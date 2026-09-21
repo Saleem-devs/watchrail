@@ -1,8 +1,5 @@
 export { executeHttpCheck } from './http-check.js';
-export {
-  NodeFetchHttpExecutor,
-  type NodeFetchHttpExecutorOptions,
-} from './local-http-executor.js';
+export { NodeFetchHttpExecutor, type NodeFetchHttpExecutorOptions } from './local-http-executor.js';
 
 export { InvalidHttpMethodError, InvalidHttpTimeoutError } from './errors.js';
 

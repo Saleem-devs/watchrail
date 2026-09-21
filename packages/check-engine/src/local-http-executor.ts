@@ -51,11 +51,7 @@ export class NodeFetchHttpExecutor implements HttpExecutor {
     const responseTimeMs = Math.max(0, this.monotonicNow() - startedAt);
 
     if (response.body !== null) {
-      try {
-        await response.body.cancel();
-      } catch {
-        // Best-effort cleanup after response headers are already available.
-      }
+      await response.body.cancel();
     }
 
     return {

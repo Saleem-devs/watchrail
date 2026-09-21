@@ -20,9 +20,9 @@ describe('NodeFetchHttpExecutor', () => {
   it('returns a successful 200 response and measures time until headers arrive', async () => {
     let elapsed = 100;
 
-    const fetchImpl = vi.fn(async () => {
+    const fetchImpl = vi.fn(() => {
       elapsed = 137;
-      return new Response('ok', { status: 200 });
+      return Promise.resolve(new Response('ok', { status: 200 }));
     }) as typeof fetch;
 
     const executor = new NodeFetchHttpExecutor({
@@ -44,7 +44,9 @@ describe('NodeFetchHttpExecutor', () => {
   });
 
   it('lets the engine classify a 503 response as an unexpected status', async () => {
-    const fetchImpl = vi.fn(async () => new Response('unavailable', { status: 503 })) as typeof fetch;
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(new Response('unavailable', { status: 503 })),
+    ) as typeof fetch;
     const executor = new NodeFetchHttpExecutor({ fetchImpl });
 
     const result = await executeHttpCheck(
@@ -61,7 +63,9 @@ describe('NodeFetchHttpExecutor', () => {
   });
 
   it('executes HEAD', async () => {
-    const fetchImpl = vi.fn(async () => new Response(null, { status: 200 })) as typeof fetch;
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(new Response(null, { status: 200 })),
+    ) as typeof fetch;
     const executor = new NodeFetchHttpExecutor({ fetchImpl });
 
     await executor.execute({
@@ -118,9 +122,7 @@ describe('NodeFetchHttpExecutor', () => {
   });
 
   it('translates DNS lookup failure into target evidence', async () => {
-    const fetchImpl = vi.fn(async () => {
-      throw fetchFailure('ENOTFOUND');
-    }) as typeof fetch;
+    const fetchImpl = vi.fn(() => Promise.reject(fetchFailure('ENOTFOUND'))) as typeof fetch;
 
     const result = await executeHttpCheck(
       { url: 'https://missing.example', method: 'GET', timeoutMs: 10_000 },
@@ -135,9 +137,7 @@ describe('NodeFetchHttpExecutor', () => {
   });
 
   it('translates connection refusal into target evidence', async () => {
-    const fetchImpl = vi.fn(async () => {
-      throw fetchFailure('ECONNREFUSED');
-    }) as typeof fetch;
+    const fetchImpl = vi.fn(() => Promise.reject(fetchFailure('ECONNREFUSED'))) as typeof fetch;
 
     const result = await executeHttpCheck(
       { url: 'http://127.0.0.1:65535', method: 'GET', timeoutMs: 10_000 },
@@ -152,9 +152,7 @@ describe('NodeFetchHttpExecutor', () => {
   });
 
   it('translates an expired TLS certificate into target evidence', async () => {
-    const fetchImpl = vi.fn(async () => {
-      throw fetchFailure('CERT_HAS_EXPIRED');
-    }) as typeof fetch;
+    const fetchImpl = vi.fn(() => Promise.reject(fetchFailure('CERT_HAS_EXPIRED'))) as typeof fetch;
 
     const result = await executeHttpCheck(
       { url: 'https://example.com', method: 'GET', timeoutMs: 10_000 },
@@ -169,9 +167,9 @@ describe('NodeFetchHttpExecutor', () => {
   });
 
   it('keeps unexpected executor errors as probe malfunctions', async () => {
-    const fetchImpl = vi.fn(async () => {
-      throw new Error('unexpected executor failure');
-    }) as typeof fetch;
+    const fetchImpl = vi.fn(() =>
+      Promise.reject(new Error('unexpected executor failure')),
+    ) as typeof fetch;
 
     const result = await executeHttpCheck(
       { url: 'https://example.com', method: 'GET', timeoutMs: 10_000 },
@@ -186,12 +184,13 @@ describe('NodeFetchHttpExecutor', () => {
   });
 
   it('keeps redirect responses final while redirect handling is manual', async () => {
-    const fetchImpl = vi.fn(
-      async () =>
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(
         new Response(null, {
           status: 302,
           headers: { Location: 'https://example.com/next' },
         }),
+      ),
     ) as typeof fetch;
 
     const result = await executeHttpCheck(
@@ -217,7 +216,9 @@ describe('NodeFetchHttpExecutor', () => {
       },
     });
 
-    const fetchImpl = vi.fn(async () => new Response(body, { status: 200 })) as typeof fetch;
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(new Response(body, { status: 200 })),
+    ) as typeof fetch;
     const executor = new NodeFetchHttpExecutor({ fetchImpl });
 
     await executor.execute({
@@ -227,5 +228,28 @@ describe('NodeFetchHttpExecutor', () => {
     });
 
     expect(cancelled).toBe(true);
+  });
+
+  it('classifies response-body cleanup failure as a probe malfunction', async () => {
+    const body = new ReadableStream({
+      cancel() {
+        return Promise.reject(new Error('body cancellation failed'));
+      },
+    });
+
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(new Response(body, { status: 200 })),
+    ) as typeof fetch;
+
+    const result = await executeHttpCheck(
+      { url: 'https://example.com', method: 'GET', timeoutMs: 10_000 },
+      { executor: new NodeFetchHttpExecutor({ fetchImpl }), clock: createEngineClock() },
+    );
+
+    expect(result).toMatchObject({
+      outcome: 'UNKNOWN',
+      stage: 'PROBE',
+      reason: 'INTERNAL_ERROR',
+    });
   });
 });
