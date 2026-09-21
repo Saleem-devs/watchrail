@@ -151,6 +151,23 @@ describe('NodeFetchHttpExecutor', () => {
     });
   });
 
+  it('translates an expired TLS certificate into target evidence', async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw fetchFailure('CERT_HAS_EXPIRED');
+    }) as typeof fetch;
+
+    const result = await executeHttpCheck(
+      { url: 'https://example.com', method: 'GET', timeoutMs: 10_000 },
+      { executor: new NodeFetchHttpExecutor({ fetchImpl }), clock: createEngineClock() },
+    );
+
+    expect(result).toMatchObject({
+      outcome: 'FAIL',
+      stage: 'TLS',
+      reason: 'CERTIFICATE_EXPIRED',
+    });
+  });
+
   it('keeps unexpected executor errors as probe malfunctions', async () => {
     const fetchImpl = vi.fn(async () => {
       throw new Error('unexpected executor failure');
