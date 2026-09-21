@@ -1,0 +1,40 @@
+{
+  "name": "watchrail",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.5.1",
+  "engines": {
+    "node": ">=24.0.0 <25",
+    "pnpm": ">=12.0.0 <13"
+  },
+  "scripts": {
+    "build": "pnpm -r --if-present build",
+    "build:packages": "pnpm --filter './packages/*' build",
+    "dev": "pnpm build:packages && pnpm --parallel --filter @watchrail/api --filter @watchrail/web dev",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint . --max-warnings 0",
+    "typecheck": "pnpm build:packages && pnpm -r --if-present typecheck",
+    "test": "pnpm build:packages && pnpm -r --if-present test",
+    "test:integration": "pnpm build:packages && pnpm --filter @watchrail/api test:integration",
+    "test:e2e": "pnpm build && playwright test",
+    "db:generate": "pnpm --filter @watchrail/db db:generate",
+    "db:migrate": "pnpm --filter @watchrail/db db:migrate",
+    "db:migrate:check": "pnpm --filter @watchrail/db test:migrations",
+    "docs:check": "node tooling/check-doc-links.mjs",
+    "verify:fast": "pnpm format && pnpm lint && pnpm typecheck && pnpm test",
+    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:integration && pnpm test:e2e && pnpm build && pnpm db:migrate:check && pnpm docs:check"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@playwright/test": "1.63.0",
+    "@types/node": "24.13.6",
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.3.5",
+    "prettier": "3.9.8",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.70.0",
+    "vitest": "5.0.1"
+  }
+}

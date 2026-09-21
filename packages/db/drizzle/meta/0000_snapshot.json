@@ -1,0 +1,151 @@
+{
+  "id": "41e11355-123a-40a5-96b9-f14eb26a7b4d",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.monitors": {
+      "name": "monitors",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "varchar(120)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "url": {
+          "name": "url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "method": {
+          "name": "method",
+          "type": "http_method",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'GET'"
+        },
+        "lifecycle_state": {
+          "name": "lifecycle_state",
+          "type": "monitor_lifecycle_state",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'ENABLED'"
+        },
+        "timeout_ms": {
+          "name": "timeout_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 10000
+        },
+        "locations": {
+          "name": "locations",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[\"local\"]'::jsonb"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "monitors_organization_created_idx": {
+          "name": "monitors_organization_created_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "monitors_name_not_blank": {
+          "name": "monitors_name_not_blank",
+          "value": "length(btrim(\"monitors\".\"name\")) > 0"
+        },
+        "monitors_url_length": {
+          "name": "monitors_url_length",
+          "value": "length(\"monitors\".\"url\") <= 2048"
+        },
+        "monitors_timeout_range": {
+          "name": "monitors_timeout_range",
+          "value": "\"monitors\".\"timeout_ms\" between 1000 and 30000"
+        },
+        "monitors_locations_non_empty": {
+          "name": "monitors_locations_non_empty",
+          "value": "jsonb_typeof(\"monitors\".\"locations\") = 'array' and jsonb_array_length(\"monitors\".\"locations\") > 0"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.http_method": {
+      "name": "http_method",
+      "schema": "public",
+      "values": ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+    },
+    "public.monitor_lifecycle_state": {
+      "name": "monitor_lifecycle_state",
+      "schema": "public",
+      "values": ["ENABLED", "PAUSED", "ARCHIVED"]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

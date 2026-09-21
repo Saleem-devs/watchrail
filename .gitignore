@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Documentation
+docs/
+
+# Build output
+.next/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Test output
+test-results/
+playwright-report/
+
+# Logs
+*.log
+pnpm-debug.log*
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/

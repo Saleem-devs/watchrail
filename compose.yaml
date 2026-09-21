@@ -1,0 +1,22 @@
+name: watchrail
+
+services:
+  postgres:
+    image: postgres:18.0-alpine
+    environment:
+      POSTGRES_DB: watchrail
+      POSTGRES_USER: watchrail
+      POSTGRES_PASSWORD: watchrail
+    ports:
+      - '${POSTGRES_PORT:-5433}:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U watchrail -d watchrail']
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    volumes:
+      - watchrail-postgres:/var/lib/postgresql/data
+
+volumes:
+  watchrail-postgres:
+    name: watchrail-postgres-data
