@@ -1,10 +1,6 @@
 export { executeHttpCheck } from './http-check.js';
 
-export {
-  HttpTargetFailureError,
-  InvalidHttpMethodError,
-  InvalidHttpTimeoutError,
-} from './errors.js';
+export { InvalidHttpMethodError, InvalidHttpTimeoutError } from './errors.js';
 
 export { HTTP_CHECK_TIMEOUT_LIMITS } from './types.js';
 
@@ -17,6 +13,7 @@ export type {
   HttpCheckResult,
   HttpCheckStage,
   HttpExecutionInput,
+  HttpResponseObservation,
   HttpExecutionResult,
   HttpExecutor,
   HttpTargetFailure,
