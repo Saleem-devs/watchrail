@@ -230,7 +230,7 @@ describe('NodeFetchHttpExecutor', () => {
     expect(cancelled).toBe(true);
   });
 
-  it('classifies response-body cleanup failure as a probe malfunction', async () => {
+  it('preserves response evidence when response-body cleanup fails', async () => {
     const body = new ReadableStream({
       cancel() {
         return Promise.reject(new Error('body cancellation failed'));
@@ -247,9 +247,10 @@ describe('NodeFetchHttpExecutor', () => {
     );
 
     expect(result).toMatchObject({
-      outcome: 'UNKNOWN',
-      stage: 'PROBE',
-      reason: 'INTERNAL_ERROR',
+      outcome: 'PASS',
+      stage: 'HTTP',
+      reason: 'COMPLETED',
+      statusCode: 200,
     });
   });
 });
