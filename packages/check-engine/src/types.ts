@@ -1,3 +1,8 @@
+export const HTTP_CHECK_TIMEOUT_LIMITS = {
+  minMs: 1_000,
+  maxMs: 30_000,
+} as const;
+
 export type HttpMethod = 'GET' | 'HEAD';
 
 export interface HttpCheckInput {
@@ -8,10 +13,30 @@ export interface HttpCheckInput {
 
 export type HttpCheckOutcome = 'PASS' | 'FAIL' | 'UNKNOWN';
 
-export type HttpCheckStage = 'HTTP' | 'PROBE';
+export type HttpCheckStage = 'DNS' | 'CONNECT' | 'TLS' | 'HTTP' | 'PROBE';
 
 export type HttpCheckReason =
-  'COMPLETED' | 'UNEXPECTED_STATUS' | 'REQUEST_TIMEOUT' | 'INTERNAL_ERROR';
+  | 'COMPLETED'
+  | 'UNEXPECTED_STATUS'
+  | 'REQUEST_TIMEOUT'
+  | 'NAME_NOT_FOUND'
+  | 'CONNECTION_REFUSED'
+  | 'CERTIFICATE_EXPIRED'
+  | 'INTERNAL_ERROR';
+
+export type HttpTargetFailure =
+  | {
+      stage: 'DNS';
+      reason: 'NAME_NOT_FOUND';
+    }
+  | {
+      stage: 'CONNECT';
+      reason: 'CONNECTION_REFUSED';
+    }
+  | {
+      stage: 'TLS';
+      reason: 'CERTIFICATE_EXPIRED';
+    };
 
 export interface HttpCheckResult {
   outcome: HttpCheckOutcome;

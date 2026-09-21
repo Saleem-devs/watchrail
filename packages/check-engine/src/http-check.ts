@@ -1,4 +1,9 @@
-import { InvalidHttpMethodError } from './errors.js';
+import {
+  HttpTargetFailureError,
+  InvalidHttpMethodError,
+  InvalidHttpTimeoutError,
+} from './errors.js';
+import { HTTP_CHECK_TIMEOUT_LIMITS } from './types.js';
 import type {
   CheckClock,
   HttpCheckDependencies,
@@ -20,6 +25,7 @@ export async function executeHttpCheck(
   dependencies: HttpCheckDependencies,
 ): Promise<HttpCheckResult> {
   assertSupportedMethod(input.method);
+  assertValidTimeout(input.timeoutMs);
 
   const clock = dependencies.clock ?? defaultClock;
 
@@ -61,6 +67,18 @@ export async function executeHttpCheck(
         outcome: 'FAIL',
         stage: 'HTTP',
         reason: 'REQUEST_TIMEOUT',
+        statusCode: null,
+        responseTimeMs: null,
+        attemptDurationMs,
+        checkedAt,
+      };
+    }
+
+    if (error instanceof HttpTargetFailureError) {
+      return {
+        outcome: 'FAIL',
+        stage: error.failure.stage,
+        reason: error.failure.reason,
         statusCode: null,
         responseTimeMs: null,
         attemptDurationMs,
@@ -122,7 +140,20 @@ function assertSupportedMethod(method: unknown): asserts method is HttpMethod {
   }
 }
 
+function assertValidTimeout(timeoutMs: unknown): asserts timeoutMs is number {
+  const { minMs, maxMs } = HTTP_CHECK_TIMEOUT_LIMITS;
+
+  if (
+    typeof timeoutMs !== 'number' ||
+    !Number.isInteger(timeoutMs) ||
+    timeoutMs < minMs ||
+    timeoutMs > maxMs
+  ) {
+    throw new InvalidHttpTimeoutError(timeoutMs);
+  }
+}
 function elapsed(clock: CheckClock, startedAt: number): number {
+
   return Math.max(0, clock.monotonicNow() - startedAt);
 }
 
