@@ -1,5 +1,4 @@
 import { HTTP_CHECK_TIMEOUT_LIMITS } from './types.js';
-import type { HttpTargetFailure } from './types.js';
 
 export class InvalidHttpMethodError extends Error {
   constructor(method: unknown) {
@@ -18,15 +17,5 @@ export class InvalidHttpTimeoutError extends Error {
     );
     this.name = 'InvalidHttpTimeoutError';
     this.timeoutMs = timeoutMs;
-  }
-}
-
-export class HttpTargetFailureError extends Error {
-  readonly failure: HttpTargetFailure;
-
-  constructor(failure: HttpTargetFailure, options?: ErrorOptions) {
-    super(`HTTP target failure: ${failure.reason}`, options);
-    this.name = 'HttpTargetFailureError';
-    this.failure = failure;
   }
 }

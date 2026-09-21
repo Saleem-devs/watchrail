@@ -1,8 +1,4 @@
-import {
-  HttpTargetFailureError,
-  InvalidHttpMethodError,
-  InvalidHttpTimeoutError,
-} from './errors.js';
+import { InvalidHttpMethodError, InvalidHttpTimeoutError } from './errors.js';
 import { HTTP_CHECK_TIMEOUT_LIMITS } from './types.js';
 import type {
   CheckClock,
@@ -11,6 +7,7 @@ import type {
   HttpCheckResult,
   HttpExecutionResult,
   HttpMethod,
+  HttpTargetFailure,
 } from './types.js';
 
 const defaultClock: CheckClock = {
@@ -54,7 +51,7 @@ export async function executeHttpCheck(
 
     const execution = await Promise.race([executionPromise, timeoutPromise]);
 
-    return classifyHttpResponse({
+    return classifyHttpExecution({
       execution,
       checkedAt,
       attemptDurationMs: elapsed(clock, startedAt),
@@ -67,18 +64,6 @@ export async function executeHttpCheck(
         outcome: 'FAIL',
         stage: 'HTTP',
         reason: 'REQUEST_TIMEOUT',
-        statusCode: null,
-        responseTimeMs: null,
-        attemptDurationMs,
-        checkedAt,
-      };
-    }
-
-    if (error instanceof HttpTargetFailureError) {
-      return {
-        outcome: 'FAIL',
-        stage: error.failure.stage,
-        reason: error.failure.reason,
         statusCode: null,
         responseTimeMs: null,
         attemptDurationMs,
@@ -102,12 +87,20 @@ export async function executeHttpCheck(
   }
 }
 
-function classifyHttpResponse(input: {
+function classifyHttpExecution(input: {
   execution: HttpExecutionResult;
   checkedAt: Date;
   attemptDurationMs: number;
 }): HttpCheckResult {
   const { execution, checkedAt, attemptDurationMs } = input;
+
+  if (execution.type === 'TARGET_FAILURE') {
+    return classifyTargetFailure({
+      failure: execution,
+      attemptDurationMs,
+      checkedAt,
+    });
+  }
 
   const successful = execution.statusCode >= 200 && execution.statusCode <= 299;
 
@@ -134,6 +127,30 @@ function classifyHttpResponse(input: {
   };
 }
 
+function classifyTargetFailure(input: {
+  failure: HttpTargetFailure;
+  checkedAt: Date;
+  attemptDurationMs: number;
+}): HttpCheckResult {
+  const { failure, checkedAt, attemptDurationMs } = input;
+  const common = {
+    outcome: 'FAIL',
+    statusCode: null,
+    responseTimeMs: null,
+    attemptDurationMs,
+    checkedAt,
+  } as const;
+
+  switch (failure.stage) {
+    case 'DNS':
+      return { ...common, stage: 'DNS', reason: failure.reason };
+    case 'CONNECT':
+      return { ...common, stage: 'CONNECT', reason: failure.reason };
+    case 'TLS':
+      return { ...common, stage: 'TLS', reason: failure.reason };
+  }
+}
+
 function assertSupportedMethod(method: unknown): asserts method is HttpMethod {
   if (!SUPPORTED_METHODS.has(method as HttpMethod)) {
     throw new InvalidHttpMethodError(method);
@@ -152,8 +169,8 @@ function assertValidTimeout(timeoutMs: unknown): asserts timeoutMs is number {
     throw new InvalidHttpTimeoutError(timeoutMs);
   }
 }
-function elapsed(clock: CheckClock, startedAt: number): number {
 
+function elapsed(clock: CheckClock, startedAt: number): number {
   return Math.max(0, clock.monotonicNow() - startedAt);
 }
 

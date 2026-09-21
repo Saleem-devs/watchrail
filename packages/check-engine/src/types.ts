@@ -11,20 +11,28 @@ export interface HttpCheckInput {
   timeoutMs: number;
 }
 
-export type HttpCheckOutcome = 'PASS' | 'FAIL' | 'UNKNOWN';
+interface HttpCheckTiming {
+  /**
+   * Total monotonic elapsed time from attempt start until Watchrail has
+   * completed the work required to classify the attempt.
+   */
+  attemptDurationMs: number;
 
-export type HttpCheckStage = 'DNS' | 'CONNECT' | 'TLS' | 'HTTP' | 'PROBE';
+  /** Wall-clock time at which the attempt started, before executor invocation. */
+  checkedAt: Date;
+}
 
-export type HttpCheckReason =
-  | 'COMPLETED'
-  | 'UNEXPECTED_STATUS'
-  | 'REQUEST_TIMEOUT'
-  | 'NAME_NOT_FOUND'
-  | 'CONNECTION_REFUSED'
-  | 'CERTIFICATE_EXPIRED'
-  | 'INTERNAL_ERROR';
+interface HttpResponseEvidence {
+  statusCode: number;
 
-export type HttpTargetFailure =
+  /**
+   * Monotonic elapsed time from initiating the outbound request until the
+   * final HTTP response headers were received.
+   */
+  responseTimeMs: number;
+}
+
+type HttpTargetFailureClassification =
   | {
       stage: 'DNS';
       reason: 'NAME_NOT_FOUND';
@@ -38,35 +46,69 @@ export type HttpTargetFailure =
       reason: 'CERTIFICATE_EXPIRED';
     };
 
-export interface HttpCheckResult {
-  outcome: HttpCheckOutcome;
-  stage: HttpCheckStage;
-  reason: HttpCheckReason;
+export type HttpCheckResult =
+  | (HttpCheckTiming &
+      HttpResponseEvidence & {
+        outcome: 'PASS';
+        stage: 'HTTP';
+        reason: 'COMPLETED';
+      })
+  | (HttpCheckTiming &
+      HttpResponseEvidence & {
+        outcome: 'FAIL';
+        stage: 'HTTP';
+        reason: 'UNEXPECTED_STATUS';
+      })
+  | (HttpCheckTiming & {
+      outcome: 'FAIL';
+      stage: 'HTTP';
+      reason: 'REQUEST_TIMEOUT';
+      statusCode: null;
+      responseTimeMs: null;
+    })
+  | (HttpCheckTiming &
+      HttpTargetFailureClassification & {
+        outcome: 'FAIL';
+        statusCode: null;
+        responseTimeMs: null;
+      })
+  | (HttpCheckTiming & {
+      outcome: 'UNKNOWN';
+      stage: 'PROBE';
+      reason: 'INTERNAL_ERROR';
+      statusCode: null;
+      responseTimeMs: null;
+    });
 
-  statusCode: number | null;
-  responseTimeMs: number | null;
+export type HttpCheckOutcome = HttpCheckResult['outcome'];
+export type HttpCheckStage = HttpCheckResult['stage'];
+export type HttpCheckReason = HttpCheckResult['reason'];
 
-  attemptDurationMs: number;
-  checkedAt: Date;
+export interface HttpResponseObservation extends HttpResponseEvidence {
+  type: 'RESPONSE';
 }
+
+export type HttpTargetFailure = { type: 'TARGET_FAILURE' } & HttpTargetFailureClassification;
 
 /**
- * Raw result from the network execution boundary
- *
- * This says nothing about whether Watchrail considers the
- * response successful. That remains check-engine policy
+ * An observation about the configured target. Executors return expected
+ * network failures; thrown exceptions are reserved for executor malfunctions.
  */
-export interface HttpExecutionResult {
-  statusCode: number;
-  responseTimeMs: number;
-}
+export type HttpExecutionResult = HttpResponseObservation | HttpTargetFailure;
 
 export interface HttpExecutionInput {
   url: string;
   method: HttpMethod;
+
+  /** Attempt-scoped cancellation signal controlled by the check engine. */
   signal: AbortSignal;
 }
 
+/**
+ * Executors MUST observe signal cancellation and release network resources
+ * promptly after abort. Expected target failures are returned as observations;
+ * thrown exceptions indicate an executor or probe malfunction.
+ */
 export interface HttpExecutor {
   execute(input: HttpExecutionInput): Promise<HttpExecutionResult>;
 }

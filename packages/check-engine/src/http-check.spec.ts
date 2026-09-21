@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { executeHttpCheck } from './http-check.js';
 import {
   HTTP_CHECK_TIMEOUT_LIMITS,
-  HttpTargetFailureError,
   InvalidHttpMethodError,
   InvalidHttpTimeoutError,
 } from './index.js';
@@ -27,14 +26,15 @@ describe('executeHttpCheck', () => {
     const clock = createClock();
 
     const executor: HttpExecutor = {
-      execute: vi.fn(() => {
+      execute: () => {
         clock.advance(125);
 
         return Promise.resolve({
           statusCode: 200,
+          type: 'RESPONSE',
           responseTimeMs: 118,
         });
-      }),
+      },
     };
 
     const result = await executeHttpCheck(
@@ -60,6 +60,40 @@ describe('executeHttpCheck', () => {
     });
   });
 
+  it('records checkedAt as the attempt start time', async () => {
+    let wallClockTime = checkedAt;
+    const completionTime = new Date('2026-09-21T12:00:05.000Z');
+
+    const executor: HttpExecutor = {
+      execute: () => {
+        wallClockTime = completionTime;
+        return Promise.resolve({
+          type: 'RESPONSE',
+          statusCode: 200,
+          responseTimeMs: 5_000,
+        });
+      },
+    };
+
+    const result = await executeHttpCheck(
+      {
+        url: 'https://example.com',
+        method: 'GET',
+        timeoutMs: 10_000,
+      },
+      {
+        executor,
+        clock: {
+          now: () => wallClockTime,
+          monotonicNow: () => 0,
+        },
+      },
+    );
+
+    expect(result.checkedAt).toBe(checkedAt);
+    expect(wallClockTime).toBe(completionTime);
+  });
+
   it.each([200, 204, 299])('accepts %i as a successful response', async (statusCode) => {
     const clock = createClock();
 
@@ -68,6 +102,7 @@ describe('executeHttpCheck', () => {
         Promise.resolve({
           statusCode,
           responseTimeMs: 40,
+          type: 'RESPONSE',
         }),
     };
 
@@ -92,14 +127,15 @@ describe('executeHttpCheck', () => {
     const clock = createClock();
 
     const executor: HttpExecutor = {
-      execute: vi.fn(() => {
+      execute: () => {
         clock.advance(80);
 
         return Promise.resolve({
           statusCode: 503,
           responseTimeMs: 72,
+          type: 'RESPONSE',
         });
-      }),
+      },
     };
 
     const result = await executeHttpCheck(
@@ -131,6 +167,7 @@ describe('executeHttpCheck', () => {
         Promise.resolve({
           statusCode,
           responseTimeMs: 40,
+          type: 'RESPONSE',
         }),
     };
 
@@ -255,7 +292,7 @@ describe('executeHttpCheck', () => {
     const executor: HttpExecutor = {
       execute: () => {
         clock.advance(25);
-        return Promise.reject(new HttpTargetFailureError(failure));
+        return Promise.resolve({ type: 'TARGET_FAILURE', ...failure });
       },
     };
 
@@ -346,6 +383,7 @@ describe('executeHttpCheck', () => {
           Promise.resolve({
             statusCode: 200,
             responseTimeMs: 10,
+            type: 'RESPONSE',
           }),
       };
 
@@ -371,6 +409,7 @@ describe('executeHttpCheck', () => {
         Promise.resolve({
           statusCode: 200,
           responseTimeMs: 10,
+          type: 'RESPONSE',
         }),
     };
 
