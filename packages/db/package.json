@@ -15,6 +15,7 @@
     "db:migrate": "tsx src/migrate.ts",
     "lint": "eslint src drizzle.config.ts --max-warnings 0",
     "test:migrations": "vitest run src/migrations.migration.spec.ts",
+    "test:integration": "vitest run src/manual-round-repository.integration.spec.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
