@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -8,33 +9,65 @@ import {
   pgTable,
   text,
   timestamp,
+  unique,
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
-import { HTTP_METHODS, MONITOR_LIFECYCLE_STATES } from '@watchrail/domain';
+import {
+  CHECK_ROUND_STATUSES,
+  CHECK_ROUND_TRIGGERS,
+  EXECUTION_ASSIGNMENT_STATUSES,
+  HTTP_METHODS,
+  MONITOR_LIFECYCLE_STATES,
+} from '@watchrail/domain';
+import type { CheckRoundOutboxPayload } from '@watchrail/domain';
 
 export const httpMethodEnum = pgEnum('http_method', HTTP_METHODS);
+
 export const monitorLifecycleEnum = pgEnum('monitor_lifecycle_state', MONITOR_LIFECYCLE_STATES);
+
+export const checkRoundTriggerEnum = pgEnum('check_round_trigger', CHECK_ROUND_TRIGGERS);
+
+export const checkRoundStatusEnum = pgEnum('check_round_status', CHECK_ROUND_STATUSES);
+
+export const executionAssignmentStatusEnum = pgEnum(
+  'execution_assignment_status',
+  EXECUTION_ASSIGNMENT_STATUSES,
+);
 
 export const monitors = pgTable(
   'monitors',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     organizationId: uuid('organization_id').notNull(),
+
     name: varchar('name', { length: 120 }).notNull(),
+
+    // Current projection.
+    //
+    // Execution never trusts these values directly. A round references an
+    // immutable monitor_configuration_versions row.
     url: text('url').notNull(),
     method: httpMethodEnum('method').notNull().default('GET'),
     lifecycleState: monitorLifecycleEnum('lifecycle_state').notNull().default('ENABLED'),
     timeoutMs: integer('timeout_ms').notNull().default(10_000),
     locations: jsonb('locations').$type<string[]>().notNull().default(['local']),
+
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    unique('monitors_id_organization_unique').on(table.id, table.organizationId),
+
     index('monitors_organization_created_idx').on(table.organizationId, table.createdAt),
+
     check('monitors_name_not_blank', sql`length(btrim(${table.name})) > 0`),
+
     check('monitors_url_length', sql`length(${table.url}) <= 2048`),
+
     check('monitors_timeout_range', sql`${table.timeoutMs} between 1000 and 30000`),
+
     check(
       'monitors_locations_non_empty',
       sql`jsonb_typeof(${table.locations}) = 'array' and jsonb_array_length(${table.locations}) > 0`,
@@ -42,5 +75,191 @@ export const monitors = pgTable(
   ],
 );
 
+export const monitorConfigurationVersions = pgTable(
+  'monitor_configuration_versions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+
+    organizationId: uuid('organization_id').notNull(),
+    monitorId: uuid('monitor_id').notNull(),
+
+    versionNumber: integer('version_number').notNull(),
+
+    url: text('url').notNull(),
+    method: httpMethodEnum('method').notNull(),
+    timeoutMs: integer('timeout_ms').notNull(),
+
+    locations: jsonb('locations').$type<string[]>().notNull(),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'monitor_configuration_versions_monitor_fk',
+      columns: [table.monitorId, table.organizationId],
+      foreignColumns: [monitors.id, monitors.organizationId],
+    }).onDelete('cascade'),
+
+    unique('monitor_configuration_versions_monitor_version_unique').on(
+      table.monitorId,
+      table.versionNumber,
+    ),
+
+    // Allows a round to reference a version while also proving that
+    // organization + monitor + version all belong together.
+    unique('monitor_configuration_versions_identity_unique').on(
+      table.id,
+      table.organizationId,
+      table.monitorId,
+    ),
+
+    index('monitor_configuration_versions_latest_idx').on(
+      table.organizationId,
+      table.monitorId,
+      table.versionNumber,
+    ),
+
+    check('monitor_configuration_versions_version_positive', sql`${table.versionNumber} > 0`),
+
+    check('monitor_configuration_versions_url_length', sql`length(${table.url}) <= 2048`),
+
+    check(
+      'monitor_configuration_versions_timeout_range',
+      sql`${table.timeoutMs} between 1000 and 30000`,
+    ),
+
+    check(
+      'monitor_configuration_versions_locations_non_empty',
+      sql`
+        jsonb_typeof(${table.locations}) = 'array'
+        and jsonb_array_length(${table.locations}) > 0
+      `,
+    ),
+  ],
+);
+
+export const checkRounds = pgTable(
+  'check_rounds',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+
+    organizationId: uuid('organization_id').notNull(),
+    monitorId: uuid('monitor_id').notNull(),
+
+    monitorConfigurationVersionId: uuid('monitor_configuration_version_id').notNull(),
+
+    trigger: checkRoundTriggerEnum('trigger').notNull().default('MANUAL'),
+
+    status: checkRoundStatusEnum('status').notNull().default('PENDING'),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'check_rounds_monitor_fk',
+      columns: [table.monitorId, table.organizationId],
+      foreignColumns: [monitors.id, monitors.organizationId],
+    }),
+
+    foreignKey({
+      name: 'check_rounds_configuration_version_fk',
+      columns: [table.monitorConfigurationVersionId, table.organizationId, table.monitorId],
+      foreignColumns: [
+        monitorConfigurationVersions.id,
+        monitorConfigurationVersions.organizationId,
+        monitorConfigurationVersions.monitorId,
+      ],
+    }),
+
+    unique('check_rounds_organization_id_unique').on(table.organizationId, table.id),
+
+    index('check_rounds_monitor_created_idx').on(
+      table.organizationId,
+      table.monitorId,
+      table.createdAt,
+    ),
+  ],
+);
+
+export const checkExecutionAssignments = pgTable(
+  'check_execution_assignments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+
+    organizationId: uuid('organization_id').notNull(),
+    roundId: uuid('round_id').notNull(),
+
+    location: varchar('location', { length: 64 }).notNull().default('local'),
+
+    status: executionAssignmentStatusEnum('status').notNull().default('PENDING'),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'check_execution_assignments_round_fk',
+      columns: [table.organizationId, table.roundId],
+      foreignColumns: [checkRounds.organizationId, checkRounds.id],
+    }).onDelete('cascade'),
+
+    unique('check_execution_assignments_round_location_unique').on(table.roundId, table.location),
+
+    check('check_execution_assignments_location_local', sql`${table.location} = 'local'`),
+  ],
+);
+
+export const checkRoundOutbox = pgTable(
+  'check_round_outbox',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+
+    // Metadata used for DB integrity and relay bookkeeping.
+    roundId: uuid('round_id').notNull(),
+
+    // The actual dispatched contract contains exactly these two fields.
+    payload: jsonb('payload').$type<CheckRoundOutboxPayload>().notNull(),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+
+    publishedAt: timestamp('published_at', {
+      withTimezone: true,
+    }),
+  },
+  (table) => [
+    foreignKey({
+      name: 'check_round_outbox_round_fk',
+      columns: [table.roundId],
+      foreignColumns: [checkRounds.id],
+    }).onDelete('cascade'),
+
+    // At most one queue request per round.
+    unique('check_round_outbox_round_unique').on(table.roundId),
+
+    index('check_round_outbox_unpublished_idx')
+      .on(table.createdAt)
+      .where(sql`${table.publishedAt} is null`),
+
+    check(
+      'check_round_outbox_payload_contract',
+      sql`
+        jsonb_typeof(${table.payload}) = 'object'
+        and ${table.payload}->>'contractVersion' = '1'
+        and ${table.payload}->>'roundId' = ${table.roundId}::text
+        and (${table.payload} - 'contractVersion' - 'roundId') = '{}'::jsonb
+      `,
+    ),
+  ],
+);
+
 export type MonitorRecord = typeof monitors.$inferSelect;
 export type NewMonitorRecord = typeof monitors.$inferInsert;
+
+export type MonitorConfigurationVersionRecord = typeof monitorConfigurationVersions.$inferSelect;
+
+export type NewMonitorConfigurationVersionRecord = typeof monitorConfigurationVersions.$inferInsert;
+
+export type CheckRoundRecord = typeof checkRounds.$inferSelect;
+
+export type CheckExecutionAssignmentRecord = typeof checkExecutionAssignments.$inferSelect;
+
+export type CheckRoundOutboxRecord = typeof checkRoundOutbox.$inferSelect;
