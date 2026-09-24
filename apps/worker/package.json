@@ -13,8 +13,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@nestjs/common": "12.0.3",
-    "@nestjs/core": "12.0.3",
+    "@nestjs/common": "12.1.0",
+    "@nestjs/core": "12.1.0",
+    "@nestjs/drizzle": "0.0.1",
     "@watchrail/contracts": "workspace:*",
     "@watchrail/db": "workspace:*",
     "@watchrail/queue": "workspace:*",
@@ -23,7 +24,7 @@
     "rxjs": "7.8.2"
   },
   "devDependencies": {
-    "@nestjs/testing": "12.0.3",
+    "@nestjs/testing": "12.1.0",
     "@testcontainers/postgresql": "12.1.0",
     "@testcontainers/redis": "12.1.0",
     "@watchrail/domain": "workspace:*",

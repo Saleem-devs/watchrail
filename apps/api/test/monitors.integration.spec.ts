@@ -1,10 +1,12 @@
 import 'reflect-metadata';
 import { resolve } from 'node:path';
 import type { INestApplication } from '@nestjs/common';
+import { getDrizzleToken } from '@nestjs/drizzle';
 import { Test } from '@nestjs/testing';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { createDatabaseConnection, migrateDatabase } from '@watchrail/db';
+import type { WatchrailDatabase } from '@watchrail/db';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module.js';
@@ -12,6 +14,7 @@ import { AppModule } from '../src/app.module.js';
 describe('monitor API', () => {
   let app: INestApplication;
   let container: StartedPostgreSqlContainer;
+  let database: WatchrailDatabase;
 
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:18.0-alpine').start();
@@ -24,6 +27,7 @@ describe('monitor API', () => {
     await migrationConnection.pool.end();
 
     const testingModule = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    database = testingModule.get<WatchrailDatabase>(getDrizzleToken());
     app = testingModule.createNestApplication();
     app.setGlobalPrefix('api');
     await app.init();
@@ -44,6 +48,9 @@ describe('monitor API', () => {
 
   afterAll(async () => {
     await app?.close();
+    await expect(database.$client.query('select 1')).rejects.toThrow(
+      'Cannot use a pool after calling end on the pool',
+    );
     await container?.stop();
   });
 

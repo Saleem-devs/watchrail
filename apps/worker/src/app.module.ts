@@ -1,39 +1,60 @@
 import { Module } from '@nestjs/common';
+import { DrizzleModule, getDrizzleToken } from '@nestjs/drizzle';
 import { BullMqCheckJobPublisher } from '@watchrail/queue';
-import { CheckRoundOutboxRepository, createDatabaseConnection } from '@watchrail/db';
+import { CheckRoundOutboxRepository, createWatchrailDatabase } from '@watchrail/db';
+import type { WatchrailDatabase } from '@watchrail/db';
 import { CheckOutboxRelay, createExponentialBackoff } from './check-outbox-relay.js';
-import { loadWorkerConfig, WORKER_CONFIG, type WorkerConfig } from './config.js';
+import { WorkerConfigModule } from './config.module.js';
+import { WORKER_CONFIG, type WorkerConfig } from './config.js';
 import { WorkerRuntime } from './worker-runtime.js';
 
 @Module({
+  imports: [
+    WorkerConfigModule,
+    DrizzleModule.forRootAsync({
+      imports: [WorkerConfigModule],
+      inject: [WORKER_CONFIG],
+      useFactory: (config: WorkerConfig) => ({
+        db: createWatchrailDatabase(config.databaseUrl),
+      }),
+    }),
+  ],
   providers: [
     {
-      provide: WORKER_CONFIG,
-      useFactory: loadWorkerConfig,
+      provide: BullMqCheckJobPublisher,
+      inject: [WORKER_CONFIG],
+      useFactory: (config: WorkerConfig) =>
+        BullMqCheckJobPublisher.connect({
+          redisUrl: config.redisUrl,
+          publicationTimeoutMs: config.queuePublicationTimeoutMs,
+        }),
+    },
+    {
+      provide: CheckRoundOutboxRepository,
+      inject: [getDrizzleToken()],
+      useFactory: (db: WatchrailDatabase) => new CheckRoundOutboxRepository(db),
+    },
+    {
+      provide: CheckOutboxRelay,
+      inject: [CheckRoundOutboxRepository, BullMqCheckJobPublisher, WORKER_CONFIG],
+      useFactory: (
+        outbox: CheckRoundOutboxRepository,
+        publisher: BullMqCheckJobPublisher,
+        config: WorkerConfig,
+      ) =>
+        new CheckOutboxRelay(outbox, publisher, {
+          leaseDurationMs: config.outboxLeaseDurationMs,
+          retryDelayMs: createExponentialBackoff(),
+        }),
     },
     {
       provide: WorkerRuntime,
-      inject: [WORKER_CONFIG],
-      useFactory: async (config: WorkerConfig) => {
-        const database = createDatabaseConnection(config.databaseUrl);
-
-        try {
-          const publisher = await BullMqCheckJobPublisher.connect({
-            redisUrl: config.redisUrl,
-            publicationTimeoutMs: config.queuePublicationTimeoutMs,
-          });
-          const outbox = new CheckRoundOutboxRepository(database.db);
-          const relay = new CheckOutboxRelay(outbox, publisher, {
-            leaseDurationMs: config.outboxLeaseDurationMs,
-            retryDelayMs: createExponentialBackoff(),
-          });
-
-          return new WorkerRuntime(relay, publisher, database, config);
-        } catch (error) {
-          await database.pool.end();
-          throw error;
-        }
-      },
+      inject: [CheckOutboxRelay, BullMqCheckJobPublisher, WORKER_CONFIG],
+      useFactory: (
+        relay: CheckOutboxRelay,
+        publisher: BullMqCheckJobPublisher,
+        config: WorkerConfig,
+      ) => new WorkerRuntime(relay, publisher, config),
     },
   ],
 })
