@@ -2,15 +2,17 @@ import {
   Injectable,
   Logger,
   type OnApplicationBootstrap,
+  type BeforeApplicationShutdown,
   type OnApplicationShutdown,
 } from '@nestjs/common';
-import type { DatabaseConnection } from '@watchrail/db';
 import type { BullMqCheckJobPublisher } from '@watchrail/queue';
 import type { CheckOutboxRelay } from './check-outbox-relay.js';
 import type { WorkerConfig } from './config.js';
 
 @Injectable()
-export class WorkerRuntime implements OnApplicationBootstrap, OnApplicationShutdown {
+export class WorkerRuntime
+  implements OnApplicationBootstrap, BeforeApplicationShutdown, OnApplicationShutdown
+{
   private readonly logger = new Logger(WorkerRuntime.name);
   private stopping = false;
   private running: Promise<void> | undefined;
@@ -18,7 +20,6 @@ export class WorkerRuntime implements OnApplicationBootstrap, OnApplicationShutd
   constructor(
     private readonly relay: CheckOutboxRelay,
     private readonly publisher: BullMqCheckJobPublisher,
-    private readonly database: DatabaseConnection,
     private readonly config: WorkerConfig,
   ) {}
 
@@ -26,10 +27,13 @@ export class WorkerRuntime implements OnApplicationBootstrap, OnApplicationShutd
     this.running = this.run();
   }
 
-  async onApplicationShutdown(): Promise<void> {
+  async beforeApplicationShutdown(): Promise<void> {
     this.stopping = true;
     await this.running;
-    await Promise.all([this.publisher.close(), this.database.pool.end()]);
+  }
+
+  async onApplicationShutdown(): Promise<void> {
+    await this.publisher.close();
   }
 
   private async run(): Promise<void> {
