@@ -11,6 +11,11 @@ const existingMonitor = {
   organizationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 } as const;
 
+const existingRound = {
+  id: '22222222-2222-4222-8222-222222222222',
+  outboxId: '33333333-3333-4333-8333-333333333333',
+} as const;
+
 describe('database migrations', () => {
   let container: StartedPostgreSqlContainer;
   let connection: DatabaseConnection;
@@ -43,6 +48,38 @@ describe('database migrations', () => {
     `);
 
     await applyMigration(migrations, 1);
+
+    const configuration = await connection.db.execute<{ id: string }>(sql`
+      select id
+      from monitor_configuration_versions
+      where monitor_id = ${existingMonitor.id}
+    `);
+
+    await connection.db.execute(sql`
+      insert into check_rounds (
+        id,
+        organization_id,
+        monitor_id,
+        monitor_configuration_version_id
+      )
+      values (
+        ${existingRound.id},
+        ${existingMonitor.organizationId},
+        ${existingMonitor.id},
+        ${configuration.rows[0]!.id}
+      )
+    `);
+
+    await connection.db.execute(sql`
+      insert into check_round_outbox (id, round_id, payload)
+      values (
+        ${existingRound.outboxId},
+        ${existingRound.id},
+        ${JSON.stringify({ contractVersion: 1, roundId: existingRound.id })}::jsonb
+      )
+    `);
+
+    await applyMigration(migrations, 2);
 
     const result = await connection.db.execute<{
       table_name: string;
@@ -100,6 +137,49 @@ describe('database migrations', () => {
         locations: ['local'],
       },
     ]);
+
+    const outbox = await connection.db.execute<{
+      available_at: string;
+      claim_token: string | null;
+      attempt_count: number;
+      last_attempt_at: Date | null;
+      last_error_code: string | null;
+      blocked_at: Date | null;
+      blocked_reason: string | null;
+    }>(sql`
+      select
+        available_at,
+        claim_token,
+        attempt_count,
+        last_attempt_at,
+        last_error_code,
+        blocked_at,
+        blocked_reason
+      from check_round_outbox
+      where id = ${existingRound.outboxId}
+    `);
+
+    expect(outbox.rows).toHaveLength(1);
+    expect(Number.isNaN(new Date(outbox.rows[0]!.available_at).getTime())).toBe(false);
+    expect(outbox.rows[0]).toMatchObject({
+      claim_token: null,
+      attempt_count: 0,
+      last_attempt_at: null,
+      last_error_code: null,
+      blocked_at: null,
+      blocked_reason: null,
+    });
+
+    const indexes = await connection.db.execute<{ indexname: string }>(sql`
+      select indexname
+      from pg_indexes
+      where schemaname = 'public'
+        and tablename = 'check_round_outbox'
+        and indexname like 'check_round_outbox_%_idx'
+      order by indexname
+    `);
+
+    expect(indexes.rows).toEqual([{ indexname: 'check_round_outbox_eligible_idx' }]);
   });
 
   async function applyMigration(

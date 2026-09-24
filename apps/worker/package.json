@@ -1,0 +1,38 @@
+{
+  "name": "@watchrail/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx watch src/main.ts",
+    "lint": "eslint src test --max-warnings 0",
+    "start": "node dist/main.js",
+    "test": "vitest run --exclude '**/*.integration.spec.ts'",
+    "test:integration": "vitest run --dir test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@nestjs/common": "12.0.3",
+    "@nestjs/core": "12.0.3",
+    "@watchrail/contracts": "workspace:*",
+    "@watchrail/db": "workspace:*",
+    "@watchrail/queue": "workspace:*",
+    "dotenv": "18.0.1",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "12.0.3",
+    "@testcontainers/postgresql": "12.1.0",
+    "@testcontainers/redis": "12.1.0",
+    "@watchrail/domain": "workspace:*",
+    "bullmq": "6.3.8",
+    "drizzle-orm": "0.45.2",
+    "redis": "6.2.1",
+    "testcontainers": "12.1.0",
+    "tsx": "4.23.13",
+    "typescript": "6.0.3",
+    "vitest": "5.0.1"
+  }
+}

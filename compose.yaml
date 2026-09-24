@@ -17,6 +17,28 @@ services:
     volumes:
       - watchrail-postgres:/var/lib/postgresql/data
 
+  redis:
+    image: redis:8.2-alpine
+    command:
+      - redis-server
+      - --appendonly
+      - 'yes'
+      - --appendfsync
+      - everysec
+      - --maxmemory-policy
+      - noeviction
+    ports:
+      - '${REDIS_PORT:-6379}:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    volumes:
+      - watchrail-redis:/data
+
 volumes:
   watchrail-postgres:
     name: watchrail-postgres-data
+  watchrail-redis:
+    name: watchrail-redis-data
