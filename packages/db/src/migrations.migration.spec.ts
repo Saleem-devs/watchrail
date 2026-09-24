@@ -13,6 +13,7 @@ const existingMonitor = {
 
 const existingRound = {
   id: '22222222-2222-4222-8222-222222222222',
+  assignmentId: '44444444-4444-4444-8444-444444444444',
   outboxId: '33333333-3333-4333-8333-333333333333',
 } as const;
 
@@ -81,6 +82,21 @@ describe('database migrations', () => {
 
     await applyMigration(migrations, 2);
 
+    await connection.db.execute(sql`
+      insert into check_execution_assignments (
+        id,
+        organization_id,
+        round_id
+      )
+      values (
+        ${existingRound.assignmentId},
+        ${existingMonitor.organizationId},
+        ${existingRound.id}
+      )
+    `);
+
+    await applyMigration(migrations, 3);
+
     const result = await connection.db.execute<{
       table_name: string;
     }>(sql`
@@ -92,6 +108,7 @@ describe('database migrations', () => {
           'monitor_configuration_versions',
           'check_rounds',
           'check_execution_assignments',
+          'check_execution_results',
           'check_round_outbox'
         )
       order by table_name
@@ -99,6 +116,7 @@ describe('database migrations', () => {
 
     expect(result.rows.map((row) => row.table_name)).toEqual([
       'check_execution_assignments',
+      'check_execution_results',
       'check_round_outbox',
       'check_rounds',
       'monitor_configuration_versions',
@@ -180,6 +198,33 @@ describe('database migrations', () => {
     `);
 
     expect(indexes.rows).toEqual([{ indexname: 'check_round_outbox_eligible_idx' }]);
+
+    const assignments = await connection.db.execute<{
+      status: string;
+      claim_token: string | null;
+      claim_expires_at: Date | null;
+      attempt_count: number;
+      completed_at: Date | null;
+    }>(sql`
+      select
+        status,
+        claim_token,
+        claim_expires_at,
+        attempt_count,
+        completed_at
+      from check_execution_assignments
+      where id = ${existingRound.assignmentId}
+    `);
+
+    expect(assignments.rows).toEqual([
+      {
+        status: 'PENDING',
+        claim_token: null,
+        claim_expires_at: null,
+        attempt_count: 0,
+        completed_at: null,
+      },
+    ]);
   });
 
   async function applyMigration(

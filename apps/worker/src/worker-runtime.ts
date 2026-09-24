@@ -5,7 +5,7 @@ import {
   type BeforeApplicationShutdown,
   type OnApplicationShutdown,
 } from '@nestjs/common';
-import type { BullMqCheckJobPublisher } from '@watchrail/queue';
+import type { BullMqCheckJobConsumer, BullMqCheckJobPublisher } from '@watchrail/queue';
 import type { CheckOutboxRelay } from './check-outbox-relay.js';
 import type { WorkerConfig } from './config.js';
 
@@ -19,6 +19,7 @@ export class WorkerRuntime
 
   constructor(
     private readonly relay: CheckOutboxRelay,
+    private readonly consumer: BullMqCheckJobConsumer,
     private readonly publisher: BullMqCheckJobPublisher,
     private readonly config: WorkerConfig,
   ) {}
@@ -29,7 +30,7 @@ export class WorkerRuntime
 
   async beforeApplicationShutdown(): Promise<void> {
     this.stopping = true;
-    await this.running;
+    await Promise.all([this.running, this.consumer.close()]);
   }
 
   async onApplicationShutdown(): Promise<void> {

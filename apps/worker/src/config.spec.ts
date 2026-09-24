@@ -12,6 +12,9 @@ describe('loadWorkerConfig', () => {
       databaseUrl: requiredEnvironment.DATABASE_URL,
       redisUrl: requiredEnvironment.REDIS_URL,
       queuePublicationTimeoutMs: 2_000,
+      checkConsumerConcurrency: 5,
+      checkExecutionLeaseDurationMs: 45_000,
+      checkWorkerLockDurationMs: 30_000,
       outboxLeaseDurationMs: 30_000,
       idlePollIntervalMs: 500,
       dependencyErrorDelayMs: 1_000,
@@ -32,6 +35,10 @@ describe('loadWorkerConfig', () => {
     [
       { ...requiredEnvironment, QUEUE_PUBLICATION_TIMEOUT_MS: '1.5' },
       'QUEUE_PUBLICATION_TIMEOUT_MS must be a positive safe integer.',
+    ],
+    [
+      { ...requiredEnvironment, CHECK_CONSUMER_CONCURRENCY: '0' },
+      'CHECK_CONSUMER_CONCURRENCY must be a positive safe integer.',
     ],
   ])('rejects invalid environment %#', (environment, message) => {
     expect(() => loadWorkerConfig(environment)).toThrow(message);

@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   check,
   foreignKey,
+  doublePrecision,
   index,
   integer,
   jsonb,
@@ -34,6 +35,26 @@ export const executionAssignmentStatusEnum = pgEnum(
   'execution_assignment_status',
   EXECUTION_ASSIGNMENT_STATUSES,
 );
+
+export const checkResultOutcomeEnum = pgEnum('check_result_outcome', ['PASS', 'FAIL', 'UNKNOWN']);
+
+export const checkResultStageEnum = pgEnum('check_result_stage', [
+  'DNS',
+  'CONNECT',
+  'TLS',
+  'HTTP',
+  'PROBE',
+]);
+
+export const checkResultReasonEnum = pgEnum('check_result_reason', [
+  'COMPLETED',
+  'UNEXPECTED_STATUS',
+  'REQUEST_TIMEOUT',
+  'NAME_NOT_FOUND',
+  'CONNECTION_REFUSED',
+  'CERTIFICATE_EXPIRED',
+  'INTERNAL_ERROR',
+]);
 
 export const monitors = pgTable(
   'monitors',
@@ -193,6 +214,12 @@ export const checkExecutionAssignments = pgTable(
 
     status: executionAssignmentStatusEnum('status').notNull().default('PENDING'),
 
+    claimToken: uuid('claim_token'),
+    claimExpiresAt: timestamp('claim_expires_at', { withTimezone: true }),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    lastStartedAt: timestamp('last_started_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -204,7 +231,92 @@ export const checkExecutionAssignments = pgTable(
 
     unique('check_execution_assignments_round_location_unique').on(table.roundId, table.location),
 
+    unique('check_execution_assignments_identity_unique').on(
+      table.organizationId,
+      table.roundId,
+      table.id,
+    ),
+
     check('check_execution_assignments_location_local', sql`${table.location} = 'local'`),
+
+    check(
+      'check_execution_assignments_attempt_count_non_negative',
+      sql`${table.attemptCount} >= 0`,
+    ),
+
+    check(
+      'check_execution_assignments_claim_consistent',
+      sql`
+        (${table.status} = 'RUNNING') =
+        (${table.claimToken} is not null and ${table.claimExpiresAt} is not null)
+      `,
+    ),
+
+    check(
+      'check_execution_assignments_completion_consistent',
+      sql`(${table.status} = 'COMPLETED') = (${table.completedAt} is not null)`,
+    ),
+  ],
+);
+
+export const checkExecutionResults = pgTable(
+  'check_execution_results',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+
+    organizationId: uuid('organization_id').notNull(),
+    roundId: uuid('round_id').notNull(),
+    assignmentId: uuid('assignment_id').notNull(),
+
+    outcome: checkResultOutcomeEnum('outcome').notNull(),
+    stage: checkResultStageEnum('stage').notNull(),
+    reason: checkResultReasonEnum('reason').notNull(),
+
+    statusCode: integer('status_code'),
+    responseTimeMs: doublePrecision('response_time_ms'),
+    attemptDurationMs: doublePrecision('attempt_duration_ms').notNull(),
+    checkedAt: timestamp('checked_at', { withTimezone: true }).notNull(),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'check_execution_results_assignment_fk',
+      columns: [table.organizationId, table.roundId, table.assignmentId],
+      foreignColumns: [
+        checkExecutionAssignments.organizationId,
+        checkExecutionAssignments.roundId,
+        checkExecutionAssignments.id,
+      ],
+    }).onDelete('cascade'),
+
+    unique('check_execution_results_assignment_unique').on(table.assignmentId),
+
+    index('check_execution_results_round_idx').on(
+      table.organizationId,
+      table.roundId,
+      table.checkedAt,
+    ),
+
+    check(
+      'check_execution_results_status_code_range',
+      sql`${table.statusCode} is null or ${table.statusCode} between 100 and 599`,
+    ),
+
+    check(
+      'check_execution_results_response_evidence_consistent',
+      sql`(${table.statusCode} is null) = (${table.responseTimeMs} is null)`,
+    ),
+
+    check(
+      'check_execution_results_response_time_non_negative',
+      sql`${table.responseTimeMs} is null or ${table.responseTimeMs} >= 0`,
+    ),
+
+    check(
+      'check_execution_results_attempt_duration_non_negative',
+      sql`${table.attemptDurationMs} >= 0`,
+    ),
   ],
 );
 
@@ -301,5 +413,7 @@ export type NewMonitorConfigurationVersionRecord = typeof monitorConfigurationVe
 export type CheckRoundRecord = typeof checkRounds.$inferSelect;
 
 export type CheckExecutionAssignmentRecord = typeof checkExecutionAssignments.$inferSelect;
+
+export type CheckExecutionResultRecord = typeof checkExecutionResults.$inferSelect;
 
 export type CheckRoundOutboxRecord = typeof checkRoundOutbox.$inferSelect;

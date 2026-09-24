@@ -4,6 +4,9 @@ export interface WorkerConfig {
   databaseUrl: string;
   redisUrl: string;
   queuePublicationTimeoutMs: number;
+  checkConsumerConcurrency: number;
+  checkExecutionLeaseDurationMs: number;
+  checkWorkerLockDurationMs: number;
   outboxLeaseDurationMs: number;
   idlePollIntervalMs: number;
   dependencyErrorDelayMs: number;
@@ -23,6 +26,21 @@ export function loadWorkerConfig(environment: NodeJS.ProcessEnv = process.env): 
       environment.QUEUE_PUBLICATION_TIMEOUT_MS,
       'QUEUE_PUBLICATION_TIMEOUT_MS',
       2_000,
+    ),
+    checkConsumerConcurrency: parsePositiveInteger(
+      environment.CHECK_CONSUMER_CONCURRENCY,
+      'CHECK_CONSUMER_CONCURRENCY',
+      5,
+    ),
+    checkExecutionLeaseDurationMs: parsePositiveInteger(
+      environment.CHECK_EXECUTION_LEASE_DURATION_MS,
+      'CHECK_EXECUTION_LEASE_DURATION_MS',
+      45_000,
+    ),
+    checkWorkerLockDurationMs: parsePositiveInteger(
+      environment.CHECK_WORKER_LOCK_DURATION_MS,
+      'CHECK_WORKER_LOCK_DURATION_MS',
+      30_000,
     ),
     outboxLeaseDurationMs: parsePositiveInteger(
       environment.OUTBOX_LEASE_DURATION_MS,

@@ -22,6 +22,13 @@
       "when": 1790203320298,
       "tag": "0002_classy_arclight",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790244558233,
+      "tag": "0003_famous_silver_surfer",
+      "breakpoints": true
     }
   ]
 }

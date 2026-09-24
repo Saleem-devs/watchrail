@@ -306,6 +306,9 @@ importers:
       '@nestjs/drizzle':
         specifier: 0.0.1
         version: 0.0.1(@nestjs/common@12.1.0(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@12.1.0)(drizzle-orm@0.45.2(@types/pg@8.23.1)(pg@8.23.0))(reflect-metadata@0.2.2)
+      '@watchrail/check-engine':
+        specifier: workspace:*
+        version: link:../../packages/check-engine
       '@watchrail/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
