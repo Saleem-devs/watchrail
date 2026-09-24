@@ -65,4 +65,73 @@ describe('Dashboard', () => {
       expect(screen.getByText('Enter a valid absolute URL.')).toBeInTheDocument();
     });
   });
+
+  it('runs a manual diagnostic and replaces its pending state with the result', async () => {
+    const monitor = {
+      id: 'monitor-1',
+      name: 'Production API',
+      url: 'https://example.com/health',
+      method: 'GET',
+      lifecycleState: 'ENABLED',
+      timeoutMs: 10_000,
+      locations: ['local'],
+      createdAt: new Date().toISOString(),
+    };
+    const round = {
+      id: 'round-1',
+      monitorId: monitor.id,
+      status: 'PENDING',
+      assignmentStatus: 'PENDING',
+      createdAt: new Date().toISOString(),
+      result: null,
+    };
+
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [monitor] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: round }), { status: 202 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: {
+              ...round,
+              status: 'COMPLETED',
+              assignmentStatus: 'COMPLETED',
+              result: {
+                outcome: 'PASS',
+                stage: 'HTTP',
+                reason: 'COMPLETED',
+                statusCode: 200,
+                responseTimeMs: 42.5,
+                attemptDurationMs: 46.25,
+                checkedAt: '2026-09-24T12:00:00.000Z',
+              },
+            },
+          }),
+          { status: 200 },
+        ),
+      );
+
+    render(<Dashboard />);
+    await screen.findByRole('heading', { name: monitor.name });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Run now' }));
+
+    expect(await screen.findByText('Queued')).toBeInTheDocument();
+    expect(await screen.findByText('PASS', {}, { timeout: 2_000 })).toBeInTheDocument();
+    expect(screen.getByText('200')).toBeInTheDocument();
+    expect(screen.getByText('43 ms')).toBeInTheDocument();
+    expect(screen.getByText('46 ms')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Run now' })).toBeEnabled();
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/monitors/monitor-1/check-rounds',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      '/api/monitors/monitor-1/check-rounds/round-1',
+      expect.objectContaining({ headers: { Accept: 'application/json' } }),
+    );
+  });
 });

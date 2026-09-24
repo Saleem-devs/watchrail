@@ -4,12 +4,32 @@ import type { MonitorLifecycleState } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
 import {
   checkExecutionAssignments,
+  checkExecutionResults,
   checkRoundOutbox,
   checkRounds,
   monitorConfigurationVersions,
   monitors,
+  type CheckExecutionAssignmentRecord,
+  type CheckExecutionResultRecord,
   type CheckRoundRecord,
 } from './schema.js';
+
+export interface ManualRoundResult {
+  id: string;
+  monitorId: string;
+  status: CheckRoundRecord['status'];
+  assignmentStatus: CheckExecutionAssignmentRecord['status'];
+  createdAt: Date;
+  result: {
+    outcome: CheckExecutionResultRecord['outcome'];
+    stage: CheckExecutionResultRecord['stage'];
+    reason: CheckExecutionResultRecord['reason'];
+    statusCode: number | null;
+    responseTimeMs: number | null;
+    attemptDurationMs: number;
+    checkedAt: Date;
+  } | null;
+}
 
 export class MonitorNotFoundError extends Error {
   constructor() {
@@ -122,5 +142,81 @@ export class ManualRoundRepository {
 
       return round;
     });
+  }
+
+  async findForOrganization(
+    organizationId: string,
+    monitorId: string,
+    roundId: string,
+  ): Promise<ManualRoundResult | null> {
+    const [round] = await this.db
+      .select({
+        id: checkRounds.id,
+        monitorId: checkRounds.monitorId,
+        status: checkRounds.status,
+        assignmentStatus: checkExecutionAssignments.status,
+        createdAt: checkRounds.createdAt,
+        outcome: checkExecutionResults.outcome,
+        stage: checkExecutionResults.stage,
+        reason: checkExecutionResults.reason,
+        statusCode: checkExecutionResults.statusCode,
+        responseTimeMs: checkExecutionResults.responseTimeMs,
+        attemptDurationMs: checkExecutionResults.attemptDurationMs,
+        checkedAt: checkExecutionResults.checkedAt,
+      })
+      .from(checkRounds)
+      .innerJoin(
+        checkExecutionAssignments,
+        and(
+          eq(checkExecutionAssignments.organizationId, checkRounds.organizationId),
+          eq(checkExecutionAssignments.roundId, checkRounds.id),
+          eq(checkExecutionAssignments.location, 'local'),
+        ),
+      )
+      .leftJoin(
+        checkExecutionResults,
+        and(
+          eq(checkExecutionResults.organizationId, checkRounds.organizationId),
+          eq(checkExecutionResults.roundId, checkRounds.id),
+          eq(checkExecutionResults.assignmentId, checkExecutionAssignments.id),
+        ),
+      )
+      .where(
+        and(
+          eq(checkRounds.organizationId, organizationId),
+          eq(checkRounds.monitorId, monitorId),
+          eq(checkRounds.id, roundId),
+          eq(checkRounds.trigger, 'MANUAL'),
+        ),
+      )
+      .limit(1);
+
+    if (!round) return null;
+
+    const result =
+      round.outcome &&
+      round.stage &&
+      round.reason &&
+      round.attemptDurationMs !== null &&
+      round.checkedAt
+        ? {
+            outcome: round.outcome,
+            stage: round.stage,
+            reason: round.reason,
+            statusCode: round.statusCode,
+            responseTimeMs: round.responseTimeMs,
+            attemptDurationMs: round.attemptDurationMs,
+            checkedAt: round.checkedAt,
+          }
+        : null;
+
+    return {
+      id: round.id,
+      monitorId: round.monitorId,
+      status: round.status,
+      assignmentStatus: round.assignmentStatus,
+      createdAt: round.createdAt,
+      result,
+    };
   }
 }
