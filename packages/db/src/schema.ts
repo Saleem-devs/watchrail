@@ -13,6 +13,7 @@ import {
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
+import type { ExecuteCheckRoundJobV1 } from '@watchrail/contracts';
 import {
   CHECK_ROUND_STATUSES,
   CHECK_ROUND_TRIGGERS,
@@ -20,7 +21,6 @@ import {
   HTTP_METHODS,
   MONITOR_LIFECYCLE_STATES,
 } from '@watchrail/domain';
-import type { CheckRoundOutboxPayload } from '@watchrail/domain';
 
 export const httpMethodEnum = pgEnum('http_method', HTTP_METHODS);
 
@@ -217,9 +217,27 @@ export const checkRoundOutbox = pgTable(
     roundId: uuid('round_id').notNull(),
 
     // The actual dispatched contract contains exactly these two fields.
-    payload: jsonb('payload').$type<CheckRoundOutboxPayload>().notNull(),
+    payload: jsonb('payload').$type<ExecuteCheckRoundJobV1>().notNull(),
 
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+
+    // The next database-clock instant at which a relay may claim this event.
+    // While claimed, this is the lease expiry. After transient failure, it is
+    // the retry time.
+    availableAt: timestamp('available_at', { withTimezone: true }).notNull().defaultNow(),
+
+    claimToken: uuid('claim_token'),
+
+    // Counts successful relay claims, not queue publication failures.
+    attemptCount: integer('attempt_count').notNull().default(0),
+
+    lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
+
+    lastErrorCode: varchar('last_error_code', { length: 64 }),
+
+    blockedAt: timestamp('blocked_at', { withTimezone: true }),
+
+    blockedReason: varchar('blocked_reason', { length: 64 }),
 
     publishedAt: timestamp('published_at', {
       withTimezone: true,
@@ -235,9 +253,31 @@ export const checkRoundOutbox = pgTable(
     // At most one queue request per round.
     unique('check_round_outbox_round_unique').on(table.roundId),
 
-    index('check_round_outbox_unpublished_idx')
-      .on(table.createdAt)
-      .where(sql`${table.publishedAt} is null`),
+    index('check_round_outbox_eligible_idx')
+      .on(table.availableAt, table.createdAt, table.id)
+      .where(sql`${table.publishedAt} is null and ${table.blockedAt} is null`),
+
+    check('check_round_outbox_attempt_count_non_negative', sql`${table.attemptCount} >= 0`),
+
+    check(
+      'check_round_outbox_block_fields_consistent',
+      sql`(${table.blockedAt} is null) = (${table.blockedReason} is null)`,
+    ),
+
+    check(
+      'check_round_outbox_not_published_and_blocked',
+      sql`not (${table.publishedAt} is not null and ${table.blockedAt} is not null)`,
+    ),
+
+    check(
+      'check_round_outbox_terminal_claim_cleared',
+      sql`(${table.publishedAt} is null and ${table.blockedAt} is null) or ${table.claimToken} is null`,
+    ),
+
+    check(
+      'check_round_outbox_published_error_cleared',
+      sql`${table.publishedAt} is null or ${table.lastErrorCode} is null`,
+    ),
 
     check(
       'check_round_outbox_payload_contract',

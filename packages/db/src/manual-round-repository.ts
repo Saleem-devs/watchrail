@@ -1,5 +1,6 @@
 import { and, desc, eq } from 'drizzle-orm';
-import type { CheckRoundOutboxPayload, MonitorLifecycleState } from '@watchrail/domain';
+import { createExecuteCheckRoundJob } from '@watchrail/contracts';
+import type { MonitorLifecycleState } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
 import {
   checkExecutionAssignments,
@@ -112,10 +113,7 @@ export class ManualRoundRepository {
         status: 'PENDING',
       });
 
-      const payload = {
-        contractVersion: 1,
-        roundId: round.id,
-      } satisfies CheckRoundOutboxPayload;
+      const payload = createExecuteCheckRoundJob(round.id);
 
       await tx.insert(checkRoundOutbox).values({
         roundId: round.id,

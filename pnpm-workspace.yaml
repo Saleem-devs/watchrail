@@ -4,6 +4,7 @@ packages:
 allowBuilds:
   cpu-features: false
   esbuild: true
+  msgpackr-extract: false
   protobufjs: true
   ssh2: false
   unrs-resolver: true

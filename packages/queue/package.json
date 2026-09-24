@@ -1,5 +1,5 @@
 {
-  "name": "@watchrail/db",
+  "name": "@watchrail/queue",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -11,26 +11,19 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx src/migrate.ts",
-    "lint": "eslint src drizzle.config.ts --max-warnings 0",
-    "test:migrations": "vitest run src/migrations.migration.spec.ts",
+    "lint": "eslint src --max-warnings 0",
+    "test": "vitest run --exclude '**/*.integration.spec.ts' --passWithNoTests",
     "test:integration": "vitest run src/*.integration.spec.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@watchrail/contracts": "workspace:*",
-    "@watchrail/domain": "workspace:*",
-    "drizzle-orm": "0.45.2",
-    "pg": "8.23.0"
+    "bullmq": "6.3.8",
+    "redis": "6.2.1"
   },
   "devDependencies": {
-    "@testcontainers/postgresql": "12.1.0",
-    "@types/pg": "8.23.1",
-    "dotenv": "18.0.1",
-    "drizzle-kit": "0.31.10",
+    "@testcontainers/redis": "12.1.0",
     "testcontainers": "12.1.0",
-    "tsx": "4.23.13",
     "typescript": "6.0.3",
     "vitest": "5.0.1"
   }
