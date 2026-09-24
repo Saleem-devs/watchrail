@@ -1,12 +1,29 @@
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
-import { MonitorRepository, type MonitorRecord } from '@watchrail/db';
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import {
+  ManualRoundRepository,
+  MonitorNotFoundError,
+  MonitorNotRunnableError,
+  MonitorRepository,
+  type CheckRoundRecord,
+  type ManualRoundResult,
+  type MonitorRecord,
+} from '@watchrail/db';
 import { createMonitor, MonitorInputError } from '@watchrail/domain';
 import type { CreateMonitorCommand } from '@watchrail/domain';
 import type { RequestContext } from './request-context.js';
 
 @Injectable()
 export class MonitorsService {
-  constructor(@Inject(MonitorRepository) private readonly monitors: MonitorRepository) {}
+  constructor(
+    @Inject(MonitorRepository) private readonly monitors: MonitorRepository,
+    @Inject(ManualRoundRepository) private readonly manualRounds: ManualRoundRepository,
+  ) {}
 
   async create(context: RequestContext, command: CreateMonitorCommand): Promise<MonitorRecord> {
     try {
@@ -26,5 +43,42 @@ export class MonitorsService {
 
   list(context: RequestContext): Promise<MonitorRecord[]> {
     return this.monitors.listForOrganization(context.organizationId);
+  }
+
+  async runNow(context: RequestContext, monitorId: string): Promise<CheckRoundRecord> {
+    try {
+      return await this.manualRounds.create(context.organizationId, monitorId);
+    } catch (error) {
+      if (error instanceof MonitorNotFoundError) {
+        throw new NotFoundException({ code: 'MONITOR_NOT_FOUND', message: error.message });
+      }
+
+      if (error instanceof MonitorNotRunnableError) {
+        throw new ConflictException({ code: 'MONITOR_NOT_RUNNABLE', message: error.message });
+      }
+
+      throw error;
+    }
+  }
+
+  async getManualRound(
+    context: RequestContext,
+    monitorId: string,
+    roundId: string,
+  ): Promise<ManualRoundResult> {
+    const round = await this.manualRounds.findForOrganization(
+      context.organizationId,
+      monitorId,
+      roundId,
+    );
+
+    if (!round) {
+      throw new NotFoundException({
+        code: 'CHECK_ROUND_NOT_FOUND',
+        message: 'Manual check round not found.',
+      });
+    }
+
+    return round;
   }
 }

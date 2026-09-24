@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Inject, Post, Req } from '@nestjs/common';
-import type { MonitorRecord } from '@watchrail/db';
+import { Body, Controller, Get, HttpCode, Inject, Param, Post, Req } from '@nestjs/common';
+import type { CheckRoundRecord, ManualRoundResult, MonitorRecord } from '@watchrail/db';
 import type { CreateMonitorCommand } from '@watchrail/domain';
 import { MonitorsService } from './monitors.service.js';
 import type { RequestWithContext } from './request-context.js';
@@ -14,6 +14,23 @@ interface MonitorResponse {
   locations: string[];
   createdAt: string;
   updatedAt: string;
+}
+
+interface ManualRoundResponse {
+  id: string;
+  monitorId: string;
+  status: string;
+  assignmentStatus: string;
+  createdAt: string;
+  result: {
+    outcome: string;
+    stage: string;
+    reason: string;
+    statusCode: number | null;
+    responseTimeMs: number | null;
+    attemptDurationMs: number;
+    checkedAt: string;
+  } | null;
 }
 
 @Controller('monitors')
@@ -34,6 +51,26 @@ export class MonitorsController {
     const monitors = await this.monitors.list(request.watchrailContext);
     return { data: monitors.map(toResponse) };
   }
+
+  @Post(':monitorId/check-rounds')
+  @HttpCode(202)
+  async runNow(
+    @Req() request: RequestWithContext,
+    @Param('monitorId') monitorId: string,
+  ): Promise<{ data: ManualRoundResponse }> {
+    const round = await this.monitors.runNow(request.watchrailContext, monitorId);
+    return { data: toPendingRoundResponse(round) };
+  }
+
+  @Get(':monitorId/check-rounds/:roundId')
+  async getManualRound(
+    @Req() request: RequestWithContext,
+    @Param('monitorId') monitorId: string,
+    @Param('roundId') roundId: string,
+  ): Promise<{ data: ManualRoundResponse }> {
+    const round = await this.monitors.getManualRound(request.watchrailContext, monitorId, roundId);
+    return { data: toManualRoundResponse(round) };
+  }
 }
 
 function toResponse(monitor: MonitorRecord): MonitorResponse {
@@ -47,5 +84,32 @@ function toResponse(monitor: MonitorRecord): MonitorResponse {
     locations: monitor.locations,
     createdAt: monitor.createdAt.toISOString(),
     updatedAt: monitor.updatedAt.toISOString(),
+  };
+}
+
+function toPendingRoundResponse(round: CheckRoundRecord): ManualRoundResponse {
+  return {
+    id: round.id,
+    monitorId: round.monitorId,
+    status: round.status,
+    assignmentStatus: 'PENDING',
+    createdAt: round.createdAt.toISOString(),
+    result: null,
+  };
+}
+
+function toManualRoundResponse(round: ManualRoundResult): ManualRoundResponse {
+  return {
+    id: round.id,
+    monitorId: round.monitorId,
+    status: round.status,
+    assignmentStatus: round.assignmentStatus,
+    createdAt: round.createdAt.toISOString(),
+    result: round.result
+      ? {
+          ...round.result,
+          checkedAt: round.result.checkedAt.toISOString(),
+        }
+      : null,
   };
 }
