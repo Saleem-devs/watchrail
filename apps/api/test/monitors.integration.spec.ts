@@ -37,11 +37,13 @@ describe('monitor API', () => {
     const connection = createDatabaseConnection(container.getConnectionUri());
     await connection.pool.query(`
       truncate table
+        check_execution_results,
         check_round_outbox,
         check_execution_assignments,
         check_rounds,
         monitor_configuration_versions,
         monitors
+      cascade
     `);
     await connection.pool.end();
   });

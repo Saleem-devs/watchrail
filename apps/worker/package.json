@@ -16,6 +16,7 @@
     "@nestjs/common": "12.1.0",
     "@nestjs/core": "12.1.0",
     "@nestjs/drizzle": "0.0.1",
+    "@watchrail/check-engine": "workspace:*",
     "@watchrail/contracts": "workspace:*",
     "@watchrail/db": "workspace:*",
     "@watchrail/queue": "workspace:*",

@@ -72,6 +72,8 @@ export class BullMqCheckJobPublisher implements CheckJobPublisher {
         connection: redis,
         skipWaitingForReady: true,
         defaultJobOptions: {
+          attempts: 10,
+          backoff: { type: 'fixed', delay: 5_000 },
           removeOnComplete: { age: COMPLETED_JOB_RETENTION_SECONDS },
           removeOnFail: { age: FAILED_JOB_RETENTION_SECONDS },
         },

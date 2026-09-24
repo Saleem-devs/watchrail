@@ -51,6 +51,8 @@ describe('BullMqCheckJobPublisher', () => {
     expect(job?.name).toBe(EXECUTE_CHECK_ROUND_JOB);
     expect(job?.data).toEqual(payload);
     expect(job?.opts).toMatchObject({
+      attempts: 10,
+      backoff: { type: 'fixed', delay: 5_000 },
       removeOnComplete: { age: 3_600 },
       removeOnFail: { age: 86_400 },
     });

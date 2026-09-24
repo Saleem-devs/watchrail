@@ -9,4 +9,4 @@ loadEnvironment({ path: resolve(process.cwd(), '../../.env') });
 const app = await NestFactory.createApplicationContext(AppModule);
 app.enableShutdownHooks();
 
-console.log('Watchrail worker running the check-outbox relay.');
+console.log('Watchrail worker running check publication and local execution.');

@@ -1,9 +1,15 @@
 import { Module } from '@nestjs/common';
 import { DrizzleModule, getDrizzleToken } from '@nestjs/drizzle';
-import { BullMqCheckJobPublisher } from '@watchrail/queue';
-import { CheckRoundOutboxRepository, createWatchrailDatabase } from '@watchrail/db';
+import { NodeFetchHttpExecutor } from '@watchrail/check-engine';
+import { BullMqCheckJobConsumer, BullMqCheckJobPublisher } from '@watchrail/queue';
+import {
+  CheckExecutionRepository,
+  CheckRoundOutboxRepository,
+  createWatchrailDatabase,
+} from '@watchrail/db';
 import type { WatchrailDatabase } from '@watchrail/db';
 import { CheckOutboxRelay, createExponentialBackoff } from './check-outbox-relay.js';
+import { CheckRoundJobHandler } from './check-round-job-handler.js';
 import { WorkerConfigModule } from './config.module.js';
 import { WORKER_CONFIG, type WorkerConfig } from './config.js';
 import { WorkerRuntime } from './worker-runtime.js';
@@ -35,6 +41,35 @@ import { WorkerRuntime } from './worker-runtime.js';
       useFactory: (db: WatchrailDatabase) => new CheckRoundOutboxRepository(db),
     },
     {
+      provide: CheckExecutionRepository,
+      inject: [getDrizzleToken()],
+      useFactory: (db: WatchrailDatabase) => new CheckExecutionRepository(db),
+    },
+    {
+      provide: NodeFetchHttpExecutor,
+      useFactory: () => new NodeFetchHttpExecutor(),
+    },
+    {
+      provide: CheckRoundJobHandler,
+      inject: [CheckExecutionRepository, NodeFetchHttpExecutor, WORKER_CONFIG],
+      useFactory: (
+        executions: CheckExecutionRepository,
+        executor: NodeFetchHttpExecutor,
+        config: WorkerConfig,
+      ) => new CheckRoundJobHandler(executions, executor, config.checkExecutionLeaseDurationMs),
+    },
+    {
+      provide: BullMqCheckJobConsumer,
+      inject: [WORKER_CONFIG, CheckRoundJobHandler],
+      useFactory: (config: WorkerConfig, handler: CheckRoundJobHandler) =>
+        BullMqCheckJobConsumer.connect({
+          redisUrl: config.redisUrl,
+          handler,
+          concurrency: config.checkConsumerConcurrency,
+          lockDurationMs: config.checkWorkerLockDurationMs,
+        }),
+    },
+    {
       provide: CheckOutboxRelay,
       inject: [CheckRoundOutboxRepository, BullMqCheckJobPublisher, WORKER_CONFIG],
       useFactory: (
@@ -49,12 +84,13 @@ import { WorkerRuntime } from './worker-runtime.js';
     },
     {
       provide: WorkerRuntime,
-      inject: [CheckOutboxRelay, BullMqCheckJobPublisher, WORKER_CONFIG],
+      inject: [CheckOutboxRelay, BullMqCheckJobConsumer, BullMqCheckJobPublisher, WORKER_CONFIG],
       useFactory: (
         relay: CheckOutboxRelay,
+        consumer: BullMqCheckJobConsumer,
         publisher: BullMqCheckJobPublisher,
         config: WorkerConfig,
-      ) => new WorkerRuntime(relay, publisher, config),
+      ) => new WorkerRuntime(relay, consumer, publisher, config),
     },
   ],
 })
