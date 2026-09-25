@@ -40,9 +40,11 @@ describe('createPinnedLookup', () => {
   it('connects to the pinned address while preserving the original HTTP authority', async () => {
     let receivedHost: string | undefined;
     let receivedPath: string | undefined;
+    let receivedCustomHeader: string | string[] | undefined;
     const server = createServer((request, reply) => {
       receivedHost = request.headers.host;
       receivedPath = request.url;
+      receivedCustomHeader = request.headers['x-watchrail-test'];
       reply.writeHead(204).end();
     });
     servers.push(server);
@@ -62,11 +64,13 @@ describe('createPinnedLookup', () => {
       },
       method: 'HEAD',
       signal: new AbortController().signal,
+      headers: [{ name: 'x-watchrail-test', value: 'delivered' }],
     });
 
     expect(response.statusCode).toBe(204);
     expect(receivedHost).toBe(`original.example:${address.port}`);
     expect(receivedPath).toBe('/health?ready=true');
+    expect(receivedCustomHeader).toBe('delivered');
     await response.discardBody();
   });
 

@@ -1,7 +1,7 @@
 import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post, Req } from '@nestjs/common';
 import type { CheckRoundRecord, ManualRoundResult, MonitorRecord } from '@watchrail/db';
 import type { CreateMonitorCommand } from '@watchrail/domain';
-import type { HttpStatusPolicy, StoredRequestHeader } from '@watchrail/domain';
+import { parseStoredRequestHeaders, type HttpStatusPolicy } from '@watchrail/domain';
 import { MonitorsService } from './monitors.service.js';
 import type { RequestWithContext } from './request-context.js';
 
@@ -125,10 +125,8 @@ function toResponse(monitor: MonitorRecord): MonitorResponse {
   };
 }
 
-function redactRequestHeaders(
-  headers: readonly StoredRequestHeader[],
-): MonitorResponse['requestHeaders'] {
-  return headers.map((header) => ({
+function redactRequestHeaders(value: unknown): MonitorResponse['requestHeaders'] {
+  return parseStoredRequestHeaders(value).map((header) => ({
     name: header.name,
     sensitive: header.sensitive,
     value: header.sensitive ? null : header.value,

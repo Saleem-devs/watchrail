@@ -1,6 +1,6 @@
 import 'reflect-metadata';
 import { resolve } from 'node:path';
-import type { INestApplication } from '@nestjs/common';
+import { Logger, type INestApplication } from '@nestjs/common';
 import { getDrizzleToken } from '@nestjs/drizzle';
 import { Test } from '@nestjs/testing';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
@@ -8,7 +8,7 @@ import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { CheckExecutionRepository, createDatabaseConnection, migrateDatabase } from '@watchrail/db';
 import type { WatchrailDatabase } from '@watchrail/db';
 import request from 'supertest';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 
 describe('monitor API', () => {
@@ -196,6 +196,25 @@ describe('monitor API', () => {
       .patch(`/api/monitors/${String(created.body.data.id)}/request-headers`)
       .send({ requestHeaders: [{ name: 'Authorization', sensitive: true, retain: true }] })
       .expect(400);
+  });
+
+  it('does not expose a sentinel from corrupted stored headers in API errors', async () => {
+    const sentinel = 'WATCHRAIL_SENTINEL_SECRET';
+    const logger = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const created = await request(app.getHttpServer())
+      .post('/api/monitors')
+      .send({ name: 'Corrupted configuration', url: 'https://example.com' })
+      .expect(201);
+
+    await database.$client.query('update monitors set request_headers = $1::jsonb where id = $2', [
+      JSON.stringify([{ name: 'authorization', sensitive: true, encryptedValue: sentinel }]),
+      created.body.data.id,
+    ]);
+
+    const response = await request(app.getHttpServer()).get('/api/monitors').expect(500);
+    expect(JSON.stringify(response.body)).not.toContain(sentinel);
+    expect(JSON.stringify(logger.mock.calls)).not.toContain(sentinel);
+    logger.mockRestore();
   });
 
   it('rejects an invalid exact status policy', async () => {

@@ -5,6 +5,7 @@ import type {
   ResolvedRequestHeader,
   StoredRequestHeader,
 } from '@watchrail/domain';
+import { parseStoredRequestHeaders } from '@watchrail/domain';
 
 export interface HeaderEncryptionContext {
   organizationId: string;
@@ -97,10 +98,11 @@ export function decryptHeaderValue(
 
 export function storeRequestHeaders(
   updates: readonly RequestHeaderUpdate[],
-  existing: readonly StoredRequestHeader[],
+  existingValue: unknown,
   context: Omit<HeaderEncryptionContext, 'normalizedHeaderName'>,
   keyring: HeaderEncryptionKeyring,
 ): StoredRequestHeader[] {
+  const existing = parseStoredRequestHeaders(existingValue);
   const existingByName = new Map(existing.map((header) => [header.name, header]));
 
   return updates.map((update) => {
@@ -127,10 +129,11 @@ export function storeRequestHeaders(
 }
 
 export function resolveRequestHeaders(
-  headers: readonly StoredRequestHeader[],
+  value: unknown,
   context: Omit<HeaderEncryptionContext, 'normalizedHeaderName'>,
   keyring: HeaderEncryptionKeyring,
 ): ResolvedRequestHeader[] {
+  const headers = parseStoredRequestHeaders(value);
   return headers.map((header) => ({
     name: header.name,
     value: header.sensitive

@@ -48,6 +48,25 @@ export class RequestHeaderInputError extends Error {
   }
 }
 
+export class StoredRequestHeadersInvariantError extends Error {
+  constructor() {
+    super('Stored request headers violate the persistence contract.');
+    this.name = 'StoredRequestHeadersInvariantError';
+  }
+}
+
+export function parseStoredRequestHeaders(value: unknown): StoredRequestHeader[] {
+  if (!Array.isArray(value)) throw new StoredRequestHeadersInvariantError();
+
+  const seen = new Set<string>();
+  const parsed = value.map((candidate) => parseStoredRequestHeader(candidate));
+  for (const header of parsed) {
+    if (seen.has(header.name)) throw new StoredRequestHeadersInvariantError();
+    seen.add(header.name);
+  }
+  return parsed;
+}
+
 export function normalizeRequestHeaderUpdates(value: unknown): RequestHeaderUpdate[] {
   if (!Array.isArray(value)) throw new RequestHeaderInputError(['Headers must be an array.']);
 
@@ -115,6 +134,64 @@ function isValidHeaderValue(value: string): boolean {
     if (code === 10 || code === 13 || (code < 32 && code !== 9) || code === 127) return false;
   }
   return true;
+}
+
+function parseStoredRequestHeader(value: unknown): StoredRequestHeader {
+  if (
+    !isRecord(value) ||
+    typeof value.name !== 'string' ||
+    value.name !== value.name.toLowerCase()
+  ) {
+    throw new StoredRequestHeadersInvariantError();
+  }
+  if (!HTTP_TOKEN.test(value.name) || PROHIBITED_HEADERS.has(value.name)) {
+    throw new StoredRequestHeadersInvariantError();
+  }
+
+  if (value.sensitive === false) {
+    if (typeof value.value !== 'string' || !isValidHeaderValue(value.value)) {
+      throw new StoredRequestHeadersInvariantError();
+    }
+    return { name: value.name, sensitive: false, value: value.value };
+  }
+
+  if (value.sensitive !== true || !isEncryptedHeaderValueV1(value.encryptedValue)) {
+    throw new StoredRequestHeadersInvariantError();
+  }
+  return { name: value.name, sensitive: true, encryptedValue: value.encryptedValue };
+}
+
+function isEncryptedHeaderValueV1(value: unknown): value is EncryptedHeaderValueV1 {
+  return (
+    isRecord(value) &&
+    value.version === 1 &&
+    value.algorithm === 'AES-256-GCM' &&
+    typeof value.keyId === 'string' &&
+    value.keyId.length > 0 &&
+    value.keyId.length <= 120 &&
+    typeof value.iv === 'string' &&
+    base64UrlByteLength(value.iv) === 12 &&
+    typeof value.ciphertext === 'string' &&
+    base64UrlByteLength(value.ciphertext) !== null &&
+    typeof value.authTag === 'string' &&
+    base64UrlByteLength(value.authTag) === 16
+  );
+}
+
+function base64UrlByteLength(value: string): number | null {
+  if (!/^[A-Za-z0-9_-]*$/u.test(value) || value.length % 4 === 1) return null;
+
+  try {
+    const padded = value
+      .replace(/-/gu, '+')
+      .replace(/_/gu, '/')
+      .padEnd(value.length + ((4 - (value.length % 4)) % 4), '=');
+    const decoded = atob(padded);
+    const canonical = btoa(decoded).replace(/\+/gu, '-').replace(/\//gu, '_').replace(/=+$/u, '');
+    return canonical === value ? decoded.length : null;
+  } catch {
+    return null;
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
