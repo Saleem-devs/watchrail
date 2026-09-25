@@ -107,6 +107,45 @@ describe('worker application lifecycle', () => {
     });
     expect(result.attemptDurationMs).toBeGreaterThanOrEqual(0);
   });
+
+  it('persists corrupted immutable request headers as terminal internal uncertainty', async () => {
+    if (!database) throw new Error('Expected the worker database to be available.');
+
+    const monitor = await new MonitorRepository(database).create(
+      'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      createMonitor({ name: 'Corrupted headers', url: 'https://example.com/health' }),
+    );
+    await database.$client.query(
+      `update monitor_configuration_versions
+       set request_headers = $1::jsonb
+       where monitor_id = $2`,
+      [
+        JSON.stringify([
+          {
+            name: 'authorization',
+            sensitive: false,
+            value: 'WATCHRAIL_SENTINEL_SECRET',
+          },
+        ]),
+        monitor.id,
+      ],
+    );
+
+    const round = await new ManualRoundRepository(database).create(
+      monitor.organizationId,
+      monitor.id,
+    );
+    const result = await waitForResult(database, round.id);
+
+    expect(result).toMatchObject({
+      roundId: round.id,
+      outcome: 'UNKNOWN',
+      stage: 'PROBE',
+      reason: 'INTERNAL_ERROR',
+      statusCode: null,
+      responseTimeMs: null,
+    });
+  });
 });
 
 async function waitForResult(database: WatchrailDatabase, roundId: string) {

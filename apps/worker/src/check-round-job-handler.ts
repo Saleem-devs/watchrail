@@ -3,10 +3,12 @@ import { executeHttpCheck } from '@watchrail/check-engine';
 import type { HttpCheckResult, HttpExecutor } from '@watchrail/check-engine';
 import type { ExecuteCheckRoundJobV1 } from '@watchrail/contracts';
 import type { CheckExecutionRepository } from '@watchrail/db';
+import { StoredRequestHeadersInvariantError } from '@watchrail/domain';
 import type { CheckJobHandler } from '@watchrail/queue';
 import {
   resolveRequestHeaders,
   type HeaderEncryptionKeyring,
+  StoredRequestHeaderResolutionError,
 } from '@watchrail/http-header-security';
 
 export class CheckExecutionAlreadyClaimedError extends Error {
@@ -61,7 +63,13 @@ export class CheckRoundJobHandler implements CheckJobHandler {
           },
           this.headerEncryptionKeyring,
         );
-      } catch {
+      } catch (error) {
+        if (
+          !(error instanceof StoredRequestHeadersInvariantError) &&
+          !(error instanceof StoredRequestHeaderResolutionError)
+        ) {
+          throw error;
+        }
         this.logger.error(
           `Stored request-header configuration is invalid for assignment ${claim.execution.assignmentId}.`,
         );
