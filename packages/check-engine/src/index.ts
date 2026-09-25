@@ -4,6 +4,7 @@ export {
   InvalidHttpTargetError,
   ProhibitedDestinationError,
   resolveSafeHttpTarget,
+  validateHttpTargetUrl,
   type DnsAddress,
   type DnsResolver,
   type ResolvedHttpTarget,
@@ -35,4 +36,5 @@ export type {
   HttpTargetFailure,
   HttpMethod,
   HttpPolicyRejection,
+  HttpRedirectFailure,
 } from './types.js';
