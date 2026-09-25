@@ -1,5 +1,5 @@
 import { and, eq, sql } from 'drizzle-orm';
-import type { HttpMethod, HttpStatusPolicy } from '@watchrail/domain';
+import type { HttpMethod, HttpStatusPolicy, StoredRequestHeader } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
 import {
   checkExecutionAssignments,
@@ -17,6 +17,9 @@ export interface ClaimedCheckExecution {
   method: HttpMethod;
   timeoutMs: number;
   statusPolicy: HttpStatusPolicy;
+  organizationId: string;
+  monitorId: string;
+  requestHeaders: readonly StoredRequestHeader[];
 }
 
 export type CheckExecutionClaimResult =
@@ -55,6 +58,9 @@ export class CheckExecutionRepository {
           method: monitorConfigurationVersions.method,
           timeoutMs: monitorConfigurationVersions.timeoutMs,
           statusPolicy: monitorConfigurationVersions.statusPolicy,
+          organizationId: monitorConfigurationVersions.organizationId,
+          monitorId: monitorConfigurationVersions.monitorId,
+          requestHeaders: monitorConfigurationVersions.requestHeaders,
         })
         .from(checkExecutionAssignments)
         .innerJoin(
@@ -109,6 +115,9 @@ export class CheckExecutionRepository {
           method: candidate.method,
           timeoutMs: candidate.timeoutMs,
           statusPolicy: candidate.statusPolicy,
+          organizationId: candidate.organizationId,
+          monitorId: candidate.monitorId,
+          requestHeaders: candidate.requestHeaders,
         },
       };
     });

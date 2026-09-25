@@ -7,8 +7,27 @@ describe('createMonitor', () => {
       name: 'API',
       url: 'https://example.com/health',
       ...MONITOR_DEFAULTS,
+      requestHeaders: [],
       locations: ['local'],
     });
+  });
+
+  it('normalizes request headers and rejects retained secrets during creation', () => {
+    expect(
+      createMonitor({
+        name: 'API',
+        url: 'https://example.com',
+        requestHeaders: [{ name: 'Authorization', sensitive: false, value: 'Bearer secret' }],
+      }).requestHeaders,
+    ).toEqual([{ name: 'authorization', sensitive: true, value: 'Bearer secret' }]);
+
+    expect(() =>
+      createMonitor({
+        name: 'API',
+        url: 'https://example.com',
+        requestHeaders: [{ name: 'Authorization', sensitive: true, retain: true }],
+      }),
+    ).toThrow(MonitorInputError);
   });
 
   it.each(['ftp://example.com', 'example.com', 'not a url'])('rejects invalid URL %s', (url) => {

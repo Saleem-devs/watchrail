@@ -19,6 +19,7 @@
     "@watchrail/check-engine": "workspace:*",
     "@watchrail/contracts": "workspace:*",
     "@watchrail/db": "workspace:*",
+    "@watchrail/http-header-security": "workspace:*",
     "@watchrail/queue": "workspace:*",
     "dotenv": "18.0.1",
     "reflect-metadata": "0.2.2",

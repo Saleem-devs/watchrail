@@ -22,6 +22,7 @@ import {
   HTTP_METHODS,
   MONITOR_LIFECYCLE_STATES,
   type HttpStatusPolicy,
+  type StoredRequestHeader,
 } from '@watchrail/domain';
 
 export const httpMethodEnum = pgEnum('http_method', HTTP_METHODS);
@@ -59,6 +60,7 @@ export const checkResultReasonEnum = pgEnum('check_result_reason', [
   'TOO_MANY_REDIRECTS',
   'MISSING_REDIRECT_LOCATION',
   'INVALID_REDIRECT_LOCATION',
+  'INSECURE_REDIRECT',
   'INTERNAL_ERROR',
 ]);
 
@@ -82,6 +84,7 @@ export const monitors = pgTable(
       .$type<HttpStatusPolicy>()
       .notNull()
       .default({ type: 'ANY_2XX' }),
+    requestHeaders: jsonb('request_headers').$type<StoredRequestHeader[]>().notNull().default([]),
     locations: jsonb('locations').$type<string[]>().notNull().default(['local']),
 
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -122,6 +125,7 @@ export const monitors = pgTable(
       'monitors_locations_non_empty',
       sql`jsonb_typeof(${table.locations}) = 'array' and jsonb_array_length(${table.locations}) > 0`,
     ),
+    check('monitors_request_headers_array', sql`jsonb_typeof(${table.requestHeaders}) = 'array'`),
   ],
 );
 
@@ -142,6 +146,7 @@ export const monitorConfigurationVersions = pgTable(
       .$type<HttpStatusPolicy>()
       .notNull()
       .default({ type: 'ANY_2XX' }),
+    requestHeaders: jsonb('request_headers').$type<StoredRequestHeader[]>().notNull().default([]),
 
     locations: jsonb('locations').$type<string[]>().notNull(),
 
@@ -207,6 +212,10 @@ export const monitorConfigurationVersions = pgTable(
         jsonb_typeof(${table.locations}) = 'array'
         and jsonb_array_length(${table.locations}) > 0
       `,
+    ),
+    check(
+      'monitor_configuration_versions_request_headers_array',
+      sql`jsonb_typeof(${table.requestHeaders}) = 'array'`,
     ),
   ],
 );

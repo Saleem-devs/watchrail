@@ -4,11 +4,13 @@ import { loadWorkerConfig } from './config.js';
 const requiredEnvironment = {
   DATABASE_URL: 'postgresql://watchrail:watchrail@localhost:5433/watchrail',
   REDIS_URL: 'redis://localhost:6379',
+  HTTP_HEADER_ACTIVE_KEY_ID: 'test',
+  HTTP_HEADER_ENCRYPTION_KEYS: JSON.stringify({ test: Buffer.alloc(32).toString('base64') }),
 };
 
 describe('loadWorkerConfig', () => {
   it('loads explicit dependencies and safe relay defaults', () => {
-    expect(loadWorkerConfig(requiredEnvironment)).toEqual({
+    expect(loadWorkerConfig(requiredEnvironment)).toMatchObject({
       databaseUrl: requiredEnvironment.DATABASE_URL,
       redisUrl: requiredEnvironment.REDIS_URL,
       queuePublicationTimeoutMs: 2_000,
@@ -18,6 +20,7 @@ describe('loadWorkerConfig', () => {
       outboxLeaseDurationMs: 30_000,
       idlePollIntervalMs: 500,
       dependencyErrorDelayMs: 1_000,
+      headerEncryptionKeyring: { activeKeyId: 'test' },
     });
   });
 

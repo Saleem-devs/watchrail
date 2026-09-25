@@ -1,6 +1,12 @@
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { decryptHeaderValue, encryptHeaderValue, loadHeaderEncryptionKeyring } from './index.js';
+import {
+  decryptHeaderValue,
+  encryptHeaderValue,
+  loadHeaderEncryptionKeyring,
+  resolveRequestHeaders,
+  storeRequestHeaders,
+} from './index.js';
 
 const key = randomBytes(32).toString('base64');
 const context = {
@@ -59,5 +65,35 @@ describe('HTTP header encryption', () => {
         HTTP_HEADER_ENCRYPTION_KEYS: JSON.stringify({ v1: 'short' }),
       }),
     ).toThrow('exactly 32 bytes');
+  });
+
+  it('stores secrets encrypted, retains ciphertext explicitly, and resolves only at execution', () => {
+    const keyring = loadHeaderEncryptionKeyring({
+      HTTP_HEADER_ACTIVE_KEY_ID: 'v1',
+      HTTP_HEADER_ENCRYPTION_KEYS: JSON.stringify({ v1: key }),
+    });
+    const stored = storeRequestHeaders(
+      [
+        { name: 'authorization', sensitive: true, value: 'Bearer secret' },
+        { name: 'x-environment', sensitive: false, value: 'production' },
+      ],
+      [],
+      context,
+      keyring,
+    );
+
+    expect(stored[0]).not.toHaveProperty('value');
+    expect(
+      storeRequestHeaders(
+        [{ name: 'authorization', sensitive: true, retain: true }],
+        stored,
+        context,
+        keyring,
+      )[0],
+    ).toBe(stored[0]);
+    expect(resolveRequestHeaders(stored, context, keyring)).toEqual([
+      { name: 'authorization', value: 'Bearer secret' },
+      { name: 'x-environment', value: 'production' },
+    ]);
   });
 });

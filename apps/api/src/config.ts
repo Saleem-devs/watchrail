@@ -5,6 +5,7 @@ export interface AppConfig {
   port: number;
   databaseUrl: string;
   developmentIdentityEnabled: boolean;
+  headerEncryptionKeyring: HeaderEncryptionKeyring;
 }
 
 export function loadAppConfig(environment: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -26,7 +27,13 @@ export function loadAppConfig(environment: NodeJS.ProcessEnv = process.env): App
     throw new Error('PORT must be an integer from 1 through 65535.');
   }
 
-  return { nodeEnv, port, databaseUrl, developmentIdentityEnabled };
+  return {
+    nodeEnv,
+    port,
+    databaseUrl,
+    developmentIdentityEnabled,
+    headerEncryptionKeyring: loadHeaderEncryptionKeyring(environment),
+  };
 }
 
 function parseNodeEnvironment(value: string | undefined): AppConfig['nodeEnv'] {
@@ -40,3 +47,7 @@ function parseBoolean(value: string | undefined, name: string): boolean {
   if (value === 'false' || value === undefined) return false;
   throw new Error(`${name} must be true or false.`);
 }
+import {
+  loadHeaderEncryptionKeyring,
+  type HeaderEncryptionKeyring,
+} from '@watchrail/http-header-security';

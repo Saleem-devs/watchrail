@@ -6,12 +6,17 @@ export const HTTP_CHECK_TIMEOUT_LIMITS = {
 export type HttpMethod = 'GET' | 'HEAD';
 export type HttpStatusPolicy =
   { type: 'ANY_2XX' } | { type: 'EXACT'; statusCodes: readonly number[] };
+export interface HttpRequestHeader {
+  name: string;
+  value: string;
+}
 
 export interface HttpCheckInput {
   url: string;
   method: HttpMethod;
   timeoutMs: number;
   statusPolicy?: HttpStatusPolicy;
+  requestHeaders?: readonly HttpRequestHeader[];
 }
 
 interface HttpCheckTiming {
@@ -65,7 +70,8 @@ export type HttpCheckResult =
           | 'REDIRECT_LOOP'
           | 'TOO_MANY_REDIRECTS'
           | 'MISSING_REDIRECT_LOCATION'
-          | 'INVALID_REDIRECT_LOCATION';
+          | 'INVALID_REDIRECT_LOCATION'
+          | 'INSECURE_REDIRECT';
       })
   | (HttpCheckTiming & {
       outcome: 'FAIL';
@@ -117,7 +123,8 @@ export interface HttpRedirectFailure extends HttpResponseEvidence {
     | 'REDIRECT_LOOP'
     | 'TOO_MANY_REDIRECTS'
     | 'MISSING_REDIRECT_LOCATION'
-    | 'INVALID_REDIRECT_LOCATION';
+    | 'INVALID_REDIRECT_LOCATION'
+    | 'INSECURE_REDIRECT';
 }
 
 /**
@@ -133,6 +140,7 @@ export interface HttpExecutionInput {
 
   /** Attempt-scoped cancellation signal controlled by the check engine. */
   signal: AbortSignal;
+  requestHeaders?: readonly HttpRequestHeader[];
 }
 
 /**

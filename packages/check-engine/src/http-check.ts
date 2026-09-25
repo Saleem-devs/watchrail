@@ -52,6 +52,7 @@ export async function executeHttpCheck(
       url: input.url,
       method: input.method,
       signal: controller.signal,
+      requestHeaders: input.requestHeaders ?? [],
     });
 
     const execution = await Promise.race([executionPromise, timeoutPromise]);

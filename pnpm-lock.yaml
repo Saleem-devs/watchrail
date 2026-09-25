@@ -214,6 +214,9 @@ importers:
       '@watchrail/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@watchrail/http-header-security':
+        specifier: workspace:*
+        version: link:../../packages/http-header-security
       dotenv:
         specifier: 18.0.1
         version: 18.0.1
@@ -315,6 +318,9 @@ importers:
       '@watchrail/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@watchrail/http-header-security':
+        specifier: workspace:*
+        version: link:../../packages/http-header-security
       '@watchrail/queue':
         specifier: workspace:*
         version: link:../../packages/queue

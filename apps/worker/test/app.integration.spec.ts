@@ -31,6 +31,8 @@ describe('worker application lifecycle', () => {
     dependencyErrorDelayMs: process.env.OUTBOX_DEPENDENCY_ERROR_DELAY_MS,
     idlePollIntervalMs: process.env.OUTBOX_IDLE_POLL_INTERVAL_MS,
     redisUrl: process.env.REDIS_URL,
+    headerActiveKeyId: process.env.HTTP_HEADER_ACTIVE_KEY_ID,
+    headerEncryptionKeys: process.env.HTTP_HEADER_ENCRYPTION_KEYS,
   };
 
   beforeAll(async () => {
@@ -43,6 +45,10 @@ describe('worker application lifecycle', () => {
     process.env.REDIS_URL = redis.getConnectionUrl();
     process.env.OUTBOX_IDLE_POLL_INTERVAL_MS = '10';
     process.env.OUTBOX_DEPENDENCY_ERROR_DELAY_MS = '10';
+    process.env.HTTP_HEADER_ACTIVE_KEY_ID = 'test';
+    process.env.HTTP_HEADER_ENCRYPTION_KEYS = JSON.stringify({
+      test: Buffer.alloc(32).toString('base64'),
+    });
 
     const migrationConnection = createDatabaseConnection(postgres.getConnectionUri());
     await migrateDatabase(migrationConnection, resolve(process.cwd(), '../../packages/db/drizzle'));
@@ -62,6 +68,8 @@ describe('worker application lifecycle', () => {
     restoreEnvironment('DATABASE_URL', originalEnvironment.databaseUrl);
     restoreEnvironment('REDIS_URL', originalEnvironment.redisUrl);
     restoreEnvironment('OUTBOX_IDLE_POLL_INTERVAL_MS', originalEnvironment.idlePollIntervalMs);
+    restoreEnvironment('HTTP_HEADER_ACTIVE_KEY_ID', originalEnvironment.headerActiveKeyId);
+    restoreEnvironment('HTTP_HEADER_ENCRYPTION_KEYS', originalEnvironment.headerEncryptionKeys);
     restoreEnvironment(
       'OUTBOX_DEPENDENCY_ERROR_DELAY_MS',
       originalEnvironment.dependencyErrorDelayMs,

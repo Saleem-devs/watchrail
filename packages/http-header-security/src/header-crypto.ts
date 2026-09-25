@@ -1,5 +1,10 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import type { EncryptedHeaderValueV1 } from '@watchrail/domain';
+import type {
+  EncryptedHeaderValueV1,
+  RequestHeaderUpdate,
+  ResolvedRequestHeader,
+  StoredRequestHeader,
+} from '@watchrail/domain';
 
 export interface HeaderEncryptionContext {
   organizationId: string;
@@ -88,6 +93,54 @@ export function decryptHeaderValue(
     decipher.update(Buffer.from(envelope.ciphertext, 'base64url')),
     decipher.final(),
   ]).toString('utf8');
+}
+
+export function storeRequestHeaders(
+  updates: readonly RequestHeaderUpdate[],
+  existing: readonly StoredRequestHeader[],
+  context: Omit<HeaderEncryptionContext, 'normalizedHeaderName'>,
+  keyring: HeaderEncryptionKeyring,
+): StoredRequestHeader[] {
+  const existingByName = new Map(existing.map((header) => [header.name, header]));
+
+  return updates.map((update) => {
+    if (!update.sensitive) return update;
+
+    if ('retain' in update) {
+      const previous = existingByName.get(update.name);
+      if (!previous?.sensitive) {
+        throw new Error(`Cannot retain missing sensitive header ${update.name}.`);
+      }
+      return previous;
+    }
+
+    return {
+      name: update.name,
+      sensitive: true,
+      encryptedValue: encryptHeaderValue(
+        update.value,
+        { ...context, normalizedHeaderName: update.name },
+        keyring,
+      ),
+    };
+  });
+}
+
+export function resolveRequestHeaders(
+  headers: readonly StoredRequestHeader[],
+  context: Omit<HeaderEncryptionContext, 'normalizedHeaderName'>,
+  keyring: HeaderEncryptionKeyring,
+): ResolvedRequestHeader[] {
+  return headers.map((header) => ({
+    name: header.name,
+    value: header.sensitive
+      ? decryptHeaderValue(
+          header.encryptedValue,
+          { ...context, normalizedHeaderName: header.name },
+          keyring,
+        )
+      : header.value,
+  }));
 }
 
 function aad(context: HeaderEncryptionContext): Buffer {

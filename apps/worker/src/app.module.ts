@@ -56,7 +56,13 @@ import { WorkerRuntime } from './worker-runtime.js';
         executions: CheckExecutionRepository,
         executor: NodeHttpExecutor,
         config: WorkerConfig,
-      ) => new CheckRoundJobHandler(executions, executor, config.checkExecutionLeaseDurationMs),
+      ) =>
+        new CheckRoundJobHandler(
+          executions,
+          executor,
+          config.checkExecutionLeaseDurationMs,
+          config.headerEncryptionKeyring,
+        ),
     },
     {
       provide: BullMqCheckJobConsumer,

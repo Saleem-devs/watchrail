@@ -1,7 +1,7 @@
 import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post, Req } from '@nestjs/common';
 import type { CheckRoundRecord, ManualRoundResult, MonitorRecord } from '@watchrail/db';
 import type { CreateMonitorCommand } from '@watchrail/domain';
-import type { HttpStatusPolicy } from '@watchrail/domain';
+import type { HttpStatusPolicy, StoredRequestHeader } from '@watchrail/domain';
 import { MonitorsService } from './monitors.service.js';
 import type { RequestWithContext } from './request-context.js';
 
@@ -13,6 +13,12 @@ interface MonitorResponse {
   lifecycleState: string;
   timeoutMs: number;
   statusPolicy: HttpStatusPolicy;
+  requestHeaders: Array<{
+    name: string;
+    sensitive: boolean;
+    value: string | null;
+    hasValue: true;
+  }>;
   locations: string[];
   createdAt: string;
   updatedAt: string;
@@ -68,6 +74,20 @@ export class MonitorsController {
     return { data: toResponse(monitor) };
   }
 
+  @Patch(':monitorId/request-headers')
+  async updateRequestHeaders(
+    @Req() request: RequestWithContext,
+    @Param('monitorId') monitorId: string,
+    @Body() body: { requestHeaders?: unknown },
+  ): Promise<{ data: MonitorResponse }> {
+    const monitor = await this.monitors.updateRequestHeaders(
+      request.watchrailContext,
+      monitorId,
+      body.requestHeaders,
+    );
+    return { data: toResponse(monitor) };
+  }
+
   @Post(':monitorId/check-rounds')
   @HttpCode(202)
   async runNow(
@@ -98,10 +118,22 @@ function toResponse(monitor: MonitorRecord): MonitorResponse {
     lifecycleState: monitor.lifecycleState,
     timeoutMs: monitor.timeoutMs,
     statusPolicy: monitor.statusPolicy,
+    requestHeaders: redactRequestHeaders(monitor.requestHeaders),
     locations: monitor.locations,
     createdAt: monitor.createdAt.toISOString(),
     updatedAt: monitor.updatedAt.toISOString(),
   };
+}
+
+function redactRequestHeaders(
+  headers: readonly StoredRequestHeader[],
+): MonitorResponse['requestHeaders'] {
+  return headers.map((header) => ({
+    name: header.name,
+    sensitive: header.sensitive,
+    value: header.sensitive ? null : header.value,
+    hasValue: true,
+  }));
 }
 
 function toPendingRoundResponse(round: CheckRoundRecord): ManualRoundResponse {
