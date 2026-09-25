@@ -149,13 +149,22 @@ function parseStoredRequestHeader(value: unknown): StoredRequestHeader {
   }
 
   if (value.sensitive === false) {
-    if (typeof value.value !== 'string' || !isValidHeaderValue(value.value)) {
+    if (
+      !hasExactKeys(value, ['name', 'sensitive', 'value']) ||
+      FORCED_SENSITIVE_HEADERS.has(value.name) ||
+      typeof value.value !== 'string' ||
+      !isValidHeaderValue(value.value)
+    ) {
       throw new StoredRequestHeadersInvariantError();
     }
     return { name: value.name, sensitive: false, value: value.value };
   }
 
-  if (value.sensitive !== true || !isEncryptedHeaderValueV1(value.encryptedValue)) {
+  if (
+    value.sensitive !== true ||
+    !hasExactKeys(value, ['name', 'sensitive', 'encryptedValue']) ||
+    !isEncryptedHeaderValueV1(value.encryptedValue)
+  ) {
     throw new StoredRequestHeadersInvariantError();
   }
   return { name: value.name, sensitive: true, encryptedValue: value.encryptedValue };
@@ -164,6 +173,7 @@ function parseStoredRequestHeader(value: unknown): StoredRequestHeader {
 function isEncryptedHeaderValueV1(value: unknown): value is EncryptedHeaderValueV1 {
   return (
     isRecord(value) &&
+    hasExactKeys(value, ['version', 'algorithm', 'keyId', 'iv', 'ciphertext', 'authTag']) &&
     value.version === 1 &&
     value.algorithm === 'AES-256-GCM' &&
     typeof value.keyId === 'string' &&
@@ -176,6 +186,11 @@ function isEncryptedHeaderValueV1(value: unknown): value is EncryptedHeaderValue
     typeof value.authTag === 'string' &&
     base64UrlByteLength(value.authTag) === 16
   );
+}
+
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  const actual = Object.keys(value);
+  return actual.length === expected.length && actual.every((key) => expected.includes(key));
 }
 
 function base64UrlByteLength(value: string): number | null {

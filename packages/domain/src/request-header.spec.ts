@@ -93,4 +93,40 @@ describe('request header policy', () => {
   ])('rejects corrupted stored headers %#', (stored) => {
     expect(() => parseStoredRequestHeaders(stored)).toThrow(StoredRequestHeadersInvariantError);
   });
+
+  it.each(['authorization', 'cookie', 'x-api-key', 'api-key', 'x-auth-token'])(
+    'rejects stored plaintext credential header %s',
+    (name) => {
+      expect(() =>
+        parseStoredRequestHeaders([{ name, sensitive: false, value: 'WATCHRAIL_SENTINEL_SECRET' }]),
+      ).toThrow(StoredRequestHeadersInvariantError);
+    },
+  );
+
+  it('rejects unknown properties on stored headers and encryption envelopes', () => {
+    expect(() =>
+      parseStoredRequestHeaders([
+        { name: 'x-environment', sensitive: false, value: 'production', shadow: 'secret' },
+      ]),
+    ).toThrow(StoredRequestHeadersInvariantError);
+
+    expect(() =>
+      parseStoredRequestHeaders([
+        {
+          name: 'authorization',
+          sensitive: true,
+          value: 'shadow-secret',
+          encryptedValue: {
+            version: 1,
+            algorithm: 'AES-256-GCM',
+            keyId: 'v1',
+            iv: 'AAAAAAAAAAAAAAAA',
+            ciphertext: 'c2VjcmV0',
+            authTag: 'AAAAAAAAAAAAAAAAAAAAAA',
+            plaintext: 'shadow-secret',
+          },
+        },
+      ]),
+    ).toThrow(StoredRequestHeadersInvariantError);
+  });
 });

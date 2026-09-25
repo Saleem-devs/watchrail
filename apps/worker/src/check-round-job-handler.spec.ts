@@ -32,8 +32,12 @@ const keyring: HeaderEncryptionKeyring = {
   keys: new Map([['v1', Buffer.alloc(32)]]),
 };
 
-function createHandler(executions: CheckExecutionRepository, executor: HttpExecutor) {
-  return new CheckRoundJobHandler(executions, executor, 45_000, keyring);
+function createHandler(
+  executions: CheckExecutionRepository,
+  executor: HttpExecutor,
+  encryptionKeyring: HeaderEncryptionKeyring = keyring,
+) {
+  return new CheckRoundJobHandler(executions, executor, 45_000, encryptionKeyring);
 }
 
 function createDependencies() {
@@ -175,6 +179,77 @@ describe('CheckRoundJobHandler', () => {
       sentinel,
     );
     logger.mockRestore();
+  });
+
+  it('turns authenticated-decryption failure into terminal internal evidence', async () => {
+    const { executions, executor, claim, complete, execute } = createDependencies();
+    const encryptedValue = encryptHeaderValue(
+      'Bearer secret',
+      {
+        organizationId: claimedExecution.organizationId,
+        monitorId: claimedExecution.monitorId,
+        normalizedHeaderName: 'authorization',
+      },
+      keyring,
+    );
+    claim.mockResolvedValue({
+      state: 'CLAIMED',
+      execution: {
+        ...claimedExecution,
+        requestHeaders: [
+          {
+            name: 'authorization',
+            sensitive: true,
+            encryptedValue: { ...encryptedValue, authTag: Buffer.alloc(16).toString('base64url') },
+          },
+        ],
+      },
+    });
+    complete.mockResolvedValue(true);
+
+    await createHandler(executions, executor).handle(payload);
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(complete).toHaveBeenCalledWith(
+      claimedExecution.assignmentId,
+      claimedExecution.claimToken,
+      expect.objectContaining({ outcome: 'UNKNOWN', stage: 'PROBE', reason: 'INTERNAL_ERROR' }),
+    );
+  });
+
+  it('lets unexpected header-resolution failures reach infrastructure retry handling', async () => {
+    const { executions, executor, claim, complete, execute } = createDependencies();
+    const encryptedValue = encryptHeaderValue(
+      'Bearer secret',
+      {
+        organizationId: claimedExecution.organizationId,
+        monitorId: claimedExecution.monitorId,
+        normalizedHeaderName: 'authorization',
+      },
+      keyring,
+    );
+    claim.mockResolvedValue({
+      state: 'CLAIMED',
+      execution: {
+        ...claimedExecution,
+        requestHeaders: [{ name: 'authorization', sensitive: true, encryptedValue }],
+      },
+    });
+    const unexpected = new TypeError('unexpected keyring implementation failure');
+    const brokenKeyring: HeaderEncryptionKeyring = {
+      activeKeyId: 'v1',
+      keys: {
+        get: () => {
+          throw unexpected;
+        },
+      } as unknown as ReadonlyMap<string, Buffer>,
+    };
+
+    await expect(createHandler(executions, executor, brokenKeyring).handle(payload)).rejects.toBe(
+      unexpected,
+    );
+    expect(execute).not.toHaveBeenCalled();
+    expect(complete).not.toHaveBeenCalled();
   });
 
   it('treats a completed assignment as an idempotent replay', async () => {

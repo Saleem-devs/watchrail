@@ -18,6 +18,15 @@ export interface HeaderEncryptionKeyring {
   keys: ReadonlyMap<string, Buffer>;
 }
 
+export class StoredRequestHeaderResolutionError extends Error {
+  constructor(options?: ErrorOptions) {
+    super('Stored request-header secrets could not be resolved.', options);
+    this.name = 'StoredRequestHeaderResolutionError';
+  }
+}
+
+class UnavailableHeaderEncryptionKeyError extends Error {}
+
 export function loadHeaderEncryptionKeyring(
   environment: NodeJS.ProcessEnv,
 ): HeaderEncryptionKeyring {
@@ -83,17 +92,24 @@ export function decryptHeaderValue(
   if (envelope.version !== 1 || envelope.algorithm !== 'AES-256-GCM') {
     throw new Error('Unsupported HTTP header encryption envelope.');
   }
-  const decipher = createDecipheriv(
-    'aes-256-gcm',
-    requiredKey(keyring, envelope.keyId),
-    Buffer.from(envelope.iv, 'base64url'),
-  );
-  decipher.setAAD(aad(context));
-  decipher.setAuthTag(Buffer.from(envelope.authTag, 'base64url'));
-  return Buffer.concat([
-    decipher.update(Buffer.from(envelope.ciphertext, 'base64url')),
-    decipher.final(),
-  ]).toString('utf8');
+  try {
+    const decipher = createDecipheriv(
+      'aes-256-gcm',
+      requiredDecryptionKey(keyring, envelope.keyId),
+      Buffer.from(envelope.iv, 'base64url'),
+    );
+    decipher.setAAD(aad(context));
+    decipher.setAuthTag(Buffer.from(envelope.authTag, 'base64url'));
+    return Buffer.concat([
+      decipher.update(Buffer.from(envelope.ciphertext, 'base64url')),
+      decipher.final(),
+    ]).toString('utf8');
+  } catch (error) {
+    if (error instanceof UnavailableHeaderEncryptionKeyError || isCryptoError(error)) {
+      throw new StoredRequestHeaderResolutionError({ cause: error });
+    }
+    throw error;
+  }
 }
 
 export function storeRequestHeaders(
@@ -162,6 +178,16 @@ function requiredKey(keyring: HeaderEncryptionKeyring, keyId: string): Buffer {
   const key = keyring.keys.get(keyId);
   if (!key) throw new Error(`HTTP header encryption key ${keyId} is unavailable.`);
   return key;
+}
+
+function requiredDecryptionKey(keyring: HeaderEncryptionKeyring, keyId: string): Buffer {
+  const key = keyring.keys.get(keyId);
+  if (!key) throw new UnavailableHeaderEncryptionKeyError();
+  return key;
+}
+
+function isCryptoError(value: unknown): value is Error {
+  return value instanceof Error && value.name === 'Error';
 }
 
 function decodeBase64Key(value: string): Buffer {

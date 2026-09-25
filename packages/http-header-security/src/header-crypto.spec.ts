@@ -5,6 +5,7 @@ import {
   encryptHeaderValue,
   loadHeaderEncryptionKeyring,
   resolveRequestHeaders,
+  StoredRequestHeaderResolutionError,
   storeRequestHeaders,
 } from './index.js';
 
@@ -37,7 +38,25 @@ describe('HTTP header encryption', () => {
     const encrypted = encryptHeaderValue('secret', context, keyring);
     expect(() =>
       decryptHeaderValue(encrypted, { ...context, monitorId: 'different' }, keyring),
-    ).toThrow();
+    ).toThrow(StoredRequestHeaderResolutionError);
+  });
+
+  it('translates unavailable envelope keys into a safe resolution error', () => {
+    const oldKeyring = loadHeaderEncryptionKeyring({
+      HTTP_HEADER_ACTIVE_KEY_ID: 'v0',
+      HTTP_HEADER_ENCRYPTION_KEYS: JSON.stringify({ v0: key }),
+    });
+    const encrypted = encryptHeaderValue('secret', context, oldKeyring);
+    const currentOnly = loadHeaderEncryptionKeyring({
+      HTTP_HEADER_ACTIVE_KEY_ID: 'v1',
+      HTTP_HEADER_ENCRYPTION_KEYS: JSON.stringify({
+        v1: randomBytes(32).toString('base64'),
+      }),
+    });
+
+    expect(() => decryptHeaderValue(encrypted, context, currentOnly)).toThrow(
+      StoredRequestHeaderResolutionError,
+    );
   });
 
   it('decrypts old envelopes while encrypting with the active key', () => {
