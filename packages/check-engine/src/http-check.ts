@@ -106,6 +106,18 @@ function classifyHttpExecution(input: {
     };
   }
 
+  if (execution.type === 'REDIRECT_FAILURE') {
+    return {
+      outcome: 'FAIL',
+      stage: 'HTTP',
+      reason: execution.reason,
+      statusCode: execution.statusCode,
+      responseTimeMs: execution.responseTimeMs,
+      attemptDurationMs,
+      checkedAt,
+    };
+  }
+
   if (execution.type === 'TARGET_FAILURE') {
     return classifyTargetFailure({
       failure: execution,

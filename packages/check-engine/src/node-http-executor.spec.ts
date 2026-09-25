@@ -16,8 +16,12 @@ function publicResolver(): DnsResolver {
   };
 }
 
-function response(statusCode: number, discardBody = vi.fn(() => Promise.resolve())) {
-  return { statusCode, discardBody } satisfies HttpTransportResponse;
+function response(
+  statusCode: number,
+  location: string | null = null,
+  discardBody = vi.fn(() => Promise.resolve()),
+) {
+  return { statusCode, location, discardBody } satisfies HttpTransportResponse;
 }
 
 function transportReturning(result: HttpTransportResponse): PinnedHttpTransport {
@@ -199,8 +203,12 @@ describe('NodeHttpExecutor', () => {
     });
   });
 
-  it('keeps redirect responses final while redirect handling is manual', async () => {
-    const transport = transportReturning(response(302));
+  it('follows a redirect and returns the final response', async () => {
+    const request = vi
+      .fn<PinnedHttpTransport['request']>()
+      .mockResolvedValueOnce(response(302, '/final'))
+      .mockResolvedValueOnce(response(200));
+    const transport: PinnedHttpTransport = { request };
     const result = await executeHttpCheck(
       { url: 'https://example.com', method: 'GET', timeoutMs: 10_000 },
       {
@@ -209,20 +217,211 @@ describe('NodeHttpExecutor', () => {
       },
     );
 
-    expect(transport.request).toHaveBeenCalledOnce();
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(result).toMatchObject({
+      outcome: 'PASS',
+      stage: 'HTTP',
+      reason: 'COMPLETED',
+      statusCode: 200,
+    });
+  });
+
+  it('preserves HEAD across every redirect hop', async () => {
+    const request = vi
+      .fn<PinnedHttpTransport['request']>()
+      .mockResolvedValueOnce(response(301, '/ready'))
+      .mockResolvedValueOnce(response(204));
+
+    const result = await executeHttpCheck(
+      { url: 'https://example.com/health', method: 'HEAD', timeoutMs: 10_000 },
+      {
+        executor: new NodeHttpExecutor({
+          resolver: publicResolver(),
+          transport: { request },
+        }),
+        clock: createEngineClock(),
+      },
+    );
+
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request.mock.calls.every(([call]) => call.method === 'HEAD')).toBe(true);
+    expect(result).toMatchObject({ outcome: 'PASS', statusCode: 204 });
+  });
+
+  it('returns a final non-redirect failure after following redirects', async () => {
+    const request = vi
+      .fn<PinnedHttpTransport['request']>()
+      .mockResolvedValueOnce(response(307, 'https://status.example/final'))
+      .mockResolvedValueOnce(response(503));
+    const result = await executeHttpCheck(
+      { url: 'https://example.com/start', method: 'GET', timeoutMs: 10_000 },
+      {
+        executor: new NodeHttpExecutor({
+          resolver: publicResolver(),
+          transport: { request },
+        }),
+        clock: createEngineClock(),
+      },
+    );
+
     expect(result).toMatchObject({
       outcome: 'FAIL',
-      stage: 'HTTP',
       reason: 'UNEXPECTED_STATUS',
-      statusCode: 302,
+      statusCode: 503,
     });
+  });
+
+  it.each([
+    [null, 'MISSING_REDIRECT_LOCATION'],
+    ['', 'INVALID_REDIRECT_LOCATION'],
+    ['ftp://example.com/file', 'INVALID_REDIRECT_LOCATION'],
+    ['https://user:pass@example.com', 'INVALID_REDIRECT_LOCATION'],
+    ['http://[invalid', 'INVALID_REDIRECT_LOCATION'],
+  ] as const)('classifies redirect location %s as %s', async (location, reason) => {
+    const result = await executeHttpCheck(
+      { url: 'https://example.com', method: 'GET', timeoutMs: 10_000 },
+      {
+        executor: new NodeHttpExecutor({
+          resolver: publicResolver(),
+          transport: transportReturning(response(302, location)),
+        }),
+        clock: createEngineClock(),
+      },
+    );
+
+    expect(result).toMatchObject({ outcome: 'FAIL', stage: 'HTTP', reason, statusCode: 302 });
+  });
+
+  it('detects a redirect loop before resolving the visited target again', async () => {
+    const resolver = publicResolver();
+    const request = vi
+      .fn<PinnedHttpTransport['request']>()
+      .mockResolvedValueOnce(response(302, '/other'))
+      .mockResolvedValueOnce(response(302, '/'));
+    const result = await executeHttpCheck(
+      { url: 'https://example.com/', method: 'GET', timeoutMs: 10_000 },
+      {
+        executor: new NodeHttpExecutor({ resolver, transport: { request } }),
+        clock: createEngineClock(),
+      },
+    );
+
+    expect(result).toMatchObject({ outcome: 'FAIL', reason: 'REDIRECT_LOOP' });
+    expect(resolver.lookup).toHaveBeenCalledTimes(2);
+  });
+
+  it('allows five redirects and rejects a sixth', async () => {
+    const request = vi.fn<PinnedHttpTransport['request']>();
+    for (let hop = 1; hop <= 6; hop += 1) {
+      request.mockResolvedValueOnce(response(302, `/hop-${hop}`));
+    }
+    const result = await executeHttpCheck(
+      { url: 'https://example.com/start', method: 'GET', timeoutMs: 10_000 },
+      {
+        executor: new NodeHttpExecutor({
+          resolver: publicResolver(),
+          transport: { request },
+        }),
+        clock: createEngineClock(),
+      },
+    );
+
+    expect(request).toHaveBeenCalledTimes(6);
+    expect(result).toMatchObject({ outcome: 'FAIL', reason: 'TOO_MANY_REDIRECTS' });
+  });
+
+  it('allows five redirects followed by a final response', async () => {
+    const request = vi.fn<PinnedHttpTransport['request']>();
+    for (let hop = 1; hop <= 5; hop += 1) {
+      request.mockResolvedValueOnce(response(302, `/hop-${hop}`));
+    }
+    request.mockResolvedValueOnce(response(200));
+
+    const result = await executeHttpCheck(
+      { url: 'https://example.com/start', method: 'GET', timeoutMs: 10_000 },
+      {
+        executor: new NodeHttpExecutor({
+          resolver: publicResolver(),
+          transport: { request },
+        }),
+        clock: createEngineClock(),
+      },
+    );
+
+    expect(request).toHaveBeenCalledTimes(6);
+    expect(result).toMatchObject({ outcome: 'PASS', statusCode: 200 });
+  });
+
+  it('uses one deadline across the whole redirect chain', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const request = vi
+        .fn<PinnedHttpTransport['request']>()
+        .mockResolvedValueOnce(response(302, '/slow'))
+        .mockImplementationOnce(
+          ({ signal }) =>
+            new Promise<HttpTransportResponse>((_resolve, reject) => {
+              signal.addEventListener(
+                'abort',
+                () => reject(new DOMException('The operation was aborted', 'AbortError')),
+                { once: true },
+              );
+            }),
+        );
+      const resultPromise = executeHttpCheck(
+        { url: 'https://example.com/start', method: 'GET', timeoutMs: 1_000 },
+        {
+          executor: new NodeHttpExecutor({
+            resolver: publicResolver(),
+            transport: { request },
+            monotonicNow: () => Date.now(),
+          }),
+          clock: createEngineClock(),
+        },
+      );
+
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      await expect(resultPromise).resolves.toMatchObject({
+        outcome: 'FAIL',
+        reason: 'REQUEST_TIMEOUT',
+      });
+      expect(request).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('revalidates a redirect destination and rejects a prohibited address', async () => {
+    const lookup = vi
+      .fn<DnsResolver['lookup']>()
+      .mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }])
+      .mockResolvedValueOnce([{ address: '10.0.0.5', family: 4 }]);
+    const request = vi
+      .fn<PinnedHttpTransport['request']>()
+      .mockResolvedValueOnce(response(302, 'https://internal.example/admin'));
+    const result = await executeHttpCheck(
+      { url: 'https://public.example', method: 'GET', timeoutMs: 10_000 },
+      {
+        executor: new NodeHttpExecutor({ resolver: { lookup }, transport: { request } }),
+        clock: createEngineClock(),
+      },
+    );
+
+    expect(result).toMatchObject({
+      outcome: 'UNKNOWN',
+      stage: 'DNS',
+      reason: 'PROHIBITED_DESTINATION',
+    });
+    expect(request).toHaveBeenCalledOnce();
   });
 
   it('discards the unused response body after headers arrive', async () => {
     const discardBody = vi.fn(() => Promise.resolve());
     const executor = new NodeHttpExecutor({
       resolver: publicResolver(),
-      transport: transportReturning(response(200, discardBody)),
+      transport: transportReturning(response(200, null, discardBody)),
     });
 
     await executor.execute({
@@ -240,6 +439,7 @@ describe('NodeHttpExecutor', () => {
       transport: transportReturning(
         response(
           200,
+          null,
           vi.fn(() => Promise.reject(new Error('body cancellation failed'))),
         ),
       ),

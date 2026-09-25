@@ -55,7 +55,7 @@ export async function resolveSafeHttpTarget(
   input: string | URL,
   options: { signal: AbortSignal; resolver?: DnsResolver },
 ): Promise<ResolvedHttpTarget> {
-  const url = parseHttpUrl(input);
+  const url = validateHttpTargetUrl(input);
   const hostname = normalizeHostname(url.hostname);
   const literalFamily = isIP(hostname);
   const answers =
@@ -83,7 +83,7 @@ export async function resolveSafeHttpTarget(
   };
 }
 
-function parseHttpUrl(input: string | URL): URL {
+export function validateHttpTargetUrl(input: string | URL): URL {
   let url: URL;
 
   try {

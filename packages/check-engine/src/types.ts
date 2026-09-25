@@ -57,7 +57,12 @@ export type HttpCheckResult =
       HttpResponseEvidence & {
         outcome: 'FAIL';
         stage: 'HTTP';
-        reason: 'UNEXPECTED_STATUS';
+        reason:
+          | 'UNEXPECTED_STATUS'
+          | 'REDIRECT_LOOP'
+          | 'TOO_MANY_REDIRECTS'
+          | 'MISSING_REDIRECT_LOCATION'
+          | 'INVALID_REDIRECT_LOCATION';
       })
   | (HttpCheckTiming & {
       outcome: 'FAIL';
@@ -103,11 +108,21 @@ export interface HttpPolicyRejection {
   reason: 'PROHIBITED_DESTINATION';
 }
 
+export interface HttpRedirectFailure extends HttpResponseEvidence {
+  type: 'REDIRECT_FAILURE';
+  reason:
+    | 'REDIRECT_LOOP'
+    | 'TOO_MANY_REDIRECTS'
+    | 'MISSING_REDIRECT_LOCATION'
+    | 'INVALID_REDIRECT_LOCATION';
+}
+
 /**
  * An observation about the configured target. Executors return expected
  * network failures; thrown exceptions are reserved for executor malfunctions.
  */
-export type HttpExecutionResult = HttpResponseObservation | HttpTargetFailure | HttpPolicyRejection;
+export type HttpExecutionResult =
+  HttpResponseObservation | HttpTargetFailure | HttpPolicyRejection | HttpRedirectFailure;
 
 export interface HttpExecutionInput {
   url: string;

@@ -95,4 +95,31 @@ describe('createPinnedLookup', () => {
     expect(response.statusCode).toBe(204);
     await expect(response.discardBody()).resolves.toBeUndefined();
   });
+
+  it('exposes a redirect Location header without following it', async () => {
+    const server = createServer((_request, reply) => {
+      reply.writeHead(302, { location: '/next' }).end();
+    });
+    servers.push(server);
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+
+    const address = server.address();
+    if (address === null || typeof address === 'string') throw new Error('Expected TCP address.');
+
+    const response = await new UndiciPinnedHttpTransport().request({
+      target: {
+        url: new URL(`http://original.example:${address.port}/start`),
+        hostname: 'original.example',
+        port: address.port,
+        addresses: [{ address: '127.0.0.1', family: 4 }],
+      },
+      method: 'GET',
+      signal: new AbortController().signal,
+    });
+
+    expect(response.statusCode).toBe(302);
+    expect(response.location).toBe('/next');
+    await response.discardBody();
+  });
 });

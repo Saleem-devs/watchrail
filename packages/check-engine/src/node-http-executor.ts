@@ -8,6 +8,7 @@ import {
   InvalidHttpTargetError,
   ProhibitedDestinationError,
   resolveSafeHttpTarget,
+  validateHttpTargetUrl,
   type DnsResolver,
 } from './safe-http-target.js';
 import { UndiciPinnedHttpTransport, type PinnedHttpTransport } from './undici-http-transport.js';
@@ -18,11 +19,13 @@ export interface NodeHttpExecutorOptions {
   monotonicNow?: () => number;
 }
 
+const REDIRECT_STATUS_CODES = new Set([301, 302, 303, 307, 308]);
+const MAX_REDIRECTS = 5;
+
 /**
- * Executes one HTTP request through an SSRF-safe, address-pinned transport.
- *
- * Redirects are intentionally left in manual mode until Slice 4 owns safe
- * redirect traversal. TLS verification remains at Node's secure default.
+ * Executes an HTTP check through an SSRF-safe, address-pinned transport.
+ * Every redirect target is independently validated, resolved, and pinned.
+ * TLS verification remains at Node's secure default.
  */
 export class NodeHttpExecutor implements HttpExecutor {
   private readonly resolver: DnsResolver | undefined;
@@ -37,52 +40,101 @@ export class NodeHttpExecutor implements HttpExecutor {
 
   async execute(input: HttpExecutionInput): Promise<HttpExecutionResult> {
     const startedAt = this.monotonicNow();
+    const visited = new Set<string>();
+    let currentUrl: string | URL = input.url;
+    let redirectsFollowed = 0;
 
-    let response;
+    while (true) {
+      let target;
+      let response;
 
-    try {
-      const target = await resolveSafeHttpTarget(input.url, {
-        signal: input.signal,
-        ...(this.resolver ? { resolver: this.resolver } : {}),
-      });
+      try {
+        target = await resolveSafeHttpTarget(currentUrl, {
+          signal: input.signal,
+          ...(this.resolver ? { resolver: this.resolver } : {}),
+        });
 
-      response = await this.transport.request({
-        target,
-        method: input.method,
-        signal: input.signal,
-      });
-    } catch (error) {
-      if (error instanceof ProhibitedDestinationError || error instanceof InvalidHttpTargetError) {
-        return {
-          type: 'POLICY_REJECTION',
-          stage: 'DNS',
-          reason: 'PROHIBITED_DESTINATION',
-        };
+        visited.add(redirectIdentity(target.url));
+        response = await this.transport.request({
+          target,
+          method: input.method,
+          signal: input.signal,
+        });
+      } catch (error) {
+        if (
+          error instanceof ProhibitedDestinationError ||
+          error instanceof InvalidHttpTargetError
+        ) {
+          return {
+            type: 'POLICY_REJECTION',
+            stage: 'DNS',
+            reason: 'PROHIBITED_DESTINATION',
+          };
+        }
+
+        const targetFailure = classifyFetchFailure(error);
+        if (targetFailure !== null) return targetFailure;
+        throw error;
       }
 
-      const targetFailure = classifyFetchFailure(error);
+      const responseTimeMs = Math.max(0, this.monotonicNow() - startedAt);
+      await discardResponseBody(response);
 
-      if (targetFailure !== null) {
-        return targetFailure;
+      if (!REDIRECT_STATUS_CODES.has(response.statusCode)) {
+        return { type: 'RESPONSE', statusCode: response.statusCode, responseTimeMs };
       }
 
-      throw error;
+      if (response.location === null) {
+        return redirectFailure('MISSING_REDIRECT_LOCATION', response.statusCode, responseTimeMs);
+      }
+
+      let nextUrl: URL;
+      try {
+        if (response.location.trim() === '') throw new InvalidHttpTargetError('Empty location.');
+        nextUrl = validateHttpTargetUrl(new URL(response.location, target.url));
+      } catch {
+        return redirectFailure('INVALID_REDIRECT_LOCATION', response.statusCode, responseTimeMs);
+      }
+
+      const identity = redirectIdentity(nextUrl);
+      if (visited.has(identity)) {
+        return redirectFailure('REDIRECT_LOOP', response.statusCode, responseTimeMs);
+      }
+
+      if (redirectsFollowed >= MAX_REDIRECTS) {
+        return redirectFailure('TOO_MANY_REDIRECTS', response.statusCode, responseTimeMs);
+      }
+
+      redirectsFollowed += 1;
+      currentUrl = nextUrl;
     }
+  }
+}
 
-    const responseTimeMs = Math.max(0, this.monotonicNow() - startedAt);
+function redirectIdentity(url: URL): string {
+  const normalized = new URL(url);
+  normalized.hash = '';
+  return normalized.href;
+}
 
-    try {
-      await response.discardBody();
-    } catch {
-      // Response evidence is already valid. Body cleanup failure must not
-      // erase or change the target classification.
-    }
+function redirectFailure(
+  reason:
+    | 'REDIRECT_LOOP'
+    | 'TOO_MANY_REDIRECTS'
+    | 'MISSING_REDIRECT_LOCATION'
+    | 'INVALID_REDIRECT_LOCATION',
+  statusCode: number,
+  responseTimeMs: number,
+): HttpExecutionResult {
+  return { type: 'REDIRECT_FAILURE', reason, statusCode, responseTimeMs };
+}
 
-    return {
-      type: 'RESPONSE',
-      statusCode: response.statusCode,
-      responseTimeMs,
-    };
+async function discardResponseBody(response: { discardBody(): Promise<void> }): Promise<void> {
+  try {
+    await response.discardBody();
+  } catch {
+    // Response headers are already valid evidence. Cleanup failure must not
+    // erase or change the target classification.
   }
 }
 

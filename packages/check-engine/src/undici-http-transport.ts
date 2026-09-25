@@ -5,6 +5,7 @@ import type { HttpMethod } from './types.js';
 
 export interface HttpTransportResponse {
   statusCode: number;
+  location: string | null;
   discardBody(): Promise<void>;
 }
 
@@ -49,6 +50,7 @@ export class UndiciPinnedHttpTransport implements PinnedHttpTransport {
 
       return {
         statusCode: response.statusCode,
+        location: headerValue(response.headers.location),
         async discardBody() {
           response.body.on('error', () => undefined);
           response.body.destroy();
@@ -64,6 +66,11 @@ export class UndiciPinnedHttpTransport implements PinnedHttpTransport {
       throw error;
     }
   }
+}
+
+function headerValue(value: string | string[] | undefined): string | null {
+  if (value === undefined) return null;
+  return Array.isArray(value) ? (value[0] ?? null) : value;
 }
 
 export function createPinnedLookup(addresses: readonly ValidatedAddress[]): LookupFunction {

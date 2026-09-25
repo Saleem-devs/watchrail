@@ -36,6 +36,13 @@
       "when": 1790271489116,
       "tag": "0004_spooky_doctor_faustus",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790332312093,
+      "tag": "0005_spicy_shaman",
+      "breakpoints": true
     }
   ]
 }
