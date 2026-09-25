@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { HttpExecutor } from '@watchrail/check-engine';
 import type { CheckExecutionRepository } from '@watchrail/db';
+import { encryptHeaderValue, type HeaderEncryptionKeyring } from '@watchrail/http-header-security';
 import {
   CheckExecutionAlreadyClaimedError,
   CheckExecutionClaimLostError,
@@ -20,7 +21,19 @@ const claimedExecution = {
   method: 'GET',
   timeoutMs: 10_000,
   statusPolicy: { type: 'ANY_2XX' },
+  organizationId: '44444444-4444-4444-8444-444444444444',
+  monitorId: '55555555-5555-4555-8555-555555555555',
+  requestHeaders: [],
 } as const;
+
+const keyring: HeaderEncryptionKeyring = {
+  activeKeyId: 'v1',
+  keys: new Map([['v1', Buffer.alloc(32)]]),
+};
+
+function createHandler(executions: CheckExecutionRepository, executor: HttpExecutor) {
+  return new CheckRoundJobHandler(executions, executor, 45_000, keyring);
+}
 
 function createDependencies() {
   const claim = vi.fn<CheckExecutionRepository['claim']>();
@@ -55,7 +68,7 @@ describe('CheckRoundJobHandler', () => {
     });
     complete.mockResolvedValue(true);
 
-    await new CheckRoundJobHandler(executions, executor, 45_000).handle(payload);
+    await createHandler(executions, executor).handle(payload);
 
     expect(claim).toHaveBeenCalledWith(payload.roundId, 45_000);
     expect(complete).toHaveBeenCalledWith(
@@ -83,7 +96,7 @@ describe('CheckRoundJobHandler', () => {
     execute.mockResolvedValue({ type: 'RESPONSE', statusCode: 404, responseTimeMs: 12 });
     complete.mockResolvedValue(true);
 
-    await new CheckRoundJobHandler(executions, executor, 45_000).handle(payload);
+    await createHandler(executions, executor).handle(payload);
 
     expect(complete).toHaveBeenCalledWith(
       claimedExecution.assignmentId,
@@ -92,11 +105,46 @@ describe('CheckRoundJobHandler', () => {
     );
   });
 
+  it('decrypts immutable request headers only when invoking the executor', async () => {
+    const { executions, executor, claim, complete, execute } = createDependencies();
+    claim.mockResolvedValue({
+      state: 'CLAIMED',
+      execution: {
+        ...claimedExecution,
+        requestHeaders: [
+          {
+            name: 'authorization',
+            sensitive: true,
+            encryptedValue: encryptHeaderValue(
+              'Bearer secret',
+              {
+                organizationId: claimedExecution.organizationId,
+                monitorId: claimedExecution.monitorId,
+                normalizedHeaderName: 'authorization',
+              },
+              keyring,
+            ),
+          },
+        ],
+      },
+    });
+    execute.mockResolvedValue({ type: 'RESPONSE', statusCode: 200, responseTimeMs: 12 });
+    complete.mockResolvedValue(true);
+
+    await createHandler(executions, executor).handle(payload);
+
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestHeaders: [{ name: 'authorization', value: 'Bearer secret' }],
+      }),
+    );
+  });
+
   it('treats a completed assignment as an idempotent replay', async () => {
     const { executions, executor, claim, complete, execute } = createDependencies();
     claim.mockResolvedValue({ state: 'COMPLETED' });
 
-    await new CheckRoundJobHandler(executions, executor, 45_000).handle(payload);
+    await createHandler(executions, executor).handle(payload);
 
     expect(execute).not.toHaveBeenCalled();
     expect(complete).not.toHaveBeenCalled();
@@ -106,9 +154,9 @@ describe('CheckRoundJobHandler', () => {
     const { executions, executor, claim } = createDependencies();
     claim.mockResolvedValue({ state: 'BUSY' });
 
-    await expect(
-      new CheckRoundJobHandler(executions, executor, 45_000).handle(payload),
-    ).rejects.toBeInstanceOf(CheckExecutionAlreadyClaimedError);
+    await expect(createHandler(executions, executor).handle(payload)).rejects.toBeInstanceOf(
+      CheckExecutionAlreadyClaimedError,
+    );
   });
 
   it('retries when its database claim is replaced before completion', async () => {
@@ -124,9 +172,9 @@ describe('CheckRoundJobHandler', () => {
     });
     complete.mockResolvedValue(false);
 
-    await expect(
-      new CheckRoundJobHandler(executions, executor, 45_000).handle(payload),
-    ).rejects.toBeInstanceOf(CheckExecutionClaimLostError);
+    await expect(createHandler(executions, executor).handle(payload)).rejects.toBeInstanceOf(
+      CheckExecutionClaimLostError,
+    );
   });
 
   it('persists unsupported stored methods as an internal execution failure', async () => {
@@ -137,7 +185,7 @@ describe('CheckRoundJobHandler', () => {
     });
     complete.mockResolvedValue(true);
 
-    await new CheckRoundJobHandler(executions, executor, 45_000).handle(payload);
+    await createHandler(executions, executor).handle(payload);
 
     expect(execute).not.toHaveBeenCalled();
     expect(complete).toHaveBeenCalledWith(

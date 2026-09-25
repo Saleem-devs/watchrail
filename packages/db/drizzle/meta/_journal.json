@@ -50,6 +50,13 @@
       "when": 1790339710156,
       "tag": "0006_opposite_shockwave",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790358270257,
+      "tag": "0007_first_lady_deathstrike",
+      "breakpoints": true
     }
   ]
 }

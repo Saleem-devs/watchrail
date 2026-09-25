@@ -4,6 +4,10 @@ import type { HttpCheckResult, HttpExecutor } from '@watchrail/check-engine';
 import type { ExecuteCheckRoundJobV1 } from '@watchrail/contracts';
 import type { CheckExecutionRepository } from '@watchrail/db';
 import type { CheckJobHandler } from '@watchrail/queue';
+import {
+  resolveRequestHeaders,
+  type HeaderEncryptionKeyring,
+} from '@watchrail/http-header-security';
 
 export class CheckExecutionAlreadyClaimedError extends Error {
   constructor() {
@@ -27,6 +31,7 @@ export class CheckRoundJobHandler implements CheckJobHandler {
     private readonly executions: CheckExecutionRepository,
     private readonly executor: HttpExecutor,
     private readonly leaseDurationMs: number,
+    private readonly headerEncryptionKeyring: HeaderEncryptionKeyring,
   ) {}
 
   async handle(payload: ExecuteCheckRoundJobV1): Promise<void> {
@@ -50,6 +55,14 @@ export class CheckRoundJobHandler implements CheckJobHandler {
             method: claim.execution.method,
             timeoutMs: claim.execution.timeoutMs,
             statusPolicy: claim.execution.statusPolicy,
+            requestHeaders: resolveRequestHeaders(
+              claim.execution.requestHeaders,
+              {
+                organizationId: claim.execution.organizationId,
+                monitorId: claim.execution.monitorId,
+              },
+              this.headerEncryptionKeyring,
+            ),
           },
           { executor: this.executor },
         )

@@ -21,6 +21,10 @@ describe('monitor API', () => {
     process.env.NODE_ENV = 'test';
     process.env.DATABASE_URL = container.getConnectionUri();
     process.env.DEV_IDENTITY_ENABLED = 'true';
+    process.env.HTTP_HEADER_ACTIVE_KEY_ID = 'test';
+    process.env.HTTP_HEADER_ENCRYPTION_KEYS = JSON.stringify({
+      test: Buffer.alloc(32).toString('base64'),
+    });
 
     const migrationConnection = createDatabaseConnection(container.getConnectionUri());
     await migrateDatabase(migrationConnection, resolve(process.cwd(), '../../packages/db/drizzle'));
@@ -120,6 +124,78 @@ describe('monitor API', () => {
       { version_number: 1, status_policy: { type: 'EXACT', statusCodes: [200, 404] } },
       { version_number: 2, status_policy: { type: 'EXACT', statusCodes: [204] } },
     ]);
+  });
+
+  it('encrypts sensitive headers, redacts reads, and retains secrets explicitly', async () => {
+    const created = await request(app.getHttpServer())
+      .post('/api/monitors')
+      .send({
+        name: 'Authenticated API',
+        url: 'https://example.com/health',
+        requestHeaders: [
+          { name: 'Authorization', sensitive: false, value: 'Bearer top-secret' },
+          { name: 'X-Environment', sensitive: false, value: 'production' },
+        ],
+      })
+      .expect(201);
+
+    expect(created.body.data.requestHeaders).toEqual([
+      { name: 'authorization', sensitive: true, value: null, hasValue: true },
+      { name: 'x-environment', sensitive: false, value: 'production', hasValue: true },
+    ]);
+
+    const monitorId = created.body.data.id as string;
+    const stored = await database.$client.query<{ request_headers: unknown }>(
+      'select request_headers from monitors where id = $1',
+      [monitorId],
+    );
+    expect(JSON.stringify(stored.rows[0]?.request_headers)).not.toContain('top-secret');
+
+    const updated = await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/request-headers`)
+      .send({
+        requestHeaders: [
+          { name: 'Authorization', sensitive: true, retain: true },
+          { name: 'X-Environment', sensitive: false, value: 'staging' },
+        ],
+      })
+      .expect(200);
+
+    expect(updated.body.data.requestHeaders).toEqual([
+      { name: 'authorization', sensitive: true, value: null, hasValue: true },
+      { name: 'x-environment', sensitive: false, value: 'staging', hasValue: true },
+    ]);
+
+    const versions = await database.$client.query<{ request_headers: unknown }>(
+      `select request_headers
+       from monitor_configuration_versions
+       where monitor_id = $1
+       order by version_number`,
+      [monitorId],
+    );
+    expect(versions.rows).toHaveLength(2);
+    expect(JSON.stringify(versions.rows)).not.toContain('top-secret');
+  });
+
+  it('rejects unsafe headers and retaining a missing secret', async () => {
+    await request(app.getHttpServer())
+      .post('/api/monitors')
+      .send({
+        name: 'Unsafe headers',
+        url: 'https://example.com',
+        requestHeaders: [{ name: 'Host', sensitive: false, value: 'internal.example' }],
+      })
+      .expect(400);
+
+    const created = await request(app.getHttpServer())
+      .post('/api/monitors')
+      .send({ name: 'API', url: 'https://example.com' })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${String(created.body.data.id)}/request-headers`)
+      .send({ requestHeaders: [{ name: 'Authorization', sensitive: true, retain: true }] })
+      .expect(400);
   });
 
   it('rejects an invalid exact status policy', async () => {

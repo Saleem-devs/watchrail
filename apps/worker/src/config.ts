@@ -10,6 +10,7 @@ export interface WorkerConfig {
   outboxLeaseDurationMs: number;
   idlePollIntervalMs: number;
   dependencyErrorDelayMs: number;
+  headerEncryptionKeyring: HeaderEncryptionKeyring;
 }
 
 export function loadWorkerConfig(environment: NodeJS.ProcessEnv = process.env): WorkerConfig {
@@ -57,6 +58,7 @@ export function loadWorkerConfig(environment: NodeJS.ProcessEnv = process.env): 
       'OUTBOX_DEPENDENCY_ERROR_DELAY_MS',
       1_000,
     ),
+    headerEncryptionKeyring: loadHeaderEncryptionKeyring(environment),
   };
 }
 
@@ -87,3 +89,7 @@ function parsePositiveInteger(value: string | undefined, name: string, fallback:
 
   return parsed;
 }
+import {
+  loadHeaderEncryptionKeyring,
+  type HeaderEncryptionKeyring,
+} from '@watchrail/http-header-security';

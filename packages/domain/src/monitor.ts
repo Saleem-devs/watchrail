@@ -24,6 +24,7 @@ export interface CreateMonitorCommand {
   name: unknown;
   url: unknown;
   statusPolicy?: unknown;
+  requestHeaders?: unknown;
 }
 
 export interface NewMonitor {
@@ -33,6 +34,7 @@ export interface NewMonitor {
   lifecycleState: MonitorLifecycleState;
   timeoutMs: number;
   statusPolicy: HttpStatusPolicy;
+  requestHeaders: RequestHeaderUpdate[];
   locations: string[];
 }
 
@@ -40,6 +42,7 @@ export interface MonitorFieldErrors {
   name?: string[];
   url?: string[];
   statusPolicy?: string[];
+  requestHeaders?: string[];
 }
 
 export class MonitorInputError extends Error {
@@ -57,6 +60,7 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
   const name = normalizeName(command.name, fields);
   const url = normalizeUrl(command.url, fields);
   const statusPolicy = normalizeStatusPolicy(command.statusPolicy, fields);
+  const requestHeaders = normalizeHeaders(command.requestHeaders, fields);
 
   if (Object.keys(fields).length > 0) throw new MonitorInputError(fields);
 
@@ -67,8 +71,25 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
     lifecycleState: MONITOR_DEFAULTS.lifecycleState,
     timeoutMs: MONITOR_DEFAULTS.timeoutMs,
     statusPolicy,
+    requestHeaders,
     locations: [...MONITOR_DEFAULTS.locations],
   };
+}
+
+function normalizeHeaders(value: unknown, fields: MonitorFieldErrors): RequestHeaderUpdate[] {
+  if (value === undefined) return [];
+
+  try {
+    const headers = normalizeRequestHeaderUpdates(value);
+    assertNoRetainedHeaders(headers);
+    return headers;
+  } catch (error) {
+    if (error instanceof RequestHeaderInputError) {
+      fields.requestHeaders = error.issues;
+      return [];
+    }
+    throw error;
+  }
 }
 
 export function parseHttpStatusPolicy(value: unknown): HttpStatusPolicy {
@@ -152,3 +173,9 @@ function normalizeUrl(value: unknown, fields: MonitorFieldErrors): string {
     return '';
   }
 }
+import {
+  assertNoRetainedHeaders,
+  normalizeRequestHeaderUpdates,
+  RequestHeaderInputError,
+  type RequestHeaderUpdate,
+} from './request-header.js';

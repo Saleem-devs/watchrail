@@ -19,6 +19,7 @@
     "@nestjs/platform-express": "12.1.0",
     "@watchrail/db": "workspace:*",
     "@watchrail/domain": "workspace:*",
+    "@watchrail/http-header-security": "workspace:*",
     "dotenv": "18.0.1",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2"

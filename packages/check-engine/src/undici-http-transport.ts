@@ -2,6 +2,7 @@ import { isIP, type LookupFunction } from 'node:net';
 import { Client } from 'undici';
 import type { ResolvedHttpTarget, ValidatedAddress } from './safe-http-target.js';
 import type { HttpMethod } from './types.js';
+import type { HttpRequestHeader } from './types.js';
 
 export interface HttpTransportResponse {
   statusCode: number;
@@ -16,6 +17,7 @@ export interface PinnedHttpTransport {
       target: ResolvedHttpTarget;
       method: HttpMethod;
       signal: AbortSignal;
+      headers?: readonly HttpRequestHeader[];
     },
   ): Promise<HttpTransportResponse>;
 }
@@ -25,6 +27,7 @@ export class UndiciPinnedHttpTransport implements PinnedHttpTransport {
     target: ResolvedHttpTarget;
     method: HttpMethod;
     signal: AbortSignal;
+    headers?: readonly HttpRequestHeader[];
   }): Promise<HttpTransportResponse> {
     const { target } = input;
     if (target.addresses.length === 0) {
@@ -44,7 +47,10 @@ export class UndiciPinnedHttpTransport implements PinnedHttpTransport {
       const response = await client.request({
         method: input.method,
         path: `${target.url.pathname}${target.url.search}`,
-        headers: { host: target.url.host },
+        headers: {
+          ...Object.fromEntries((input.headers ?? []).map((header) => [header.name, header.value])),
+          host: target.url.host,
+        },
         signal: input.signal,
       });
 

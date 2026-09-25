@@ -43,6 +43,7 @@ export class NodeHttpExecutor implements HttpExecutor {
     const visited = new Set<string>();
     let currentUrl: string | URL = input.url;
     let redirectsFollowed = 0;
+    let headersAttached = true;
 
     while (true) {
       let target;
@@ -59,6 +60,7 @@ export class NodeHttpExecutor implements HttpExecutor {
           target,
           method: input.method,
           signal: input.signal,
+          headers: headersAttached ? (input.requestHeaders ?? []) : [],
         });
       } catch (error) {
         if (
@@ -96,6 +98,10 @@ export class NodeHttpExecutor implements HttpExecutor {
         return redirectFailure('INVALID_REDIRECT_LOCATION', response.statusCode, responseTimeMs);
       }
 
+      if (target.url.protocol === 'https:' && nextUrl.protocol === 'http:') {
+        return redirectFailure('INSECURE_REDIRECT', response.statusCode, responseTimeMs);
+      }
+
       const identity = redirectIdentity(nextUrl);
       if (visited.has(identity)) {
         return redirectFailure('REDIRECT_LOOP', response.statusCode, responseTimeMs);
@@ -106,6 +112,7 @@ export class NodeHttpExecutor implements HttpExecutor {
       }
 
       redirectsFollowed += 1;
+      if (target.url.origin !== nextUrl.origin) headersAttached = false;
       currentUrl = nextUrl;
     }
   }
@@ -122,7 +129,8 @@ function redirectFailure(
     | 'REDIRECT_LOOP'
     | 'TOO_MANY_REDIRECTS'
     | 'MISSING_REDIRECT_LOCATION'
-    | 'INVALID_REDIRECT_LOCATION',
+    | 'INVALID_REDIRECT_LOCATION'
+    | 'INSECURE_REDIRECT',
   statusCode: number,
   responseTimeMs: number,
 ): HttpExecutionResult {

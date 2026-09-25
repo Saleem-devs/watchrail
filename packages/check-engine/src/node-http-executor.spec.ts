@@ -77,6 +77,7 @@ describe('NodeHttpExecutor', () => {
       }),
       method: 'HEAD',
       signal,
+      headers: [],
     });
   });
 
@@ -246,6 +247,73 @@ describe('NodeHttpExecutor', () => {
     expect(request).toHaveBeenCalledTimes(2);
     expect(request.mock.calls.every(([call]) => call.method === 'HEAD')).toBe(true);
     expect(result).toMatchObject({ outcome: 'PASS', statusCode: 204 });
+  });
+
+  it('preserves configured headers on same-origin redirects', async () => {
+    const request = vi
+      .fn<PinnedHttpTransport['request']>()
+      .mockResolvedValueOnce(response(302, '/final'))
+      .mockResolvedValueOnce(response(200));
+    const requestHeaders = [{ name: 'authorization', value: 'Bearer secret' }];
+
+    await new NodeHttpExecutor({ resolver: publicResolver(), transport: { request } }).execute({
+      url: 'https://example.com/start',
+      method: 'GET',
+      signal: new AbortController().signal,
+      requestHeaders,
+    });
+
+    expect(request.mock.calls.map(([call]) => call.headers)).toEqual([
+      requestHeaders,
+      requestHeaders,
+    ]);
+  });
+
+  it('strips configured headers permanently after a cross-origin redirect', async () => {
+    const request = vi
+      .fn<PinnedHttpTransport['request']>()
+      .mockResolvedValueOnce(response(302, 'https://other.example/away'))
+      .mockResolvedValueOnce(response(302, 'https://example.com/back'))
+      .mockResolvedValueOnce(response(200));
+    const requestHeaders = [{ name: 'authorization', value: 'Bearer secret' }];
+
+    await new NodeHttpExecutor({ resolver: publicResolver(), transport: { request } }).execute({
+      url: 'https://example.com/start',
+      method: 'GET',
+      signal: new AbortController().signal,
+      requestHeaders,
+    });
+
+    expect(request.mock.calls.map(([call]) => call.headers)).toEqual([requestHeaders, [], []]);
+  });
+
+  it('rejects an HTTPS to HTTP redirect before DNS resolution', async () => {
+    const resolver = publicResolver();
+    const request = vi
+      .fn<PinnedHttpTransport['request']>()
+      .mockResolvedValueOnce(response(302, 'http://example.com/insecure'));
+
+    const result = await executeHttpCheck(
+      {
+        url: 'https://example.com/start',
+        method: 'GET',
+        timeoutMs: 10_000,
+        requestHeaders: [{ name: 'authorization', value: 'Bearer secret' }],
+      },
+      {
+        executor: new NodeHttpExecutor({ resolver, transport: { request } }),
+        clock: createEngineClock(),
+      },
+    );
+
+    expect(result).toMatchObject({
+      outcome: 'FAIL',
+      stage: 'HTTP',
+      reason: 'INSECURE_REDIRECT',
+      statusCode: 302,
+    });
+    expect(resolver.lookup).toHaveBeenCalledOnce();
+    expect(request).toHaveBeenCalledOnce();
   });
 
   it('returns a final non-redirect failure after following redirects', async () => {
