@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { DrizzleModule, getDrizzleToken } from '@nestjs/drizzle';
-import { NodeFetchHttpExecutor } from '@watchrail/check-engine';
+import { NodeHttpExecutor } from '@watchrail/check-engine';
 import { BullMqCheckJobConsumer, BullMqCheckJobPublisher } from '@watchrail/queue';
 import {
   CheckExecutionRepository,
@@ -46,15 +46,15 @@ import { WorkerRuntime } from './worker-runtime.js';
       useFactory: (db: WatchrailDatabase) => new CheckExecutionRepository(db),
     },
     {
-      provide: NodeFetchHttpExecutor,
-      useFactory: () => new NodeFetchHttpExecutor(),
+      provide: NodeHttpExecutor,
+      useFactory: () => new NodeHttpExecutor(),
     },
     {
       provide: CheckRoundJobHandler,
-      inject: [CheckExecutionRepository, NodeFetchHttpExecutor, WORKER_CONFIG],
+      inject: [CheckExecutionRepository, NodeHttpExecutor, WORKER_CONFIG],
       useFactory: (
         executions: CheckExecutionRepository,
-        executor: NodeFetchHttpExecutor,
+        executor: NodeHttpExecutor,
         config: WorkerConfig,
       ) => new CheckRoundJobHandler(executions, executor, config.checkExecutionLeaseDurationMs),
     },

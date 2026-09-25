@@ -1,5 +1,20 @@
 export { executeHttpCheck } from './http-check.js';
-export { NodeFetchHttpExecutor, type NodeFetchHttpExecutorOptions } from './local-http-executor.js';
+export { NodeHttpExecutor, type NodeHttpExecutorOptions } from './node-http-executor.js';
+export {
+  InvalidHttpTargetError,
+  ProhibitedDestinationError,
+  resolveSafeHttpTarget,
+  type DnsAddress,
+  type DnsResolver,
+  type ResolvedHttpTarget,
+  type ValidatedAddress,
+} from './safe-http-target.js';
+export {
+  UndiciPinnedHttpTransport,
+  createPinnedLookup,
+  type HttpTransportResponse,
+  type PinnedHttpTransport,
+} from './undici-http-transport.js';
 
 export { InvalidHttpMethodError, InvalidHttpTimeoutError } from './errors.js';
 
@@ -19,4 +34,5 @@ export type {
   HttpExecutor,
   HttpTargetFailure,
   HttpMethod,
+  HttpPolicyRejection,
 } from './types.js';

@@ -1,0 +1,254 @@
+import { describe, expect, it, vi } from 'vitest';
+import { executeHttpCheck } from './http-check.js';
+import { NodeHttpExecutor } from './node-http-executor.js';
+import type { DnsResolver } from './safe-http-target.js';
+import type { HttpTransportResponse, PinnedHttpTransport } from './undici-http-transport.js';
+
+const checkedAt = new Date('2026-09-21T12:00:00.000Z');
+
+function createEngineClock() {
+  return { now: () => checkedAt, monotonicNow: () => Date.now() };
+}
+
+function publicResolver(): DnsResolver {
+  return {
+    lookup: vi.fn(() => Promise.resolve([{ address: '93.184.216.34', family: 4 }] as const)),
+  };
+}
+
+function response(statusCode: number, discardBody = vi.fn(() => Promise.resolve())) {
+  return { statusCode, discardBody } satisfies HttpTransportResponse;
+}
+
+function transportReturning(result: HttpTransportResponse): PinnedHttpTransport {
+  return { request: vi.fn(() => Promise.resolve(result)) };
+}
+
+function networkFailure(code: string): TypeError {
+  const cause = Object.assign(new Error(code), { code });
+  return new TypeError('request failed', { cause });
+}
+
+describe('NodeHttpExecutor', () => {
+  it('returns a successful 200 response and measures time until headers arrive', async () => {
+    let elapsed = 100;
+    const transport: PinnedHttpTransport = {
+      request: vi.fn(() => {
+        elapsed = 137;
+        return Promise.resolve(response(200));
+      }),
+    };
+    const executor = new NodeHttpExecutor({
+      resolver: publicResolver(),
+      transport,
+      monotonicNow: () => elapsed,
+    });
+
+    const result = await executor.execute({
+      url: 'https://example.com',
+      method: 'GET',
+      signal: new AbortController().signal,
+    });
+
+    expect(result).toEqual({ type: 'RESPONSE', statusCode: 200, responseTimeMs: 37 });
+  });
+
+  it('passes only validated addresses and the original hostname to the transport', async () => {
+    const resolver = publicResolver();
+    const transport = transportReturning(response(200));
+    const signal = new AbortController().signal;
+
+    await new NodeHttpExecutor({ resolver, transport }).execute({
+      url: 'https://example.com:8443/health?ready=true',
+      method: 'HEAD',
+      signal,
+    });
+
+    expect(resolver.lookup).toHaveBeenCalledOnce();
+    expect(transport.request).toHaveBeenCalledWith({
+      target: expect.objectContaining({
+        hostname: 'example.com',
+        port: 8443,
+        addresses: [{ address: '93.184.216.34', family: 4 }],
+      }),
+      method: 'HEAD',
+      signal,
+    });
+  });
+
+  it('lets the engine classify a 503 response as an unexpected status', async () => {
+    const executor = new NodeHttpExecutor({
+      resolver: publicResolver(),
+      transport: transportReturning(response(503)),
+    });
+    const result = await executeHttpCheck(
+      { url: 'https://example.com', method: 'GET', timeoutMs: 10_000 },
+      { executor, clock: createEngineClock() },
+    );
+
+    expect(result).toMatchObject({
+      outcome: 'FAIL',
+      stage: 'HTTP',
+      reason: 'UNEXPECTED_STATUS',
+      statusCode: 503,
+    });
+  });
+
+  it('passes the engine AbortSignal through DNS and transport work', async () => {
+    vi.useFakeTimers();
+
+    try {
+      let receivedSignal: AbortSignal | undefined;
+      const transport: PinnedHttpTransport = {
+        request: vi.fn(({ signal }) => {
+          receivedSignal = signal;
+          return new Promise<HttpTransportResponse>((_resolve, reject) => {
+            signal.addEventListener(
+              'abort',
+              () => reject(new DOMException('The operation was aborted', 'AbortError')),
+              { once: true },
+            );
+          });
+        }),
+      };
+      const executor = new NodeHttpExecutor({
+        resolver: publicResolver(),
+        transport,
+        monotonicNow: () => Date.now(),
+      });
+      const resultPromise = executeHttpCheck(
+        { url: 'https://example.com', method: 'GET', timeoutMs: 1_000 },
+        { executor, clock: createEngineClock() },
+      );
+
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      await expect(resultPromise).resolves.toMatchObject({
+        outcome: 'FAIL',
+        stage: 'HTTP',
+        reason: 'REQUEST_TIMEOUT',
+      });
+      expect(receivedSignal?.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('translates DNS name-not-found into target evidence', async () => {
+    const resolver: DnsResolver = {
+      lookup: vi.fn(() => Promise.reject(networkFailure('ENOTFOUND'))),
+    };
+    const result = await executeHttpCheck(
+      { url: 'https://missing.example', method: 'GET', timeoutMs: 10_000 },
+      { executor: new NodeHttpExecutor({ resolver }), clock: createEngineClock() },
+    );
+
+    expect(result).toMatchObject({ outcome: 'FAIL', stage: 'DNS', reason: 'NAME_NOT_FOUND' });
+  });
+
+  it('classifies a prohibited destination as uncertainty rather than target failure', async () => {
+    const resolver: DnsResolver = {
+      lookup: vi.fn(() => Promise.resolve([{ address: '127.0.0.1', family: 4 }] as const)),
+    };
+    const result = await executeHttpCheck(
+      { url: 'https://internal.example', method: 'GET', timeoutMs: 10_000 },
+      { executor: new NodeHttpExecutor({ resolver }), clock: createEngineClock() },
+    );
+
+    expect(result).toMatchObject({
+      outcome: 'UNKNOWN',
+      stage: 'DNS',
+      reason: 'PROHIBITED_DESTINATION',
+    });
+  });
+
+  it.each([
+    ['ECONNREFUSED', 'CONNECT', 'CONNECTION_REFUSED'],
+    ['CERT_HAS_EXPIRED', 'TLS', 'CERTIFICATE_EXPIRED'],
+  ] as const)('classifies %s network failure', async (code, stage, reason) => {
+    const transport: PinnedHttpTransport = {
+      request: vi.fn(() => Promise.reject(networkFailure(code))),
+    };
+    const result = await executeHttpCheck(
+      { url: 'https://example.com', method: 'GET', timeoutMs: 10_000 },
+      {
+        executor: new NodeHttpExecutor({ resolver: publicResolver(), transport }),
+        clock: createEngineClock(),
+      },
+    );
+
+    expect(result).toMatchObject({ outcome: 'FAIL', stage, reason });
+  });
+
+  it('keeps unexpected executor errors as probe malfunctions', async () => {
+    const transport: PinnedHttpTransport = {
+      request: vi.fn(() => Promise.reject(new Error('unexpected executor failure'))),
+    };
+    const result = await executeHttpCheck(
+      { url: 'https://example.com', method: 'GET', timeoutMs: 10_000 },
+      {
+        executor: new NodeHttpExecutor({ resolver: publicResolver(), transport }),
+        clock: createEngineClock(),
+      },
+    );
+
+    expect(result).toMatchObject({
+      outcome: 'UNKNOWN',
+      stage: 'PROBE',
+      reason: 'INTERNAL_ERROR',
+    });
+  });
+
+  it('keeps redirect responses final while redirect handling is manual', async () => {
+    const transport = transportReturning(response(302));
+    const result = await executeHttpCheck(
+      { url: 'https://example.com', method: 'GET', timeoutMs: 10_000 },
+      {
+        executor: new NodeHttpExecutor({ resolver: publicResolver(), transport }),
+        clock: createEngineClock(),
+      },
+    );
+
+    expect(transport.request).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({
+      outcome: 'FAIL',
+      stage: 'HTTP',
+      reason: 'UNEXPECTED_STATUS',
+      statusCode: 302,
+    });
+  });
+
+  it('discards the unused response body after headers arrive', async () => {
+    const discardBody = vi.fn(() => Promise.resolve());
+    const executor = new NodeHttpExecutor({
+      resolver: publicResolver(),
+      transport: transportReturning(response(200, discardBody)),
+    });
+
+    await executor.execute({
+      url: 'https://example.com',
+      method: 'GET',
+      signal: new AbortController().signal,
+    });
+
+    expect(discardBody).toHaveBeenCalledOnce();
+  });
+
+  it('preserves response evidence when response-body cleanup fails', async () => {
+    const executor = new NodeHttpExecutor({
+      resolver: publicResolver(),
+      transport: transportReturning(
+        response(
+          200,
+          vi.fn(() => Promise.reject(new Error('body cancellation failed'))),
+        ),
+      ),
+    });
+    const result = await executeHttpCheck(
+      { url: 'https://example.com', method: 'GET', timeoutMs: 10_000 },
+      { executor, clock: createEngineClock() },
+    );
+
+    expect(result).toMatchObject({ outcome: 'PASS', statusCode: 200 });
+  });
+});

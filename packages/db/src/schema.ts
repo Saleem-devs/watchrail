@@ -53,6 +53,7 @@ export const checkResultReasonEnum = pgEnum('check_result_reason', [
   'NAME_NOT_FOUND',
   'CONNECTION_REFUSED',
   'CERTIFICATE_EXPIRED',
+  'PROHIBITED_DESTINATION',
   'INTERNAL_ERROR',
 ]);
 

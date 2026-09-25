@@ -1,6 +1,4 @@
 import 'reflect-metadata';
-import { createServer } from 'node:http';
-import type { Server } from 'node:http';
 import { resolve } from 'node:path';
 import type { INestApplicationContext } from '@nestjs/common';
 import { DrizzleModule, getDrizzleToken } from '@nestjs/drizzle';
@@ -27,8 +25,6 @@ describe('worker application lifecycle', () => {
   let database: WatchrailDatabase | undefined;
   let postgres: StartedPostgreSqlContainer;
   let redis: StartedRedisContainer;
-  let targetServer: Server;
-  let targetUrl: string;
 
   const originalEnvironment = {
     databaseUrl: process.env.DATABASE_URL,
@@ -48,8 +44,6 @@ describe('worker application lifecycle', () => {
     process.env.OUTBOX_IDLE_POLL_INTERVAL_MS = '10';
     process.env.OUTBOX_DEPENDENCY_ERROR_DELAY_MS = '10';
 
-    ({ server: targetServer, url: targetUrl } = await startTargetServer());
-
     const migrationConnection = createDatabaseConnection(postgres.getConnectionUri());
     await migrateDatabase(migrationConnection, resolve(process.cwd(), '../../packages/db/drizzle'));
     await migrationConnection.pool.end();
@@ -63,7 +57,6 @@ describe('worker application lifecycle', () => {
       await app.close();
       await expect(database.$client.query('select 1')).rejects.toThrow();
     }
-    await closeServer(targetServer);
     await Promise.all([postgres?.stop(), redis?.stop()]);
 
     restoreEnvironment('DATABASE_URL', originalEnvironment.databaseUrl);
@@ -82,12 +75,12 @@ describe('worker application lifecycle', () => {
     expect(app.get(DrizzleModule)).toBeInstanceOf(DrizzleModule);
   });
 
-  it('publishes and executes one durable local HTTP check', async () => {
+  it('persists a prohibited local destination as execution uncertainty', async () => {
     if (!database) throw new Error('Expected the worker database to be available.');
 
     const monitor = await new MonitorRepository(database).create(
       'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-      createMonitor({ name: 'Local target', url: targetUrl }),
+      createMonitor({ name: 'Local target', url: 'http://127.0.0.1:65535/health' }),
     );
     const round = await new ManualRoundRepository(database).create(
       monitor.organizationId,
@@ -98,63 +91,15 @@ describe('worker application lifecycle', () => {
 
     expect(result).toMatchObject({
       roundId: round.id,
-      outcome: 'PASS',
-      stage: 'HTTP',
-      reason: 'COMPLETED',
-      statusCode: 200,
+      outcome: 'UNKNOWN',
+      stage: 'DNS',
+      reason: 'PROHIBITED_DESTINATION',
+      statusCode: null,
+      responseTimeMs: null,
     });
-    expect(result.responseTimeMs).toBeGreaterThanOrEqual(0);
-    expect(result.attemptDurationMs).toBeGreaterThanOrEqual(result.responseTimeMs ?? 0);
-  });
-
-  it('persists target HTTP failures without failing the queue job', async () => {
-    if (!database) throw new Error('Expected the worker database to be available.');
-
-    const monitor = await new MonitorRepository(database).create(
-      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-      createMonitor({ name: 'Unavailable target', url: `${targetUrl}/unavailable` }),
-    );
-    const round = await new ManualRoundRepository(database).create(
-      monitor.organizationId,
-      monitor.id,
-    );
-
-    await expect(waitForResult(database, round.id)).resolves.toMatchObject({
-      roundId: round.id,
-      outcome: 'FAIL',
-      stage: 'HTTP',
-      reason: 'UNEXPECTED_STATUS',
-      statusCode: 503,
-    });
+    expect(result.attemptDurationMs).toBeGreaterThanOrEqual(0);
   });
 });
-
-async function startTargetServer(): Promise<{ server: Server; url: string }> {
-  const server = createServer((request, response) => {
-    response.writeHead(request.url?.endsWith('/unavailable') ? 503 : 200).end();
-  });
-
-  await new Promise<void>((resolveListen, reject) => {
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => resolveListen());
-  });
-
-  const address = server.address();
-
-  if (address === null || typeof address === 'string') {
-    throw new Error('Expected the local target server to bind a TCP port.');
-  }
-
-  return { server, url: `http://127.0.0.1:${address.port}/health` };
-}
-
-async function closeServer(server: Server | undefined): Promise<void> {
-  if (!server) return;
-
-  await new Promise<void>((resolveClose, reject) => {
-    server.close((error) => (error ? reject(error) : resolveClose()));
-  });
-}
 
 async function waitForResult(database: WatchrailDatabase, roundId: string) {
   const deadline = Date.now() + 10_000;

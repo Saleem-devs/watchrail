@@ -94,6 +94,18 @@ function classifyHttpExecution(input: {
 }): HttpCheckResult {
   const { execution, checkedAt, attemptDurationMs } = input;
 
+  if (execution.type === 'POLICY_REJECTION') {
+    return {
+      outcome: 'UNKNOWN',
+      stage: execution.stage,
+      reason: execution.reason,
+      statusCode: null,
+      responseTimeMs: null,
+      attemptDurationMs,
+      checkedAt,
+    };
+  }
+
   if (execution.type === 'TARGET_FAILURE') {
     return classifyTargetFailure({
       failure: execution,

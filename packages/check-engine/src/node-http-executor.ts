@@ -4,41 +4,62 @@ import type {
   HttpExecutor,
   HttpTargetFailure,
 } from './types.js';
+import {
+  InvalidHttpTargetError,
+  ProhibitedDestinationError,
+  resolveSafeHttpTarget,
+  type DnsResolver,
+} from './safe-http-target.js';
+import { UndiciPinnedHttpTransport, type PinnedHttpTransport } from './undici-http-transport.js';
 
-export interface NodeFetchHttpExecutorOptions {
-  fetchImpl?: typeof globalThis.fetch;
+export interface NodeHttpExecutorOptions {
+  resolver?: DnsResolver;
+  transport?: PinnedHttpTransport;
   monotonicNow?: () => number;
 }
 
 /**
- * Executes one HTTP request with Node's built-in fetch implementation.
+ * Executes one HTTP request through an SSRF-safe, address-pinned transport.
  *
  * Redirects are intentionally left in manual mode until Slice 4 owns safe
- * redirect traversal and SSRF validation. TLS verification remains at Node's
- * secure default because this adapter does not install a custom dispatcher or
- * disable certificate verification.
+ * redirect traversal. TLS verification remains at Node's secure default.
  */
-export class NodeFetchHttpExecutor implements HttpExecutor {
-  private readonly fetchImpl: typeof globalThis.fetch;
+export class NodeHttpExecutor implements HttpExecutor {
+  private readonly resolver: DnsResolver | undefined;
+  private readonly transport: PinnedHttpTransport;
   private readonly monotonicNow: () => number;
 
-  constructor(options: NodeFetchHttpExecutorOptions = {}) {
-    this.fetchImpl = options.fetchImpl ?? globalThis.fetch;
+  constructor(options: NodeHttpExecutorOptions = {}) {
+    this.resolver = options.resolver;
+    this.transport = options.transport ?? new UndiciPinnedHttpTransport();
     this.monotonicNow = options.monotonicNow ?? (() => performance.now());
   }
 
   async execute(input: HttpExecutionInput): Promise<HttpExecutionResult> {
     const startedAt = this.monotonicNow();
 
-    let response: Response;
+    let response;
 
     try {
-      response = await this.fetchImpl(input.url, {
+      const target = await resolveSafeHttpTarget(input.url, {
+        signal: input.signal,
+        ...(this.resolver ? { resolver: this.resolver } : {}),
+      });
+
+      response = await this.transport.request({
+        target,
         method: input.method,
         signal: input.signal,
-        redirect: 'manual',
       });
     } catch (error) {
+      if (error instanceof ProhibitedDestinationError || error instanceof InvalidHttpTargetError) {
+        return {
+          type: 'POLICY_REJECTION',
+          stage: 'DNS',
+          reason: 'PROHIBITED_DESTINATION',
+        };
+      }
+
       const targetFailure = classifyFetchFailure(error);
 
       if (targetFailure !== null) {
@@ -50,18 +71,16 @@ export class NodeFetchHttpExecutor implements HttpExecutor {
 
     const responseTimeMs = Math.max(0, this.monotonicNow() - startedAt);
 
-    if (response.body !== null) {
-      try {
-        await response.body.cancel();
-      } catch {
-        // Response evidence is already valid. Body cleanup failure must not
-        // erase or change the target classification.
-      }
+    try {
+      await response.discardBody();
+    } catch {
+      // Response evidence is already valid. Body cleanup failure must not
+      // erase or change the target classification.
     }
 
     return {
       type: 'RESPONSE',
-      statusCode: response.status,
+      statusCode: response.statusCode,
       responseTimeMs,
     };
   }

@@ -319,6 +319,35 @@ describe('executeHttpCheck', () => {
     });
   });
 
+  it('returns UNKNOWN / DNS / PROHIBITED_DESTINATION for a policy rejection', async () => {
+    const clock = createClock();
+    const executor: HttpExecutor = {
+      execute: () => {
+        clock.advance(10);
+        return Promise.resolve({
+          type: 'POLICY_REJECTION',
+          stage: 'DNS',
+          reason: 'PROHIBITED_DESTINATION',
+        });
+      },
+    };
+
+    const result = await executeHttpCheck(
+      { url: 'http://127.0.0.1', method: 'GET', timeoutMs: 10_000 },
+      { executor, clock },
+    );
+
+    expect(result).toEqual({
+      outcome: 'UNKNOWN',
+      stage: 'DNS',
+      reason: 'PROHIBITED_DESTINATION',
+      statusCode: null,
+      responseTimeMs: null,
+      attemptDurationMs: 10,
+      checkedAt,
+    });
+  });
+
   it('returns UNKNOWN / PROBE / INTERNAL_ERROR for an executor failure', async () => {
     const clock = createClock();
 

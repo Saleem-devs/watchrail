@@ -74,6 +74,13 @@ export type HttpCheckResult =
       })
   | (HttpCheckTiming & {
       outcome: 'UNKNOWN';
+      stage: 'DNS';
+      reason: 'PROHIBITED_DESTINATION';
+      statusCode: null;
+      responseTimeMs: null;
+    })
+  | (HttpCheckTiming & {
+      outcome: 'UNKNOWN';
       stage: 'PROBE';
       reason: 'INTERNAL_ERROR';
       statusCode: null;
@@ -90,11 +97,17 @@ export interface HttpResponseObservation extends HttpResponseEvidence {
 
 export type HttpTargetFailure = { type: 'TARGET_FAILURE' } & HttpTargetFailureClassification;
 
+export interface HttpPolicyRejection {
+  type: 'POLICY_REJECTION';
+  stage: 'DNS';
+  reason: 'PROHIBITED_DESTINATION';
+}
+
 /**
  * An observation about the configured target. Executors return expected
  * network failures; thrown exceptions are reserved for executor malfunctions.
  */
-export type HttpExecutionResult = HttpResponseObservation | HttpTargetFailure;
+export type HttpExecutionResult = HttpResponseObservation | HttpTargetFailure | HttpPolicyRejection;
 
 export interface HttpExecutionInput {
   url: string;
