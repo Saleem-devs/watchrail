@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { Logger } from '@nestjs/common';
 import type { HttpExecutor } from '@watchrail/check-engine';
 import type { CheckExecutionRepository } from '@watchrail/db';
 import { encryptHeaderValue, type HeaderEncryptionKeyring } from '@watchrail/http-header-security';
@@ -138,6 +139,42 @@ describe('CheckRoundJobHandler', () => {
         requestHeaders: [{ name: 'authorization', value: 'Bearer secret' }],
       }),
     );
+  });
+
+  it('turns corrupted stored headers into redacted internal evidence', async () => {
+    const sentinel = 'WATCHRAIL_SENTINEL_SECRET';
+    const logger = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const { executions, executor, claim, complete, execute } = createDependencies();
+    claim.mockResolvedValue({
+      state: 'CLAIMED',
+      execution: {
+        ...claimedExecution,
+        requestHeaders: [
+          {
+            name: 'authorization',
+            sensitive: true,
+            encryptedValue: sentinel,
+          },
+        ] as never,
+      },
+    });
+    complete.mockResolvedValue(true);
+
+    await createHandler(executions, executor).handle(payload);
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(complete).toHaveBeenCalledWith(
+      claimedExecution.assignmentId,
+      claimedExecution.claimToken,
+      expect.objectContaining({ outcome: 'UNKNOWN', stage: 'PROBE', reason: 'INTERNAL_ERROR' }),
+    );
+    expect(logger).toHaveBeenCalledWith(
+      `Stored request-header configuration is invalid for assignment ${claimedExecution.assignmentId}.`,
+    );
+    expect(JSON.stringify({ logs: logger.mock.calls, result: complete.mock.calls })).not.toContain(
+      sentinel,
+    );
+    logger.mockRestore();
   });
 
   it('treats a completed assignment as an idempotent replay', async () => {

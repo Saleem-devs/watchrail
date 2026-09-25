@@ -90,7 +90,7 @@ describe('HTTP header encryption', () => {
         context,
         keyring,
       )[0],
-    ).toBe(stored[0]);
+    ).toEqual(stored[0]);
     expect(resolveRequestHeaders(stored, context, keyring)).toEqual([
       { name: 'authorization', value: 'Bearer secret' },
       { name: 'x-environment', value: 'production' },

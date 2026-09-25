@@ -48,25 +48,38 @@ export class CheckRoundJobHandler implements CheckJobHandler {
       throw new CheckExecutionAlreadyClaimedError();
     }
 
-    const result = isSupportedMethod(claim.execution.method)
-      ? await executeHttpCheck(
+    let result: HttpCheckResult = internalExecutionFailureResult();
+
+    if (isSupportedMethod(claim.execution.method)) {
+      let requestHeaders;
+      try {
+        requestHeaders = resolveRequestHeaders(
+          claim.execution.requestHeaders,
+          {
+            organizationId: claim.execution.organizationId,
+            monitorId: claim.execution.monitorId,
+          },
+          this.headerEncryptionKeyring,
+        );
+      } catch {
+        this.logger.error(
+          `Stored request-header configuration is invalid for assignment ${claim.execution.assignmentId}.`,
+        );
+      }
+
+      if (requestHeaders !== undefined) {
+        result = await executeHttpCheck(
           {
             url: claim.execution.url,
             method: claim.execution.method,
             timeoutMs: claim.execution.timeoutMs,
             statusPolicy: claim.execution.statusPolicy,
-            requestHeaders: resolveRequestHeaders(
-              claim.execution.requestHeaders,
-              {
-                organizationId: claim.execution.organizationId,
-                monitorId: claim.execution.monitorId,
-              },
-              this.headerEncryptionKeyring,
-            ),
+            requestHeaders,
           },
           { executor: this.executor },
-        )
-      : unsupportedMethodResult();
+        );
+      }
+    }
 
     const completed = await this.executions.complete(
       claim.execution.assignmentId,
@@ -82,7 +95,7 @@ function isSupportedMethod(method: string): method is 'GET' | 'HEAD' {
   return method === 'GET' || method === 'HEAD';
 }
 
-function unsupportedMethodResult(): HttpCheckResult {
+function internalExecutionFailureResult(): HttpCheckResult {
   return {
     outcome: 'UNKNOWN',
     stage: 'PROBE',
