@@ -9,6 +9,7 @@ interface Monitor {
   method: string;
   lifecycleState: string;
   timeoutMs: number;
+  statusPolicy: { type: 'ANY_2XX' } | { type: 'EXACT'; statusCodes: number[] };
   locations: string[];
   createdAt: string;
 }
@@ -16,6 +17,7 @@ interface Monitor {
 interface FieldErrors {
   name?: string[];
   url?: string[];
+  statusPolicy?: string[];
 }
 
 interface ApiError {
@@ -44,6 +46,7 @@ export function Dashboard() {
   const [monitors, setMonitors] = useState<Monitor[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [updatingPolicyIds, setUpdatingPolicyIds] = useState<Set<string>>(() => new Set());
   const [pageError, setPageError] = useState<string>();
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [manualRounds, setManualRounds] = useState<Record<string, ManualRound>>({});
@@ -87,12 +90,17 @@ export function Dashboard() {
 
     const form = event.currentTarget;
     const formData = new FormData(form);
+    const statusPolicy = statusPolicyFromForm(formData);
 
     try {
       const response = await fetch('/api/monitors', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ name: formData.get('name'), url: formData.get('url') }),
+        body: JSON.stringify({
+          name: formData.get('name'),
+          url: formData.get('url'),
+          statusPolicy,
+        }),
       });
 
       const body = (await response.json()) as { data?: Monitor } & ApiError;
@@ -134,6 +142,41 @@ export function Dashboard() {
         ...current,
         [monitorId]: 'Watchrail could not start this diagnostic check. Try again.',
       }));
+    }
+  }
+
+  async function updateStatusPolicy(
+    monitorId: string,
+    event: FormEvent<HTMLFormElement>,
+  ): Promise<void> {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const statusPolicy = statusPolicyFromForm(formData);
+
+    setUpdatingPolicyIds((current) => new Set(current).add(monitorId));
+    setPageError(undefined);
+
+    try {
+      const response = await fetch(`/api/monitors/${monitorId}/status-policy`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ statusPolicy }),
+      });
+      const body = (await response.json()) as { data?: Monitor } & ApiError;
+      if (!response.ok || !body.data) {
+        throw new Error(body.fields?.statusPolicy?.[0] ?? 'Could not update status policy.');
+      }
+      setMonitors((current) =>
+        current.map((monitor) => (monitor.id === monitorId ? (body.data as Monitor) : monitor)),
+      );
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : 'Could not update status policy.');
+    } finally {
+      setUpdatingPolicyIds((current) => {
+        const next = new Set(current);
+        next.delete(monitorId);
+        return next;
+      });
     }
   }
 
@@ -228,6 +271,31 @@ export function Dashboard() {
               <p className="eyebrow">NEW MONITOR</p>
               <h2 id="create-heading">Add an endpoint</h2>
             </div>
+
+            <fieldset className="field">
+              <legend>Expected status</legend>
+              <label>
+                <input name="statusPolicyMode" type="radio" value="ANY_2XX" defaultChecked />
+                Any 2xx response
+              </label>
+              <label>
+                <input name="statusPolicyMode" type="radio" value="EXACT" />
+                Specific status codes
+              </label>
+              <input
+                name="statusCodes"
+                type="text"
+                inputMode="numeric"
+                placeholder="200, 204"
+                aria-describedby={fieldErrors.statusPolicy ? 'status-policy-error' : undefined}
+                aria-invalid={Boolean(fieldErrors.statusPolicy)}
+              />
+              {fieldErrors.statusPolicy ? (
+                <p className="field-error" id="status-policy-error">
+                  {fieldErrors.statusPolicy[0]}
+                </p>
+              ) : null}
+            </fieldset>
             <span className="step">01</span>
           </div>
 
@@ -336,9 +404,41 @@ export function Dashboard() {
                     <div className="monitor-meta">
                       <span>{monitor.method}</span>
                       <span>{monitor.timeoutMs / 1000}s timeout</span>
+                      <span>{statusPolicyLabel(monitor.statusPolicy)}</span>
                       <span>{monitor.locations.join(', ')}</span>
                       <span>{monitor.lifecycleState.toLowerCase()}</span>
                     </div>
+                    <form
+                      className="status-policy-form"
+                      onSubmit={(event) => void updateStatusPolicy(monitor.id, event)}
+                    >
+                      <label>
+                        Expected status
+                        <select name="statusPolicyMode" defaultValue={monitor.statusPolicy.type}>
+                          <option value="ANY_2XX">Any 2xx response</option>
+                          <option value="EXACT">Specific status codes</option>
+                        </select>
+                      </label>
+                      <input
+                        name="statusCodes"
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="200, 204"
+                        defaultValue={
+                          monitor.statusPolicy.type === 'EXACT'
+                            ? monitor.statusPolicy.statusCodes.join(', ')
+                            : ''
+                        }
+                        aria-label={`Specific status codes for ${monitor.name}`}
+                      />
+                      <button
+                        className="quiet-button"
+                        type="submit"
+                        disabled={updatingPolicyIds.has(monitor.id)}
+                      >
+                        {updatingPolicyIds.has(monitor.id) ? 'Saving…' : 'Save policy'}
+                      </button>
+                    </form>
                     <ManualDiagnostic
                       round={manualRounds[monitor.id]}
                       error={runErrors[monitor.id]}
@@ -352,6 +452,21 @@ export function Dashboard() {
       </div>
     </main>
   );
+}
+
+function statusPolicyLabel(policy: Monitor['statusPolicy']): string {
+  return policy.type === 'ANY_2XX' ? 'any 2xx' : `status ${policy.statusCodes.join(', ')}`;
+}
+
+function statusPolicyFromForm(formData: FormData): Monitor['statusPolicy'] {
+  if (formData.get('statusPolicyMode') !== 'EXACT') return { type: 'ANY_2XX' };
+
+  const rawCodes = formData.get('statusCodes');
+  const codes = typeof rawCodes === 'string' ? rawCodes : '';
+  return {
+    type: 'EXACT',
+    statusCodes: codes.split(',').map((value) => Number(value.trim())),
+  };
 }
 
 function ManualDiagnostic({

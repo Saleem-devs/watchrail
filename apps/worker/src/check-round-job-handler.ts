@@ -49,6 +49,7 @@ export class CheckRoundJobHandler implements CheckJobHandler {
             url: claim.execution.url,
             method: claim.execution.method,
             timeoutMs: claim.execution.timeoutMs,
+            statusPolicy: claim.execution.statusPolicy,
           },
           { executor: this.executor },
         )

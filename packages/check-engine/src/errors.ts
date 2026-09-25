@@ -19,3 +19,10 @@ export class InvalidHttpTimeoutError extends Error {
     this.timeoutMs = timeoutMs;
   }
 }
+
+export class InvalidHttpStatusPolicyError extends Error {
+  constructor() {
+    super('HTTP status policy is invalid.');
+    this.name = 'InvalidHttpStatusPolicyError';
+  }
+}

@@ -19,6 +19,7 @@ const claimedExecution = {
   url: 'https://example.com/health',
   method: 'GET',
   timeoutMs: 10_000,
+  statusPolicy: { type: 'ANY_2XX' },
 } as const;
 
 function createDependencies() {
@@ -67,6 +68,27 @@ describe('CheckRoundJobHandler', () => {
         statusCode: 200,
         responseTimeMs: 12,
       }),
+    );
+  });
+
+  it('evaluates the immutable exact status policy before persisting', async () => {
+    const { executions, executor, claim, complete, execute } = createDependencies();
+    claim.mockResolvedValue({
+      state: 'CLAIMED',
+      execution: {
+        ...claimedExecution,
+        statusPolicy: { type: 'EXACT', statusCodes: [404] },
+      },
+    });
+    execute.mockResolvedValue({ type: 'RESPONSE', statusCode: 404, responseTimeMs: 12 });
+    complete.mockResolvedValue(true);
+
+    await new CheckRoundJobHandler(executions, executor, 45_000).handle(payload);
+
+    expect(complete).toHaveBeenCalledWith(
+      claimedExecution.assignmentId,
+      claimedExecution.claimToken,
+      expect.objectContaining({ outcome: 'PASS', statusCode: 404 }),
     );
   });
 

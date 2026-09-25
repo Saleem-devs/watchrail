@@ -17,7 +17,11 @@ export {
   type PinnedHttpTransport,
 } from './undici-http-transport.js';
 
-export { InvalidHttpMethodError, InvalidHttpTimeoutError } from './errors.js';
+export {
+  InvalidHttpMethodError,
+  InvalidHttpStatusPolicyError,
+  InvalidHttpTimeoutError,
+} from './errors.js';
 
 export { HTTP_CHECK_TIMEOUT_LIMITS } from './types.js';
 
@@ -35,6 +39,7 @@ export type {
   HttpExecutor,
   HttpTargetFailure,
   HttpMethod,
+  HttpStatusPolicy,
   HttpPolicyRejection,
   HttpRedirectFailure,
 } from './types.js';

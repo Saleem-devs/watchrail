@@ -271,6 +271,30 @@ describe('NodeHttpExecutor', () => {
     });
   });
 
+  it('applies an exact status policy only to the final redirected response', async () => {
+    const request = vi
+      .fn<PinnedHttpTransport['request']>()
+      .mockResolvedValueOnce(response(302, '/expected'))
+      .mockResolvedValueOnce(response(404));
+    const result = await executeHttpCheck(
+      {
+        url: 'https://example.com/start',
+        method: 'GET',
+        timeoutMs: 10_000,
+        statusPolicy: { type: 'EXACT', statusCodes: [404] },
+      },
+      {
+        executor: new NodeHttpExecutor({
+          resolver: publicResolver(),
+          transport: { request },
+        }),
+        clock: createEngineClock(),
+      },
+    );
+
+    expect(result).toMatchObject({ outcome: 'PASS', statusCode: 404 });
+  });
+
   it.each([
     [null, 'MISSING_REDIRECT_LOCATION'],
     ['', 'INVALID_REDIRECT_LOCATION'],

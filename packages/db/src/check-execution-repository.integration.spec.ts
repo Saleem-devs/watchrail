@@ -65,6 +65,7 @@ describe('CheckExecutionRepository', () => {
         url: 'https://example.com/health',
         method: 'GET',
         timeoutMs: 10_000,
+        statusPolicy: { type: 'ANY_2XX' },
       },
     });
 
