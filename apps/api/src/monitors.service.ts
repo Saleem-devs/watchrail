@@ -10,11 +10,12 @@ import {
   MonitorNotFoundError,
   MonitorNotRunnableError,
   MonitorRepository,
+  MonitorUpdateNotFoundError,
   type CheckRoundRecord,
   type ManualRoundResult,
   type MonitorRecord,
 } from '@watchrail/db';
-import { createMonitor, MonitorInputError } from '@watchrail/domain';
+import { createMonitor, MonitorInputError, parseHttpStatusPolicy } from '@watchrail/domain';
 import type { CreateMonitorCommand } from '@watchrail/domain';
 import type { RequestContext } from './request-context.js';
 
@@ -43,6 +44,33 @@ export class MonitorsService {
 
   list(context: RequestContext): Promise<MonitorRecord[]> {
     return this.monitors.listForOrganization(context.organizationId);
+  }
+
+  async updateStatusPolicy(
+    context: RequestContext,
+    monitorId: string,
+    value: unknown,
+  ): Promise<MonitorRecord> {
+    try {
+      const statusPolicy = parseHttpStatusPolicy(value);
+      return await this.monitors.updateStatusPolicy(
+        context.organizationId,
+        monitorId,
+        statusPolicy,
+      );
+    } catch (error) {
+      if (error instanceof MonitorInputError) {
+        throw new BadRequestException({
+          code: 'VALIDATION_FAILED',
+          message: error.message,
+          fields: error.fields,
+        });
+      }
+      if (error instanceof MonitorUpdateNotFoundError) {
+        throw new NotFoundException({ code: 'MONITOR_NOT_FOUND', message: error.message });
+      }
+      throw error;
+    }
   }
 
   async runNow(context: RequestContext, monitorId: string): Promise<CheckRoundRecord> {

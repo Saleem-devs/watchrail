@@ -27,4 +27,25 @@ describe('createMonitor', () => {
       });
     }
   });
+
+  it('normalizes an exact status policy into a unique deterministic order', () => {
+    const monitor = createMonitor({
+      name: 'API',
+      url: 'https://example.com',
+      statusPolicy: { type: 'EXACT', statusCodes: [404, 200, 404, 204] },
+    });
+
+    expect(monitor.statusPolicy).toEqual({ type: 'EXACT', statusCodes: [200, 204, 404] });
+  });
+
+  it.each([
+    { type: 'EXACT', statusCodes: [] },
+    { type: 'EXACT', statusCodes: [99] },
+    { type: 'EXACT', statusCodes: [600] },
+    { type: 'EXACT', statusCodes: [200.5] },
+  ])('rejects invalid exact policy $statusCodes', (statusPolicy) => {
+    expect(() => createMonitor({ name: 'API', url: 'https://example.com', statusPolicy })).toThrow(
+      MonitorInputError,
+    );
+  });
 });

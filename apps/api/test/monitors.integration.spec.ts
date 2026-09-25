@@ -73,12 +73,68 @@ describe('monitor API', () => {
       method: 'GET',
       lifecycleState: 'ENABLED',
       timeoutMs: 10_000,
+      statusPolicy: { type: 'ANY_2XX' },
       locations: ['local'],
     });
 
     const listed = await request(app.getHttpServer()).get('/api/monitors').expect(200);
     expect(listed.body.data).toHaveLength(1);
     expect(listed.body.data[0].id).toBe(created.body.data.id);
+  });
+
+  it('normalizes and versions exact status-policy edits', async () => {
+    const created = await request(app.getHttpServer())
+      .post('/api/monitors')
+      .send({
+        name: 'Expected maintenance response',
+        url: 'https://example.com/health',
+        statusPolicy: { type: 'EXACT', statusCodes: [404, 200, 404] },
+      })
+      .expect(201);
+
+    expect(created.body.data.statusPolicy).toEqual({
+      type: 'EXACT',
+      statusCodes: [200, 404],
+    });
+
+    const monitorId = created.body.data.id as string;
+    const updated = await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/status-policy`)
+      .send({ statusPolicy: { type: 'EXACT', statusCodes: [204] } })
+      .expect(200);
+
+    expect(updated.body.data.statusPolicy).toEqual({ type: 'EXACT', statusCodes: [204] });
+
+    const versions = await database.$client.query<{
+      version_number: number;
+      status_policy: unknown;
+    }>(
+      `select version_number, status_policy
+       from monitor_configuration_versions
+       where monitor_id = $1
+       order by version_number`,
+      [monitorId],
+    );
+
+    expect(versions.rows).toEqual([
+      { version_number: 1, status_policy: { type: 'EXACT', statusCodes: [200, 404] } },
+      { version_number: 2, status_policy: { type: 'EXACT', statusCodes: [204] } },
+    ]);
+  });
+
+  it('rejects an invalid exact status policy', async () => {
+    const invalid = await request(app.getHttpServer())
+      .post('/api/monitors')
+      .send({
+        name: 'API',
+        url: 'https://example.com',
+        statusPolicy: { type: 'EXACT', statusCodes: [] },
+      })
+      .expect(400);
+
+    expect(invalid.body.fields.statusPolicy).toEqual([
+      'Enter one or more integer status codes from 100 to 599.',
+    ]);
   });
 
   it('returns field-level errors and does not create a partial record', async () => {

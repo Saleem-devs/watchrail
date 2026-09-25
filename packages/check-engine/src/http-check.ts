@@ -1,4 +1,8 @@
-import { InvalidHttpMethodError, InvalidHttpTimeoutError } from './errors.js';
+import {
+  InvalidHttpMethodError,
+  InvalidHttpStatusPolicyError,
+  InvalidHttpTimeoutError,
+} from './errors.js';
 import { HTTP_CHECK_TIMEOUT_LIMITS } from './types.js';
 import type {
   CheckClock,
@@ -23,6 +27,7 @@ export async function executeHttpCheck(
 ): Promise<HttpCheckResult> {
   assertSupportedMethod(input.method);
   assertValidTimeout(input.timeoutMs);
+  assertValidStatusPolicy(input.statusPolicy);
 
   const clock = dependencies.clock ?? defaultClock;
 
@@ -53,6 +58,7 @@ export async function executeHttpCheck(
 
     return classifyHttpExecution({
       execution,
+      statusPolicy: input.statusPolicy ?? { type: 'ANY_2XX' },
       checkedAt,
       attemptDurationMs: elapsed(clock, startedAt),
     });
@@ -89,10 +95,11 @@ export async function executeHttpCheck(
 
 function classifyHttpExecution(input: {
   execution: HttpExecutionResult;
+  statusPolicy: NonNullable<HttpCheckInput['statusPolicy']>;
   checkedAt: Date;
   attemptDurationMs: number;
 }): HttpCheckResult {
-  const { execution, checkedAt, attemptDurationMs } = input;
+  const { execution, statusPolicy, checkedAt, attemptDurationMs } = input;
 
   if (execution.type === 'POLICY_REJECTION') {
     return {
@@ -126,7 +133,7 @@ function classifyHttpExecution(input: {
     });
   }
 
-  const successful = execution.statusCode >= 200 && execution.statusCode <= 299;
+  const successful = statusMatches(statusPolicy, execution.statusCode);
 
   if (successful) {
     return {
@@ -149,6 +156,15 @@ function classifyHttpExecution(input: {
     attemptDurationMs,
     checkedAt,
   };
+}
+
+function statusMatches(
+  policy: NonNullable<HttpCheckInput['statusPolicy']>,
+  statusCode: number,
+): boolean {
+  return policy.type === 'ANY_2XX'
+    ? statusCode >= 200 && statusCode <= 299
+    : policy.statusCodes.includes(statusCode);
 }
 
 function classifyTargetFailure(input: {
@@ -191,6 +207,18 @@ function assertValidTimeout(timeoutMs: unknown): asserts timeoutMs is number {
     timeoutMs > maxMs
   ) {
     throw new InvalidHttpTimeoutError(timeoutMs);
+  }
+}
+
+function assertValidStatusPolicy(policy: HttpCheckInput['statusPolicy']): void {
+  if (policy === undefined || policy.type === 'ANY_2XX') return;
+
+  if (
+    policy.type !== 'EXACT' ||
+    policy.statusCodes.length === 0 ||
+    policy.statusCodes.some((code) => !Number.isInteger(code) || code < 100 || code > 599)
+  ) {
+    throw new InvalidHttpStatusPolicyError();
   }
 }
 

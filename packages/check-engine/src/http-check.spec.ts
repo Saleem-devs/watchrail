@@ -161,6 +161,29 @@ describe('executeHttpCheck', () => {
     });
   });
 
+  it.each([
+    [200, 'PASS'],
+    [404, 'PASS'],
+    [204, 'FAIL'],
+  ] as const)('evaluates final status %i against an exact policy', async (statusCode, outcome) => {
+    const executor: HttpExecutor = {
+      execute: () => Promise.resolve({ type: 'RESPONSE', statusCode, responseTimeMs: 25 }),
+    };
+
+    const result = await executeHttpCheck(
+      {
+        url: 'https://example.com',
+        method: 'GET',
+        timeoutMs: 10_000,
+        statusPolicy: { type: 'EXACT', statusCodes: [200, 404] },
+      },
+      { executor, clock: createClock() },
+    );
+
+    expect(result.outcome).toBe(outcome);
+    expect(result.statusCode).toBe(statusCode);
+  });
+
   it.each([199, 300])('rejects %i as a non-2xx response', async (statusCode) => {
     const executor: HttpExecutor = {
       execute: () =>

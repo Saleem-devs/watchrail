@@ -4,22 +4,26 @@ export const MONITOR_LOCATIONS = ['local'] as const;
 
 export type HttpMethod = (typeof HTTP_METHODS)[number];
 export type MonitorLifecycleState = (typeof MONITOR_LIFECYCLE_STATES)[number];
+export type HttpStatusPolicy = { type: 'ANY_2XX' } | { type: 'EXACT'; statusCodes: number[] };
 
 export const MONITOR_DEFAULTS = {
   method: 'GET',
   lifecycleState: 'ENABLED',
   timeoutMs: 10_000,
+  statusPolicy: { type: 'ANY_2XX' } as const,
   locations: [...MONITOR_LOCATIONS],
 } as const satisfies {
   method: HttpMethod;
   lifecycleState: MonitorLifecycleState;
   timeoutMs: number;
+  statusPolicy: HttpStatusPolicy;
   locations: readonly string[];
 };
 
 export interface CreateMonitorCommand {
   name: unknown;
   url: unknown;
+  statusPolicy?: unknown;
 }
 
 export interface NewMonitor {
@@ -28,12 +32,14 @@ export interface NewMonitor {
   method: HttpMethod;
   lifecycleState: MonitorLifecycleState;
   timeoutMs: number;
+  statusPolicy: HttpStatusPolicy;
   locations: string[];
 }
 
 export interface MonitorFieldErrors {
   name?: string[];
   url?: string[];
+  statusPolicy?: string[];
 }
 
 export class MonitorInputError extends Error {
@@ -50,6 +56,7 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
   const fields: MonitorFieldErrors = {};
   const name = normalizeName(command.name, fields);
   const url = normalizeUrl(command.url, fields);
+  const statusPolicy = normalizeStatusPolicy(command.statusPolicy, fields);
 
   if (Object.keys(fields).length > 0) throw new MonitorInputError(fields);
 
@@ -59,7 +66,47 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
     method: MONITOR_DEFAULTS.method,
     lifecycleState: MONITOR_DEFAULTS.lifecycleState,
     timeoutMs: MONITOR_DEFAULTS.timeoutMs,
+    statusPolicy,
     locations: [...MONITOR_DEFAULTS.locations],
+  };
+}
+
+export function parseHttpStatusPolicy(value: unknown): HttpStatusPolicy {
+  const fields: MonitorFieldErrors = {};
+  const policy = normalizeStatusPolicy(value, fields);
+  if (fields.statusPolicy) throw new MonitorInputError(fields);
+  return policy;
+}
+
+function normalizeStatusPolicy(value: unknown, fields: MonitorFieldErrors): HttpStatusPolicy {
+  if (value === undefined) return { type: 'ANY_2XX' };
+
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    fields.statusPolicy = ['Choose a valid expected-status policy.'];
+    return { type: 'ANY_2XX' };
+  }
+
+  const policy = value as Record<string, unknown>;
+  if (policy.type === 'ANY_2XX') return { type: 'ANY_2XX' };
+
+  if (policy.type !== 'EXACT' || !Array.isArray(policy.statusCodes)) {
+    fields.statusPolicy = ['Choose any 2xx response or provide specific status codes.'];
+    return { type: 'ANY_2XX' };
+  }
+
+  if (
+    policy.statusCodes.length === 0 ||
+    policy.statusCodes.some(
+      (code) => !Number.isInteger(code) || (code as number) < 100 || (code as number) > 599,
+    )
+  ) {
+    fields.statusPolicy = ['Enter one or more integer status codes from 100 to 599.'];
+    return { type: 'ANY_2XX' };
+  }
+
+  return {
+    type: 'EXACT',
+    statusCodes: [...new Set(policy.statusCodes as number[])].sort((left, right) => left - right),
   };
 }
 

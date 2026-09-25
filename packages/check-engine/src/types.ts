@@ -4,11 +4,14 @@ export const HTTP_CHECK_TIMEOUT_LIMITS = {
 } as const;
 
 export type HttpMethod = 'GET' | 'HEAD';
+export type HttpStatusPolicy =
+  { type: 'ANY_2XX' } | { type: 'EXACT'; statusCodes: readonly number[] };
 
 export interface HttpCheckInput {
   url: string;
   method: HttpMethod;
   timeoutMs: number;
+  statusPolicy?: HttpStatusPolicy;
 }
 
 interface HttpCheckTiming {

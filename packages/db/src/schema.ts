@@ -21,6 +21,7 @@ import {
   EXECUTION_ASSIGNMENT_STATUSES,
   HTTP_METHODS,
   MONITOR_LIFECYCLE_STATES,
+  type HttpStatusPolicy,
 } from '@watchrail/domain';
 
 export const httpMethodEnum = pgEnum('http_method', HTTP_METHODS);
@@ -77,6 +78,10 @@ export const monitors = pgTable(
     method: httpMethodEnum('method').notNull().default('GET'),
     lifecycleState: monitorLifecycleEnum('lifecycle_state').notNull().default('ENABLED'),
     timeoutMs: integer('timeout_ms').notNull().default(10_000),
+    statusPolicy: jsonb('status_policy')
+      .$type<HttpStatusPolicy>()
+      .notNull()
+      .default({ type: 'ANY_2XX' }),
     locations: jsonb('locations').$type<string[]>().notNull().default(['local']),
 
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -93,6 +98,25 @@ export const monitors = pgTable(
     check('monitors_url_length', sql`length(${table.url}) <= 2048`),
 
     check('monitors_timeout_range', sql`${table.timeoutMs} between 1000 and 30000`),
+
+    check(
+      'monitors_status_policy_shape',
+      sql`
+        jsonb_typeof(${table.statusPolicy}) = 'object'
+        and ${table.statusPolicy}->>'type' in ('ANY_2XX', 'EXACT')
+        and (
+          ${table.statusPolicy}->>'type' = 'ANY_2XX'
+          or (
+            jsonb_typeof(${table.statusPolicy}->'statusCodes') = 'array'
+            and jsonb_array_length(${table.statusPolicy}->'statusCodes') > 0
+            and not jsonb_path_exists(
+              ${table.statusPolicy},
+              '$.statusCodes[*] ? (@.type() != "number" || @ != @.floor() || @ < 100 || @ > 599)'
+            )
+          )
+        )
+      `,
+    ),
 
     check(
       'monitors_locations_non_empty',
@@ -114,6 +138,10 @@ export const monitorConfigurationVersions = pgTable(
     url: text('url').notNull(),
     method: httpMethodEnum('method').notNull(),
     timeoutMs: integer('timeout_ms').notNull(),
+    statusPolicy: jsonb('status_policy')
+      .$type<HttpStatusPolicy>()
+      .notNull()
+      .default({ type: 'ANY_2XX' }),
 
     locations: jsonb('locations').$type<string[]>().notNull(),
 
@@ -152,6 +180,25 @@ export const monitorConfigurationVersions = pgTable(
     check(
       'monitor_configuration_versions_timeout_range',
       sql`${table.timeoutMs} between 1000 and 30000`,
+    ),
+
+    check(
+      'monitor_configuration_versions_status_policy_shape',
+      sql`
+        jsonb_typeof(${table.statusPolicy}) = 'object'
+        and ${table.statusPolicy}->>'type' in ('ANY_2XX', 'EXACT')
+        and (
+          ${table.statusPolicy}->>'type' = 'ANY_2XX'
+          or (
+            jsonb_typeof(${table.statusPolicy}->'statusCodes') = 'array'
+            and jsonb_array_length(${table.statusPolicy}->'statusCodes') > 0
+            and not jsonb_path_exists(
+              ${table.statusPolicy},
+              '$.statusCodes[*] ? (@.type() != "number" || @ != @.floor() || @ < 100 || @ > 599)'
+            )
+          )
+        )
+      `,
     ),
 
     check(

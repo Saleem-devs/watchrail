@@ -20,6 +20,7 @@ describe('Dashboard', () => {
               method: 'GET',
               lifecycleState: 'ENABLED',
               timeoutMs: 10_000,
+              statusPolicy: { type: 'ANY_2XX' },
               locations: ['local'],
               createdAt: new Date().toISOString(),
             },
@@ -74,6 +75,7 @@ describe('Dashboard', () => {
       method: 'GET',
       lifecycleState: 'ENABLED',
       timeoutMs: 10_000,
+      statusPolicy: { type: 'ANY_2XX' },
       locations: ['local'],
       createdAt: new Date().toISOString(),
     };
@@ -132,6 +134,48 @@ describe('Dashboard', () => {
       3,
       '/api/monitors/monitor-1/check-rounds/round-1',
       expect.objectContaining({ headers: { Accept: 'application/json' } }),
+    );
+  });
+
+  it('updates a monitor to an exact status policy', async () => {
+    const monitor = {
+      id: 'monitor-1',
+      name: 'Maintenance endpoint',
+      url: 'https://example.com/health',
+      method: 'GET',
+      lifecycleState: 'ENABLED',
+      timeoutMs: 10_000,
+      statusPolicy: { type: 'ANY_2XX' },
+      locations: ['local'],
+      createdAt: new Date().toISOString(),
+    };
+    const updated = {
+      ...monitor,
+      statusPolicy: { type: 'EXACT', statusCodes: [404] },
+    };
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [monitor] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: updated }), { status: 200 }));
+
+    render(<Dashboard />);
+    await screen.findByRole('heading', { name: monitor.name });
+
+    await userEvent.selectOptions(
+      screen.getByRole('combobox', { name: 'Expected status' }),
+      'EXACT',
+    );
+    const codes = screen.getByLabelText(`Specific status codes for ${monitor.name}`);
+    await userEvent.type(codes, '404');
+    await userEvent.click(screen.getByRole('button', { name: 'Save policy' }));
+
+    expect(await screen.findByText('status 404')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      '/api/monitors/monitor-1/status-policy',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ statusPolicy: { type: 'EXACT', statusCodes: [404] } }),
+      }),
     );
   });
 });

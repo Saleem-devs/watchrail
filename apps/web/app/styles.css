@@ -39,7 +39,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -51,6 +52,11 @@ a {
 button:focus-visible,
 a:focus-visible,
 input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+select:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
@@ -481,6 +487,36 @@ form {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
+}
+
+.status-policy-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 0;
+}
+
+.status-policy-form label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.status-policy-form select,
+.status-policy-form input {
+  min-height: 34px;
+  border: 1px solid #344247;
+  border-radius: 4px;
+  color: var(--text);
+  background: #091012;
+}
+
+.status-policy-form input {
+  width: 130px;
+  padding: 0 9px;
 }
 
 .diagnostic-empty,

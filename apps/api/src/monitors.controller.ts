@@ -1,6 +1,7 @@
-import { Body, Controller, Get, HttpCode, Inject, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post, Req } from '@nestjs/common';
 import type { CheckRoundRecord, ManualRoundResult, MonitorRecord } from '@watchrail/db';
 import type { CreateMonitorCommand } from '@watchrail/domain';
+import type { HttpStatusPolicy } from '@watchrail/domain';
 import { MonitorsService } from './monitors.service.js';
 import type { RequestWithContext } from './request-context.js';
 
@@ -11,6 +12,7 @@ interface MonitorResponse {
   method: string;
   lifecycleState: string;
   timeoutMs: number;
+  statusPolicy: HttpStatusPolicy;
   locations: string[];
   createdAt: string;
   updatedAt: string;
@@ -52,6 +54,20 @@ export class MonitorsController {
     return { data: monitors.map(toResponse) };
   }
 
+  @Patch(':monitorId/status-policy')
+  async updateStatusPolicy(
+    @Req() request: RequestWithContext,
+    @Param('monitorId') monitorId: string,
+    @Body() body: { statusPolicy?: unknown },
+  ): Promise<{ data: MonitorResponse }> {
+    const monitor = await this.monitors.updateStatusPolicy(
+      request.watchrailContext,
+      monitorId,
+      body.statusPolicy,
+    );
+    return { data: toResponse(monitor) };
+  }
+
   @Post(':monitorId/check-rounds')
   @HttpCode(202)
   async runNow(
@@ -81,6 +97,7 @@ function toResponse(monitor: MonitorRecord): MonitorResponse {
     method: monitor.method,
     lifecycleState: monitor.lifecycleState,
     timeoutMs: monitor.timeoutMs,
+    statusPolicy: monitor.statusPolicy,
     locations: monitor.locations,
     createdAt: monitor.createdAt.toISOString(),
     updatedAt: monitor.updatedAt.toISOString(),

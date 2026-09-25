@@ -43,6 +43,13 @@
       "when": 1790332312093,
       "tag": "0005_spicy_shaman",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790339710156,
+      "tag": "0006_opposite_shockwave",
+      "breakpoints": true
     }
   ]
 }
