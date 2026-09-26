@@ -92,7 +92,7 @@ describe('NodeHttpExecutor', () => {
       transport: transportReturning(response(503)),
     });
     const result = await executeHttpCheck(
-      { url: 'https://example.com', method: 'GET', timeoutMs: 10_000 },
+      { url: 'https://example.com', method: 'GET', followRedirects: true, timeoutMs: 10_000 },
       { executor, clock: createEngineClock() },
     );
 
@@ -127,7 +127,7 @@ describe('NodeHttpExecutor', () => {
         monotonicNow: () => Date.now(),
       });
       const resultPromise = executeHttpCheck(
-        { url: 'https://example.com', method: 'GET', timeoutMs: 1_000 },
+        { url: 'https://example.com', method: 'GET', followRedirects: true, timeoutMs: 1_000 },
         { executor, clock: createEngineClock() },
       );
 
@@ -149,7 +149,7 @@ describe('NodeHttpExecutor', () => {
       lookup: vi.fn(() => Promise.reject(networkFailure('ENOTFOUND'))),
     };
     const result = await executeHttpCheck(
-      { url: 'https://missing.example', method: 'GET', timeoutMs: 10_000 },
+      { url: 'https://missing.example', method: 'GET', followRedirects: true, timeoutMs: 10_000 },
       { executor: new NodeHttpExecutor({ resolver }), clock: createEngineClock() },
     );
 
@@ -161,7 +161,7 @@ describe('NodeHttpExecutor', () => {
       lookup: vi.fn(() => Promise.resolve([{ address: '127.0.0.1', family: 4 }] as const)),
     };
     const result = await executeHttpCheck(
-      { url: 'https://internal.example', method: 'GET', timeoutMs: 10_000 },
+      { url: 'https://internal.example', method: 'GET', followRedirects: true, timeoutMs: 10_000 },
       { executor: new NodeHttpExecutor({ resolver }), clock: createEngineClock() },
     );
 
@@ -180,7 +180,7 @@ describe('NodeHttpExecutor', () => {
       request: vi.fn(() => Promise.reject(networkFailure(code))),
     };
     const result = await executeHttpCheck(
-      { url: 'https://example.com', method: 'GET', timeoutMs: 10_000 },
+      { url: 'https://example.com', method: 'GET', followRedirects: true, timeoutMs: 10_000 },
       {
         executor: new NodeHttpExecutor({ resolver: publicResolver(), transport }),
         clock: createEngineClock(),
@@ -195,7 +195,7 @@ describe('NodeHttpExecutor', () => {
       request: vi.fn(() => Promise.reject(new Error('unexpected executor failure'))),
     };
     const result = await executeHttpCheck(
-      { url: 'https://example.com', method: 'GET', timeoutMs: 10_000 },
+      { url: 'https://example.com', method: 'GET', followRedirects: true, timeoutMs: 10_000 },
       {
         executor: new NodeHttpExecutor({ resolver: publicResolver(), transport }),
         clock: createEngineClock(),
@@ -216,7 +216,7 @@ describe('NodeHttpExecutor', () => {
       .mockResolvedValueOnce(response(200));
     const transport: PinnedHttpTransport = { request };
     const result = await executeHttpCheck(
-      { url: 'https://example.com', method: 'GET', timeoutMs: 10_000 },
+      { url: 'https://example.com', method: 'GET', followRedirects: true, timeoutMs: 10_000 },
       {
         executor: new NodeHttpExecutor({ resolver: publicResolver(), transport }),
         clock: createEngineClock(),
@@ -241,6 +241,65 @@ describe('NodeHttpExecutor', () => {
     });
   });
 
+  it.each([
+    [{ type: 'ANY_2XX' } as const, 'FAIL', 'UNEXPECTED_STATUS'],
+    [{ type: 'EXACT', statusCodes: [302] } as const, 'PASS', 'COMPLETED'],
+  ] as const)(
+    'treats a redirect as final when following is disabled for %o',
+    async (statusPolicy, outcome, reason) => {
+      const resolver = publicResolver();
+      const request = vi
+        .fn<PinnedHttpTransport['request']>()
+        .mockResolvedValueOnce(response(302, '/final'));
+
+      const result = await executeHttpCheck(
+        {
+          url: 'https://example.com/start',
+          method: 'GET',
+          timeoutMs: 10_000,
+          followRedirects: false,
+          statusPolicy,
+        },
+        {
+          executor: new NodeHttpExecutor({ resolver, transport: { request } }),
+          clock: createEngineClock(),
+        },
+      );
+
+      expect(result).toMatchObject({ outcome, reason, statusCode: 302, redirects: [] });
+      expect(resolver.lookup).toHaveBeenCalledOnce();
+      expect(request).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each([null, 'http://[invalid', 'http://127.0.0.1/private', 'http://example.com/insecure'])(
+    'does not inspect redirect Location %s when following is disabled',
+    async (location) => {
+      const resolver = publicResolver();
+      const request = vi
+        .fn<PinnedHttpTransport['request']>()
+        .mockResolvedValueOnce(response(302, location));
+
+      const result = await executeHttpCheck(
+        {
+          url: 'https://example.com/start',
+          method: 'GET',
+          timeoutMs: 10_000,
+          followRedirects: false,
+          statusPolicy: { type: 'EXACT', statusCodes: [302] },
+        },
+        {
+          executor: new NodeHttpExecutor({ resolver, transport: { request } }),
+          clock: createEngineClock(),
+        },
+      );
+
+      expect(result).toMatchObject({ outcome: 'PASS', statusCode: 302, redirects: [] });
+      expect(resolver.lookup).toHaveBeenCalledOnce();
+      expect(request).toHaveBeenCalledOnce();
+    },
+  );
+
   it('preserves HEAD across every redirect hop', async () => {
     const request = vi
       .fn<PinnedHttpTransport['request']>()
@@ -248,7 +307,12 @@ describe('NodeHttpExecutor', () => {
       .mockResolvedValueOnce(response(204));
 
     const result = await executeHttpCheck(
-      { url: 'https://example.com/health', method: 'HEAD', timeoutMs: 10_000 },
+      {
+        url: 'https://example.com/health',
+        method: 'HEAD',
+        followRedirects: true,
+        timeoutMs: 10_000,
+      },
       {
         executor: new NodeHttpExecutor({
           resolver: publicResolver(),
@@ -315,6 +379,7 @@ describe('NodeHttpExecutor', () => {
       {
         url: 'https://example.com/start',
         method: 'GET',
+        followRedirects: true,
         timeoutMs: 10_000,
         requestHeaders: [{ name: 'authorization', value: 'Bearer secret' }],
       },
@@ -346,7 +411,7 @@ describe('NodeHttpExecutor', () => {
       .mockResolvedValueOnce(response(307, 'https://status.example/final'))
       .mockResolvedValueOnce(response(503));
     const result = await executeHttpCheck(
-      { url: 'https://example.com/start', method: 'GET', timeoutMs: 10_000 },
+      { url: 'https://example.com/start', method: 'GET', followRedirects: true, timeoutMs: 10_000 },
       {
         executor: new NodeHttpExecutor({
           resolver: publicResolver(),
@@ -372,6 +437,7 @@ describe('NodeHttpExecutor', () => {
       {
         url: 'https://example.com/start',
         method: 'GET',
+        followRedirects: true,
         timeoutMs: 10_000,
         statusPolicy: { type: 'EXACT', statusCodes: [404] },
       },
@@ -395,7 +461,7 @@ describe('NodeHttpExecutor', () => {
     ['http://[invalid', 'INVALID_REDIRECT_LOCATION'],
   ] as const)('classifies redirect location %s as %s', async (location, reason) => {
     const result = await executeHttpCheck(
-      { url: 'https://example.com', method: 'GET', timeoutMs: 10_000 },
+      { url: 'https://example.com', method: 'GET', followRedirects: true, timeoutMs: 10_000 },
       {
         executor: new NodeHttpExecutor({
           resolver: publicResolver(),
@@ -418,7 +484,7 @@ describe('NodeHttpExecutor', () => {
       .mockResolvedValueOnce(response(302, '/other'))
       .mockResolvedValueOnce(response(302, '/'));
     const result = await executeHttpCheck(
-      { url: 'https://example.com/', method: 'GET', timeoutMs: 10_000 },
+      { url: 'https://example.com/', method: 'GET', followRedirects: true, timeoutMs: 10_000 },
       {
         executor: new NodeHttpExecutor({ resolver, transport: { request } }),
         clock: createEngineClock(),
@@ -449,7 +515,7 @@ describe('NodeHttpExecutor', () => {
       request.mockResolvedValueOnce(response(302, `/hop-${hop}`));
     }
     const result = await executeHttpCheck(
-      { url: 'https://example.com/start', method: 'GET', timeoutMs: 10_000 },
+      { url: 'https://example.com/start', method: 'GET', followRedirects: true, timeoutMs: 10_000 },
       {
         executor: new NodeHttpExecutor({
           resolver: publicResolver(),
@@ -480,7 +546,7 @@ describe('NodeHttpExecutor', () => {
     request.mockResolvedValueOnce(response(200));
 
     const result = await executeHttpCheck(
-      { url: 'https://example.com/start', method: 'GET', timeoutMs: 10_000 },
+      { url: 'https://example.com/start', method: 'GET', followRedirects: true, timeoutMs: 10_000 },
       {
         executor: new NodeHttpExecutor({
           resolver: publicResolver(),
@@ -512,7 +578,12 @@ describe('NodeHttpExecutor', () => {
             }),
         );
       const resultPromise = executeHttpCheck(
-        { url: 'https://example.com/start', method: 'GET', timeoutMs: 1_000 },
+        {
+          url: 'https://example.com/start',
+          method: 'GET',
+          followRedirects: true,
+          timeoutMs: 1_000,
+        },
         {
           executor: new NodeHttpExecutor({
             resolver: publicResolver(),
@@ -555,7 +626,7 @@ describe('NodeHttpExecutor', () => {
       .fn<PinnedHttpTransport['request']>()
       .mockResolvedValueOnce(response(302, 'https://internal.example/admin'));
     const result = await executeHttpCheck(
-      { url: 'https://public.example', method: 'GET', timeoutMs: 10_000 },
+      { url: 'https://public.example', method: 'GET', followRedirects: true, timeoutMs: 10_000 },
       {
         executor: new NodeHttpExecutor({ resolver: { lookup }, transport: { request } }),
         clock: createEngineClock(),
@@ -712,7 +783,7 @@ describe('NodeHttpExecutor', () => {
       ),
     });
     const result = await executeHttpCheck(
-      { url: 'https://example.com', method: 'GET', timeoutMs: 10_000 },
+      { url: 'https://example.com', method: 'GET', followRedirects: true, timeoutMs: 10_000 },
       { executor, clock: createEngineClock() },
     );
 

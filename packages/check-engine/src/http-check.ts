@@ -53,6 +53,7 @@ export async function executeHttpCheck(
       url: input.url,
       method: input.method,
       signal: controller.signal,
+      followRedirects: input.followRedirects,
       requestHeaders: input.requestHeaders ?? [],
       onEvidence: (evidence) => {
         redirects = [...evidence.redirects];

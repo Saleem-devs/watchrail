@@ -20,6 +20,7 @@ describe('Dashboard', () => {
               method: 'GET',
               lifecycleState: 'ENABLED',
               timeoutMs: 10_000,
+              followRedirects: true,
               statusPolicy: { type: 'ANY_2XX' },
               locations: ['local'],
               createdAt: new Date().toISOString(),
@@ -75,6 +76,7 @@ describe('Dashboard', () => {
       method: 'GET',
       lifecycleState: 'ENABLED',
       timeoutMs: 10_000,
+      followRedirects: true,
       statusPolicy: { type: 'ANY_2XX' },
       locations: ['local'],
       createdAt: new Date().toISOString(),
@@ -161,6 +163,7 @@ describe('Dashboard', () => {
       method: 'GET',
       lifecycleState: 'ENABLED',
       timeoutMs: 10_000,
+      followRedirects: true,
       statusPolicy: { type: 'ANY_2XX' },
       locations: ['local'],
       createdAt: new Date().toISOString(),
@@ -191,6 +194,59 @@ describe('Dashboard', () => {
       expect.objectContaining({
         method: 'PATCH',
         body: JSON.stringify({ statusPolicy: { type: 'EXACT', statusCodes: [404] } }),
+      }),
+    );
+  });
+
+  it('updates the complete HTTP settings object', async () => {
+    const monitor = {
+      id: 'monitor-1',
+      name: 'Production API',
+      url: 'https://old.example.com/health',
+      method: 'GET',
+      lifecycleState: 'ENABLED',
+      timeoutMs: 10_000,
+      followRedirects: true,
+      statusPolicy: { type: 'ANY_2XX' },
+      locations: ['local'],
+      createdAt: new Date().toISOString(),
+    };
+    const updated = {
+      ...monitor,
+      url: 'https://new.example.com/ready',
+      method: 'HEAD',
+      timeoutMs: 5_000,
+      followRedirects: false,
+    };
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [monitor] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: updated }), { status: 200 }));
+
+    render(<Dashboard />);
+    await screen.findByRole('heading', { name: monitor.name });
+
+    const url = screen.getByRole('textbox', { name: 'URL' });
+    await userEvent.clear(url);
+    await userEvent.type(url, updated.url);
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Method' }), 'HEAD');
+    const timeout = screen.getByRole('spinbutton', { name: 'Timeout (seconds)' });
+    await userEvent.clear(timeout);
+    await userEvent.type(timeout, '5');
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Follow redirects' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save HTTP settings' }));
+
+    expect(await screen.findByText('redirects final')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      '/api/monitors/monitor-1/http-settings',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({
+          url: updated.url,
+          method: 'HEAD',
+          timeoutMs: 5_000,
+          followRedirects: false,
+        }),
       }),
     );
   });

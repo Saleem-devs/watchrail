@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   check,
+  boolean,
   foreignKey,
   doublePrecision,
   index,
@@ -81,6 +82,7 @@ export const monitors = pgTable(
     method: httpMethodEnum('method').notNull().default('GET'),
     lifecycleState: monitorLifecycleEnum('lifecycle_state').notNull().default('ENABLED'),
     timeoutMs: integer('timeout_ms').notNull().default(10_000),
+    followRedirects: boolean('follow_redirects').notNull().default(true),
     statusPolicy: jsonb('status_policy')
       .$type<HttpStatusPolicy>()
       .notNull()
@@ -143,6 +145,7 @@ export const monitorConfigurationVersions = pgTable(
     url: text('url').notNull(),
     method: httpMethodEnum('method').notNull(),
     timeoutMs: integer('timeout_ms').notNull(),
+    followRedirects: boolean('follow_redirects').notNull().default(true),
     statusPolicy: jsonb('status_policy')
       .$type<HttpStatusPolicy>()
       .notNull()
