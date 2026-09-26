@@ -254,13 +254,17 @@ function classifyFetchFailure(error: unknown, tlsAttempted: boolean): HttpTarget
         reason: 'CONNECTION_REFUSED',
         redirects: [],
       };
+    default:
+      return classifyTlsFailure(code, tlsAttempted);
+  }
+}
+
+function classifyTlsFailure(code: string | null, tlsAttempted: boolean): HttpTargetFailure | null {
+  if (!tlsAttempted) return null;
+
+  switch (code) {
     case 'CERT_HAS_EXPIRED':
-      return {
-        type: 'TARGET_FAILURE',
-        stage: 'TLS',
-        reason: 'CERTIFICATE_EXPIRED',
-        redirects: [],
-      };
+      return tlsFailure('CERTIFICATE_EXPIRED');
     case 'CERT_NOT_YET_VALID':
       return tlsFailure('CERTIFICATE_NOT_YET_VALID');
     case 'ERR_TLS_CERT_ALTNAME_INVALID':
@@ -271,9 +275,19 @@ function classifyFetchFailure(error: unknown, tlsAttempted: boolean): HttpTarget
     case 'UNABLE_TO_GET_ISSUER_CERT':
     case 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY':
     case 'CERT_UNTRUSTED':
+    case 'CERT_REVOKED':
+    case 'CERT_CHAIN_TOO_LONG':
+    case 'INVALID_CA':
+    case 'PATH_LENGTH_EXCEEDED':
+    case 'INVALID_PURPOSE':
+    case 'CERT_REJECTED':
       return tlsFailure('CERTIFICATE_UNTRUSTED');
+    case 'EPROTO':
+    case 'ERR_TLS_DH_PARAM_SIZE':
+    case 'ERR_TLS_HANDSHAKE_TIMEOUT':
+      return tlsFailure('TLS_HANDSHAKE_FAILED');
     default:
-      return tlsAttempted && isTlsHandshakeCode(code) ? tlsFailure('TLS_HANDSHAKE_FAILED') : null;
+      return code?.startsWith('ERR_SSL_') === true ? tlsFailure('TLS_HANDSHAKE_FAILED') : null;
   }
 }
 
@@ -281,14 +295,6 @@ function tlsFailure(
   reason: Extract<HttpTargetFailure, { stage: 'TLS' }>['reason'],
 ): HttpTargetFailure {
   return { type: 'TARGET_FAILURE', stage: 'TLS', reason, redirects: [] };
-}
-
-function isTlsHandshakeCode(code: string | null): boolean {
-  return (
-    code === 'EPROTO' ||
-    code?.startsWith('ERR_SSL_') === true ||
-    code?.startsWith('ERR_TLS_') === true
-  );
 }
 
 function findErrorCode(error: unknown): string | null {

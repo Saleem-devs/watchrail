@@ -18,6 +18,14 @@ const TEST_PRIVATE_KEY = readFileSync(
   new URL('./test-support/fixtures/original-example.key.pem', import.meta.url),
   'utf8',
 );
+const EXPIRED_TEST_CERTIFICATE = readFileSync(
+  new URL('./test-support/fixtures/original-example.expired.cert.pem', import.meta.url),
+  'utf8',
+);
+const FUTURE_TEST_CERTIFICATE = readFileSync(
+  new URL('./test-support/fixtures/original-example.future.cert.pem', import.meta.url),
+  'utf8',
+);
 const servers: HttpTestServer[] = [];
 
 afterEach(async () => {
@@ -77,6 +85,24 @@ describe('HTTPS transport conformance', () => {
     });
   });
 
+  it.each([
+    [EXPIRED_TEST_CERTIFICATE, 'CERTIFICATE_EXPIRED'],
+    [FUTURE_TEST_CERTIFICATE, 'CERTIFICATE_NOT_YET_VALID'],
+  ] as const)(
+    'classifies certificate validity dates through the real TLS stack',
+    async (cert, reason) => {
+      const server = await startTlsServer(cert);
+
+      const result = await checkHttpsTarget({
+        server,
+        hostname: 'original.example',
+        transport: new UndiciPinnedHttpTransport({ ca: cert }),
+      });
+
+      expect(result).toMatchObject({ outcome: 'FAIL', stage: 'TLS', reason, statusCode: null });
+    },
+  );
+
   it('classifies a recognizable TLS protocol failure as a failed handshake', async () => {
     const server = await startHttpTestServer((_request, response) => {
       response.writeHead(200).end();
@@ -98,9 +124,9 @@ describe('HTTPS transport conformance', () => {
   });
 });
 
-async function startTlsServer(): Promise<HttpTestServer> {
+async function startTlsServer(certificate = TEST_CERTIFICATE): Promise<HttpTestServer> {
   const server = await startHttpsTestServer(
-    { cert: TEST_CERTIFICATE, key: TEST_PRIVATE_KEY },
+    { cert: certificate, key: TEST_PRIVATE_KEY },
     (_request, response) => {
       response.writeHead(200).end();
     },

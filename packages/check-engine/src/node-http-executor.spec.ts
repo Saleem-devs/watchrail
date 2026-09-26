@@ -181,8 +181,11 @@ describe('NodeHttpExecutor', () => {
     ['SELF_SIGNED_CERT_IN_CHAIN', 'TLS', 'CERTIFICATE_UNTRUSTED'],
     ['UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'TLS', 'CERTIFICATE_UNTRUSTED'],
     ['UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'TLS', 'CERTIFICATE_UNTRUSTED'],
+    ['CERT_REVOKED', 'TLS', 'CERTIFICATE_UNTRUSTED'],
+    ['INVALID_CA', 'TLS', 'CERTIFICATE_UNTRUSTED'],
     ['ERR_SSL_SSLV3_ALERT_HANDSHAKE_FAILURE', 'TLS', 'TLS_HANDSHAKE_FAILED'],
     ['EPROTO', 'TLS', 'TLS_HANDSHAKE_FAILED'],
+    ['ERR_TLS_HANDSHAKE_TIMEOUT', 'TLS', 'TLS_HANDSHAKE_FAILED'],
   ] as const)('classifies %s network failure', async (code, stage, reason) => {
     const transport: PinnedHttpTransport = {
       request: vi.fn(() => Promise.reject(networkFailure(code))),
@@ -204,6 +207,48 @@ describe('NodeHttpExecutor', () => {
     };
     const result = await executeHttpCheck(
       { url: 'http://example.com', method: 'GET', followRedirects: true, timeoutMs: 10_000 },
+      {
+        executor: new NodeHttpExecutor({ resolver: publicResolver(), transport }),
+        clock: createEngineClock(),
+      },
+    );
+
+    expect(result).toMatchObject({ outcome: 'UNKNOWN', stage: 'PROBE', reason: 'INTERNAL_ERROR' });
+  });
+
+  it.each([
+    'CERT_HAS_EXPIRED',
+    'CERT_NOT_YET_VALID',
+    'ERR_TLS_CERT_ALTNAME_INVALID',
+    'DEPTH_ZERO_SELF_SIGNED_CERT',
+  ])('does not classify %s as TLS evidence for a plain HTTP request', async (code) => {
+    const transport: PinnedHttpTransport = {
+      request: vi.fn(() => Promise.reject(networkFailure(code))),
+    };
+    const result = await executeHttpCheck(
+      { url: 'http://example.com', method: 'GET', followRedirects: true, timeoutMs: 10_000 },
+      {
+        executor: new NodeHttpExecutor({ resolver: publicResolver(), transport }),
+        clock: createEngineClock(),
+      },
+    );
+
+    expect(result).toMatchObject({ outcome: 'UNKNOWN', stage: 'PROBE', reason: 'INTERNAL_ERROR' });
+  });
+
+  it.each([
+    'ERR_TLS_INVALID_CONTEXT',
+    'ERR_TLS_INVALID_PROTOCOL_METHOD',
+    'ERR_TLS_INVALID_PROTOCOL_VERSION',
+    'ERR_TLS_INVALID_STATE',
+    'ERR_TLS_PROTOCOL_VERSION_CONFLICT',
+    'ERR_TLS_REQUIRED_SERVER_NAME',
+  ])('keeps local TLS error %s as a probe malfunction', async (code) => {
+    const transport: PinnedHttpTransport = {
+      request: vi.fn(() => Promise.reject(networkFailure(code))),
+    };
+    const result = await executeHttpCheck(
+      { url: 'https://example.com', method: 'GET', followRedirects: true, timeoutMs: 10_000 },
       {
         executor: new NodeHttpExecutor({ resolver: publicResolver(), transport }),
         clock: createEngineClock(),

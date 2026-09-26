@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { executeHttpCheck } from './http-check.js';
+import { NodeHttpExecutor } from './node-http-executor.js';
+import type { DnsResolver } from './safe-http-target.js';
 import { startHttpTestServer, type HttpTestServer } from './test-support/http-test-server.js';
-import { UndiciPinnedHttpTransport } from './undici-http-transport.js';
+import { UndiciPinnedHttpTransport, type PinnedHttpTransport } from './undici-http-transport.js';
 
 const servers: HttpTestServer[] = [];
 
@@ -62,6 +65,54 @@ describe('HTTP transport conformance', () => {
     controller.abort();
 
     await expect(response).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('rejects a prohibited redirect before the malicious destination receives a request', async () => {
+    const maliciousServer = await startHttpTestServer((_request, response) => {
+      response.writeHead(200).end('secret');
+    });
+    servers.push(maliciousServer);
+    const firstHopServer = await startHttpTestServer((_request, response) => {
+      response
+        .writeHead(302, {
+          location: `http://${maliciousServer.address}:${maliciousServer.port}/secret`,
+        })
+        .end();
+    });
+    servers.push(firstHopServer);
+
+    const resolver: DnsResolver = {
+      lookup: () => Promise.resolve([{ address: '93.184.216.34', family: 4 }] as const),
+    };
+    const localTransport = new UndiciPinnedHttpTransport();
+    const transport: PinnedHttpTransport = {
+      request: (request) =>
+        localTransport.request({
+          ...request,
+          target: {
+            ...request.target,
+            addresses: [{ address: firstHopServer.address, family: 4 }],
+          },
+        }),
+    };
+
+    const result = await executeHttpCheck(
+      {
+        url: `http://public.example:${firstHopServer.port}/start`,
+        method: 'GET',
+        timeoutMs: 3_000,
+        followRedirects: true,
+      },
+      { executor: new NodeHttpExecutor({ resolver, transport }) },
+    );
+
+    expect(result).toMatchObject({
+      outcome: 'UNKNOWN',
+      stage: 'DNS',
+      reason: 'PROHIBITED_DESTINATION',
+    });
+    expect(firstHopServer.requests).toHaveLength(1);
+    expect(maliciousServer.requests).toHaveLength(0);
   });
 });
 
