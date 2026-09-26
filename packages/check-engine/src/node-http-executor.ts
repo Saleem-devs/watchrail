@@ -108,7 +108,7 @@ export class NodeHttpExecutor implements HttpExecutor {
           };
         }
 
-        const targetFailure = classifyFetchFailure(error);
+        const targetFailure = classifyFetchFailure(error, target?.url.protocol === 'https:');
         if (targetFailure !== null) return { ...targetFailure, redirects };
         throw error;
       }
@@ -236,7 +236,7 @@ async function discardResponseBody(response: { discardBody(): Promise<void> }): 
   }
 }
 
-function classifyFetchFailure(error: unknown): HttpTargetFailure | null {
+function classifyFetchFailure(error: unknown, tlsAttempted: boolean): HttpTargetFailure | null {
   const code = findErrorCode(error);
 
   switch (code) {
@@ -261,9 +261,34 @@ function classifyFetchFailure(error: unknown): HttpTargetFailure | null {
         reason: 'CERTIFICATE_EXPIRED',
         redirects: [],
       };
+    case 'CERT_NOT_YET_VALID':
+      return tlsFailure('CERTIFICATE_NOT_YET_VALID');
+    case 'ERR_TLS_CERT_ALTNAME_INVALID':
+      return tlsFailure('CERTIFICATE_HOSTNAME_MISMATCH');
+    case 'DEPTH_ZERO_SELF_SIGNED_CERT':
+    case 'SELF_SIGNED_CERT_IN_CHAIN':
+    case 'UNABLE_TO_VERIFY_LEAF_SIGNATURE':
+    case 'UNABLE_TO_GET_ISSUER_CERT':
+    case 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY':
+    case 'CERT_UNTRUSTED':
+      return tlsFailure('CERTIFICATE_UNTRUSTED');
     default:
-      return null;
+      return tlsAttempted && isTlsHandshakeCode(code) ? tlsFailure('TLS_HANDSHAKE_FAILED') : null;
   }
+}
+
+function tlsFailure(
+  reason: Extract<HttpTargetFailure, { stage: 'TLS' }>['reason'],
+): HttpTargetFailure {
+  return { type: 'TARGET_FAILURE', stage: 'TLS', reason, redirects: [] };
+}
+
+function isTlsHandshakeCode(code: string | null): boolean {
+  return (
+    code === 'EPROTO' ||
+    code?.startsWith('ERR_SSL_') === true ||
+    code?.startsWith('ERR_TLS_') === true
+  );
 }
 
 function findErrorCode(error: unknown): string | null {

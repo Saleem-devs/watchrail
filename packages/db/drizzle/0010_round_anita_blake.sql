@@ -1,0 +1,4 @@
+ALTER TYPE "public"."check_result_reason" ADD VALUE 'CERTIFICATE_NOT_YET_VALID' BEFORE 'PROHIBITED_DESTINATION';--> statement-breakpoint
+ALTER TYPE "public"."check_result_reason" ADD VALUE 'CERTIFICATE_HOSTNAME_MISMATCH' BEFORE 'PROHIBITED_DESTINATION';--> statement-breakpoint
+ALTER TYPE "public"."check_result_reason" ADD VALUE 'CERTIFICATE_UNTRUSTED' BEFORE 'PROHIBITED_DESTINATION';--> statement-breakpoint
+ALTER TYPE "public"."check_result_reason" ADD VALUE 'TLS_HANDSHAKE_FAILED' BEFORE 'PROHIBITED_DESTINATION';

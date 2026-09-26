@@ -175,6 +175,14 @@ describe('NodeHttpExecutor', () => {
   it.each([
     ['ECONNREFUSED', 'CONNECT', 'CONNECTION_REFUSED'],
     ['CERT_HAS_EXPIRED', 'TLS', 'CERTIFICATE_EXPIRED'],
+    ['CERT_NOT_YET_VALID', 'TLS', 'CERTIFICATE_NOT_YET_VALID'],
+    ['ERR_TLS_CERT_ALTNAME_INVALID', 'TLS', 'CERTIFICATE_HOSTNAME_MISMATCH'],
+    ['DEPTH_ZERO_SELF_SIGNED_CERT', 'TLS', 'CERTIFICATE_UNTRUSTED'],
+    ['SELF_SIGNED_CERT_IN_CHAIN', 'TLS', 'CERTIFICATE_UNTRUSTED'],
+    ['UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'TLS', 'CERTIFICATE_UNTRUSTED'],
+    ['UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'TLS', 'CERTIFICATE_UNTRUSTED'],
+    ['ERR_SSL_SSLV3_ALERT_HANDSHAKE_FAILURE', 'TLS', 'TLS_HANDSHAKE_FAILED'],
+    ['EPROTO', 'TLS', 'TLS_HANDSHAKE_FAILED'],
   ] as const)('classifies %s network failure', async (code, stage, reason) => {
     const transport: PinnedHttpTransport = {
       request: vi.fn(() => Promise.reject(networkFailure(code))),
@@ -188,6 +196,21 @@ describe('NodeHttpExecutor', () => {
     );
 
     expect(result).toMatchObject({ outcome: 'FAIL', stage, reason });
+  });
+
+  it('does not misclassify a TLS-shaped code on a plain HTTP request', async () => {
+    const transport: PinnedHttpTransport = {
+      request: vi.fn(() => Promise.reject(networkFailure('ERR_SSL_WRONG_VERSION_NUMBER'))),
+    };
+    const result = await executeHttpCheck(
+      { url: 'http://example.com', method: 'GET', followRedirects: true, timeoutMs: 10_000 },
+      {
+        executor: new NodeHttpExecutor({ resolver: publicResolver(), transport }),
+        clock: createEngineClock(),
+      },
+    );
+
+    expect(result).toMatchObject({ outcome: 'UNKNOWN', stage: 'PROBE', reason: 'INTERNAL_ERROR' });
   });
 
   it('keeps unexpected executor errors as probe malfunctions', async () => {

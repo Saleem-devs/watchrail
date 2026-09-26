@@ -1,4 +1,5 @@
 import { isIP, type LookupFunction } from 'node:net';
+import type { SecureContextOptions } from 'node:tls';
 import { Client } from 'undici';
 import type { ResolvedHttpTarget, ValidatedAddress } from './safe-http-target.js';
 import type { HttpMethod } from './types.js';
@@ -22,7 +23,18 @@ export interface PinnedHttpTransport {
   ): Promise<HttpTransportResponse>;
 }
 
+export interface UndiciPinnedHttpTransportOptions {
+  /** Additional trust roots, intended for deterministic test infrastructure. */
+  ca?: SecureContextOptions['ca'];
+}
+
 export class UndiciPinnedHttpTransport implements PinnedHttpTransport {
+  private readonly ca: SecureContextOptions['ca'] | undefined;
+
+  constructor(options: UndiciPinnedHttpTransportOptions = {}) {
+    this.ca = options.ca;
+  }
+
   async request(input: {
     target: ResolvedHttpTarget;
     method: HttpMethod;
@@ -40,6 +52,7 @@ export class UndiciPinnedHttpTransport implements PinnedHttpTransport {
       connect: {
         lookup: createPinnedLookup(target.addresses),
         ...(isIP(target.hostname) === 0 ? { servername: target.hostname } : {}),
+        ...(this.ca === undefined ? {} : { ca: this.ca }),
       },
     });
 

@@ -1,0 +1,957 @@
+{
+  "id": "25aa6ea7-8aca-40c5-93fa-a700b9a5eb95",
+  "prevId": "c92bb551-a96e-4d92-8aaa-676b6bf8f245",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.check_execution_assignments": {
+      "name": "check_execution_assignments",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "round_id": {
+          "name": "round_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "location": {
+          "name": "location",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'local'"
+        },
+        "status": {
+          "name": "status",
+          "type": "execution_assignment_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'PENDING'"
+        },
+        "claim_token": {
+          "name": "claim_token",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "claim_expires_at": {
+          "name": "claim_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "attempt_count": {
+          "name": "attempt_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "last_started_at": {
+          "name": "last_started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "check_execution_assignments_round_fk": {
+          "name": "check_execution_assignments_round_fk",
+          "tableFrom": "check_execution_assignments",
+          "tableTo": "check_rounds",
+          "columnsFrom": ["organization_id", "round_id"],
+          "columnsTo": ["organization_id", "id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "check_execution_assignments_round_location_unique": {
+          "name": "check_execution_assignments_round_location_unique",
+          "nullsNotDistinct": false,
+          "columns": ["round_id", "location"]
+        },
+        "check_execution_assignments_identity_unique": {
+          "name": "check_execution_assignments_identity_unique",
+          "nullsNotDistinct": false,
+          "columns": ["organization_id", "round_id", "id"]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "check_execution_assignments_location_local": {
+          "name": "check_execution_assignments_location_local",
+          "value": "\"check_execution_assignments\".\"location\" = 'local'"
+        },
+        "check_execution_assignments_attempt_count_non_negative": {
+          "name": "check_execution_assignments_attempt_count_non_negative",
+          "value": "\"check_execution_assignments\".\"attempt_count\" >= 0"
+        },
+        "check_execution_assignments_claim_consistent": {
+          "name": "check_execution_assignments_claim_consistent",
+          "value": "\n        (\"check_execution_assignments\".\"status\" = 'RUNNING') =\n        (\"check_execution_assignments\".\"claim_token\" is not null and \"check_execution_assignments\".\"claim_expires_at\" is not null)\n      "
+        },
+        "check_execution_assignments_completion_consistent": {
+          "name": "check_execution_assignments_completion_consistent",
+          "value": "(\"check_execution_assignments\".\"status\" = 'COMPLETED') = (\"check_execution_assignments\".\"completed_at\" is not null)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.check_execution_results": {
+      "name": "check_execution_results",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "round_id": {
+          "name": "round_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "assignment_id": {
+          "name": "assignment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "outcome": {
+          "name": "outcome",
+          "type": "check_result_outcome",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "stage": {
+          "name": "stage",
+          "type": "check_result_stage",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "check_result_reason",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status_code": {
+          "name": "status_code",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "response_time_ms": {
+          "name": "response_time_ms",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "attempt_duration_ms": {
+          "name": "attempt_duration_ms",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "redirects": {
+          "name": "redirects",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "checked_at": {
+          "name": "checked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "check_execution_results_round_idx": {
+          "name": "check_execution_results_round_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "round_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "checked_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "check_execution_results_assignment_fk": {
+          "name": "check_execution_results_assignment_fk",
+          "tableFrom": "check_execution_results",
+          "tableTo": "check_execution_assignments",
+          "columnsFrom": ["organization_id", "round_id", "assignment_id"],
+          "columnsTo": ["organization_id", "round_id", "id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "check_execution_results_assignment_unique": {
+          "name": "check_execution_results_assignment_unique",
+          "nullsNotDistinct": false,
+          "columns": ["assignment_id"]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "check_execution_results_status_code_range": {
+          "name": "check_execution_results_status_code_range",
+          "value": "\"check_execution_results\".\"status_code\" is null or \"check_execution_results\".\"status_code\" between 100 and 599"
+        },
+        "check_execution_results_response_evidence_consistent": {
+          "name": "check_execution_results_response_evidence_consistent",
+          "value": "(\"check_execution_results\".\"status_code\" is null) = (\"check_execution_results\".\"response_time_ms\" is null)"
+        },
+        "check_execution_results_response_time_non_negative": {
+          "name": "check_execution_results_response_time_non_negative",
+          "value": "\"check_execution_results\".\"response_time_ms\" is null or \"check_execution_results\".\"response_time_ms\" >= 0"
+        },
+        "check_execution_results_attempt_duration_non_negative": {
+          "name": "check_execution_results_attempt_duration_non_negative",
+          "value": "\"check_execution_results\".\"attempt_duration_ms\" >= 0"
+        },
+        "check_execution_results_redirects_array": {
+          "name": "check_execution_results_redirects_array",
+          "value": "jsonb_typeof(\"check_execution_results\".\"redirects\") = 'array'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.check_round_outbox": {
+      "name": "check_round_outbox",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "round_id": {
+          "name": "round_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "available_at": {
+          "name": "available_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "claim_token": {
+          "name": "claim_token",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "attempt_count": {
+          "name": "attempt_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "last_attempt_at": {
+          "name": "last_attempt_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_error_code": {
+          "name": "last_error_code",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "blocked_at": {
+          "name": "blocked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "blocked_reason": {
+          "name": "blocked_reason",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "published_at": {
+          "name": "published_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "check_round_outbox_eligible_idx": {
+          "name": "check_round_outbox_eligible_idx",
+          "columns": [
+            {
+              "expression": "available_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"check_round_outbox\".\"published_at\" is null and \"check_round_outbox\".\"blocked_at\" is null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "check_round_outbox_round_fk": {
+          "name": "check_round_outbox_round_fk",
+          "tableFrom": "check_round_outbox",
+          "tableTo": "check_rounds",
+          "columnsFrom": ["round_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "check_round_outbox_round_unique": {
+          "name": "check_round_outbox_round_unique",
+          "nullsNotDistinct": false,
+          "columns": ["round_id"]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "check_round_outbox_attempt_count_non_negative": {
+          "name": "check_round_outbox_attempt_count_non_negative",
+          "value": "\"check_round_outbox\".\"attempt_count\" >= 0"
+        },
+        "check_round_outbox_block_fields_consistent": {
+          "name": "check_round_outbox_block_fields_consistent",
+          "value": "(\"check_round_outbox\".\"blocked_at\" is null) = (\"check_round_outbox\".\"blocked_reason\" is null)"
+        },
+        "check_round_outbox_not_published_and_blocked": {
+          "name": "check_round_outbox_not_published_and_blocked",
+          "value": "not (\"check_round_outbox\".\"published_at\" is not null and \"check_round_outbox\".\"blocked_at\" is not null)"
+        },
+        "check_round_outbox_terminal_claim_cleared": {
+          "name": "check_round_outbox_terminal_claim_cleared",
+          "value": "(\"check_round_outbox\".\"published_at\" is null and \"check_round_outbox\".\"blocked_at\" is null) or \"check_round_outbox\".\"claim_token\" is null"
+        },
+        "check_round_outbox_published_error_cleared": {
+          "name": "check_round_outbox_published_error_cleared",
+          "value": "\"check_round_outbox\".\"published_at\" is null or \"check_round_outbox\".\"last_error_code\" is null"
+        },
+        "check_round_outbox_payload_contract": {
+          "name": "check_round_outbox_payload_contract",
+          "value": "\n        jsonb_typeof(\"check_round_outbox\".\"payload\") = 'object'\n        and \"check_round_outbox\".\"payload\"->>'contractVersion' = '1'\n        and \"check_round_outbox\".\"payload\"->>'roundId' = \"check_round_outbox\".\"round_id\"::text\n        and (\"check_round_outbox\".\"payload\" - 'contractVersion' - 'roundId') = '{}'::jsonb\n      "
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.check_rounds": {
+      "name": "check_rounds",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "monitor_id": {
+          "name": "monitor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "monitor_configuration_version_id": {
+          "name": "monitor_configuration_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "trigger": {
+          "name": "trigger",
+          "type": "check_round_trigger",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'MANUAL'"
+        },
+        "status": {
+          "name": "status",
+          "type": "check_round_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'PENDING'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "check_rounds_monitor_created_idx": {
+          "name": "check_rounds_monitor_created_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "monitor_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "check_rounds_monitor_fk": {
+          "name": "check_rounds_monitor_fk",
+          "tableFrom": "check_rounds",
+          "tableTo": "monitors",
+          "columnsFrom": ["monitor_id", "organization_id"],
+          "columnsTo": ["id", "organization_id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "check_rounds_configuration_version_fk": {
+          "name": "check_rounds_configuration_version_fk",
+          "tableFrom": "check_rounds",
+          "tableTo": "monitor_configuration_versions",
+          "columnsFrom": ["monitor_configuration_version_id", "organization_id", "monitor_id"],
+          "columnsTo": ["id", "organization_id", "monitor_id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "check_rounds_organization_id_unique": {
+          "name": "check_rounds_organization_id_unique",
+          "nullsNotDistinct": false,
+          "columns": ["organization_id", "id"]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.monitor_configuration_versions": {
+      "name": "monitor_configuration_versions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "monitor_id": {
+          "name": "monitor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version_number": {
+          "name": "version_number",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "url": {
+          "name": "url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "method": {
+          "name": "method",
+          "type": "http_method",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "timeout_ms": {
+          "name": "timeout_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "follow_redirects": {
+          "name": "follow_redirects",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "status_policy": {
+          "name": "status_policy",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{\"type\":\"ANY_2XX\"}'::jsonb"
+        },
+        "request_headers": {
+          "name": "request_headers",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "locations": {
+          "name": "locations",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "monitor_configuration_versions_latest_idx": {
+          "name": "monitor_configuration_versions_latest_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "monitor_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "version_number",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "monitor_configuration_versions_monitor_fk": {
+          "name": "monitor_configuration_versions_monitor_fk",
+          "tableFrom": "monitor_configuration_versions",
+          "tableTo": "monitors",
+          "columnsFrom": ["monitor_id", "organization_id"],
+          "columnsTo": ["id", "organization_id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "monitor_configuration_versions_monitor_version_unique": {
+          "name": "monitor_configuration_versions_monitor_version_unique",
+          "nullsNotDistinct": false,
+          "columns": ["monitor_id", "version_number"]
+        },
+        "monitor_configuration_versions_identity_unique": {
+          "name": "monitor_configuration_versions_identity_unique",
+          "nullsNotDistinct": false,
+          "columns": ["id", "organization_id", "monitor_id"]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "monitor_configuration_versions_version_positive": {
+          "name": "monitor_configuration_versions_version_positive",
+          "value": "\"monitor_configuration_versions\".\"version_number\" > 0"
+        },
+        "monitor_configuration_versions_url_length": {
+          "name": "monitor_configuration_versions_url_length",
+          "value": "length(\"monitor_configuration_versions\".\"url\") <= 2048"
+        },
+        "monitor_configuration_versions_timeout_range": {
+          "name": "monitor_configuration_versions_timeout_range",
+          "value": "\"monitor_configuration_versions\".\"timeout_ms\" between 1000 and 30000"
+        },
+        "monitor_configuration_versions_status_policy_shape": {
+          "name": "monitor_configuration_versions_status_policy_shape",
+          "value": "\n        jsonb_typeof(\"monitor_configuration_versions\".\"status_policy\") = 'object'\n        and \"monitor_configuration_versions\".\"status_policy\"->>'type' in ('ANY_2XX', 'EXACT')\n        and (\n          \"monitor_configuration_versions\".\"status_policy\"->>'type' = 'ANY_2XX'\n          or (\n            jsonb_typeof(\"monitor_configuration_versions\".\"status_policy\"->'statusCodes') = 'array'\n            and jsonb_array_length(\"monitor_configuration_versions\".\"status_policy\"->'statusCodes') > 0\n            and not jsonb_path_exists(\n              \"monitor_configuration_versions\".\"status_policy\",\n              '$.statusCodes[*] ? (@.type() != \"number\" || @ != @.floor() || @ < 100 || @ > 599)'\n            )\n          )\n        )\n      "
+        },
+        "monitor_configuration_versions_locations_non_empty": {
+          "name": "monitor_configuration_versions_locations_non_empty",
+          "value": "\n        jsonb_typeof(\"monitor_configuration_versions\".\"locations\") = 'array'\n        and jsonb_array_length(\"monitor_configuration_versions\".\"locations\") > 0\n      "
+        },
+        "monitor_configuration_versions_request_headers_array": {
+          "name": "monitor_configuration_versions_request_headers_array",
+          "value": "jsonb_typeof(\"monitor_configuration_versions\".\"request_headers\") = 'array'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.monitors": {
+      "name": "monitors",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "varchar(120)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "url": {
+          "name": "url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "method": {
+          "name": "method",
+          "type": "http_method",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'GET'"
+        },
+        "lifecycle_state": {
+          "name": "lifecycle_state",
+          "type": "monitor_lifecycle_state",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'ENABLED'"
+        },
+        "timeout_ms": {
+          "name": "timeout_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 10000
+        },
+        "follow_redirects": {
+          "name": "follow_redirects",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "status_policy": {
+          "name": "status_policy",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{\"type\":\"ANY_2XX\"}'::jsonb"
+        },
+        "request_headers": {
+          "name": "request_headers",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "locations": {
+          "name": "locations",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[\"local\"]'::jsonb"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "monitors_organization_created_idx": {
+          "name": "monitors_organization_created_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "monitors_id_organization_unique": {
+          "name": "monitors_id_organization_unique",
+          "nullsNotDistinct": false,
+          "columns": ["id", "organization_id"]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "monitors_name_not_blank": {
+          "name": "monitors_name_not_blank",
+          "value": "length(btrim(\"monitors\".\"name\")) > 0"
+        },
+        "monitors_url_length": {
+          "name": "monitors_url_length",
+          "value": "length(\"monitors\".\"url\") <= 2048"
+        },
+        "monitors_timeout_range": {
+          "name": "monitors_timeout_range",
+          "value": "\"monitors\".\"timeout_ms\" between 1000 and 30000"
+        },
+        "monitors_status_policy_shape": {
+          "name": "monitors_status_policy_shape",
+          "value": "\n        jsonb_typeof(\"monitors\".\"status_policy\") = 'object'\n        and \"monitors\".\"status_policy\"->>'type' in ('ANY_2XX', 'EXACT')\n        and (\n          \"monitors\".\"status_policy\"->>'type' = 'ANY_2XX'\n          or (\n            jsonb_typeof(\"monitors\".\"status_policy\"->'statusCodes') = 'array'\n            and jsonb_array_length(\"monitors\".\"status_policy\"->'statusCodes') > 0\n            and not jsonb_path_exists(\n              \"monitors\".\"status_policy\",\n              '$.statusCodes[*] ? (@.type() != \"number\" || @ != @.floor() || @ < 100 || @ > 599)'\n            )\n          )\n        )\n      "
+        },
+        "monitors_locations_non_empty": {
+          "name": "monitors_locations_non_empty",
+          "value": "jsonb_typeof(\"monitors\".\"locations\") = 'array' and jsonb_array_length(\"monitors\".\"locations\") > 0"
+        },
+        "monitors_request_headers_array": {
+          "name": "monitors_request_headers_array",
+          "value": "jsonb_typeof(\"monitors\".\"request_headers\") = 'array'"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.check_result_outcome": {
+      "name": "check_result_outcome",
+      "schema": "public",
+      "values": ["PASS", "FAIL", "UNKNOWN"]
+    },
+    "public.check_result_reason": {
+      "name": "check_result_reason",
+      "schema": "public",
+      "values": [
+        "COMPLETED",
+        "UNEXPECTED_STATUS",
+        "REQUEST_TIMEOUT",
+        "NAME_NOT_FOUND",
+        "CONNECTION_REFUSED",
+        "CERTIFICATE_EXPIRED",
+        "CERTIFICATE_NOT_YET_VALID",
+        "CERTIFICATE_HOSTNAME_MISMATCH",
+        "CERTIFICATE_UNTRUSTED",
+        "TLS_HANDSHAKE_FAILED",
+        "PROHIBITED_DESTINATION",
+        "REDIRECT_LOOP",
+        "TOO_MANY_REDIRECTS",
+        "MISSING_REDIRECT_LOCATION",
+        "INVALID_REDIRECT_LOCATION",
+        "INSECURE_REDIRECT",
+        "INTERNAL_ERROR"
+      ]
+    },
+    "public.check_result_stage": {
+      "name": "check_result_stage",
+      "schema": "public",
+      "values": ["DNS", "CONNECT", "TLS", "HTTP", "PROBE"]
+    },
+    "public.check_round_status": {
+      "name": "check_round_status",
+      "schema": "public",
+      "values": ["PENDING", "COMPLETED"]
+    },
+    "public.check_round_trigger": {
+      "name": "check_round_trigger",
+      "schema": "public",
+      "values": ["MANUAL"]
+    },
+    "public.execution_assignment_status": {
+      "name": "execution_assignment_status",
+      "schema": "public",
+      "values": ["PENDING", "RUNNING", "COMPLETED"]
+    },
+    "public.http_method": {
+      "name": "http_method",
+      "schema": "public",
+      "values": ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+    },
+    "public.monitor_lifecycle_state": {
+      "name": "monitor_lifecycle_state",
+      "schema": "public",
+      "values": ["ENABLED", "PAUSED", "ARCHIVED"]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}
