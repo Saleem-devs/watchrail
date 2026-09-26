@@ -32,6 +32,7 @@ describe('executeHttpCheck', () => {
         return Promise.resolve({
           statusCode: 200,
           type: 'RESPONSE',
+          redirects: [],
           responseTimeMs: 118,
         });
       },
@@ -57,6 +58,7 @@ describe('executeHttpCheck', () => {
       responseTimeMs: 118,
       attemptDurationMs: 125,
       checkedAt,
+      redirects: [],
     });
   });
 
@@ -69,6 +71,7 @@ describe('executeHttpCheck', () => {
         wallClockTime = completionTime;
         return Promise.resolve({
           type: 'RESPONSE',
+          redirects: [],
           statusCode: 200,
           responseTimeMs: 5_000,
         });
@@ -103,6 +106,7 @@ describe('executeHttpCheck', () => {
           statusCode,
           responseTimeMs: 40,
           type: 'RESPONSE',
+          redirects: [],
         }),
     };
 
@@ -134,6 +138,7 @@ describe('executeHttpCheck', () => {
           statusCode: 503,
           responseTimeMs: 72,
           type: 'RESPONSE',
+          redirects: [],
         });
       },
     };
@@ -158,6 +163,7 @@ describe('executeHttpCheck', () => {
       responseTimeMs: 72,
       attemptDurationMs: 80,
       checkedAt,
+      redirects: [],
     });
   });
 
@@ -167,7 +173,8 @@ describe('executeHttpCheck', () => {
     [204, 'FAIL'],
   ] as const)('evaluates final status %i against an exact policy', async (statusCode, outcome) => {
     const executor: HttpExecutor = {
-      execute: () => Promise.resolve({ type: 'RESPONSE', statusCode, responseTimeMs: 25 }),
+      execute: () =>
+        Promise.resolve({ type: 'RESPONSE', statusCode, responseTimeMs: 25, redirects: [] }),
     };
 
     const result = await executeHttpCheck(
@@ -191,6 +198,7 @@ describe('executeHttpCheck', () => {
           statusCode,
           responseTimeMs: 40,
           type: 'RESPONSE',
+          redirects: [],
         }),
     };
 
@@ -315,7 +323,7 @@ describe('executeHttpCheck', () => {
     const executor: HttpExecutor = {
       execute: () => {
         clock.advance(25);
-        return Promise.resolve({ type: 'TARGET_FAILURE', ...failure });
+        return Promise.resolve({ type: 'TARGET_FAILURE', ...failure, redirects: [] });
       },
     };
 
@@ -339,6 +347,7 @@ describe('executeHttpCheck', () => {
       responseTimeMs: null,
       attemptDurationMs: 25,
       checkedAt,
+      redirects: [],
     });
   });
 
@@ -349,6 +358,7 @@ describe('executeHttpCheck', () => {
         clock.advance(10);
         return Promise.resolve({
           type: 'POLICY_REJECTION',
+          redirects: [],
           stage: 'DNS',
           reason: 'PROHIBITED_DESTINATION',
         });
@@ -368,14 +378,26 @@ describe('executeHttpCheck', () => {
       responseTimeMs: null,
       attemptDurationMs: 10,
       checkedAt,
+      redirects: [],
     });
   });
 
   it('returns UNKNOWN / PROBE / INTERNAL_ERROR for an executor failure', async () => {
     const clock = createClock();
+    const redirects = [
+      {
+        sequence: 1,
+        statusCode: 302 as const,
+        source: { targetId: 1, origin: 'https://example.com:443' },
+        destination: { targetId: 2, origin: 'https://example.com:443' },
+        responseTimeMs: 10,
+        headers: 'PRESERVED' as const,
+      },
+    ];
 
     const executor: HttpExecutor = {
-      execute: vi.fn(() => {
+      execute: vi.fn((input) => {
+        input.onEvidence?.({ redirects });
         clock.advance(15);
         return Promise.reject(new Error('executor exploded'));
       }),
@@ -401,6 +423,7 @@ describe('executeHttpCheck', () => {
       responseTimeMs: null,
       attemptDurationMs: 15,
       checkedAt,
+      redirects,
     });
   });
 
@@ -436,6 +459,7 @@ describe('executeHttpCheck', () => {
             statusCode: 200,
             responseTimeMs: 10,
             type: 'RESPONSE',
+            redirects: [],
           }),
       };
 
@@ -462,6 +486,7 @@ describe('executeHttpCheck', () => {
           statusCode: 200,
           responseTimeMs: 10,
           type: 'RESPONSE',
+          redirects: [],
         }),
     };
 

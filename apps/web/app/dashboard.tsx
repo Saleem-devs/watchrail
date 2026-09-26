@@ -38,6 +38,14 @@ interface ManualRound {
     statusCode: number | null;
     responseTimeMs: number | null;
     attemptDurationMs: number;
+    redirects: Array<{
+      sequence: number;
+      statusCode: 301 | 302 | 303 | 307 | 308;
+      source: { targetId: number; origin: string };
+      destination: { targetId: number; origin: string } | null;
+      responseTimeMs: number;
+      headers: 'PRESERVED' | 'STRIPPED' | 'NOT_SENT';
+    }>;
     checkedAt: string;
   } | null;
 }
@@ -516,6 +524,27 @@ function ManualDiagnostic({
       <p className="diagnostic-reason">
         {humanize(result.stage)} · {humanize(result.reason)}
       </p>
+      {result.redirects.length > 0 ? (
+        <ol className="redirect-chain" aria-label="Redirect chain">
+          {result.redirects.map((hop) => (
+            <li key={hop.sequence}>
+              <code>
+                #{hop.source.targetId} {hop.source.origin}
+              </code>
+              <span aria-hidden="true"> → </span>
+              <code>
+                {hop.destination
+                  ? `#${hop.destination.targetId} ${hop.destination.origin}`
+                  : 'No valid destination'}
+              </code>
+              <small>
+                {hop.statusCode} · {formatMilliseconds(hop.responseTimeMs)} ·{' '}
+                {humanize(hop.headers)}
+              </small>
+            </li>
+          ))}
+        </ol>
+      ) : null}
     </div>
   );
 }

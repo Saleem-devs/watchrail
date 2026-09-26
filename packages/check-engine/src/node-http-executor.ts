@@ -5,6 +5,11 @@ import type {
   HttpTargetFailure,
 } from './types.js';
 import {
+  formatHttpRedirectOrigin,
+  type HttpRedirectEndpoint,
+  type HttpRedirectHop,
+} from '@watchrail/domain';
+import {
   InvalidHttpTargetError,
   ProhibitedDestinationError,
   resolveSafeHttpTarget,
@@ -21,6 +26,7 @@ export interface NodeHttpExecutorOptions {
 
 const REDIRECT_STATUS_CODES = new Set([301, 302, 303, 307, 308]);
 const MAX_REDIRECTS = 5;
+type RedirectStatusCode = 301 | 302 | 303 | 307 | 308;
 
 /**
  * Executes an HTTP check through an SSRF-safe, address-pinned transport.
@@ -41,11 +47,27 @@ export class NodeHttpExecutor implements HttpExecutor {
   async execute(input: HttpExecutionInput): Promise<HttpExecutionResult> {
     const startedAt = this.monotonicNow();
     const visited = new Set<string>();
+    const endpoints = new Map<string, HttpRedirectEndpoint>();
+    const redirects: HttpRedirectHop[] = [];
+    const publishEvidence = (): void => {
+      input.onEvidence?.({ redirects: [...redirects] });
+    };
     let currentUrl: string | URL = input.url;
     let redirectsFollowed = 0;
     let headersAttached = true;
+    let pendingHopIndex: number | null = null;
+
+    const endpointFor = (url: URL): HttpRedirectEndpoint => {
+      const identity = redirectIdentity(url);
+      const existing = endpoints.get(identity);
+      if (existing) return existing;
+      const endpoint = { targetId: endpoints.size + 1, origin: formatHttpRedirectOrigin(url) };
+      endpoints.set(identity, endpoint);
+      return endpoint;
+    };
 
     while (true) {
+      const hopStartedAt = this.monotonicNow();
       let target;
       let response;
 
@@ -56,6 +78,17 @@ export class NodeHttpExecutor implements HttpExecutor {
         });
 
         visited.add(redirectIdentity(target.url));
+        if (pendingHopIndex !== null) {
+          const pending = redirects[pendingHopIndex];
+          if (pending) {
+            redirects[pendingHopIndex] = {
+              ...pending,
+              headers: headersAttached ? 'PRESERVED' : 'STRIPPED',
+            };
+            publishEvidence();
+          }
+          pendingHopIndex = null;
+        }
         response = await this.transport.request({
           target,
           method: input.method,
@@ -71,23 +104,35 @@ export class NodeHttpExecutor implements HttpExecutor {
             type: 'POLICY_REJECTION',
             stage: 'DNS',
             reason: 'PROHIBITED_DESTINATION',
+            redirects,
           };
         }
 
         const targetFailure = classifyFetchFailure(error);
-        if (targetFailure !== null) return targetFailure;
+        if (targetFailure !== null) return { ...targetFailure, redirects };
         throw error;
       }
 
-      const responseTimeMs = Math.max(0, this.monotonicNow() - startedAt);
+      const responseReceivedAt = this.monotonicNow();
+      const responseTimeMs = Math.max(0, responseReceivedAt - startedAt);
+      const hopResponseTimeMs = Math.max(0, responseReceivedAt - hopStartedAt);
       await discardResponseBody(response);
 
-      if (!REDIRECT_STATUS_CODES.has(response.statusCode)) {
-        return { type: 'RESPONSE', statusCode: response.statusCode, responseTimeMs };
+      if (!isRedirectStatus(response.statusCode)) {
+        return { type: 'RESPONSE', statusCode: response.statusCode, responseTimeMs, redirects };
       }
 
+      const source = endpointFor(target.url);
+
       if (response.location === null) {
-        return redirectFailure('MISSING_REDIRECT_LOCATION', response.statusCode, responseTimeMs);
+        redirects.push(createHop(response.statusCode, source, null, hopResponseTimeMs, redirects));
+        publishEvidence();
+        return redirectFailure(
+          'MISSING_REDIRECT_LOCATION',
+          response.statusCode,
+          responseTimeMs,
+          redirects,
+        );
       }
 
       let nextUrl: URL;
@@ -95,24 +140,43 @@ export class NodeHttpExecutor implements HttpExecutor {
         if (response.location.trim() === '') throw new InvalidHttpTargetError('Empty location.');
         nextUrl = validateHttpTargetUrl(new URL(response.location, target.url));
       } catch {
-        return redirectFailure('INVALID_REDIRECT_LOCATION', response.statusCode, responseTimeMs);
+        redirects.push(createHop(response.statusCode, source, null, hopResponseTimeMs, redirects));
+        publishEvidence();
+        return redirectFailure(
+          'INVALID_REDIRECT_LOCATION',
+          response.statusCode,
+          responseTimeMs,
+          redirects,
+        );
       }
 
+      const destination = endpointFor(nextUrl);
+      redirects.push(
+        createHop(response.statusCode, source, destination, hopResponseTimeMs, redirects),
+      );
+      publishEvidence();
+
       if (target.url.protocol === 'https:' && nextUrl.protocol === 'http:') {
-        return redirectFailure('INSECURE_REDIRECT', response.statusCode, responseTimeMs);
+        return redirectFailure('INSECURE_REDIRECT', response.statusCode, responseTimeMs, redirects);
       }
 
       const identity = redirectIdentity(nextUrl);
       if (visited.has(identity)) {
-        return redirectFailure('REDIRECT_LOOP', response.statusCode, responseTimeMs);
+        return redirectFailure('REDIRECT_LOOP', response.statusCode, responseTimeMs, redirects);
       }
 
       if (redirectsFollowed >= MAX_REDIRECTS) {
-        return redirectFailure('TOO_MANY_REDIRECTS', response.statusCode, responseTimeMs);
+        return redirectFailure(
+          'TOO_MANY_REDIRECTS',
+          response.statusCode,
+          responseTimeMs,
+          redirects,
+        );
       }
 
       redirectsFollowed += 1;
       if (target.url.origin !== nextUrl.origin) headersAttached = false;
+      pendingHopIndex = redirects.length - 1;
       currentUrl = nextUrl;
     }
   }
@@ -133,8 +197,30 @@ function redirectFailure(
     | 'INSECURE_REDIRECT',
   statusCode: number,
   responseTimeMs: number,
+  redirects: readonly HttpRedirectHop[],
 ): HttpExecutionResult {
-  return { type: 'REDIRECT_FAILURE', reason, statusCode, responseTimeMs };
+  return { type: 'REDIRECT_FAILURE', reason, statusCode, responseTimeMs, redirects };
+}
+
+function createHop(
+  statusCode: RedirectStatusCode,
+  source: HttpRedirectEndpoint,
+  destination: HttpRedirectEndpoint | null,
+  responseTimeMs: number,
+  existing: readonly HttpRedirectHop[],
+): HttpRedirectHop {
+  return {
+    sequence: existing.length + 1,
+    statusCode,
+    source,
+    destination,
+    responseTimeMs,
+    headers: 'NOT_SENT',
+  };
+}
+
+function isRedirectStatus(statusCode: number): statusCode is RedirectStatusCode {
+  return REDIRECT_STATUS_CODES.has(statusCode);
 }
 
 async function discardResponseBody(response: { discardBody(): Promise<void> }): Promise<void> {
@@ -155,18 +241,21 @@ function classifyFetchFailure(error: unknown): HttpTargetFailure | null {
         type: 'TARGET_FAILURE',
         stage: 'DNS',
         reason: 'NAME_NOT_FOUND',
+        redirects: [],
       };
     case 'ECONNREFUSED':
       return {
         type: 'TARGET_FAILURE',
         stage: 'CONNECT',
         reason: 'CONNECTION_REFUSED',
+        redirects: [],
       };
     case 'CERT_HAS_EXPIRED':
       return {
         type: 'TARGET_FAILURE',
         stage: 'TLS',
         reason: 'CERTIFICATE_EXPIRED',
+        redirects: [],
       };
     default:
       return null;

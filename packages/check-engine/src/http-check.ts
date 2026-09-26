@@ -35,6 +35,7 @@ export async function executeHttpCheck(
   const startedAt = clock.monotonicNow();
 
   const controller = new AbortController();
+  let redirects: HttpCheckResult['redirects'] = [];
 
   let deadlineExceeded = false;
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
@@ -53,6 +54,9 @@ export async function executeHttpCheck(
       method: input.method,
       signal: controller.signal,
       requestHeaders: input.requestHeaders ?? [],
+      onEvidence: (evidence) => {
+        redirects = [...evidence.redirects];
+      },
     });
 
     const execution = await Promise.race([executionPromise, timeoutPromise]);
@@ -75,6 +79,7 @@ export async function executeHttpCheck(
         responseTimeMs: null,
         attemptDurationMs,
         checkedAt,
+        redirects,
       };
     }
 
@@ -86,6 +91,7 @@ export async function executeHttpCheck(
       responseTimeMs: null,
       attemptDurationMs,
       checkedAt,
+      redirects,
     };
   } finally {
     if (timeoutHandle !== undefined) {
@@ -111,6 +117,7 @@ function classifyHttpExecution(input: {
       responseTimeMs: null,
       attemptDurationMs,
       checkedAt,
+      redirects: execution.redirects,
     };
   }
 
@@ -123,6 +130,7 @@ function classifyHttpExecution(input: {
       responseTimeMs: execution.responseTimeMs,
       attemptDurationMs,
       checkedAt,
+      redirects: execution.redirects,
     };
   }
 
@@ -145,6 +153,7 @@ function classifyHttpExecution(input: {
       responseTimeMs: execution.responseTimeMs,
       attemptDurationMs,
       checkedAt,
+      redirects: execution.redirects,
     };
   }
 
@@ -156,6 +165,7 @@ function classifyHttpExecution(input: {
     responseTimeMs: execution.responseTimeMs,
     attemptDurationMs,
     checkedAt,
+    redirects: execution.redirects,
   };
 }
 
@@ -180,6 +190,7 @@ function classifyTargetFailure(input: {
     responseTimeMs: null,
     attemptDurationMs,
     checkedAt,
+    redirects: failure.redirects,
   } as const;
 
   switch (failure.stage) {

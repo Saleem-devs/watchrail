@@ -286,6 +286,16 @@ describe('monitor API', () => {
     if (claim.state !== 'CLAIMED') throw new Error('Expected the round to be claimable.');
 
     const checkedAt = new Date('2026-09-24T12:00:00.000Z');
+    const redirects = [
+      {
+        sequence: 1,
+        statusCode: 302 as const,
+        source: { targetId: 1, origin: 'https://example.com:443' },
+        destination: { targetId: 2, origin: 'https://status.example:443' },
+        responseTimeMs: 12.25,
+        headers: 'STRIPPED' as const,
+      },
+    ];
     await executions.complete(claim.execution.assignmentId, claim.execution.claimToken, {
       outcome: 'PASS',
       stage: 'HTTP',
@@ -294,6 +304,7 @@ describe('monitor API', () => {
       responseTimeMs: 42.5,
       attemptDurationMs: 46.25,
       checkedAt,
+      redirects,
     });
 
     const completed = await request(app.getHttpServer())
@@ -313,9 +324,11 @@ describe('monitor API', () => {
         statusCode: 200,
         responseTimeMs: 42.5,
         attemptDurationMs: 46.25,
+        redirects,
         checkedAt: checkedAt.toISOString(),
       },
     });
+    expect(JSON.stringify(completed.body.data.result)).not.toContain('/health');
   });
 
   it('does not create or reveal manual rounds for unknown monitor identities', async () => {

@@ -111,6 +111,7 @@ function internalExecutionFailureResult(): HttpCheckResult {
     statusCode: null,
     responseTimeMs: null,
     attemptDurationMs: 0,
+    redirects: [],
     checkedAt: new Date(),
   };
 }

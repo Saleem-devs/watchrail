@@ -22,6 +22,7 @@ import {
   HTTP_METHODS,
   MONITOR_LIFECYCLE_STATES,
   type HttpStatusPolicy,
+  type HttpRedirectHop,
   type StoredRequestHeader,
 } from '@watchrail/domain';
 
@@ -336,6 +337,7 @@ export const checkExecutionResults = pgTable(
     statusCode: integer('status_code'),
     responseTimeMs: doublePrecision('response_time_ms'),
     attemptDurationMs: doublePrecision('attempt_duration_ms').notNull(),
+    redirects: jsonb('redirects').$type<HttpRedirectHop[]>().notNull().default([]),
     checkedAt: timestamp('checked_at', { withTimezone: true }).notNull(),
 
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -377,6 +379,10 @@ export const checkExecutionResults = pgTable(
     check(
       'check_execution_results_attempt_duration_non_negative',
       sql`${table.attemptDurationMs} >= 0`,
+    ),
+    check(
+      'check_execution_results_redirects_array',
+      sql`jsonb_typeof(${table.redirects}) = 'array'`,
     ),
   ],
 );

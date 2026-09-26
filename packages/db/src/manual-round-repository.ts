@@ -1,6 +1,10 @@
 import { and, desc, eq } from 'drizzle-orm';
 import { createExecuteCheckRoundJob } from '@watchrail/contracts';
-import type { MonitorLifecycleState } from '@watchrail/domain';
+import {
+  parseHttpRedirectHops,
+  type HttpRedirectHop,
+  type MonitorLifecycleState,
+} from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
 import {
   checkExecutionAssignments,
@@ -27,6 +31,7 @@ export interface ManualRoundResult {
     statusCode: number | null;
     responseTimeMs: number | null;
     attemptDurationMs: number;
+    redirects: HttpRedirectHop[];
     checkedAt: Date;
   } | null;
 }
@@ -162,6 +167,7 @@ export class ManualRoundRepository {
         statusCode: checkExecutionResults.statusCode,
         responseTimeMs: checkExecutionResults.responseTimeMs,
         attemptDurationMs: checkExecutionResults.attemptDurationMs,
+        redirects: checkExecutionResults.redirects,
         checkedAt: checkExecutionResults.checkedAt,
       })
       .from(checkRounds)
@@ -206,6 +212,7 @@ export class ManualRoundRepository {
             statusCode: round.statusCode,
             responseTimeMs: round.responseTimeMs,
             attemptDurationMs: round.attemptDurationMs,
+            redirects: parseHttpRedirectHops(round.redirects ?? []),
             checkedAt: round.checkedAt,
           }
         : null;

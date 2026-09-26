@@ -70,6 +70,7 @@ describe('CheckRoundJobHandler', () => {
       type: 'RESPONSE',
       statusCode: 200,
       responseTimeMs: 12,
+      redirects: [],
     });
     complete.mockResolvedValue(true);
 
@@ -98,7 +99,12 @@ describe('CheckRoundJobHandler', () => {
         statusPolicy: { type: 'EXACT', statusCodes: [404] },
       },
     });
-    execute.mockResolvedValue({ type: 'RESPONSE', statusCode: 404, responseTimeMs: 12 });
+    execute.mockResolvedValue({
+      type: 'RESPONSE',
+      statusCode: 404,
+      responseTimeMs: 12,
+      redirects: [],
+    });
     complete.mockResolvedValue(true);
 
     await createHandler(executions, executor).handle(payload);
@@ -133,7 +139,12 @@ describe('CheckRoundJobHandler', () => {
         ],
       },
     });
-    execute.mockResolvedValue({ type: 'RESPONSE', statusCode: 200, responseTimeMs: 12 });
+    execute.mockResolvedValue({
+      type: 'RESPONSE',
+      statusCode: 200,
+      responseTimeMs: 12,
+      redirects: [],
+    });
     complete.mockResolvedValue(true);
 
     await createHandler(executions, executor).handle(payload);
@@ -281,6 +292,7 @@ describe('CheckRoundJobHandler', () => {
       type: 'RESPONSE',
       statusCode: 503,
       responseTimeMs: 10,
+      redirects: [],
     });
     complete.mockResolvedValue(false);
 

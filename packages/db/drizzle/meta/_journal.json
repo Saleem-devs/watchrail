@@ -57,6 +57,13 @@
       "when": 1790358270257,
       "tag": "0007_first_lady_deathstrike",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790387062984,
+      "tag": "0008_tense_shen",
+      "breakpoints": true
     }
   ]
 }

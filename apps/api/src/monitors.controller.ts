@@ -1,7 +1,11 @@
 import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post, Req } from '@nestjs/common';
 import type { CheckRoundRecord, ManualRoundResult, MonitorRecord } from '@watchrail/db';
 import type { CreateMonitorCommand } from '@watchrail/domain';
-import { parseStoredRequestHeaders, type HttpStatusPolicy } from '@watchrail/domain';
+import {
+  parseStoredRequestHeaders,
+  type HttpRedirectHop,
+  type HttpStatusPolicy,
+} from '@watchrail/domain';
 import { MonitorsService } from './monitors.service.js';
 import type { RequestWithContext } from './request-context.js';
 
@@ -37,6 +41,7 @@ interface ManualRoundResponse {
     statusCode: number | null;
     responseTimeMs: number | null;
     attemptDurationMs: number;
+    redirects: HttpRedirectHop[];
     checkedAt: string;
   } | null;
 }
