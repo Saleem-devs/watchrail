@@ -1,0 +1,2 @@
+ALTER TABLE "monitor_configuration_versions" ADD COLUMN "follow_redirects" boolean DEFAULT true NOT NULL;--> statement-breakpoint
+ALTER TABLE "monitors" ADD COLUMN "follow_redirects" boolean DEFAULT true NOT NULL;

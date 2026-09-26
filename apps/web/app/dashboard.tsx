@@ -9,6 +9,7 @@ interface Monitor {
   method: string;
   lifecycleState: string;
   timeoutMs: number;
+  followRedirects: boolean;
   statusPolicy: { type: 'ANY_2XX' } | { type: 'EXACT'; statusCodes: number[] };
   locations: string[];
   createdAt: string;
@@ -55,6 +56,7 @@ export function Dashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [updatingPolicyIds, setUpdatingPolicyIds] = useState<Set<string>>(() => new Set());
+  const [updatingSettingsIds, setUpdatingSettingsIds] = useState<Set<string>>(() => new Set());
   const [pageError, setPageError] = useState<string>();
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [manualRounds, setManualRounds] = useState<Record<string, ManualRound>>({});
@@ -181,6 +183,46 @@ export function Dashboard() {
       setPageError(error instanceof Error ? error.message : 'Could not update status policy.');
     } finally {
       setUpdatingPolicyIds((current) => {
+        const next = new Set(current);
+        next.delete(monitorId);
+        return next;
+      });
+    }
+  }
+
+  async function updateHttpSettings(
+    monitorId: string,
+    event: FormEvent<HTMLFormElement>,
+  ): Promise<void> {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const timeoutSeconds = Number(formData.get('timeoutSeconds'));
+
+    setUpdatingSettingsIds((current) => new Set(current).add(monitorId));
+    setPageError(undefined);
+
+    try {
+      const response = await fetch(`/api/monitors/${monitorId}/http-settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          url: formData.get('url'),
+          method: formData.get('method'),
+          timeoutMs: timeoutSeconds * 1_000,
+          followRedirects: formData.get('followRedirects') === 'on',
+        }),
+      });
+      const body = (await response.json()) as { data?: Monitor } & ApiError;
+      if (!response.ok || !body.data) {
+        throw new Error('Could not update HTTP settings.');
+      }
+      setMonitors((current) =>
+        current.map((monitor) => (monitor.id === monitorId ? (body.data as Monitor) : monitor)),
+      );
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : 'Could not update HTTP settings.');
+    } finally {
+      setUpdatingSettingsIds((current) => {
         const next = new Set(current);
         next.delete(monitorId);
         return next;
@@ -412,10 +454,55 @@ export function Dashboard() {
                     <div className="monitor-meta">
                       <span>{monitor.method}</span>
                       <span>{monitor.timeoutMs / 1000}s timeout</span>
+                      <span>
+                        {monitor.followRedirects ? 'follow redirects' : 'redirects final'}
+                      </span>
                       <span>{statusPolicyLabel(monitor.statusPolicy)}</span>
                       <span>{monitor.locations.join(', ')}</span>
                       <span>{monitor.lifecycleState.toLowerCase()}</span>
                     </div>
+                    <form
+                      className="status-policy-form"
+                      onSubmit={(event) => void updateHttpSettings(monitor.id, event)}
+                    >
+                      <label>
+                        URL
+                        <input name="url" type="url" defaultValue={monitor.url} required />
+                      </label>
+                      <label>
+                        Method
+                        <select name="method" defaultValue={monitor.method}>
+                          <option value="GET">GET</option>
+                          <option value="HEAD">HEAD</option>
+                        </select>
+                      </label>
+                      <label>
+                        Timeout (seconds)
+                        <input
+                          name="timeoutSeconds"
+                          type="number"
+                          min="1"
+                          max="30"
+                          step="1"
+                          defaultValue={monitor.timeoutMs / 1_000}
+                        />
+                      </label>
+                      <label>
+                        <input
+                          name="followRedirects"
+                          type="checkbox"
+                          defaultChecked={monitor.followRedirects}
+                        />
+                        Follow redirects
+                      </label>
+                      <button
+                        className="quiet-button"
+                        type="submit"
+                        disabled={updatingSettingsIds.has(monitor.id)}
+                      >
+                        {updatingSettingsIds.has(monitor.id) ? 'Saving…' : 'Save HTTP settings'}
+                      </button>
+                    </form>
                     <form
                       className="status-policy-form"
                       onSubmit={(event) => void updateStatusPolicy(monitor.id, event)}

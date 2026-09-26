@@ -42,6 +42,7 @@ describe('executeHttpCheck', () => {
       {
         url: 'https://example.com',
         method: 'GET',
+        followRedirects: true,
         timeoutMs: 10_000,
       },
       {
@@ -82,6 +83,7 @@ describe('executeHttpCheck', () => {
       {
         url: 'https://example.com',
         method: 'GET',
+        followRedirects: true,
         timeoutMs: 10_000,
       },
       {
@@ -114,6 +116,7 @@ describe('executeHttpCheck', () => {
       {
         url: 'https://example.com',
         method: 'HEAD',
+        followRedirects: true,
         timeoutMs: 10_000,
       },
       {
@@ -147,6 +150,7 @@ describe('executeHttpCheck', () => {
       {
         url: 'https://example.com',
         method: 'GET',
+        followRedirects: true,
         timeoutMs: 10_000,
       },
       {
@@ -181,6 +185,7 @@ describe('executeHttpCheck', () => {
       {
         url: 'https://example.com',
         method: 'GET',
+        followRedirects: true,
         timeoutMs: 10_000,
         statusPolicy: { type: 'EXACT', statusCodes: [200, 404] },
       },
@@ -206,6 +211,7 @@ describe('executeHttpCheck', () => {
       {
         url: 'https://example.com',
         method: 'GET',
+        followRedirects: true,
         timeoutMs: 10_000,
       },
       {
@@ -241,6 +247,7 @@ describe('executeHttpCheck', () => {
         {
           url: 'https://example.com',
           method: 'GET',
+          followRedirects: true,
           timeoutMs: 5_000,
         },
         {
@@ -291,6 +298,7 @@ describe('executeHttpCheck', () => {
         {
           url: 'https://example.com',
           method: 'GET',
+          followRedirects: true,
           timeoutMs: 5_000,
         },
         {
@@ -331,6 +339,7 @@ describe('executeHttpCheck', () => {
       {
         url: 'https://example.com',
         method: 'GET',
+        followRedirects: true,
         timeoutMs: 10_000,
       },
       {
@@ -366,7 +375,7 @@ describe('executeHttpCheck', () => {
     };
 
     const result = await executeHttpCheck(
-      { url: 'http://127.0.0.1', method: 'GET', timeoutMs: 10_000 },
+      { url: 'http://127.0.0.1', method: 'GET', followRedirects: true, timeoutMs: 10_000 },
       { executor, clock },
     );
 
@@ -407,6 +416,7 @@ describe('executeHttpCheck', () => {
       {
         url: 'https://example.com',
         method: 'GET',
+        followRedirects: true,
         timeoutMs: 10_000,
       },
       {
@@ -437,6 +447,7 @@ describe('executeHttpCheck', () => {
           {
             url: 'https://example.com',
             method: 'GET',
+            followRedirects: true,
             timeoutMs,
           },
           {
@@ -468,6 +479,7 @@ describe('executeHttpCheck', () => {
           {
             url: 'https://example.com',
             method: 'GET',
+            followRedirects: true,
             timeoutMs,
           },
           {
@@ -495,6 +507,7 @@ describe('executeHttpCheck', () => {
         {
           url: 'https://example.com',
           method,
+          followRedirects: true,
           timeoutMs: 10_000,
         },
         {
@@ -518,6 +531,7 @@ describe('executeHttpCheck', () => {
         {
           url: 'https://example.com',
           method: 'POST',
+          followRedirects: true,
           timeoutMs: 10_000,
         } as never,
         {

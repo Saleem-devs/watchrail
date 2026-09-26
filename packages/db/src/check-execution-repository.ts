@@ -22,6 +22,7 @@ export interface ClaimedCheckExecution {
   url: string;
   method: HttpMethod;
   timeoutMs: number;
+  followRedirects: boolean;
   statusPolicy: HttpStatusPolicy;
   organizationId: string;
   monitorId: string;
@@ -64,6 +65,7 @@ export class CheckExecutionRepository {
           url: monitorConfigurationVersions.url,
           method: monitorConfigurationVersions.method,
           timeoutMs: monitorConfigurationVersions.timeoutMs,
+          followRedirects: monitorConfigurationVersions.followRedirects,
           statusPolicy: monitorConfigurationVersions.statusPolicy,
           organizationId: monitorConfigurationVersions.organizationId,
           monitorId: monitorConfigurationVersions.monitorId,
@@ -121,6 +123,7 @@ export class CheckExecutionRepository {
           url: candidate.url,
           method: candidate.method,
           timeoutMs: candidate.timeoutMs,
+          followRedirects: candidate.followRedirects,
           statusPolicy: candidate.statusPolicy,
           organizationId: candidate.organizationId,
           monitorId: candidate.monitorId,

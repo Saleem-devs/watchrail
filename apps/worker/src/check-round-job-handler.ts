@@ -81,6 +81,7 @@ export class CheckRoundJobHandler implements CheckJobHandler {
             url: claim.execution.url,
             method: claim.execution.method,
             timeoutMs: claim.execution.timeoutMs,
+            followRedirects: claim.execution.followRedirects,
             statusPolicy: claim.execution.statusPolicy,
             requestHeaders,
           },

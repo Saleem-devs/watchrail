@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { createMonitor, MONITOR_DEFAULTS, MonitorInputError } from './monitor.js';
+import {
+  createMonitor,
+  MONITOR_DEFAULTS,
+  MonitorInputError,
+  parseHttpMonitorSettings,
+} from './monitor.js';
 
 describe('createMonitor', () => {
   it('normalizes input and applies server-owned defaults', () => {
@@ -66,5 +71,86 @@ describe('createMonitor', () => {
     expect(() => createMonitor({ name: 'API', url: 'https://example.com', statusPolicy })).toThrow(
       MonitorInputError,
     );
+  });
+});
+
+describe('parseHttpMonitorSettings', () => {
+  it('accepts the complete strict HTTP settings contract', () => {
+    expect(
+      parseHttpMonitorSettings({
+        url: 'https://api.example.com/health',
+        method: 'HEAD',
+        timeoutMs: 5_000,
+        followRedirects: false,
+      }),
+    ).toEqual({
+      url: 'https://api.example.com/health',
+      method: 'HEAD',
+      timeoutMs: 5_000,
+      followRedirects: false,
+    });
+  });
+
+  it.each([1_000, 30_000])('accepts timeout boundary %i', (timeoutMs) => {
+    expect(
+      parseHttpMonitorSettings({
+        url: 'https://example.com',
+        method: 'GET',
+        timeoutMs,
+        followRedirects: true,
+      }).timeoutMs,
+    ).toBe(timeoutMs);
+  });
+
+  it.each([999, 30_001, 1_000.5, '5000'])('rejects invalid timeout %s', (timeoutMs) => {
+    expect(() =>
+      parseHttpMonitorSettings({
+        url: 'https://example.com',
+        method: 'GET',
+        timeoutMs,
+        followRedirects: true,
+      }),
+    ).toThrow(MonitorInputError);
+  });
+
+  it.each(['POST', 'get', undefined])('rejects unsupported method %s', (method) => {
+    expect(() =>
+      parseHttpMonitorSettings({
+        url: 'https://example.com',
+        method,
+        timeoutMs: 5_000,
+        followRedirects: true,
+      }),
+    ).toThrow(MonitorInputError);
+  });
+
+  it.each(['false', 0, undefined])('rejects non-boolean followRedirects %s', (followRedirects) => {
+    expect(() =>
+      parseHttpMonitorSettings({
+        url: 'https://example.com',
+        method: 'GET',
+        timeoutMs: 5_000,
+        followRedirects,
+      }),
+    ).toThrow(MonitorInputError);
+  });
+
+  it('rejects missing and additional settings', () => {
+    expect(() =>
+      parseHttpMonitorSettings({
+        url: 'https://example.com',
+        method: 'GET',
+        timeoutMs: 5_000,
+      }),
+    ).toThrow(MonitorInputError);
+    expect(() =>
+      parseHttpMonitorSettings({
+        url: 'https://example.com',
+        method: 'GET',
+        timeoutMs: 5_000,
+        followRedirects: true,
+        statusPolicy: { type: 'ANY_2XX' },
+      }),
+    ).toThrow(MonitorInputError);
   });
 });

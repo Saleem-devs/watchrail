@@ -77,6 +77,7 @@ describe('monitor API', () => {
       method: 'GET',
       lifecycleState: 'ENABLED',
       timeoutMs: 10_000,
+      followRedirects: true,
       statusPolicy: { type: 'ANY_2XX' },
       locations: ['local'],
     });
@@ -124,6 +125,111 @@ describe('monitor API', () => {
       { version_number: 1, status_policy: { type: 'EXACT', statusCodes: [200, 404] } },
       { version_number: 2, status_policy: { type: 'EXACT', statusCodes: [204] } },
     ]);
+  });
+
+  it('versions complete HTTP settings while old rounds retain captured settings', async () => {
+    const created = await request(app.getHttpServer())
+      .post('/api/monitors')
+      .send({
+        name: 'Versioned API',
+        url: 'https://old.example.com/health',
+        statusPolicy: { type: 'EXACT', statusCodes: [204] },
+        requestHeaders: [{ name: 'x-watchrail-test', sensitive: false, value: 'preserved' }],
+      })
+      .expect(201);
+    const monitorId = created.body.data.id as string;
+    const oldRound = await request(app.getHttpServer())
+      .post(`/api/monitors/${monitorId}/check-rounds`)
+      .expect(202);
+
+    const settings = {
+      url: 'https://new.example.com/ready',
+      method: 'HEAD',
+      timeoutMs: 5_000,
+      followRedirects: false,
+    } as const;
+    const updated = await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/http-settings`)
+      .send(settings)
+      .expect(200);
+
+    expect(updated.body.data).toMatchObject(settings);
+
+    const versions = await database.$client.query<{
+      version_number: number;
+      url: string;
+      method: string;
+      timeout_ms: number;
+      follow_redirects: boolean;
+      status_policy: unknown;
+      request_headers: unknown;
+      locations: unknown;
+    }>(
+      `select version_number, url, method, timeout_ms, follow_redirects,
+              status_policy, request_headers, locations
+       from monitor_configuration_versions
+       where monitor_id = $1
+       order by version_number`,
+      [monitorId],
+    );
+
+    expect(versions.rows).toHaveLength(2);
+    expect(versions.rows[0]).toMatchObject({
+      version_number: 1,
+      url: 'https://old.example.com/health',
+      method: 'GET',
+      timeout_ms: 10_000,
+      follow_redirects: true,
+      status_policy: { type: 'EXACT', statusCodes: [204] },
+      locations: ['local'],
+    });
+    expect(versions.rows[1]).toMatchObject({
+      version_number: 2,
+      url: settings.url,
+      method: settings.method,
+      timeout_ms: settings.timeoutMs,
+      follow_redirects: false,
+      status_policy: versions.rows[0]!.status_policy,
+      request_headers: versions.rows[0]!.request_headers,
+      locations: versions.rows[0]!.locations,
+    });
+
+    const executions = new CheckExecutionRepository(database);
+    const oldClaim = await executions.claim(oldRound.body.data.id as string, 30_000);
+    expect(oldClaim).toMatchObject({
+      state: 'CLAIMED',
+      execution: {
+        url: 'https://old.example.com/health',
+        method: 'GET',
+        timeoutMs: 10_000,
+        followRedirects: true,
+      },
+    });
+
+    const newRound = await request(app.getHttpServer())
+      .post(`/api/monitors/${monitorId}/check-rounds`)
+      .expect(202);
+    const newClaim = await executions.claim(newRound.body.data.id as string, 30_000);
+    expect(newClaim).toMatchObject({ state: 'CLAIMED', execution: settings });
+  });
+
+  it.each([
+    [{ url: 'https://example.com', method: 'POST', timeoutMs: 5_000, followRedirects: true }],
+    [{ url: 'https://example.com', method: 'GET', timeoutMs: 999, followRedirects: true }],
+    [{ url: 'https://example.com', method: 'GET', timeoutMs: 30_001, followRedirects: true }],
+    [{ url: 'https://example.com', method: 'GET', timeoutMs: 5_000, followRedirects: 'false' }],
+    [{ url: 'https://example.com', method: 'GET', timeoutMs: 5_000 }],
+  ])('rejects invalid or incomplete HTTP settings %#', async (settings) => {
+    const created = await request(app.getHttpServer())
+      .post('/api/monitors')
+      .send({ name: 'Validation target', url: 'https://example.com' })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${created.body.data.id as string}/http-settings`)
+      .send(settings)
+      .expect(400)
+      .expect(({ body }) => expect(body).toMatchObject({ code: 'VALIDATION_FAILED' }));
   });
 
   it('encrypts sensitive headers, redacts reads, and retains secrets explicitly', async () => {

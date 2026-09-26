@@ -21,6 +21,7 @@ const claimedExecution = {
   url: 'https://example.com/health',
   method: 'GET',
   timeoutMs: 10_000,
+  followRedirects: true,
   statusPolicy: { type: 'ANY_2XX' },
   organizationId: '44444444-4444-4444-8444-444444444444',
   monitorId: '55555555-5555-4555-8555-555555555555',
@@ -77,6 +78,7 @@ describe('CheckRoundJobHandler', () => {
     await createHandler(executions, executor).handle(payload);
 
     expect(claim).toHaveBeenCalledWith(payload.roundId, 45_000);
+    expect(execute).toHaveBeenCalledWith(expect.objectContaining({ followRedirects: true }));
     expect(complete).toHaveBeenCalledWith(
       claimedExecution.assignmentId,
       claimedExecution.claimToken,

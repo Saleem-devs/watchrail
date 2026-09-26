@@ -19,6 +19,7 @@ import {
   createMonitor,
   MonitorInputError,
   normalizeRequestHeaderUpdates,
+  parseHttpMonitorSettings,
   parseHttpStatusPolicy,
   RequestHeaderInputError,
 } from '@watchrail/domain';
@@ -100,6 +101,29 @@ export class MonitorsService {
 
   list(context: RequestContext): Promise<MonitorRecord[]> {
     return this.monitors.listForOrganization(context.organizationId);
+  }
+
+  async updateHttpSettings(
+    context: RequestContext,
+    monitorId: string,
+    value: unknown,
+  ): Promise<MonitorRecord> {
+    try {
+      const settings = parseHttpMonitorSettings(value);
+      return await this.monitors.updateHttpSettings(context.organizationId, monitorId, settings);
+    } catch (error) {
+      if (error instanceof MonitorInputError) {
+        throw new BadRequestException({
+          code: 'VALIDATION_FAILED',
+          message: error.message,
+          fields: error.fields,
+        });
+      }
+      if (error instanceof MonitorUpdateNotFoundError) {
+        throw new NotFoundException({ code: 'MONITOR_NOT_FOUND', message: error.message });
+      }
+      throw error;
+    }
   }
 
   async updateStatusPolicy(

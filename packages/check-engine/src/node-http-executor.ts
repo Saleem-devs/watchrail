@@ -122,6 +122,10 @@ export class NodeHttpExecutor implements HttpExecutor {
         return { type: 'RESPONSE', statusCode: response.statusCode, responseTimeMs, redirects };
       }
 
+      if (input.followRedirects === false) {
+        return { type: 'RESPONSE', statusCode: response.statusCode, responseTimeMs, redirects: [] };
+      }
+
       const source = endpointFor(target.url);
 
       if (response.location === null) {

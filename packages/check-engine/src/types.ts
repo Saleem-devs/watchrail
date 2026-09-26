@@ -15,6 +15,7 @@ export interface HttpCheckInput {
   url: string;
   method: HttpMethod;
   timeoutMs: number;
+  followRedirects: boolean;
   statusPolicy?: HttpStatusPolicy;
   requestHeaders?: readonly HttpRequestHeader[];
 }
@@ -146,6 +147,7 @@ export interface HttpExecutionInput {
 
   /** Attempt-scoped cancellation signal controlled by the check engine. */
   signal: AbortSignal;
+  followRedirects?: boolean;
   requestHeaders?: readonly HttpRequestHeader[];
 
   /**

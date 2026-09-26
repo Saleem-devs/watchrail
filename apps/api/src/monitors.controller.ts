@@ -16,6 +16,7 @@ interface MonitorResponse {
   method: string;
   lifecycleState: string;
   timeoutMs: number;
+  followRedirects: boolean;
   statusPolicy: HttpStatusPolicy;
   requestHeaders: Array<{
     name: string;
@@ -79,6 +80,20 @@ export class MonitorsController {
     return { data: toResponse(monitor) };
   }
 
+  @Patch(':monitorId/http-settings')
+  async updateHttpSettings(
+    @Req() request: RequestWithContext,
+    @Param('monitorId') monitorId: string,
+    @Body() body: unknown,
+  ): Promise<{ data: MonitorResponse }> {
+    const monitor = await this.monitors.updateHttpSettings(
+      request.watchrailContext,
+      monitorId,
+      body,
+    );
+    return { data: toResponse(monitor) };
+  }
+
   @Patch(':monitorId/request-headers')
   async updateRequestHeaders(
     @Req() request: RequestWithContext,
@@ -122,6 +137,7 @@ function toResponse(monitor: MonitorRecord): MonitorResponse {
     method: monitor.method,
     lifecycleState: monitor.lifecycleState,
     timeoutMs: monitor.timeoutMs,
+    followRedirects: monitor.followRedirects,
     statusPolicy: monitor.statusPolicy,
     requestHeaders: redactRequestHeaders(monitor.requestHeaders),
     locations: monitor.locations,
