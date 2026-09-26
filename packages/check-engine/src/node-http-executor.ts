@@ -108,7 +108,7 @@ export class NodeHttpExecutor implements HttpExecutor {
           };
         }
 
-        const targetFailure = classifyFetchFailure(error);
+        const targetFailure = classifyFetchFailure(error, target?.url.protocol === 'https:');
         if (targetFailure !== null) return { ...targetFailure, redirects };
         throw error;
       }
@@ -236,7 +236,7 @@ async function discardResponseBody(response: { discardBody(): Promise<void> }): 
   }
 }
 
-function classifyFetchFailure(error: unknown): HttpTargetFailure | null {
+function classifyFetchFailure(error: unknown, tlsAttempted: boolean): HttpTargetFailure | null {
   const code = findErrorCode(error);
 
   switch (code) {
@@ -254,16 +254,47 @@ function classifyFetchFailure(error: unknown): HttpTargetFailure | null {
         reason: 'CONNECTION_REFUSED',
         redirects: [],
       };
-    case 'CERT_HAS_EXPIRED':
-      return {
-        type: 'TARGET_FAILURE',
-        stage: 'TLS',
-        reason: 'CERTIFICATE_EXPIRED',
-        redirects: [],
-      };
     default:
-      return null;
+      return classifyTlsFailure(code, tlsAttempted);
   }
+}
+
+function classifyTlsFailure(code: string | null, tlsAttempted: boolean): HttpTargetFailure | null {
+  if (!tlsAttempted) return null;
+
+  switch (code) {
+    case 'CERT_HAS_EXPIRED':
+      return tlsFailure('CERTIFICATE_EXPIRED');
+    case 'CERT_NOT_YET_VALID':
+      return tlsFailure('CERTIFICATE_NOT_YET_VALID');
+    case 'ERR_TLS_CERT_ALTNAME_INVALID':
+      return tlsFailure('CERTIFICATE_HOSTNAME_MISMATCH');
+    case 'DEPTH_ZERO_SELF_SIGNED_CERT':
+    case 'SELF_SIGNED_CERT_IN_CHAIN':
+    case 'UNABLE_TO_VERIFY_LEAF_SIGNATURE':
+    case 'UNABLE_TO_GET_ISSUER_CERT':
+    case 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY':
+    case 'CERT_UNTRUSTED':
+    case 'CERT_REVOKED':
+    case 'CERT_CHAIN_TOO_LONG':
+    case 'INVALID_CA':
+    case 'PATH_LENGTH_EXCEEDED':
+    case 'INVALID_PURPOSE':
+    case 'CERT_REJECTED':
+      return tlsFailure('CERTIFICATE_UNTRUSTED');
+    case 'EPROTO':
+    case 'ERR_TLS_DH_PARAM_SIZE':
+    case 'ERR_TLS_HANDSHAKE_TIMEOUT':
+      return tlsFailure('TLS_HANDSHAKE_FAILED');
+    default:
+      return code?.startsWith('ERR_SSL_') === true ? tlsFailure('TLS_HANDSHAKE_FAILED') : null;
+  }
+}
+
+function tlsFailure(
+  reason: Extract<HttpTargetFailure, { stage: 'TLS' }>['reason'],
+): HttpTargetFailure {
+  return { type: 'TARGET_FAILURE', stage: 'TLS', reason, redirects: [] };
 }
 
 function findErrorCode(error: unknown): string | null {

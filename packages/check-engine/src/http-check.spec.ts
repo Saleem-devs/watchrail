@@ -326,6 +326,10 @@ describe('executeHttpCheck', () => {
     { stage: 'DNS', reason: 'NAME_NOT_FOUND' },
     { stage: 'CONNECT', reason: 'CONNECTION_REFUSED' },
     { stage: 'TLS', reason: 'CERTIFICATE_EXPIRED' },
+    { stage: 'TLS', reason: 'CERTIFICATE_NOT_YET_VALID' },
+    { stage: 'TLS', reason: 'CERTIFICATE_HOSTNAME_MISMATCH' },
+    { stage: 'TLS', reason: 'CERTIFICATE_UNTRUSTED' },
+    { stage: 'TLS', reason: 'TLS_HANDSHAKE_FAILED' },
   ] as const)('returns FAIL / $stage / $reason for a target failure', async (failure) => {
     const clock = createClock();
     const executor: HttpExecutor = {

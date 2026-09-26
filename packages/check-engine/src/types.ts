@@ -53,7 +53,12 @@ type HttpTargetFailureClassification =
     }
   | {
       stage: 'TLS';
-      reason: 'CERTIFICATE_EXPIRED';
+      reason:
+        | 'CERTIFICATE_EXPIRED'
+        | 'CERTIFICATE_NOT_YET_VALID'
+        | 'CERTIFICATE_HOSTNAME_MISMATCH'
+        | 'CERTIFICATE_UNTRUSTED'
+        | 'TLS_HANDSHAKE_FAILED';
     };
 
 export type HttpCheckResult =
