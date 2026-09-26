@@ -54,7 +54,12 @@ describe('NodeHttpExecutor', () => {
       signal: new AbortController().signal,
     });
 
-    expect(result).toEqual({ type: 'RESPONSE', statusCode: 200, responseTimeMs: 37 });
+    expect(result).toEqual({
+      type: 'RESPONSE',
+      statusCode: 200,
+      responseTimeMs: 37,
+      redirects: [],
+    });
   });
 
   it('passes only validated addresses and the original hostname to the transport', async () => {
@@ -224,6 +229,15 @@ describe('NodeHttpExecutor', () => {
       stage: 'HTTP',
       reason: 'COMPLETED',
       statusCode: 200,
+      redirects: [
+        {
+          sequence: 1,
+          statusCode: 302,
+          source: { targetId: 1, origin: 'https://example.com:443' },
+          destination: { targetId: 2, origin: 'https://example.com:443' },
+          headers: 'PRESERVED',
+        },
+      ],
     });
   });
 
@@ -277,7 +291,10 @@ describe('NodeHttpExecutor', () => {
       .mockResolvedValueOnce(response(200));
     const requestHeaders = [{ name: 'authorization', value: 'Bearer secret' }];
 
-    await new NodeHttpExecutor({ resolver: publicResolver(), transport: { request } }).execute({
+    const result = await new NodeHttpExecutor({
+      resolver: publicResolver(),
+      transport: { request },
+    }).execute({
       url: 'https://example.com/start',
       method: 'GET',
       signal: new AbortController().signal,
@@ -285,6 +302,7 @@ describe('NodeHttpExecutor', () => {
     });
 
     expect(request.mock.calls.map(([call]) => call.headers)).toEqual([requestHeaders, [], []]);
+    expect(result.redirects.map((hop) => hop.headers)).toEqual(['STRIPPED', 'STRIPPED']);
   });
 
   it('rejects an HTTPS to HTTP redirect before DNS resolution', async () => {
@@ -311,6 +329,12 @@ describe('NodeHttpExecutor', () => {
       stage: 'HTTP',
       reason: 'INSECURE_REDIRECT',
       statusCode: 302,
+      redirects: [
+        expect.objectContaining({
+          destination: { targetId: 2, origin: 'http://example.com:80' },
+          headers: 'NOT_SENT',
+        }),
+      ],
     });
     expect(resolver.lookup).toHaveBeenCalledOnce();
     expect(request).toHaveBeenCalledOnce();
@@ -382,6 +406,9 @@ describe('NodeHttpExecutor', () => {
     );
 
     expect(result).toMatchObject({ outcome: 'FAIL', stage: 'HTTP', reason, statusCode: 302 });
+    expect(result.redirects).toEqual([
+      expect.objectContaining({ destination: null, headers: 'NOT_SENT' }),
+    ]);
   });
 
   it('detects a redirect loop before resolving the visited target again', async () => {
@@ -399,6 +426,20 @@ describe('NodeHttpExecutor', () => {
     );
 
     expect(result).toMatchObject({ outcome: 'FAIL', reason: 'REDIRECT_LOOP' });
+    expect(result.redirects).toMatchObject([
+      {
+        sequence: 1,
+        source: { targetId: 1, origin: 'https://example.com:443' },
+        destination: { targetId: 2, origin: 'https://example.com:443' },
+        headers: 'PRESERVED',
+      },
+      {
+        sequence: 2,
+        source: { targetId: 2, origin: 'https://example.com:443' },
+        destination: { targetId: 1, origin: 'https://example.com:443' },
+        headers: 'NOT_SENT',
+      },
+    ]);
     expect(resolver.lookup).toHaveBeenCalledTimes(2);
   });
 
@@ -420,6 +461,15 @@ describe('NodeHttpExecutor', () => {
 
     expect(request).toHaveBeenCalledTimes(6);
     expect(result).toMatchObject({ outcome: 'FAIL', reason: 'TOO_MANY_REDIRECTS' });
+    expect(result.redirects).toHaveLength(6);
+    expect(result.redirects.map((hop) => hop.headers)).toEqual([
+      'PRESERVED',
+      'PRESERVED',
+      'PRESERVED',
+      'PRESERVED',
+      'PRESERVED',
+      'NOT_SENT',
+    ]);
   });
 
   it('allows five redirects followed by a final response', async () => {
@@ -505,8 +555,122 @@ describe('NodeHttpExecutor', () => {
       outcome: 'UNKNOWN',
       stage: 'DNS',
       reason: 'PROHIBITED_DESTINATION',
+      redirects: [
+        expect.objectContaining({
+          destination: { targetId: 2, origin: 'https://internal.example:443' },
+          headers: 'NOT_SENT',
+        }),
+      ],
     });
     expect(request).toHaveBeenCalledOnce();
+  });
+
+  it('keeps ordered per-hop timing and opaque endpoint identities without leaking URL secrets', async () => {
+    const times = [0, 0, 10, 10, 30, 30, 60];
+    const request = vi
+      .fn<PinnedHttpTransport['request']>()
+      .mockResolvedValueOnce(
+        response(302, 'https://other.example/login?token=WATCHRAIL_QUERY_SECRET'),
+      )
+      .mockResolvedValueOnce(response(307, '/ready'))
+      .mockResolvedValueOnce(response(204));
+    const result = await new NodeHttpExecutor({
+      resolver: publicResolver(),
+      transport: { request },
+      monotonicNow: () => times.shift() ?? 60,
+    }).execute({
+      url: 'https://example.com/invite/WATCHRAIL_PATH_SECRET',
+      method: 'GET',
+      signal: new AbortController().signal,
+      requestHeaders: [{ name: 'authorization', value: 'WATCHRAIL_HEADER_SECRET' }],
+    });
+
+    expect(result).toEqual({
+      type: 'RESPONSE',
+      statusCode: 204,
+      responseTimeMs: 60,
+      redirects: [
+        {
+          sequence: 1,
+          statusCode: 302,
+          source: { targetId: 1, origin: 'https://example.com:443' },
+          destination: { targetId: 2, origin: 'https://other.example:443' },
+          responseTimeMs: 10,
+          headers: 'STRIPPED',
+        },
+        {
+          sequence: 2,
+          statusCode: 307,
+          source: { targetId: 2, origin: 'https://other.example:443' },
+          destination: { targetId: 3, origin: 'https://other.example:443' },
+          responseTimeMs: 20,
+          headers: 'STRIPPED',
+        },
+      ],
+    });
+
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain('WATCHRAIL_PATH_SECRET');
+    expect(serialized).not.toContain('WATCHRAIL_QUERY_SECRET');
+    expect(serialized).not.toContain('WATCHRAIL_HEADER_SECRET');
+    expect(serialized).not.toContain('authorization');
+    expect(serialized).not.toContain('93.184.216.34');
+  });
+
+  it('retains a NOT_SENT redirect hop when destination DNS fails', async () => {
+    const lookup = vi
+      .fn<DnsResolver['lookup']>()
+      .mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }])
+      .mockRejectedValueOnce(networkFailure('ENOTFOUND'));
+    const request = vi
+      .fn<PinnedHttpTransport['request']>()
+      .mockResolvedValueOnce(response(302, 'https://missing.example/secret'));
+
+    const result = await new NodeHttpExecutor({
+      resolver: { lookup },
+      transport: { request },
+    }).execute({
+      url: 'https://example.com/start',
+      method: 'GET',
+      signal: new AbortController().signal,
+    });
+
+    expect(result).toMatchObject({
+      type: 'TARGET_FAILURE',
+      stage: 'DNS',
+      reason: 'NAME_NOT_FOUND',
+      redirects: [
+        expect.objectContaining({
+          destination: { targetId: 2, origin: 'https://missing.example:443' },
+          headers: 'NOT_SENT',
+        }),
+      ],
+    });
+    expect(request).toHaveBeenCalledOnce();
+  });
+
+  it('records STRIPPED when a cross-origin destination transport is invoked but connect fails', async () => {
+    const request = vi
+      .fn<PinnedHttpTransport['request']>()
+      .mockResolvedValueOnce(response(302, 'https://other.example/final'))
+      .mockRejectedValueOnce(networkFailure('ECONNREFUSED'));
+
+    const result = await new NodeHttpExecutor({
+      resolver: publicResolver(),
+      transport: { request },
+    }).execute({
+      url: 'https://example.com/start',
+      method: 'GET',
+      signal: new AbortController().signal,
+      requestHeaders: [{ name: 'authorization', value: 'Bearer secret' }],
+    });
+
+    expect(result).toMatchObject({
+      type: 'TARGET_FAILURE',
+      stage: 'CONNECT',
+      redirects: [expect.objectContaining({ headers: 'STRIPPED' })],
+    });
+    expect(request).toHaveBeenCalledTimes(2);
   });
 
   it('discards the unused response body after headers arrive', async () => {

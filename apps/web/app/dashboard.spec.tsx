@@ -106,6 +106,16 @@ describe('Dashboard', () => {
                 statusCode: 200,
                 responseTimeMs: 42.5,
                 attemptDurationMs: 46.25,
+                redirects: [
+                  {
+                    sequence: 1,
+                    statusCode: 302,
+                    source: { targetId: 1, origin: 'https://example.com:443' },
+                    destination: { targetId: 2, origin: 'https://status.example:443' },
+                    responseTimeMs: 12.25,
+                    headers: 'STRIPPED',
+                  },
+                ],
                 checkedAt: '2026-09-24T12:00:00.000Z',
               },
             },
@@ -124,6 +134,12 @@ describe('Dashboard', () => {
     expect(screen.getByText('200')).toBeInTheDocument();
     expect(screen.getByText('43 ms')).toBeInTheDocument();
     expect(screen.getByText('46 ms')).toBeInTheDocument();
+    expect(screen.getByRole('list', { name: 'Redirect chain' })).toHaveTextContent(
+      '#1 https://example.com:443 → #2 https://status.example:443',
+    );
+    expect(screen.getByRole('list', { name: 'Redirect chain' })).toHaveTextContent(
+      '302 · 12 ms · stripped',
+    );
     expect(screen.getByRole('button', { name: 'Run now' })).toBeEnabled();
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,

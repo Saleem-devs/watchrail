@@ -100,6 +100,16 @@ describe('CheckExecutionRepository', () => {
     if (claim.state !== 'CLAIMED') throw new Error('Expected an execution claim.');
 
     const checkedAt = new Date('2026-09-24T10:00:00.000Z');
+    const redirects = [
+      {
+        sequence: 1,
+        statusCode: 302 as const,
+        source: { targetId: 1, origin: 'https://example.com:443' },
+        destination: { targetId: 2, origin: 'https://status.example:443' },
+        responseTimeMs: 7.5,
+        headers: 'STRIPPED' as const,
+      },
+    ];
 
     await expect(
       repository.complete(claim.execution.assignmentId, claim.execution.claimToken, {
@@ -109,6 +119,7 @@ describe('CheckExecutionRepository', () => {
         statusCode: 200,
         responseTimeMs: 12.5,
         attemptDurationMs: 14.25,
+        redirects,
         checkedAt,
       }),
     ).resolves.toBe(true);
@@ -137,10 +148,56 @@ describe('CheckExecutionRepository', () => {
       statusCode: 200,
       responseTimeMs: 12.5,
       attemptDurationMs: 14.25,
+      redirects,
       checkedAt,
     });
     expect(completedRound?.status).toBe('COMPLETED');
     await expect(repository.claim(round.id, 45_000)).resolves.toEqual({ state: 'COMPLETED' });
+  });
+
+  it('rejects corrupted redirect JSONB instead of exposing extra fields', async () => {
+    const round = await createRound('https://example.com/invite/WATCHRAIL_PATH_SECRET');
+    const claim = await repository.claim(round.id, 45_000);
+    if (claim.state !== 'CLAIMED') throw new Error('Expected an execution claim.');
+
+    await repository.complete(claim.execution.assignmentId, claim.execution.claimToken, {
+      outcome: 'PASS',
+      stage: 'HTTP',
+      reason: 'COMPLETED',
+      statusCode: 200,
+      responseTimeMs: 10,
+      attemptDurationMs: 12,
+      redirects: [],
+      checkedAt: new Date(),
+    });
+
+    await connection.pool.query(
+      `update check_execution_results
+       set redirects = $1::jsonb
+       where assignment_id = $2`,
+      [
+        JSON.stringify([
+          {
+            sequence: 1,
+            statusCode: 302,
+            source: { targetId: 1, origin: 'https://example.com:443' },
+            destination: { targetId: 2, origin: 'https://status.example:443' },
+            responseTimeMs: 5,
+            headers: 'STRIPPED',
+            rawLocation: '/WATCHRAIL_PATH_SECRET',
+          },
+        ]),
+        claim.execution.assignmentId,
+      ],
+    );
+
+    await expect(
+      new ManualRoundRepository(connection.db).findForOrganization(
+        organizationId,
+        round.monitorId,
+        round.id,
+      ),
+    ).rejects.toMatchObject({ name: 'HttpRedirectDiagnosticsInvariantError' });
   });
 
   it('rejects a stale claimant after an expired assignment is reclaimed', async () => {
@@ -165,6 +222,7 @@ describe('CheckExecutionRepository', () => {
       statusCode: 503,
       responseTimeMs: 20,
       attemptDurationMs: 21,
+      redirects: [],
       checkedAt: new Date(),
     } as const;
 

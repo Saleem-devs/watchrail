@@ -28,6 +28,7 @@ interface HttpCheckTiming {
 
   /** Wall-clock time at which the attempt started, before executor invocation. */
   checkedAt: Date;
+  redirects: readonly HttpRedirectHop[];
 }
 
 interface HttpResponseEvidence {
@@ -105,19 +106,24 @@ export type HttpCheckOutcome = HttpCheckResult['outcome'];
 export type HttpCheckStage = HttpCheckResult['stage'];
 export type HttpCheckReason = HttpCheckResult['reason'];
 
-export interface HttpResponseObservation extends HttpResponseEvidence {
+interface HttpExecutionEvidence {
+  redirects: readonly HttpRedirectHop[];
+}
+
+export interface HttpResponseObservation extends HttpResponseEvidence, HttpExecutionEvidence {
   type: 'RESPONSE';
 }
 
-export type HttpTargetFailure = { type: 'TARGET_FAILURE' } & HttpTargetFailureClassification;
+export type HttpTargetFailure = { type: 'TARGET_FAILURE' } & HttpTargetFailureClassification &
+  HttpExecutionEvidence;
 
-export interface HttpPolicyRejection {
+export interface HttpPolicyRejection extends HttpExecutionEvidence {
   type: 'POLICY_REJECTION';
   stage: 'DNS';
   reason: 'PROHIBITED_DESTINATION';
 }
 
-export interface HttpRedirectFailure extends HttpResponseEvidence {
+export interface HttpRedirectFailure extends HttpResponseEvidence, HttpExecutionEvidence {
   type: 'REDIRECT_FAILURE';
   reason:
     | 'REDIRECT_LOOP'
@@ -168,3 +174,4 @@ export interface HttpCheckDependencies {
   executor: HttpExecutor;
   clock?: CheckClock;
 }
+import type { HttpRedirectHop } from '@watchrail/domain';

@@ -370,6 +370,9 @@ importers:
 
   packages/check-engine:
     dependencies:
+      '@watchrail/domain':
+        specifier: workspace:*
+        version: link:../domain
       undici:
         specifier: 8.10.2
         version: 8.10.2

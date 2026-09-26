@@ -75,6 +75,7 @@ export async function executeHttpCheck(
         responseTimeMs: null,
         attemptDurationMs,
         checkedAt,
+        redirects: [],
       };
     }
 
@@ -86,6 +87,7 @@ export async function executeHttpCheck(
       responseTimeMs: null,
       attemptDurationMs,
       checkedAt,
+      redirects: [],
     };
   } finally {
     if (timeoutHandle !== undefined) {
@@ -111,6 +113,7 @@ function classifyHttpExecution(input: {
       responseTimeMs: null,
       attemptDurationMs,
       checkedAt,
+      redirects: execution.redirects,
     };
   }
 
@@ -123,6 +126,7 @@ function classifyHttpExecution(input: {
       responseTimeMs: execution.responseTimeMs,
       attemptDurationMs,
       checkedAt,
+      redirects: execution.redirects,
     };
   }
 
@@ -145,6 +149,7 @@ function classifyHttpExecution(input: {
       responseTimeMs: execution.responseTimeMs,
       attemptDurationMs,
       checkedAt,
+      redirects: execution.redirects,
     };
   }
 
@@ -156,6 +161,7 @@ function classifyHttpExecution(input: {
     responseTimeMs: execution.responseTimeMs,
     attemptDurationMs,
     checkedAt,
+    redirects: execution.redirects,
   };
 }
 
@@ -180,6 +186,7 @@ function classifyTargetFailure(input: {
     responseTimeMs: null,
     attemptDurationMs,
     checkedAt,
+    redirects: failure.redirects,
   } as const;
 
   switch (failure.stage) {

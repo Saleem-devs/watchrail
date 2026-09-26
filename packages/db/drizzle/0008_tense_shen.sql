@@ -1,0 +1,2 @@
+ALTER TABLE "check_execution_results" ADD COLUMN "redirects" jsonb DEFAULT '[]'::jsonb NOT NULL;--> statement-breakpoint
+ALTER TABLE "check_execution_results" ADD CONSTRAINT "check_execution_results_redirects_array" CHECK (jsonb_typeof("check_execution_results"."redirects") = 'array');

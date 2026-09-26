@@ -1,5 +1,11 @@
 import { and, eq, sql } from 'drizzle-orm';
-import type { HttpMethod, HttpStatusPolicy, StoredRequestHeader } from '@watchrail/domain';
+import {
+  parseHttpRedirectHops,
+  type HttpMethod,
+  type HttpRedirectHop,
+  type HttpStatusPolicy,
+  type StoredRequestHeader,
+} from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
 import {
   checkExecutionAssignments,
@@ -35,6 +41,7 @@ export interface AuthoritativeCheckResult {
   statusCode: number | null;
   responseTimeMs: number | null;
   attemptDurationMs: number;
+  redirects: readonly HttpRedirectHop[];
   checkedAt: Date;
 }
 
@@ -151,6 +158,8 @@ export class CheckExecutionRepository {
 
       if (!completed) return false;
 
+      const redirects = parseHttpRedirectHops(result.redirects);
+
       await tx.insert(checkExecutionResults).values({
         organizationId: completed.organizationId,
         roundId: completed.roundId,
@@ -161,6 +170,7 @@ export class CheckExecutionRepository {
         statusCode: result.statusCode,
         responseTimeMs: result.responseTimeMs,
         attemptDurationMs: result.attemptDurationMs,
+        redirects,
         checkedAt: result.checkedAt,
       });
 
