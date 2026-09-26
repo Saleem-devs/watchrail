@@ -106,7 +106,7 @@ export type HttpCheckOutcome = HttpCheckResult['outcome'];
 export type HttpCheckStage = HttpCheckResult['stage'];
 export type HttpCheckReason = HttpCheckResult['reason'];
 
-interface HttpExecutionEvidence {
+export interface HttpExecutionEvidence {
   redirects: readonly HttpRedirectHop[];
 }
 
@@ -147,6 +147,12 @@ export interface HttpExecutionInput {
   /** Attempt-scoped cancellation signal controlled by the check engine. */
   signal: AbortSignal;
   requestHeaders?: readonly HttpRequestHeader[];
+
+  /**
+   * Publishes sanitized evidence observed before an executor settles. The
+   * engine uses the latest snapshot when it must synthesize a terminal result.
+   */
+  onEvidence?: (evidence: HttpExecutionEvidence) => void;
 }
 
 /**

@@ -49,6 +49,9 @@ export class NodeHttpExecutor implements HttpExecutor {
     const visited = new Set<string>();
     const endpoints = new Map<string, HttpRedirectEndpoint>();
     const redirects: HttpRedirectHop[] = [];
+    const publishEvidence = (): void => {
+      input.onEvidence?.({ redirects: [...redirects] });
+    };
     let currentUrl: string | URL = input.url;
     let redirectsFollowed = 0;
     let headersAttached = true;
@@ -82,6 +85,7 @@ export class NodeHttpExecutor implements HttpExecutor {
               ...pending,
               headers: headersAttached ? 'PRESERVED' : 'STRIPPED',
             };
+            publishEvidence();
           }
           pendingHopIndex = null;
         }
@@ -122,6 +126,7 @@ export class NodeHttpExecutor implements HttpExecutor {
 
       if (response.location === null) {
         redirects.push(createHop(response.statusCode, source, null, hopResponseTimeMs, redirects));
+        publishEvidence();
         return redirectFailure(
           'MISSING_REDIRECT_LOCATION',
           response.statusCode,
@@ -136,6 +141,7 @@ export class NodeHttpExecutor implements HttpExecutor {
         nextUrl = validateHttpTargetUrl(new URL(response.location, target.url));
       } catch {
         redirects.push(createHop(response.statusCode, source, null, hopResponseTimeMs, redirects));
+        publishEvidence();
         return redirectFailure(
           'INVALID_REDIRECT_LOCATION',
           response.statusCode,
@@ -148,6 +154,7 @@ export class NodeHttpExecutor implements HttpExecutor {
       redirects.push(
         createHop(response.statusCode, source, destination, hopResponseTimeMs, redirects),
       );
+      publishEvidence();
 
       if (target.url.protocol === 'https:' && nextUrl.protocol === 'http:') {
         return redirectFailure('INSECURE_REDIRECT', response.statusCode, responseTimeMs, redirects);

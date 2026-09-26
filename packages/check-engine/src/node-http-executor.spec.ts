@@ -525,9 +525,20 @@ describe('NodeHttpExecutor', () => {
 
       await vi.advanceTimersByTimeAsync(1_000);
 
-      await expect(resultPromise).resolves.toMatchObject({
+      const result = await resultPromise;
+
+      expect(result).toMatchObject({
         outcome: 'FAIL',
         reason: 'REQUEST_TIMEOUT',
+        redirects: [
+          {
+            sequence: 1,
+            statusCode: 302,
+            source: { targetId: 1, origin: 'https://example.com:443' },
+            destination: { targetId: 2, origin: 'https://example.com:443' },
+            headers: 'PRESERVED',
+          },
+        ],
       });
       expect(request).toHaveBeenCalledTimes(2);
     } finally {

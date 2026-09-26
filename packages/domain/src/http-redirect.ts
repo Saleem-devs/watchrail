@@ -16,6 +16,7 @@ export interface HttpRedirectHop {
 
 const REDIRECT_STATUS_CODES = new Set([301, 302, 303, 307, 308]);
 const HEADER_DISPOSITIONS = new Set(['PRESERVED', 'STRIPPED', 'NOT_SENT']);
+const MAX_RECORDED_REDIRECT_HOPS = 6;
 
 export class HttpRedirectDiagnosticsInvariantError extends Error {
   constructor() {
@@ -25,9 +26,13 @@ export class HttpRedirectDiagnosticsInvariantError extends Error {
 }
 
 export function parseHttpRedirectHops(value: unknown): HttpRedirectHop[] {
-  if (!Array.isArray(value)) throw new HttpRedirectDiagnosticsInvariantError();
+  if (!Array.isArray(value) || value.length > MAX_RECORDED_REDIRECT_HOPS) {
+    throw new HttpRedirectDiagnosticsInvariantError();
+  }
 
-  return value.map((hop, index) => parseHop(hop, index + 1));
+  const hops = value.map((hop, index) => parseHop(hop, index + 1));
+  assertValidChain(hops);
+  return hops;
 }
 
 export function formatHttpRedirectOrigin(url: URL): string {
@@ -88,6 +93,46 @@ function parseEndpoint(value: unknown): HttpRedirectEndpoint {
   }
 
   return { targetId: value.targetId as number, origin: value.origin };
+}
+
+function assertValidChain(hops: readonly HttpRedirectHop[]): void {
+  const originsByTargetId = new Map<number, string>();
+
+  const registerEndpoint = (endpoint: HttpRedirectEndpoint): void => {
+    const existingOrigin = originsByTargetId.get(endpoint.targetId);
+    if (existingOrigin !== undefined && existingOrigin !== endpoint.origin) {
+      throw new HttpRedirectDiagnosticsInvariantError();
+    }
+    originsByTargetId.set(endpoint.targetId, endpoint.origin);
+  };
+
+  hops.forEach((hop, index) => {
+    registerEndpoint(hop.source);
+    if (hop.destination !== null) registerEndpoint(hop.destination);
+
+    const terminal = index === hops.length - 1;
+    if (hop.destination === null && hop.headers !== 'NOT_SENT') {
+      throw new HttpRedirectDiagnosticsInvariantError();
+    }
+    if (hop.headers === 'NOT_SENT' && !terminal) {
+      throw new HttpRedirectDiagnosticsInvariantError();
+    }
+
+    if (index === 0) return;
+    const previous = hops[index - 1];
+    if (
+      previous === undefined ||
+      previous.destination === null ||
+      previous.headers === 'NOT_SENT' ||
+      !sameEndpoint(previous.destination, hop.source)
+    ) {
+      throw new HttpRedirectDiagnosticsInvariantError();
+    }
+  });
+}
+
+function sameEndpoint(left: HttpRedirectEndpoint, right: HttpRedirectEndpoint): boolean {
+  return left.targetId === right.targetId && left.origin === right.origin;
 }
 
 function isCanonicalHttpOrigin(origin: string): boolean {

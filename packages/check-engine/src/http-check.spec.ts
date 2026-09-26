@@ -384,9 +384,20 @@ describe('executeHttpCheck', () => {
 
   it('returns UNKNOWN / PROBE / INTERNAL_ERROR for an executor failure', async () => {
     const clock = createClock();
+    const redirects = [
+      {
+        sequence: 1,
+        statusCode: 302 as const,
+        source: { targetId: 1, origin: 'https://example.com:443' },
+        destination: { targetId: 2, origin: 'https://example.com:443' },
+        responseTimeMs: 10,
+        headers: 'PRESERVED' as const,
+      },
+    ];
 
     const executor: HttpExecutor = {
-      execute: vi.fn(() => {
+      execute: vi.fn((input) => {
+        input.onEvidence?.({ redirects });
         clock.advance(15);
         return Promise.reject(new Error('executor exploded'));
       }),
@@ -412,7 +423,7 @@ describe('executeHttpCheck', () => {
       responseTimeMs: null,
       attemptDurationMs: 15,
       checkedAt,
-      redirects: [],
+      redirects,
     });
   });
 
