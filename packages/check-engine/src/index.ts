@@ -1,4 +1,5 @@
 export { executeHttpCheck } from './http-check.js';
+export { evaluateHeaderAssertions, notEvaluateHeaderAssertions } from './header-assertions.js';
 export { NodeHttpExecutor, type NodeHttpExecutorOptions } from './node-http-executor.js';
 export {
   InvalidHttpTargetError,
@@ -13,6 +14,7 @@ export {
 export {
   UndiciPinnedHttpTransport,
   createPinnedLookup,
+  normalizeResponseHeaders,
   type HttpTransportResponse,
   type PinnedHttpTransport,
 } from './undici-http-transport.js';
@@ -40,6 +42,7 @@ export type {
   HttpTargetFailure,
   HttpMethod,
   HttpStatusPolicy,
+  HttpResponseHeader,
   HttpPolicyRejection,
   HttpRedirectFailure,
 } from './types.js';

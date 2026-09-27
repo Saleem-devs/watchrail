@@ -11,6 +11,11 @@ export interface HttpRequestHeader {
   value: string;
 }
 
+export interface HttpResponseHeader {
+  name: string;
+  values: readonly string[];
+}
+
 export interface HttpCheckInput {
   url: string;
   method: HttpMethod;
@@ -18,6 +23,7 @@ export interface HttpCheckInput {
   followRedirects: boolean;
   statusPolicy?: HttpStatusPolicy;
   requestHeaders?: readonly HttpRequestHeader[];
+  headerAssertions?: readonly HeaderAssertion[];
 }
 
 interface HttpCheckTiming {
@@ -30,6 +36,7 @@ interface HttpCheckTiming {
   /** Wall-clock time at which the attempt started, before executor invocation. */
   checkedAt: Date;
   redirects: readonly HttpRedirectHop[];
+  assertionEvaluation: AssertionEvaluationV1;
 }
 
 interface HttpResponseEvidence {
@@ -118,6 +125,7 @@ export interface HttpExecutionEvidence {
 
 export interface HttpResponseObservation extends HttpResponseEvidence, HttpExecutionEvidence {
   type: 'RESPONSE';
+  headers: readonly HttpResponseHeader[];
 }
 
 export type HttpTargetFailure = { type: 'TARGET_FAILURE' } & HttpTargetFailureClassification &
@@ -187,4 +195,4 @@ export interface HttpCheckDependencies {
   executor: HttpExecutor;
   clock?: CheckClock;
 }
-import type { HttpRedirectHop } from '@watchrail/domain';
+import type { AssertionEvaluationV1, HeaderAssertion, HttpRedirectHop } from '@watchrail/domain';

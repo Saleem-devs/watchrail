@@ -69,6 +69,7 @@ describe('CheckRoundJobHandler', () => {
     });
     execute.mockResolvedValue({
       type: 'RESPONSE',
+      headers: [],
       statusCode: 200,
       responseTimeMs: 12,
       redirects: [],
@@ -103,6 +104,7 @@ describe('CheckRoundJobHandler', () => {
     });
     execute.mockResolvedValue({
       type: 'RESPONSE',
+      headers: [],
       statusCode: 404,
       responseTimeMs: 12,
       redirects: [],
@@ -143,6 +145,7 @@ describe('CheckRoundJobHandler', () => {
     });
     execute.mockResolvedValue({
       type: 'RESPONSE',
+      headers: [],
       statusCode: 200,
       responseTimeMs: 12,
       redirects: [],
@@ -292,6 +295,7 @@ describe('CheckRoundJobHandler', () => {
     });
     execute.mockResolvedValue({
       type: 'RESPONSE',
+      headers: [],
       statusCode: 503,
       responseTimeMs: 10,
       redirects: [],

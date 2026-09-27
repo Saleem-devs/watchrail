@@ -3,6 +3,7 @@ import {
   InvalidHttpStatusPolicyError,
   InvalidHttpTimeoutError,
 } from './errors.js';
+import { evaluateHeaderAssertions, notEvaluateHeaderAssertions } from './header-assertions.js';
 import { HTTP_CHECK_TIMEOUT_LIMITS } from './types.js';
 import type {
   CheckClock,
@@ -28,6 +29,7 @@ export async function executeHttpCheck(
   assertSupportedMethod(input.method);
   assertValidTimeout(input.timeoutMs);
   assertValidStatusPolicy(input.statusPolicy);
+  const unavailableAssertions = notEvaluateHeaderAssertions(input.headerAssertions ?? []);
 
   const clock = dependencies.clock ?? defaultClock;
 
@@ -65,6 +67,7 @@ export async function executeHttpCheck(
     return classifyHttpExecution({
       execution,
       statusPolicy: input.statusPolicy ?? { type: 'ANY_2XX' },
+      headerAssertions: input.headerAssertions ?? [],
       checkedAt,
       attemptDurationMs: elapsed(clock, startedAt),
     });
@@ -81,6 +84,7 @@ export async function executeHttpCheck(
         attemptDurationMs,
         checkedAt,
         redirects,
+        assertionEvaluation: unavailableAssertions,
       };
     }
 
@@ -93,6 +97,7 @@ export async function executeHttpCheck(
       attemptDurationMs,
       checkedAt,
       redirects,
+      assertionEvaluation: unavailableAssertions,
     };
   } finally {
     if (timeoutHandle !== undefined) {
@@ -104,10 +109,12 @@ export async function executeHttpCheck(
 function classifyHttpExecution(input: {
   execution: HttpExecutionResult;
   statusPolicy: NonNullable<HttpCheckInput['statusPolicy']>;
+  headerAssertions: NonNullable<HttpCheckInput['headerAssertions']>;
   checkedAt: Date;
   attemptDurationMs: number;
 }): HttpCheckResult {
-  const { execution, statusPolicy, checkedAt, attemptDurationMs } = input;
+  const { execution, statusPolicy, headerAssertions, checkedAt, attemptDurationMs } = input;
+  const unavailableAssertions = notEvaluateHeaderAssertions(headerAssertions);
 
   if (execution.type === 'POLICY_REJECTION') {
     return {
@@ -119,6 +126,7 @@ function classifyHttpExecution(input: {
       attemptDurationMs,
       checkedAt,
       redirects: execution.redirects,
+      assertionEvaluation: unavailableAssertions,
     };
   }
 
@@ -132,6 +140,7 @@ function classifyHttpExecution(input: {
       attemptDurationMs,
       checkedAt,
       redirects: execution.redirects,
+      assertionEvaluation: unavailableAssertions,
     };
   }
 
@@ -140,10 +149,12 @@ function classifyHttpExecution(input: {
       failure: execution,
       attemptDurationMs,
       checkedAt,
+      assertionEvaluation: unavailableAssertions,
     });
   }
 
   const successful = statusMatches(statusPolicy, execution.statusCode);
+  const assertionEvaluation = evaluateHeaderAssertions(headerAssertions, execution.headers);
 
   if (successful) {
     return {
@@ -155,6 +166,7 @@ function classifyHttpExecution(input: {
       attemptDurationMs,
       checkedAt,
       redirects: execution.redirects,
+      assertionEvaluation,
     };
   }
 
@@ -167,6 +179,7 @@ function classifyHttpExecution(input: {
     attemptDurationMs,
     checkedAt,
     redirects: execution.redirects,
+    assertionEvaluation,
   };
 }
 
@@ -183,8 +196,9 @@ function classifyTargetFailure(input: {
   failure: HttpTargetFailure;
   checkedAt: Date;
   attemptDurationMs: number;
+  assertionEvaluation: ReturnType<typeof notEvaluateHeaderAssertions>;
 }): HttpCheckResult {
-  const { failure, checkedAt, attemptDurationMs } = input;
+  const { failure, checkedAt, attemptDurationMs, assertionEvaluation } = input;
   const common = {
     outcome: 'FAIL',
     statusCode: null,
@@ -192,6 +206,7 @@ function classifyTargetFailure(input: {
     attemptDurationMs,
     checkedAt,
     redirects: failure.redirects,
+    assertionEvaluation,
   } as const;
 
   switch (failure.stage) {

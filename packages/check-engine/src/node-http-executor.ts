@@ -119,11 +119,23 @@ export class NodeHttpExecutor implements HttpExecutor {
       await discardResponseBody(response);
 
       if (!isRedirectStatus(response.statusCode)) {
-        return { type: 'RESPONSE', statusCode: response.statusCode, responseTimeMs, redirects };
+        return {
+          type: 'RESPONSE',
+          statusCode: response.statusCode,
+          responseTimeMs,
+          headers: response.headers,
+          redirects,
+        };
       }
 
       if (input.followRedirects === false) {
-        return { type: 'RESPONSE', statusCode: response.statusCode, responseTimeMs, redirects: [] };
+        return {
+          type: 'RESPONSE',
+          statusCode: response.statusCode,
+          responseTimeMs,
+          headers: response.headers,
+          redirects: [],
+        };
       }
 
       const source = endpointFor(target.url);
