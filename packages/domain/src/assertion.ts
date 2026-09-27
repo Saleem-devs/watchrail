@@ -21,6 +21,15 @@ export const JSON_BODY_ASSERTION_OPERATORS = [
   'not_equals',
 ] as const;
 export const ASSERTION_OUTCOMES = ['PASS', 'FAIL', 'NOT_EVALUATED'] as const;
+export const ASSERTION_LIMITS = {
+  maxAssertions: 32,
+  maxTargetLength: 4_096,
+  maxSelectorLength: 512,
+  maxSelectorDepth: 32,
+  maxJsonNumberDigits: 256,
+  maxJsonExponentDigits: 6,
+  maxEncryptedValueBytes: 4_352,
+} as const;
 
 export type HeaderAssertionOperator = (typeof HEADER_ASSERTION_OPERATORS)[number];
 export type TextBodyAssertionOperator = (typeof TEXT_BODY_ASSERTION_OPERATORS)[number];
@@ -116,6 +125,17 @@ export function parseResponseAssertions(
   }
 
   const issues: string[] = [];
+  if (
+    Array.isArray(value.headers) &&
+    Array.isArray(value.textBody) &&
+    Array.isArray(value.jsonBody) &&
+    value.headers.length + value.textBody.length + value.jsonBody.length >
+      ASSERTION_LIMITS.maxAssertions
+  ) {
+    throw new AssertionInputError([
+      `Configure at most ${ASSERTION_LIMITS.maxAssertions} assertions.`,
+    ]);
+  }
   const headers = parseArray(value.headers, 'Header assertions', issues, parseHeaderAssertion);
   const textBody = parseArray(
     value.textBody,
@@ -139,10 +159,14 @@ export function parseResponseAssertions(
 }
 
 export function isValidJsonSelector(selector: string): boolean {
-  if (!selector.startsWith('$')) return false;
+  if (!selector.startsWith('$') || selector.length > ASSERTION_LIMITS.maxSelectorLength)
+    return false;
   let index = 1;
+  let depth = 0;
 
   while (index < selector.length) {
+    depth += 1;
+    if (depth > ASSERTION_LIMITS.maxSelectorDepth) return false;
     if (selector[index] === '.') {
       index += 1;
       if (!isCharacter(selector[index], IDENTIFIER_START)) return false;
@@ -267,7 +291,8 @@ function parseSensitiveStringTarget(
     !isRecord(value) ||
     !hasExactKeys(value, ['value', 'sensitive']) ||
     typeof value.value !== 'string' ||
-    typeof value.sensitive !== 'boolean'
+    typeof value.sensitive !== 'boolean' ||
+    value.value.length > ASSERTION_LIMITS.maxTargetLength
   ) {
     issues.push(`${label} must provide a string target and explicit sensitivity.`);
     return null;
@@ -297,7 +322,8 @@ function parseSensitiveJsonTarget(
   if (
     target.type === 'string' &&
     hasExactKeys(target, ['type', 'value']) &&
-    typeof target.value === 'string'
+    typeof target.value === 'string' &&
+    target.value.length <= ASSERTION_LIMITS.maxTargetLength
   ) {
     scalar = { type: 'string', value: target.value };
   }
@@ -312,7 +338,7 @@ function parseSensitiveJsonTarget(
     target.type === 'number' &&
     hasExactKeys(target, ['type', 'value']) &&
     typeof target.value === 'string' &&
-    JSON_NUMBER.test(target.value)
+    isBoundedJsonNumber(target.value)
   ) {
     scalar = { type: 'number', value: normalizeJsonNumber(target.value) };
   }
@@ -322,6 +348,18 @@ function parseSensitiveJsonTarget(
     return null;
   }
   return { value: scalar, sensitive: value.sensitive };
+}
+
+function isBoundedJsonNumber(value: string): boolean {
+  if (value.length > ASSERTION_LIMITS.maxTargetLength) return false;
+  const match = JSON_NUMBER.exec(value);
+  if (!match) return false;
+  const digitCount = (match[2]?.length ?? 0) + (match[3]?.length ?? 0);
+  const exponent = match[4]?.replace(/^[+-]/u, '') ?? '';
+  return (
+    digitCount <= ASSERTION_LIMITS.maxJsonNumberDigits &&
+    exponent.length <= ASSERTION_LIMITS.maxJsonExponentDigits
+  );
 }
 
 function normalizeJsonNumber(value: string): string {

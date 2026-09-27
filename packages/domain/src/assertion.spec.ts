@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { AssertionInputError, isValidJsonSelector, parseResponseAssertions } from './assertion.js';
+import {
+  ASSERTION_LIMITS,
+  AssertionInputError,
+  isValidJsonSelector,
+  parseResponseAssertions,
+} from './assertion.js';
 
 describe('parseResponseAssertions', () => {
   it('defaults to an empty assertion contract', () => {
@@ -198,6 +203,73 @@ describe('parseResponseAssertions', () => {
     ).toThrow(AssertionInputError);
     expect(() =>
       parseResponseAssertions({ headers: {}, textBody: [], jsonBody: [] }, 'GET'),
+    ).toThrow(AssertionInputError);
+  });
+
+  it('rejects configurations beyond the total assertion limit', () => {
+    expect(() =>
+      parseResponseAssertions(
+        {
+          headers: Array.from({ length: ASSERTION_LIMITS.maxAssertions + 1 }, (_, index) => ({
+            name: `x-${index}`,
+            operator: 'exists',
+          })),
+          textBody: [],
+          jsonBody: [],
+        },
+        'GET',
+      ),
+    ).toThrow(AssertionInputError);
+  });
+
+  it('rejects oversized targets, selectors, selector depth, and number components', () => {
+    const parseJsonTarget = (selector: string, value: { type: string; value?: string }) =>
+      parseResponseAssertions(
+        {
+          headers: [],
+          textBody: [],
+          jsonBody: [{ selector, operator: 'equals', target: { value, sensitive: false } }],
+        },
+        'GET',
+      );
+
+    expect(() =>
+      parseResponseAssertions(
+        {
+          headers: [],
+          textBody: [
+            {
+              operator: 'equals',
+              target: {
+                value: 'x'.repeat(ASSERTION_LIMITS.maxTargetLength + 1),
+                sensitive: false,
+              },
+            },
+          ],
+          jsonBody: [],
+        },
+        'GET',
+      ),
+    ).toThrow(AssertionInputError);
+    expect(() =>
+      parseJsonTarget(`$['${'x'.repeat(ASSERTION_LIMITS.maxSelectorLength)}']`, { type: 'null' }),
+    ).toThrow(AssertionInputError);
+    expect(() =>
+      parseJsonTarget(`$${'.value'.repeat(ASSERTION_LIMITS.maxSelectorDepth + 1)}`, {
+        type: 'null',
+      }),
+    ).toThrow(AssertionInputError);
+    expect(() =>
+      parseJsonTarget('$.value', {
+        type: 'number',
+        value: '1'.repeat(ASSERTION_LIMITS.maxJsonNumberDigits + 1),
+      }),
+    ).toThrow(AssertionInputError);
+    expect(() =>
+      parseJsonTarget('$.value', {
+        type: 'number',
+        value: `1e${'9'.repeat(ASSERTION_LIMITS.maxJsonExponentDigits + 1)}`,
+      }),
     ).toThrow(AssertionInputError);
   });
 });
