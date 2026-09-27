@@ -5,6 +5,13 @@ export {
   evaluateTextBodyAssertions,
   notEvaluateTextBodyAssertions,
 } from './text-body-assertions.js';
+export {
+  parseStrictJson,
+  STRICT_JSON_LIMITS,
+  type StrictJsonMember,
+  type StrictJsonParseResult,
+  type StrictJsonValue,
+} from './strict-json-parser.js';
 export { NodeHttpExecutor, type NodeHttpExecutorOptions } from './node-http-executor.js';
 export {
   InvalidHttpTargetError,
