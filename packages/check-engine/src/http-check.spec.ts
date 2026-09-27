@@ -34,6 +34,7 @@ describe('executeHttpCheck', () => {
           statusCode: 200,
           type: 'RESPONSE',
           headers: [],
+          body: { state: 'NOT_REQUESTED' },
           redirects: [],
           responseTimeMs: 118,
         });
@@ -76,6 +77,7 @@ describe('executeHttpCheck', () => {
         return Promise.resolve({
           type: 'RESPONSE',
           headers: [],
+          body: { state: 'NOT_REQUESTED' },
           redirects: [],
           statusCode: 200,
           responseTimeMs: 5_000,
@@ -113,6 +115,7 @@ describe('executeHttpCheck', () => {
           responseTimeMs: 40,
           type: 'RESPONSE',
           headers: [],
+          body: { state: 'NOT_REQUESTED' },
           redirects: [],
         }),
     };
@@ -147,6 +150,7 @@ describe('executeHttpCheck', () => {
           responseTimeMs: 72,
           type: 'RESPONSE',
           headers: [],
+          body: { state: 'NOT_REQUESTED' },
           redirects: [],
         });
       },
@@ -186,6 +190,7 @@ describe('executeHttpCheck', () => {
           statusCode: 200,
           responseTimeMs: 10,
           headers: [{ name: 'x-state', values: ['not-ready'] }],
+          body: { state: 'NOT_REQUESTED' },
           redirects: [],
         }),
     };
@@ -273,6 +278,7 @@ describe('executeHttpCheck', () => {
           statusCode,
           responseTimeMs: 25,
           headers: [],
+          body: { state: 'NOT_REQUESTED' },
           redirects: [],
         }),
     };
@@ -300,6 +306,7 @@ describe('executeHttpCheck', () => {
           responseTimeMs: 40,
           type: 'RESPONSE',
           headers: [],
+          body: { state: 'NOT_REQUESTED' },
           redirects: [],
         }),
     };
@@ -594,6 +601,7 @@ describe('executeHttpCheck', () => {
             responseTimeMs: 10,
             type: 'RESPONSE',
             headers: [],
+            body: { state: 'NOT_REQUESTED' },
             redirects: [],
           }),
       };
@@ -623,6 +631,7 @@ describe('executeHttpCheck', () => {
           responseTimeMs: 10,
           type: 'RESPONSE',
           headers: [],
+          body: { state: 'NOT_REQUESTED' },
           redirects: [],
         }),
     };

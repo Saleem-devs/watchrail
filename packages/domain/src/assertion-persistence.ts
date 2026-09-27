@@ -89,6 +89,7 @@ const DIAGNOSTIC_REASONS = new Set<AssertionDiagnosticReason>([
   'UNSUPPORTED_CONTENT_ENCODING',
   'UNSUPPORTED_CHARSET',
   'BODY_TOO_LARGE',
+  'BODY_READ_FAILED',
   'RESPONSE_UNAVAILABLE',
 ]);
 
@@ -330,10 +331,12 @@ function validateDiagnosticSemantics(diagnostic: AssertionDiagnostic): Assertion
       reason === 'JSON_TYPE_UNSUPPORTED') &&
       source === 'JSON_BODY' &&
       outcome === 'FAIL') ||
-    ((reason === 'UNSUPPORTED_CONTENT_ENCODING' || reason === 'BODY_TOO_LARGE') &&
+    ((reason === 'UNSUPPORTED_CONTENT_ENCODING' ||
+      reason === 'BODY_TOO_LARGE' ||
+      reason === 'BODY_READ_FAILED') &&
       bodySource &&
       outcome === 'NOT_EVALUATED') ||
-    (reason === 'UNSUPPORTED_CHARSET' && source === 'TEXT_BODY' && outcome === 'NOT_EVALUATED') ||
+    (reason === 'UNSUPPORTED_CHARSET' && bodySource && outcome === 'NOT_EVALUATED') ||
     (reason === 'RESPONSE_UNAVAILABLE' && outcome === 'NOT_EVALUATED');
 
   if (!valid) throw new StoredAssertionContractError();

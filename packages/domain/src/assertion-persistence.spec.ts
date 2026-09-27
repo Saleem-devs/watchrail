@@ -222,6 +222,28 @@ describe('parseStoredAssertionEvaluation', () => {
     ).toThrow(StoredAssertionContractError);
   });
 
+  it.each(['TEXT_BODY', 'JSON_BODY'] as const)(
+    'accepts BODY_READ_FAILED as unavailable %s evidence',
+    (source) => {
+      expect(
+        parseStoredAssertionEvaluation({
+          contractVersion: 1,
+          outcome: 'NOT_EVALUATED',
+          diagnostics: [
+            {
+              index: 0,
+              source,
+              subject: source === 'JSON_BODY' ? '$.status' : null,
+              operator: source === 'JSON_BODY' ? 'equals' : 'contains',
+              outcome: 'NOT_EVALUATED',
+              reason: 'BODY_READ_FAILED',
+            },
+          ],
+        }),
+      ).toMatchObject({ outcome: 'NOT_EVALUATED' });
+    },
+  );
+
   it('accepts JSON evidence failures as FAIL according to the assertion contract', () => {
     expect(
       parseStoredAssertionEvaluation({

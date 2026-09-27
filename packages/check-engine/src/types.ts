@@ -3,6 +3,8 @@ export const HTTP_CHECK_TIMEOUT_LIMITS = {
   maxMs: 30_000,
 } as const;
 
+export const HTTP_BODY_CAPTURE_LIMIT_BYTES = 256 * 1024;
+
 export type HttpMethod = 'GET' | 'HEAD';
 export type HttpStatusPolicy =
   { type: 'ANY_2XX' } | { type: 'EXACT'; statusCodes: readonly number[] };
@@ -15,6 +17,18 @@ export interface HttpResponseHeader {
   name: string;
   values: readonly string[];
 }
+
+export type HttpBodyCapture =
+  | { state: 'CAPTURED'; text: string }
+  | {
+      state: 'UNAVAILABLE';
+      reason:
+        | 'BODY_TOO_LARGE'
+        | 'UNSUPPORTED_CONTENT_ENCODING'
+        | 'UNSUPPORTED_CHARSET'
+        | 'BODY_READ_FAILED';
+    }
+  | { state: 'NOT_REQUESTED' };
 
 export interface HttpCheckInput {
   url: string;
@@ -126,6 +140,7 @@ export interface HttpExecutionEvidence {
 export interface HttpResponseObservation extends HttpResponseEvidence, HttpExecutionEvidence {
   type: 'RESPONSE';
   headers: readonly HttpResponseHeader[];
+  body: HttpBodyCapture;
 }
 
 export type HttpTargetFailure = { type: 'TARGET_FAILURE' } & HttpTargetFailureClassification &
@@ -162,6 +177,7 @@ export interface HttpExecutionInput {
   signal: AbortSignal;
   followRedirects?: boolean;
   requestHeaders?: readonly HttpRequestHeader[];
+  captureResponseBody?: boolean;
 
   /**
    * Publishes sanitized evidence observed before an executor settles. The

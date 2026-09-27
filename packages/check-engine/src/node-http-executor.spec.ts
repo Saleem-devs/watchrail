@@ -21,8 +21,15 @@ function response(
   location: string | null = null,
   discardBody = vi.fn(() => Promise.resolve()),
   headers: HttpTransportResponse['headers'] = [],
+  captureEncodedBody = vi.fn(() => Promise.resolve(new Uint8Array())),
 ) {
-  return { statusCode, location, headers, discardBody } satisfies HttpTransportResponse;
+  return {
+    statusCode,
+    location,
+    headers,
+    captureEncodedBody,
+    discardBody,
+  } satisfies HttpTransportResponse;
 }
 
 function transportReturning(result: HttpTransportResponse): PinnedHttpTransport {
@@ -60,6 +67,7 @@ describe('NodeHttpExecutor', () => {
       statusCode: 200,
       responseTimeMs: 37,
       headers: [],
+      body: { state: 'NOT_REQUESTED' },
       redirects: [],
     });
   });
@@ -800,6 +808,7 @@ describe('NodeHttpExecutor', () => {
       statusCode: 204,
       responseTimeMs: 60,
       headers: [],
+      body: { state: 'NOT_REQUESTED' },
       redirects: [
         {
           sequence: 1,
