@@ -1,5 +1,10 @@
 export { executeHttpCheck } from './http-check.js';
 export { evaluateHeaderAssertions, notEvaluateHeaderAssertions } from './header-assertions.js';
+export { combineAssertionEvaluations } from './assertion-evaluation.js';
+export {
+  evaluateTextBodyAssertions,
+  notEvaluateTextBodyAssertions,
+} from './text-body-assertions.js';
 export { NodeHttpExecutor, type NodeHttpExecutorOptions } from './node-http-executor.js';
 export {
   InvalidHttpTargetError,

@@ -5,6 +5,7 @@ import {
   type HeaderAssertion,
 } from '@watchrail/domain';
 import type { HttpResponseHeader } from './types.js';
+import { combineAssertionEvaluations } from './assertion-evaluation.js';
 
 export function evaluateHeaderAssertions(
   assertions: readonly HeaderAssertion[],
@@ -25,20 +26,16 @@ export function evaluateHeaderAssertions(
     };
   });
 
-  return {
-    contractVersion: 1,
-    outcome: diagnostics.some((diagnostic) => diagnostic.outcome === 'FAIL') ? 'FAIL' : 'PASS',
-    diagnostics,
-  };
+  return combineAssertionEvaluations({ contractVersion: 1, outcome: 'PASS', diagnostics });
 }
 
 export function notEvaluateHeaderAssertions(
   assertions: readonly HeaderAssertion[],
 ): AssertionEvaluationV1 {
   assertBounded(assertions);
-  return {
+  return combineAssertionEvaluations({
     contractVersion: 1,
-    outcome: assertions.length === 0 ? 'PASS' : 'NOT_EVALUATED',
+    outcome: 'PASS',
     diagnostics: assertions.map((assertion, index) => ({
       index,
       source: 'HEADER',
@@ -47,7 +44,7 @@ export function notEvaluateHeaderAssertions(
       outcome: 'NOT_EVALUATED',
       reason: 'RESPONSE_UNAVAILABLE',
     })),
-  };
+  });
 }
 
 function matches(assertion: HeaderAssertion, values: readonly string[]): boolean {

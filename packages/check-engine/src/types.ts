@@ -42,6 +42,7 @@ export interface HttpCheckInput {
   statusPolicy?: HttpStatusPolicy;
   requestHeaders?: readonly HttpRequestHeader[];
   headerAssertions?: readonly HeaderAssertion[];
+  textBodyAssertions?: readonly TextBodyAssertion[];
 }
 
 interface HttpCheckTiming {
@@ -215,4 +216,9 @@ export interface HttpCheckDependencies {
   executor: HttpExecutor;
   clock?: CheckClock;
 }
-import type { AssertionEvaluationV1, HeaderAssertion, HttpRedirectHop } from '@watchrail/domain';
+import type {
+  AssertionEvaluationV1,
+  HeaderAssertion,
+  HttpRedirectHop,
+  TextBodyAssertion,
+} from '@watchrail/domain';
