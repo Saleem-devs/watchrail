@@ -65,6 +65,39 @@ describe('parseStrictJson', () => {
     });
   });
 
+  it('canonicalizes a near-body-limit coefficient with trailing zeroes', () => {
+    const trailingZeroes = 250_000;
+    expect(parseStrictJson(`1${'0'.repeat(trailingZeroes)}`)).toEqual({
+      status: 'PARSED',
+      value: { type: 'number', value: `1e${trailingZeroes}` },
+    });
+  });
+
+  it.each(['', '-'])('canonicalizes a near-body-limit %s exponent', (sign) => {
+    const exponent = `${sign}${'9'.repeat(250_000)}`;
+    expect(parseStrictJson(`1e${exponent}`)).toEqual({
+      status: 'PARSED',
+      value: { type: 'number', value: `1e${exponent}` },
+    });
+  });
+
+  it('handles a near-body-limit fraction requiring exponent subtraction', () => {
+    const fractionZeroes = 249_000;
+    expect(parseStrictJson(`0.${'0'.repeat(fractionZeroes)}1`)).toEqual({
+      status: 'PARSED',
+      value: { type: 'number', value: `1e-${fractionZeroes + 1}` },
+    });
+  });
+
+  it('handles large exponent and fraction operands without iterative prepending', () => {
+    const fractionZeroes = 124_000;
+    const exponent = `1${'0'.repeat(124_000)}`;
+    expect(parseStrictJson(`0.${'0'.repeat(fractionZeroes)}1e${exponent}`)).toMatchObject({
+      status: 'PARSED',
+      value: { type: 'number' },
+    });
+  });
+
   it.each([
     ['{"a":1,"a":2}', 'direct'],
     ['{"outer":{"secret":1,"secret":2}}', 'nested'],

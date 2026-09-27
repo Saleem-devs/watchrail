@@ -274,11 +274,12 @@ function canonicalizeNumber(
 ): string {
   let digits = `${integer}${fraction}`.replace(/^0+/u, '');
   if (digits.length === 0) return '0';
-  let trailingZeroes = 0;
-  while (digits.endsWith('0')) {
-    digits = digits.slice(0, -1);
-    trailingZeroes += 1;
+  let significantEnd = digits.length;
+  while (significantEnd > 0 && digits.charCodeAt(significantEnd - 1) === 48) {
+    significantEnd -= 1;
   }
+  const trailingZeroes = digits.length - significantEnd;
+  digits = digits.slice(0, significantEnd);
   const exponent = addSignedDecimals(
     normalizeSignedDecimal(declaredExponent),
     String(trailingZeroes - fraction.length),
@@ -314,22 +315,24 @@ function addSignedDecimals(left: string, right: string): string {
 
 function addUnsignedDecimals(left: string, right: string): string {
   let carry = 0;
-  let result = '';
+  const reversed: string[] = [];
   let leftIndex = left.length - 1;
   let rightIndex = right.length - 1;
   while (leftIndex >= 0 || rightIndex >= 0 || carry > 0) {
     const sum = digitAt(left, leftIndex) + digitAt(right, rightIndex) + carry;
-    result = String(sum % 10) + result;
+    reversed.push(String(sum % 10));
     carry = Math.floor(sum / 10);
     leftIndex -= 1;
     rightIndex -= 1;
   }
+  reversed.reverse();
+  const result = reversed.join('');
   return result.replace(/^0+/u, '') || '0';
 }
 
 function subtractUnsignedDecimals(larger: string, smaller: string): string {
   let borrow = 0;
-  let result = '';
+  const reversed: string[] = [];
   let smallerIndex = smaller.length - 1;
   for (let largerIndex = larger.length - 1; largerIndex >= 0; largerIndex -= 1) {
     let difference = digitAt(larger, largerIndex) - borrow - digitAt(smaller, smallerIndex);
@@ -339,9 +342,11 @@ function subtractUnsignedDecimals(larger: string, smaller: string): string {
     } else {
       borrow = 0;
     }
-    result = String(difference) + result;
+    reversed.push(String(difference));
     smallerIndex -= 1;
   }
+  reversed.reverse();
+  const result = reversed.join('');
   return result.replace(/^0+/u, '') || '0';
 }
 
