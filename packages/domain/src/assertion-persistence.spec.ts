@@ -170,4 +170,74 @@ describe('parseStoredAssertionEvaluation', () => {
       }),
     ).toThrow(StoredAssertionContractError);
   });
+
+  it.each([
+    {
+      source: 'HEADER',
+      subject: 'content-type',
+      operator: 'equals',
+      outcome: 'PASS',
+      reason: 'INVALID_JSON',
+    },
+    {
+      source: 'JSON_BODY',
+      subject: '$.value',
+      operator: 'equals',
+      outcome: 'PASS',
+      reason: 'BODY_TOO_LARGE',
+    },
+    {
+      source: 'TEXT_BODY',
+      subject: null,
+      operator: 'contains',
+      outcome: 'NOT_EVALUATED',
+      reason: 'MATCHED',
+    },
+  ])('rejects semantically impossible diagnostic %#', (diagnostic) => {
+    expect(() =>
+      parseStoredAssertionEvaluation({
+        contractVersion: 1,
+        outcome: diagnostic.outcome,
+        diagnostics: [{ index: 0, ...diagnostic }],
+      }),
+    ).toThrow(StoredAssertionContractError);
+  });
+
+  it('rejects a top-level outcome that contradicts AND-composed diagnostics', () => {
+    expect(() =>
+      parseStoredAssertionEvaluation({
+        contractVersion: 1,
+        outcome: 'PASS',
+        diagnostics: [
+          {
+            index: 0,
+            source: 'HEADER',
+            subject: 'content-type',
+            operator: 'equals',
+            outcome: 'FAIL',
+            reason: 'HEADER_MISMATCH',
+          },
+        ],
+      }),
+    ).toThrow(StoredAssertionContractError);
+  });
+
+  it('accepts JSON evidence failures as FAIL according to the assertion contract', () => {
+    expect(
+      parseStoredAssertionEvaluation({
+        contractVersion: 1,
+        outcome: 'FAIL',
+        diagnostics: [
+          {
+            index: 0,
+            source: 'JSON_BODY',
+            subject: '$.value',
+            operator: 'equals',
+            outcome: 'FAIL',
+            reason: 'INVALID_JSON',
+          },
+        ],
+      }),
+    ).toMatchObject({ outcome: 'FAIL' });
+  });
 });

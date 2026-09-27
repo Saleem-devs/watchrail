@@ -126,6 +126,10 @@ export function parseStoredAssertionEvaluation(value: unknown): AssertionEvaluat
     identities.add(identity);
   }
 
+  if (value.outcome !== deriveEvaluationOutcome(diagnostics)) {
+    throw new StoredAssertionContractError();
+  }
+
   return { contractVersion: 1, outcome: value.outcome, diagnostics };
 }
 
@@ -289,14 +293,16 @@ function parseDiagnostic(value: unknown): AssertionDiagnostic {
     HTTP_TOKEN.test(value.subject) &&
     isHeaderOperator(value.operator)
   ) {
-    return diagnostic(value, value.source, value.subject, value.operator);
+    return validateDiagnosticSemantics(
+      diagnostic(value, value.source, value.subject, value.operator),
+    );
   }
   if (
     value.source === 'TEXT_BODY' &&
     value.subject === null &&
     isTextBodyOperator(value.operator)
   ) {
-    return diagnostic(value, value.source, null, value.operator);
+    return validateDiagnosticSemantics(diagnostic(value, value.source, null, value.operator));
   }
   if (
     value.source === 'JSON_BODY' &&
@@ -304,9 +310,42 @@ function parseDiagnostic(value: unknown): AssertionDiagnostic {
     isValidJsonSelector(value.subject) &&
     isJsonBodyOperator(value.operator)
   ) {
-    return diagnostic(value, value.source, value.subject, value.operator);
+    return validateDiagnosticSemantics(
+      diagnostic(value, value.source, value.subject, value.operator),
+    );
   }
   throw new StoredAssertionContractError();
+}
+
+function validateDiagnosticSemantics(diagnostic: AssertionDiagnostic): AssertionDiagnostic {
+  const { source, outcome, reason } = diagnostic;
+  const bodySource = source === 'TEXT_BODY' || source === 'JSON_BODY';
+  const valid =
+    (reason === 'MATCHED' && outcome === 'PASS') ||
+    (reason === 'HEADER_MISMATCH' && source === 'HEADER' && outcome === 'FAIL') ||
+    (reason === 'TEXT_BODY_MISMATCH' && source === 'TEXT_BODY' && outcome === 'FAIL') ||
+    (reason === 'JSON_BODY_MISMATCH' && source === 'JSON_BODY' && outcome === 'FAIL') ||
+    ((reason === 'INVALID_JSON' ||
+      reason === 'DUPLICATE_JSON_KEY' ||
+      reason === 'JSON_TYPE_UNSUPPORTED') &&
+      source === 'JSON_BODY' &&
+      outcome === 'FAIL') ||
+    ((reason === 'UNSUPPORTED_CONTENT_ENCODING' || reason === 'BODY_TOO_LARGE') &&
+      bodySource &&
+      outcome === 'NOT_EVALUATED') ||
+    (reason === 'UNSUPPORTED_CHARSET' && source === 'TEXT_BODY' && outcome === 'NOT_EVALUATED') ||
+    (reason === 'RESPONSE_UNAVAILABLE' && outcome === 'NOT_EVALUATED');
+
+  if (!valid) throw new StoredAssertionContractError();
+  return diagnostic;
+}
+
+function deriveEvaluationOutcome(diagnostics: readonly AssertionDiagnostic[]): AssertionOutcome {
+  if (diagnostics.some((diagnostic) => diagnostic.outcome === 'FAIL')) return 'FAIL';
+  if (diagnostics.some((diagnostic) => diagnostic.outcome === 'NOT_EVALUATED')) {
+    return 'NOT_EVALUATED';
+  }
+  return 'PASS';
 }
 
 function diagnostic(

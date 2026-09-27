@@ -27,7 +27,7 @@ export const ASSERTION_LIMITS = {
   maxSelectorLength: 512,
   maxSelectorDepth: 32,
   maxJsonNumberDigits: 256,
-  maxJsonExponentDigits: 6,
+  maxAbsoluteJsonExponent: 1_000_255,
   maxEncryptedValueBytes: 4_352,
 } as const;
 
@@ -125,13 +125,11 @@ export function parseResponseAssertions(
   }
 
   const issues: string[] = [];
-  if (
-    Array.isArray(value.headers) &&
-    Array.isArray(value.textBody) &&
-    Array.isArray(value.jsonBody) &&
-    value.headers.length + value.textBody.length + value.jsonBody.length >
-      ASSERTION_LIMITS.maxAssertions
-  ) {
+  const totalAssertions =
+    (Array.isArray(value.headers) ? value.headers.length : 0) +
+    (Array.isArray(value.textBody) ? value.textBody.length : 0) +
+    (Array.isArray(value.jsonBody) ? value.jsonBody.length : 0);
+  if (totalAssertions > ASSERTION_LIMITS.maxAssertions) {
     throw new AssertionInputError([
       `Configure at most ${ASSERTION_LIMITS.maxAssertions} assertions.`,
     ]);
@@ -150,12 +148,24 @@ export function parseResponseAssertions(
     parseJsonBodyAssertion,
   );
 
-  if (method === 'HEAD' && (textBody.length > 0 || jsonBody.length > 0)) {
-    issues.push('HEAD monitors cannot configure body assertions.');
+  try {
+    assertAssertionsCompatibleWithMethod(method, { textBody, jsonBody });
+  } catch (error) {
+    if (error instanceof AssertionInputError) issues.push(...error.issues);
+    else throw error;
   }
   if (issues.length > 0) throw new AssertionInputError(issues);
 
   return { headers, textBody, jsonBody };
+}
+
+export function assertAssertionsCompatibleWithMethod(
+  method: HttpMonitorMethod,
+  assertions: { textBody: readonly unknown[]; jsonBody: readonly unknown[] },
+): void {
+  if (method === 'HEAD' && (assertions.textBody.length > 0 || assertions.jsonBody.length > 0)) {
+    throw new AssertionInputError(['HEAD monitors cannot configure body assertions.']);
+  }
 }
 
 export function isValidJsonSelector(selector: string): boolean {
@@ -337,10 +347,10 @@ function parseSensitiveJsonTarget(
   if (
     target.type === 'number' &&
     hasExactKeys(target, ['type', 'value']) &&
-    typeof target.value === 'string' &&
-    isBoundedJsonNumber(target.value)
+    typeof target.value === 'string'
   ) {
-    scalar = { type: 'number', value: normalizeJsonNumber(target.value) };
+    const normalized = normalizeJsonNumber(target.value);
+    if (normalized !== null) scalar = { type: 'number', value: normalized };
   }
 
   if (scalar === null) {
@@ -350,26 +360,23 @@ function parseSensitiveJsonTarget(
   return { value: scalar, sensitive: value.sensitive };
 }
 
-function isBoundedJsonNumber(value: string): boolean {
-  if (value.length > ASSERTION_LIMITS.maxTargetLength) return false;
+function normalizeJsonNumber(value: string): string | null {
+  if (value.length > ASSERTION_LIMITS.maxTargetLength) return null;
   const match = JSON_NUMBER.exec(value);
-  if (!match) return false;
+  if (!match) return null;
   const digitCount = (match[2]?.length ?? 0) + (match[3]?.length ?? 0);
-  const exponent = match[4]?.replace(/^[+-]/u, '') ?? '';
-  return (
-    digitCount <= ASSERTION_LIMITS.maxJsonNumberDigits &&
-    exponent.length <= ASSERTION_LIMITS.maxJsonExponentDigits
-  );
-}
+  if (digitCount > ASSERTION_LIMITS.maxJsonNumberDigits) return null;
 
-function normalizeJsonNumber(value: string): string {
-  const match = JSON_NUMBER.exec(value);
-  if (!match) throw new Error('Expected a validated JSON number.');
+  const rawExponent = match[4] ?? '0';
+  const unsignedExponent = rawExponent.replace(/^[+-]/u, '');
+  if (unsignedExponent.length > String(ASSERTION_LIMITS.maxAbsoluteJsonExponent).length) {
+    return null;
+  }
 
   const sign = match[1] === '-' ? '-' : '';
   const integer = match[2] ?? '';
   const fraction = match[3] ?? '';
-  const declaredExponent = BigInt(match[4] ?? '0');
+  const declaredExponent = BigInt(rawExponent);
   let digits = `${integer}${fraction}`.replace(/^0+/u, '');
   if (digits.length === 0) return '0';
 
@@ -377,6 +384,13 @@ function normalizeJsonNumber(value: string): string {
   while (digits.endsWith('0')) {
     digits = digits.slice(0, -1);
     exponent += 1n;
+  }
+
+  if (
+    exponent < -BigInt(ASSERTION_LIMITS.maxAbsoluteJsonExponent) ||
+    exponent > BigInt(ASSERTION_LIMITS.maxAbsoluteJsonExponent)
+  ) {
+    return null;
   }
 
   return `${sign}${digits}${exponent === 0n ? '' : `e${exponent}`}`;

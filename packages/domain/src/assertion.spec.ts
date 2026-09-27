@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ASSERTION_LIMITS,
   AssertionInputError,
+  assertAssertionsCompatibleWithMethod,
   isValidJsonSelector,
   parseResponseAssertions,
 } from './assertion.js';
@@ -157,6 +158,31 @@ describe('parseResponseAssertions', () => {
     ).toThrowError(new AssertionInputError(['HEAD monitors cannot configure body assertions.']));
   });
 
+  it('checks method compatibility from the shared assertion-category shape', () => {
+    expect(() =>
+      assertAssertionsCompatibleWithMethod('HEAD', {
+        textBody: [],
+        jsonBody: [
+          {
+            selector: '$.secret',
+            operator: 'equals',
+            target: {
+              sensitive: true,
+              encryptedValue: {
+                version: 1,
+                algorithm: 'AES-256-GCM',
+                keyId: 'v1',
+                iv: 'AAAAAAAAAAAAAAAA',
+                ciphertext: 'c2VjcmV0',
+                authTag: 'AAAAAAAAAAAAAAAAAAAAAA',
+              },
+            },
+          },
+        ],
+      }),
+    ).toThrow(AssertionInputError);
+  });
+
   it('requires exact shapes and explicit target sensitivity', () => {
     expect(() =>
       parseResponseAssertions(
@@ -268,8 +294,47 @@ describe('parseResponseAssertions', () => {
     expect(() =>
       parseJsonTarget('$.value', {
         type: 'number',
-        value: `1e${'9'.repeat(ASSERTION_LIMITS.maxJsonExponentDigits + 1)}`,
+        value: `1e${ASSERTION_LIMITS.maxAbsoluteJsonExponent + 1}`,
       }),
+    ).toThrow(AssertionInputError);
+  });
+
+  it('round-trips canonical JSON numbers at the configured exponent boundary', () => {
+    const significant = `1${'0'.repeat(ASSERTION_LIMITS.maxJsonNumberDigits - 1)}`;
+    const input = {
+      headers: [],
+      textBody: [],
+      jsonBody: [
+        {
+          selector: '$.value',
+          operator: 'equals',
+          target: {
+            value: { type: 'number', value: `${significant}e1000000` },
+            sensitive: false,
+          },
+        },
+      ],
+    };
+
+    const first = parseResponseAssertions(input, 'GET');
+    const second = parseResponseAssertions(structuredClone(first), 'GET');
+
+    expect(second).toEqual(first);
+    expect(first.jsonBody[0]).toMatchObject({
+      target: { value: { type: 'number', value: '1e1000255' } },
+    });
+  });
+
+  it('rejects an oversized collection before traversing entries when a sibling is malformed', () => {
+    const inaccessible = new Proxy(Array.from({ length: ASSERTION_LIMITS.maxAssertions + 1 }), {
+      get(target, property, receiver) {
+        if (property !== 'length') throw new Error('Assertion entry was traversed.');
+        return Reflect.get(target, property, receiver);
+      },
+    });
+
+    expect(() =>
+      parseResponseAssertions({ headers: inaccessible, textBody: {}, jsonBody: [] }, 'GET'),
     ).toThrow(AssertionInputError);
   });
 });
