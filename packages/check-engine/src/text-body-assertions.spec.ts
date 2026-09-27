@@ -131,6 +131,30 @@ describe('assertion evaluation composition', () => {
     );
     expect(evaluation.outcome).toBe(expected);
   });
+
+  it('rejects a combined evaluation above the V1 diagnostic limit', () => {
+    const diagnostics = Array.from({ length: ASSERTION_LIMITS.maxAssertions + 1 }, (_, index) => ({
+      index,
+      source: 'TEXT_BODY' as const,
+      subject: null,
+      operator: 'contains' as const,
+      outcome: 'PASS' as const,
+      reason: 'MATCHED' as const,
+    }));
+
+    expect(() =>
+      combineAssertionEvaluations({ contractVersion: 1, outcome: 'PASS', diagnostics }),
+    ).toThrow(`Cannot combine more than ${ASSERTION_LIMITS.maxAssertions} assertion diagnostics.`);
+  });
+
+  it('rejects duplicate source-local diagnostic identities', () => {
+    expect(() =>
+      combineAssertionEvaluations(
+        evaluationWithOutcome('PASS', 0),
+        evaluationWithOutcome('PASS', 0),
+      ),
+    ).toThrow('Duplicate assertion diagnostic identity: TEXT_BODY:0.');
+  });
 });
 
 describe('executeHttpCheck text-body assertions', () => {
