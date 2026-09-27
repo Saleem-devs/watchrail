@@ -1,9 +1,13 @@
+import { Readable } from 'node:stream';
+import { createBrotliDecompress, createGunzip, createInflate } from 'node:zlib';
 import type {
+  HttpBodyCapture,
   HttpExecutionInput,
   HttpExecutionResult,
   HttpExecutor,
   HttpTargetFailure,
 } from './types.js';
+import { HTTP_BODY_CAPTURE_LIMIT_BYTES } from './types.js';
 import {
   formatHttpRedirectOrigin,
   type HttpRedirectEndpoint,
@@ -16,7 +20,13 @@ import {
   validateHttpTargetUrl,
   type DnsResolver,
 } from './safe-http-target.js';
-import { UndiciPinnedHttpTransport, type PinnedHttpTransport } from './undici-http-transport.js';
+import {
+  EncodedBodyTooLargeError,
+  ResponseBodyReadError,
+  UndiciPinnedHttpTransport,
+  type HttpTransportResponse,
+  type PinnedHttpTransport,
+} from './undici-http-transport.js';
 
 export interface NodeHttpExecutorOptions {
   resolver?: DnsResolver;
@@ -49,8 +59,15 @@ export class NodeHttpExecutor implements HttpExecutor {
     const visited = new Set<string>();
     const endpoints = new Map<string, HttpRedirectEndpoint>();
     const redirects: HttpRedirectHop[] = [];
-    const publishEvidence = (): void => {
-      input.onEvidence?.({ redirects: [...redirects] });
+    const publishEvidence = (finalResponse?: {
+      statusCode: number;
+      responseTimeMs: number;
+      headers: HttpTransportResponse['headers'];
+    }): void => {
+      input.onEvidence?.({
+        redirects: [...redirects],
+        ...(finalResponse === undefined ? {} : { finalResponse }),
+      });
     };
     let currentUrl: string | URL = input.url;
     let redirectsFollowed = 0;
@@ -116,27 +133,42 @@ export class NodeHttpExecutor implements HttpExecutor {
       const responseReceivedAt = this.monotonicNow();
       const responseTimeMs = Math.max(0, responseReceivedAt - startedAt);
       const hopResponseTimeMs = Math.max(0, responseReceivedAt - hopStartedAt);
-      await discardResponseBody(response);
 
       if (!isRedirectStatus(response.statusCode)) {
+        publishEvidence({
+          statusCode: response.statusCode,
+          responseTimeMs,
+          headers: response.headers,
+        });
+        const body = await observeFinalBody(response, input);
         return {
           type: 'RESPONSE',
           statusCode: response.statusCode,
           responseTimeMs,
           headers: response.headers,
+          body,
           redirects,
         };
       }
 
       if (input.followRedirects === false) {
+        publishEvidence({
+          statusCode: response.statusCode,
+          responseTimeMs,
+          headers: response.headers,
+        });
+        const body = await observeFinalBody(response, input);
         return {
           type: 'RESPONSE',
           statusCode: response.statusCode,
           responseTimeMs,
           headers: response.headers,
+          body,
           redirects: [],
         };
       }
+
+      await discardResponseBody(response);
 
       const source = endpointFor(target.url);
 
@@ -246,6 +278,157 @@ async function discardResponseBody(response: { discardBody(): Promise<void> }): 
     // Response headers are already valid evidence. Cleanup failure must not
     // erase or change the target classification.
   }
+}
+
+async function observeFinalBody(
+  response: HttpTransportResponse,
+  input: HttpExecutionInput,
+): Promise<HttpBodyCapture> {
+  if (input.method === 'HEAD' || input.captureResponseBody !== true) {
+    await discardResponseBody(response);
+    return { state: 'NOT_REQUESTED' };
+  }
+
+  const contentLength = singleHeaderValue(response.headers, 'content-length');
+  if (contentLength !== null && isContentLengthOverLimit(contentLength)) {
+    await discardResponseBody(response);
+    return { state: 'UNAVAILABLE', reason: 'BODY_TOO_LARGE' };
+  }
+
+  const encoding = parseContentEncoding(response.headers);
+  if (encoding === null) {
+    await discardResponseBody(response);
+    return { state: 'UNAVAILABLE', reason: 'UNSUPPORTED_CONTENT_ENCODING' };
+  }
+
+  const charset = parseCharset(response.headers);
+  if (charset === null) {
+    await discardResponseBody(response);
+    return { state: 'UNAVAILABLE', reason: 'UNSUPPORTED_CHARSET' };
+  }
+
+  try {
+    const encoded = await response.captureEncodedBody(HTTP_BODY_CAPTURE_LIMIT_BYTES);
+    const decoded = await decodeBody(encoded, encoding, input.signal);
+    try {
+      return { state: 'CAPTURED', text: new TextDecoder('utf-8', { fatal: true }).decode(decoded) };
+    } catch (error) {
+      throw new ResponseBodyDecodeError({ cause: error });
+    }
+  } catch (error) {
+    if (input.signal.aborted) throw error;
+    if (error instanceof EncodedBodyTooLargeError || error instanceof DecodedBodyTooLargeError) {
+      return { state: 'UNAVAILABLE', reason: 'BODY_TOO_LARGE' };
+    }
+    if (error instanceof ResponseBodyReadError || error instanceof ResponseBodyDecodeError) {
+      return { state: 'UNAVAILABLE', reason: 'BODY_READ_FAILED' };
+    }
+    throw error;
+  }
+}
+
+type SupportedContentEncoding = 'identity' | 'gzip' | 'deflate' | 'br';
+
+function parseContentEncoding(
+  headers: readonly { name: string; values: readonly string[] }[],
+): SupportedContentEncoding | null {
+  const values = headers
+    .filter((header) => header.name === 'content-encoding')
+    .flatMap((header) => header.values)
+    .map((value) => value.trim().toLowerCase())
+    .filter((value) => value !== '');
+  if (values.length === 0) return 'identity';
+  if (values.length !== 1 || values[0]?.includes(',') === true) return null;
+  const value = values[0];
+  return value === 'identity' || value === 'gzip' || value === 'deflate' || value === 'br'
+    ? value
+    : null;
+}
+
+function parseCharset(
+  headers: readonly { name: string; values: readonly string[] }[],
+): 'utf-8' | null {
+  const contentType = singleHeaderValue(headers, 'content-type');
+  if (contentType === null) return 'utf-8';
+  const matches = [...contentType.matchAll(/(?:^|;)\s*charset\s*=\s*(?:"([^"]*)"|([^;\s]*))/gi)];
+  if (matches.length === 0) return 'utf-8';
+  if (matches.length !== 1) return null;
+  const value = (matches[0]?.[1] ?? matches[0]?.[2] ?? '').toLowerCase();
+  return value === 'utf-8' || value === 'utf8' ? 'utf-8' : null;
+}
+
+function singleHeaderValue(
+  headers: readonly { name: string; values: readonly string[] }[],
+  name: string,
+): string | null {
+  const values = headers
+    .filter((header) => header.name === name)
+    .flatMap((header) => header.values);
+  return values.length === 1 ? (values[0] ?? null) : null;
+}
+
+function isContentLengthOverLimit(value: string): boolean {
+  if (!/^[0-9]+$/.test(value)) return false;
+  try {
+    return BigInt(value) > BigInt(HTTP_BODY_CAPTURE_LIMIT_BYTES);
+  } catch {
+    return false;
+  }
+}
+
+class DecodedBodyTooLargeError extends Error {}
+class ResponseBodyDecodeError extends Error {
+  constructor(options?: ErrorOptions) {
+    super('The HTTP response body could not be decoded.', options);
+    this.name = 'ResponseBodyDecodeError';
+  }
+}
+
+async function decodeBody(
+  encoded: Uint8Array,
+  encoding: SupportedContentEncoding,
+  signal: AbortSignal,
+): Promise<Uint8Array> {
+  if (encoding === 'identity') return encoded;
+  const decoder =
+    encoding === 'gzip'
+      ? createGunzip()
+      : encoding === 'deflate'
+        ? createInflate()
+        : createBrotliDecompress();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  try {
+    const iterator = Readable.from([encoded]).pipe(decoder)[Symbol.asyncIterator]();
+    while (true) {
+      if (signal.aborted) throw signal.reason;
+      let next: IteratorResult<unknown>;
+      try {
+        next = await iterator.next();
+      } catch (error) {
+        throw new ResponseBodyDecodeError({ cause: error });
+      }
+      if (next.done === true) break;
+      const chunk = next.value;
+      const bytes = decodedBodyChunk(chunk);
+      length += bytes.byteLength;
+      if (length > HTTP_BODY_CAPTURE_LIMIT_BYTES) {
+        decoder.destroy();
+        throw new DecodedBodyTooLargeError();
+      }
+      chunks.push(bytes);
+    }
+  } catch (error) {
+    decoder.destroy();
+    throw error;
+  }
+  return Buffer.concat(chunks, length);
+}
+
+function decodedBodyChunk(value: unknown): Uint8Array {
+  if (typeof value === 'string') return Buffer.from(value);
+  if (value instanceof Uint8Array) return value;
+  throw new TypeError('HTTP body decoder emitted an unsupported chunk.');
 }
 
 function classifyFetchFailure(error: unknown, tlsAttempted: boolean): HttpTargetFailure | null {

@@ -25,17 +25,19 @@ export {
   InvalidHttpTimeoutError,
 } from './errors.js';
 
-export { HTTP_CHECK_TIMEOUT_LIMITS } from './types.js';
+export { HTTP_BODY_CAPTURE_LIMIT_BYTES, HTTP_CHECK_TIMEOUT_LIMITS } from './types.js';
 
 export type {
   CheckClock,
   HttpCheckDependencies,
+  HttpBodyCapture,
   HttpCheckInput,
   HttpCheckOutcome,
   HttpCheckReason,
   HttpCheckResult,
   HttpCheckStage,
   HttpExecutionInput,
+  HttpFinalResponseEvidence,
   HttpResponseObservation,
   HttpExecutionResult,
   HttpExecutor,

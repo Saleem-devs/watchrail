@@ -70,6 +70,7 @@ describe('CheckRoundJobHandler', () => {
     execute.mockResolvedValue({
       type: 'RESPONSE',
       headers: [],
+      body: { state: 'NOT_REQUESTED' },
       statusCode: 200,
       responseTimeMs: 12,
       redirects: [],
@@ -105,6 +106,7 @@ describe('CheckRoundJobHandler', () => {
     execute.mockResolvedValue({
       type: 'RESPONSE',
       headers: [],
+      body: { state: 'NOT_REQUESTED' },
       statusCode: 404,
       responseTimeMs: 12,
       redirects: [],
@@ -146,6 +148,7 @@ describe('CheckRoundJobHandler', () => {
     execute.mockResolvedValue({
       type: 'RESPONSE',
       headers: [],
+      body: { state: 'NOT_REQUESTED' },
       statusCode: 200,
       responseTimeMs: 12,
       redirects: [],
@@ -296,6 +299,7 @@ describe('CheckRoundJobHandler', () => {
     execute.mockResolvedValue({
       type: 'RESPONSE',
       headers: [],
+      body: { state: 'NOT_REQUESTED' },
       statusCode: 503,
       responseTimeMs: 10,
       redirects: [],

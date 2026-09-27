@@ -1,7 +1,12 @@
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createPinnedLookup, UndiciPinnedHttpTransport } from './undici-http-transport.js';
+import { HTTP_BODY_CAPTURE_LIMIT_BYTES } from './types.js';
+import {
+  createPinnedLookup,
+  EncodedBodyTooLargeError,
+  UndiciPinnedHttpTransport,
+} from './undici-http-transport.js';
 
 const servers: ReturnType<typeof createServer>[] = [];
 
@@ -98,6 +103,57 @@ describe('createPinnedLookup', () => {
 
     expect(response.statusCode).toBe(204);
     await expect(response.discardBody()).resolves.toBeUndefined();
+  });
+
+  it('captures an encoded response body at the exact limit', async () => {
+    const server = createServer((_request, reply) => {
+      reply.writeHead(200).end(Buffer.alloc(HTTP_BODY_CAPTURE_LIMIT_BYTES, 97));
+    });
+    servers.push(server);
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+
+    const address = server.address();
+    if (address === null || typeof address === 'string') throw new Error('Expected TCP address.');
+    const response = await new UndiciPinnedHttpTransport().request({
+      target: {
+        url: new URL(`http://original.example:${address.port}/body`),
+        hostname: 'original.example',
+        port: address.port,
+        addresses: [{ address: '127.0.0.1', family: 4 }],
+      },
+      method: 'GET',
+      signal: new AbortController().signal,
+    });
+
+    const body = await response.captureEncodedBody(HTTP_BODY_CAPTURE_LIMIT_BYTES);
+    expect(body.byteLength).toBe(HTTP_BODY_CAPTURE_LIMIT_BYTES);
+  });
+
+  it('stops an encoded response stream at limit plus one byte', async () => {
+    const server = createServer((_request, reply) => {
+      reply.writeHead(200).end(Buffer.alloc(HTTP_BODY_CAPTURE_LIMIT_BYTES + 1, 97));
+    });
+    servers.push(server);
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+
+    const address = server.address();
+    if (address === null || typeof address === 'string') throw new Error('Expected TCP address.');
+    const response = await new UndiciPinnedHttpTransport().request({
+      target: {
+        url: new URL(`http://original.example:${address.port}/oversized`),
+        hostname: 'original.example',
+        port: address.port,
+        addresses: [{ address: '127.0.0.1', family: 4 }],
+      },
+      method: 'GET',
+      signal: new AbortController().signal,
+    });
+
+    await expect(response.captureEncodedBody(HTTP_BODY_CAPTURE_LIMIT_BYTES)).rejects.toBeInstanceOf(
+      EncodedBodyTooLargeError,
+    );
   });
 
   it('exposes a redirect Location header without following it', async () => {

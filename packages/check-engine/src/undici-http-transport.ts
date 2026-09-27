@@ -9,7 +9,22 @@ export interface HttpTransportResponse {
   statusCode: number;
   location: string | null;
   headers: readonly HttpResponseHeader[];
+  captureEncodedBody(limitBytes: number): Promise<Uint8Array>;
   discardBody(): Promise<void>;
+}
+
+export class EncodedBodyTooLargeError extends Error {
+  constructor() {
+    super('The encoded HTTP response body exceeded the capture limit.');
+    this.name = 'EncodedBodyTooLargeError';
+  }
+}
+
+export class ResponseBodyReadError extends Error {
+  constructor(options?: ErrorOptions) {
+    super('The HTTP response body could not be read.', options);
+    this.name = 'ResponseBodyReadError';
+  }
 }
 
 export interface PinnedHttpTransport {
@@ -68,18 +83,53 @@ export class UndiciPinnedHttpTransport implements PinnedHttpTransport {
         signal: input.signal,
       });
 
+      let consumed = false;
+      const consume = async <T>(operation: () => Promise<T>): Promise<T> => {
+        if (consumed) throw new Error('The HTTP response body has already been consumed.');
+        consumed = true;
+        try {
+          return await operation();
+        } finally {
+          await client.destroy();
+        }
+      };
+
       return {
         statusCode: response.statusCode,
         location: headerValue(response.headers.location),
         headers: normalizeResponseHeaders(response.headers),
+        captureEncodedBody(limitBytes) {
+          return consume(async () => {
+            const chunks: Uint8Array[] = [];
+            let length = 0;
+            const iterator = response.body[Symbol.asyncIterator]();
+            while (true) {
+              let next: IteratorResult<unknown>;
+              try {
+                next = await iterator.next();
+              } catch (error) {
+                if (input.signal.aborted) throw error;
+                throw new ResponseBodyReadError({ cause: error });
+              }
+              if (next.done === true) break;
+              const chunk = next.value;
+              const bytes = bodyChunk(chunk);
+              length += bytes.byteLength;
+              if (length > limitBytes) {
+                response.body.destroy();
+                throw new EncodedBodyTooLargeError();
+              }
+              chunks.push(bytes);
+            }
+            return Buffer.concat(chunks, length);
+          });
+        },
         async discardBody() {
-          response.body.on('error', () => undefined);
-          response.body.destroy();
-          // This client is intentionally scoped to one pinned request. A graceful
-          // close can wait indefinitely after a GET response with no body (for
-          // example, HTTP 204), so tear down the transport once the headers have
-          // supplied all evidence required by a status-only check.
-          await client.destroy();
+          await consume(() => {
+            response.body.on('error', () => undefined);
+            response.body.destroy();
+            return Promise.resolve();
+          });
         },
       };
     } catch (error) {
@@ -87,6 +137,12 @@ export class UndiciPinnedHttpTransport implements PinnedHttpTransport {
       throw error;
     }
   }
+}
+
+function bodyChunk(value: unknown): Uint8Array {
+  if (typeof value === 'string') return Buffer.from(value);
+  if (value instanceof Uint8Array) return value;
+  throw new TypeError('HTTP response body emitted an unsupported chunk.');
 }
 
 export function normalizeResponseHeaders(

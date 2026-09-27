@@ -90,6 +90,7 @@ export type AssertionDiagnosticReason =
   | 'UNSUPPORTED_CONTENT_ENCODING'
   | 'UNSUPPORTED_CHARSET'
   | 'BODY_TOO_LARGE'
+  | 'BODY_READ_FAILED'
   | 'RESPONSE_UNAVAILABLE';
 
 export interface AssertionDiagnostic {
