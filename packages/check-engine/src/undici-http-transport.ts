@@ -20,6 +20,13 @@ export class EncodedBodyTooLargeError extends Error {
   }
 }
 
+export class ResponseBodyReadError extends Error {
+  constructor(options?: ErrorOptions) {
+    super('The HTTP response body could not be read.', options);
+    this.name = 'ResponseBodyReadError';
+  }
+}
+
 export interface PinnedHttpTransport {
   request(
     this: void,
@@ -95,7 +102,17 @@ export class UndiciPinnedHttpTransport implements PinnedHttpTransport {
           return consume(async () => {
             const chunks: Uint8Array[] = [];
             let length = 0;
-            for await (const chunk of response.body) {
+            const iterator = response.body[Symbol.asyncIterator]();
+            while (true) {
+              let next: IteratorResult<unknown>;
+              try {
+                next = await iterator.next();
+              } catch (error) {
+                if (input.signal.aborted) throw error;
+                throw new ResponseBodyReadError({ cause: error });
+              }
+              if (next.done === true) break;
+              const chunk = next.value;
               const bytes = bodyChunk(chunk);
               length += bytes.byteLength;
               if (length > limitBytes) {

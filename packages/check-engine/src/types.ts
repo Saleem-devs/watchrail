@@ -18,6 +18,10 @@ export interface HttpResponseHeader {
   values: readonly string[];
 }
 
+export interface HttpFinalResponseEvidence extends HttpResponseEvidence {
+  headers: readonly HttpResponseHeader[];
+}
+
 export type HttpBodyCapture =
   | { state: 'CAPTURED'; text: string }
   | {
@@ -101,13 +105,12 @@ export type HttpCheckResult =
           | 'INVALID_REDIRECT_LOCATION'
           | 'INSECURE_REDIRECT';
       })
-  | (HttpCheckTiming & {
-      outcome: 'FAIL';
-      stage: 'HTTP';
-      reason: 'REQUEST_TIMEOUT';
-      statusCode: null;
-      responseTimeMs: null;
-    })
+  | (HttpCheckTiming &
+      (HttpResponseEvidence | { statusCode: null; responseTimeMs: null }) & {
+        outcome: 'FAIL';
+        stage: 'HTTP';
+        reason: 'REQUEST_TIMEOUT';
+      })
   | (HttpCheckTiming &
       HttpTargetFailureClassification & {
         outcome: 'FAIL';
@@ -135,6 +138,7 @@ export type HttpCheckReason = HttpCheckResult['reason'];
 
 export interface HttpExecutionEvidence {
   redirects: readonly HttpRedirectHop[];
+  finalResponse?: HttpFinalResponseEvidence;
 }
 
 export interface HttpResponseObservation extends HttpResponseEvidence, HttpExecutionEvidence {

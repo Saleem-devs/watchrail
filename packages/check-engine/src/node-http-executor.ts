@@ -22,6 +22,7 @@ import {
 } from './safe-http-target.js';
 import {
   EncodedBodyTooLargeError,
+  ResponseBodyReadError,
   UndiciPinnedHttpTransport,
   type HttpTransportResponse,
   type PinnedHttpTransport,
@@ -58,8 +59,15 @@ export class NodeHttpExecutor implements HttpExecutor {
     const visited = new Set<string>();
     const endpoints = new Map<string, HttpRedirectEndpoint>();
     const redirects: HttpRedirectHop[] = [];
-    const publishEvidence = (): void => {
-      input.onEvidence?.({ redirects: [...redirects] });
+    const publishEvidence = (finalResponse?: {
+      statusCode: number;
+      responseTimeMs: number;
+      headers: HttpTransportResponse['headers'];
+    }): void => {
+      input.onEvidence?.({
+        redirects: [...redirects],
+        ...(finalResponse === undefined ? {} : { finalResponse }),
+      });
     };
     let currentUrl: string | URL = input.url;
     let redirectsFollowed = 0;
@@ -127,6 +135,11 @@ export class NodeHttpExecutor implements HttpExecutor {
       const hopResponseTimeMs = Math.max(0, responseReceivedAt - hopStartedAt);
 
       if (!isRedirectStatus(response.statusCode)) {
+        publishEvidence({
+          statusCode: response.statusCode,
+          responseTimeMs,
+          headers: response.headers,
+        });
         const body = await observeFinalBody(response, input);
         return {
           type: 'RESPONSE',
@@ -139,6 +152,11 @@ export class NodeHttpExecutor implements HttpExecutor {
       }
 
       if (input.followRedirects === false) {
+        publishEvidence({
+          statusCode: response.statusCode,
+          responseTimeMs,
+          headers: response.headers,
+        });
         const body = await observeFinalBody(response, input);
         return {
           type: 'RESPONSE',
@@ -291,14 +309,21 @@ async function observeFinalBody(
 
   try {
     const encoded = await response.captureEncodedBody(HTTP_BODY_CAPTURE_LIMIT_BYTES);
-    const decoded = await decodeBody(encoded, encoding);
-    return { state: 'CAPTURED', text: new TextDecoder('utf-8', { fatal: true }).decode(decoded) };
+    const decoded = await decodeBody(encoded, encoding, input.signal);
+    try {
+      return { state: 'CAPTURED', text: new TextDecoder('utf-8', { fatal: true }).decode(decoded) };
+    } catch (error) {
+      throw new ResponseBodyDecodeError({ cause: error });
+    }
   } catch (error) {
     if (input.signal.aborted) throw error;
     if (error instanceof EncodedBodyTooLargeError || error instanceof DecodedBodyTooLargeError) {
       return { state: 'UNAVAILABLE', reason: 'BODY_TOO_LARGE' };
     }
-    return { state: 'UNAVAILABLE', reason: 'BODY_READ_FAILED' };
+    if (error instanceof ResponseBodyReadError || error instanceof ResponseBodyDecodeError) {
+      return { state: 'UNAVAILABLE', reason: 'BODY_READ_FAILED' };
+    }
+    throw error;
   }
 }
 
@@ -352,10 +377,17 @@ function isContentLengthOverLimit(value: string): boolean {
 }
 
 class DecodedBodyTooLargeError extends Error {}
+class ResponseBodyDecodeError extends Error {
+  constructor(options?: ErrorOptions) {
+    super('The HTTP response body could not be decoded.', options);
+    this.name = 'ResponseBodyDecodeError';
+  }
+}
 
 async function decodeBody(
   encoded: Uint8Array,
   encoding: SupportedContentEncoding,
+  signal: AbortSignal,
 ): Promise<Uint8Array> {
   if (encoding === 'identity') return encoded;
   const decoder =
@@ -367,7 +399,17 @@ async function decodeBody(
   const chunks: Uint8Array[] = [];
   let length = 0;
   try {
-    for await (const chunk of Readable.from([encoded]).pipe(decoder)) {
+    const iterator = Readable.from([encoded]).pipe(decoder)[Symbol.asyncIterator]();
+    while (true) {
+      if (signal.aborted) throw signal.reason;
+      let next: IteratorResult<unknown>;
+      try {
+        next = await iterator.next();
+      } catch (error) {
+        throw new ResponseBodyDecodeError({ cause: error });
+      }
+      if (next.done === true) break;
+      const chunk = next.value;
       const bytes = decodedBodyChunk(chunk);
       length += bytes.byteLength;
       if (length > HTTP_BODY_CAPTURE_LIMIT_BYTES) {

@@ -37,6 +37,7 @@ export type {
   HttpCheckResult,
   HttpCheckStage,
   HttpExecutionInput,
+  HttpFinalResponseEvidence,
   HttpResponseObservation,
   HttpExecutionResult,
   HttpExecutor,

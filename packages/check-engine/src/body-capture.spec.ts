@@ -1,18 +1,26 @@
 import { brotliCompressSync, deflateSync, gzipSync } from 'node:zlib';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { executeHttpCheck } from './http-check.js';
 import { NodeHttpExecutor } from './node-http-executor.js';
 import type { DnsResolver } from './safe-http-target.js';
+import { startHttpTestServer, type HttpTestServer } from './test-support/http-test-server.js';
 import { HTTP_BODY_CAPTURE_LIMIT_BYTES } from './types.js';
 import {
   EncodedBodyTooLargeError,
+  ResponseBodyReadError,
   type HttpTransportResponse,
   type PinnedHttpTransport,
+  UndiciPinnedHttpTransport,
 } from './undici-http-transport.js';
 
 const resolver: DnsResolver = {
   lookup: () => Promise.resolve([{ address: '93.184.216.34', family: 4 }] as const),
 };
+const servers: HttpTestServer[] = [];
+
+afterEach(async () => {
+  await Promise.all(servers.splice(0).map((server) => server.close()));
+});
 
 function transportResponse(options: {
   statusCode?: number;
@@ -42,6 +50,32 @@ function executorFor(...responses: HttpTransportResponse[]) {
   const request = vi.fn<PinnedHttpTransport['request']>();
   for (const response of responses) request.mockResolvedValueOnce(response);
   return { executor: new NodeHttpExecutor({ resolver, transport: { request } }), request };
+}
+
+function localExecutor(server: HttpTestServer): NodeHttpExecutor {
+  const transport = new UndiciPinnedHttpTransport();
+  return new NodeHttpExecutor({
+    resolver,
+    transport: {
+      request: (input) =>
+        transport.request({
+          ...input,
+          target: {
+            ...input.target,
+            addresses: [{ address: server.address, family: 4 }],
+          },
+        }),
+    },
+  });
+}
+
+async function captureFrom(server: HttpTestServer) {
+  return localExecutor(server).execute({
+    url: `http://public.example:${server.port}/body`,
+    method: 'GET',
+    signal: new AbortController().signal,
+    captureResponseBody: true,
+  });
 }
 
 describe('bounded response-body capture', () => {
@@ -221,7 +255,7 @@ describe('bounded response-body capture', () => {
 
   it.each([
     ['invalid UTF-8', () => Promise.resolve(Uint8Array.of(0xc3, 0x28))],
-    ['body read failure', () => Promise.reject(new Error('socket closed'))],
+    ['body read failure', () => Promise.reject(new ResponseBodyReadError())],
     ['invalid compressed stream', () => Promise.resolve(Buffer.from('not gzip'))],
   ])('classifies %s without exposing the failure or body', async (_case, capture) => {
     const headers =
@@ -237,6 +271,21 @@ describe('bounded response-body capture', () => {
         captureResponseBody: true,
       }),
     ).resolves.toMatchObject({ body: { state: 'UNAVAILABLE', reason: 'BODY_READ_FAILED' } });
+  });
+
+  it('does not disguise an unexpected transport bug as a target body failure', async () => {
+    const bug = new TypeError('unexpected transport implementation bug');
+    const transport = transportResponse({ capture: () => Promise.reject(bug) });
+    const { executor } = executorFor(transport.response);
+
+    await expect(
+      executor.execute({
+        url: 'https://example.com',
+        method: 'GET',
+        signal: new AbortController().signal,
+        captureResponseBody: true,
+      }),
+    ).rejects.toBe(bug);
   });
 
   it('discards followed redirect bodies but captures a final response body', async () => {
@@ -292,7 +341,7 @@ describe('bounded response-body capture', () => {
         Promise.resolve({
           statusCode: 200,
           location: null,
-          headers: [],
+          headers: [{ name: 'x-state', values: ['ready'] }],
           discardBody: () => Promise.resolve(),
           captureEncodedBody: () =>
             new Promise<Uint8Array>((_resolve, reject) => {
@@ -311,6 +360,13 @@ describe('bounded response-body capture', () => {
           method: 'GET',
           timeoutMs: 1_000,
           followRedirects: true,
+          headerAssertions: [
+            {
+              name: 'x-state',
+              operator: 'equals',
+              target: { value: 'ready', sensitive: false },
+            },
+          ],
         },
         {
           executor: {
@@ -321,7 +377,15 @@ describe('bounded response-body capture', () => {
       );
 
       await vi.advanceTimersByTimeAsync(1_000);
-      await expect(resultPromise).resolves.toMatchObject({ reason: 'REQUEST_TIMEOUT' });
+      await expect(resultPromise).resolves.toMatchObject({
+        reason: 'REQUEST_TIMEOUT',
+        statusCode: 200,
+        responseTimeMs: expect.any(Number),
+        assertionEvaluation: {
+          outcome: 'PASS',
+          diagnostics: [{ outcome: 'PASS', reason: 'MATCHED' }],
+        },
+      });
     } finally {
       vi.useRealTimers();
     }
@@ -344,5 +408,71 @@ describe('bounded response-body capture', () => {
       { executor: { execute: () => Promise.resolve(observation) } },
     );
     expect(JSON.stringify(checkResult)).not.toContain(secret);
+  });
+
+  it('captures an empty body through the real Undici transport', async () => {
+    const server = await startHttpTestServer((_request, response) => {
+      response.writeHead(200).end();
+    });
+    servers.push(server);
+
+    await expect(captureFrom(server)).resolves.toMatchObject({
+      body: { state: 'CAPTURED', text: '' },
+    });
+  });
+
+  it.each([
+    ['gzip', gzipSync(Buffer.from('real compressed body'))],
+    ['deflate', deflateSync(Buffer.from('real compressed body'))],
+    ['br', brotliCompressSync(Buffer.from('real compressed body'))],
+  ] as const)('decodes a real %s response stream', async (encoding, body) => {
+    const server = await startHttpTestServer((_request, response) => {
+      response.writeHead(200, { 'content-encoding': encoding }).end(body);
+    });
+    servers.push(server);
+
+    await expect(captureFrom(server)).resolves.toMatchObject({
+      body: { state: 'CAPTURED', text: 'real compressed body' },
+    });
+  });
+
+  it.each([
+    ['malformed gzip', { 'content-encoding': 'gzip' }, Buffer.from('not gzip'), 'BODY_READ_FAILED'],
+    [
+      'unsupported encoding',
+      { 'content-encoding': 'compress' },
+      Buffer.from('encoded'),
+      'UNSUPPORTED_CONTENT_ENCODING',
+    ],
+    [
+      'unsupported charset',
+      { 'content-type': 'text/plain; charset=iso-8859-1' },
+      Buffer.from('encoded'),
+      'UNSUPPORTED_CHARSET',
+    ],
+  ] as const)('classifies a real %s response', async (_case, headers, body, reason) => {
+    const server = await startHttpTestServer((_request, response) => {
+      response.writeHead(200, headers).end(body);
+    });
+    servers.push(server);
+
+    await expect(captureFrom(server)).resolves.toMatchObject({
+      body: { state: 'UNAVAILABLE', reason },
+    });
+  });
+
+  it('classifies a real response stream interrupted after final headers', async () => {
+    const server = await startHttpTestServer((_request, response) => {
+      response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
+      response.flushHeaders();
+      response.write('partial body');
+      setTimeout(() => response.socket?.destroy(), 10);
+    });
+    servers.push(server);
+
+    await expect(captureFrom(server)).resolves.toMatchObject({
+      statusCode: 200,
+      body: { state: 'UNAVAILABLE', reason: 'BODY_READ_FAILED' },
+    });
   });
 });

@@ -11,6 +11,7 @@ import type {
   HttpCheckInput,
   HttpCheckResult,
   HttpExecutionResult,
+  HttpFinalResponseEvidence,
   HttpMethod,
   HttpTargetFailure,
 } from './types.js';
@@ -38,6 +39,7 @@ export async function executeHttpCheck(
 
   const controller = new AbortController();
   let redirects: HttpCheckResult['redirects'] = [];
+  let finalResponse: HttpFinalResponseEvidence | undefined;
 
   let deadlineExceeded = false;
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
@@ -59,6 +61,9 @@ export async function executeHttpCheck(
       requestHeaders: input.requestHeaders ?? [],
       onEvidence: (evidence) => {
         redirects = [...evidence.redirects];
+        if (evidence.finalResponse !== undefined) {
+          finalResponse = evidence.finalResponse;
+        }
       },
     });
 
@@ -75,17 +80,26 @@ export async function executeHttpCheck(
     const attemptDurationMs = elapsed(clock, startedAt);
 
     if (deadlineExceeded || error instanceof RequestDeadlineExceededError) {
-      return {
+      const responseEvidence = finalResponse;
+      const timeoutResult = {
         outcome: 'FAIL',
         stage: 'HTTP',
         reason: 'REQUEST_TIMEOUT',
-        statusCode: null,
-        responseTimeMs: null,
         attemptDurationMs,
         checkedAt,
         redirects,
-        assertionEvaluation: unavailableAssertions,
-      };
+        assertionEvaluation:
+          responseEvidence === undefined
+            ? unavailableAssertions
+            : evaluateHeaderAssertions(input.headerAssertions ?? [], responseEvidence.headers),
+      } as const;
+      return responseEvidence === undefined
+        ? { ...timeoutResult, statusCode: null, responseTimeMs: null }
+        : {
+            ...timeoutResult,
+            statusCode: responseEvidence.statusCode,
+            responseTimeMs: responseEvidence.responseTimeMs,
+          };
     }
 
     return {
