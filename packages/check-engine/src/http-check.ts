@@ -4,6 +4,10 @@ import {
   InvalidHttpTimeoutError,
 } from './errors.js';
 import { evaluateHeaderAssertions, notEvaluateHeaderAssertions } from './header-assertions.js';
+import {
+  evaluateTextBodyAssertions,
+  notEvaluateTextBodyAssertions,
+} from './text-body-assertions.js';
 import { HTTP_CHECK_TIMEOUT_LIMITS } from './types.js';
 import type {
   CheckClock,
@@ -30,7 +34,13 @@ export async function executeHttpCheck(
   assertSupportedMethod(input.method);
   assertValidTimeout(input.timeoutMs);
   assertValidStatusPolicy(input.statusPolicy);
-  const unavailableAssertions = notEvaluateHeaderAssertions(input.headerAssertions ?? []);
+  const headerAssertions = input.headerAssertions ?? [];
+  const textBodyAssertions = input.textBodyAssertions ?? [];
+  assertValidAssertionConfiguration(input.method, headerAssertions, textBodyAssertions);
+  const unavailableAssertions = combineAssertionEvaluations(
+    notEvaluateHeaderAssertions(headerAssertions),
+    notEvaluateTextBodyAssertions(textBodyAssertions),
+  );
 
   const clock = dependencies.clock ?? defaultClock;
 
@@ -59,6 +69,7 @@ export async function executeHttpCheck(
       signal: controller.signal,
       followRedirects: input.followRedirects,
       requestHeaders: input.requestHeaders ?? [],
+      captureResponseBody: textBodyAssertions.length > 0,
       onEvidence: (evidence) => {
         redirects = [...evidence.redirects];
         if (evidence.finalResponse !== undefined) {
@@ -73,6 +84,7 @@ export async function executeHttpCheck(
       execution,
       statusPolicy: input.statusPolicy ?? { type: 'ANY_2XX' },
       headerAssertions: input.headerAssertions ?? [],
+      textBodyAssertions,
       checkedAt,
       attemptDurationMs: elapsed(clock, startedAt),
     });
@@ -91,7 +103,10 @@ export async function executeHttpCheck(
         assertionEvaluation:
           responseEvidence === undefined
             ? unavailableAssertions
-            : evaluateHeaderAssertions(input.headerAssertions ?? [], responseEvidence.headers),
+            : combineAssertionEvaluations(
+                evaluateHeaderAssertions(headerAssertions, responseEvidence.headers),
+                notEvaluateTextBodyAssertions(textBodyAssertions),
+              ),
       } as const;
       return responseEvidence === undefined
         ? { ...timeoutResult, statusCode: null, responseTimeMs: null }
@@ -124,11 +139,22 @@ function classifyHttpExecution(input: {
   execution: HttpExecutionResult;
   statusPolicy: NonNullable<HttpCheckInput['statusPolicy']>;
   headerAssertions: NonNullable<HttpCheckInput['headerAssertions']>;
+  textBodyAssertions: NonNullable<HttpCheckInput['textBodyAssertions']>;
   checkedAt: Date;
   attemptDurationMs: number;
 }): HttpCheckResult {
-  const { execution, statusPolicy, headerAssertions, checkedAt, attemptDurationMs } = input;
-  const unavailableAssertions = notEvaluateHeaderAssertions(headerAssertions);
+  const {
+    execution,
+    statusPolicy,
+    headerAssertions,
+    textBodyAssertions,
+    checkedAt,
+    attemptDurationMs,
+  } = input;
+  const unavailableAssertions = combineAssertionEvaluations(
+    notEvaluateHeaderAssertions(headerAssertions),
+    notEvaluateTextBodyAssertions(textBodyAssertions),
+  );
 
   if (execution.type === 'POLICY_REJECTION') {
     return {
@@ -168,7 +194,10 @@ function classifyHttpExecution(input: {
   }
 
   const successful = statusMatches(statusPolicy, execution.statusCode);
-  const assertionEvaluation = evaluateHeaderAssertions(headerAssertions, execution.headers);
+  const assertionEvaluation = combineAssertionEvaluations(
+    evaluateHeaderAssertions(headerAssertions, execution.headers),
+    evaluateTextBodyAssertions(textBodyAssertions, execution.body),
+  );
 
   if (successful) {
     return {
@@ -210,7 +239,7 @@ function classifyTargetFailure(input: {
   failure: HttpTargetFailure;
   checkedAt: Date;
   attemptDurationMs: number;
-  assertionEvaluation: ReturnType<typeof notEvaluateHeaderAssertions>;
+  assertionEvaluation: AssertionEvaluationV1;
 }): HttpCheckResult {
   const { failure, checkedAt, attemptDurationMs, assertionEvaluation } = input;
   const common = {
@@ -231,6 +260,22 @@ function classifyTargetFailure(input: {
     case 'TLS':
       return { ...common, stage: 'TLS', reason: failure.reason };
   }
+}
+
+function assertValidAssertionConfiguration(
+  method: HttpMethod,
+  headerAssertions: NonNullable<HttpCheckInput['headerAssertions']>,
+  textBodyAssertions: NonNullable<HttpCheckInput['textBodyAssertions']>,
+): void {
+  if (headerAssertions.length + textBodyAssertions.length > ASSERTION_LIMITS.maxAssertions) {
+    throw new AssertionInputError([
+      `Configure at most ${ASSERTION_LIMITS.maxAssertions} assertions.`,
+    ]);
+  }
+  assertAssertionsCompatibleWithMethod(method, {
+    textBody: textBodyAssertions,
+    jsonBody: [],
+  });
 }
 
 function assertSupportedMethod(method: unknown): asserts method is HttpMethod {
@@ -274,3 +319,10 @@ class RequestDeadlineExceededError extends Error {
     this.name = 'RequestDeadlineExceededError';
   }
 }
+import {
+  ASSERTION_LIMITS,
+  AssertionInputError,
+  assertAssertionsCompatibleWithMethod,
+  type AssertionEvaluationV1,
+} from '@watchrail/domain';
+import { combineAssertionEvaluations } from './assertion-evaluation.js';

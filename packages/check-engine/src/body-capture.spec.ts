@@ -367,11 +367,15 @@ describe('bounded response-body capture', () => {
               target: { value: 'ready', sensitive: false },
             },
           ],
+          textBodyAssertions: [
+            {
+              operator: 'contains',
+              target: { value: 'ready', sensitive: false },
+            },
+          ],
         },
         {
-          executor: {
-            execute: (input) => nodeExecutor.execute({ ...input, captureResponseBody: true }),
-          },
+          executor: nodeExecutor,
           clock: { now: () => new Date(0), monotonicNow: () => Date.now() },
         },
       );
@@ -382,8 +386,15 @@ describe('bounded response-body capture', () => {
         statusCode: 200,
         responseTimeMs: expect.any(Number),
         assertionEvaluation: {
-          outcome: 'PASS',
-          diagnostics: [{ outcome: 'PASS', reason: 'MATCHED' }],
+          outcome: 'NOT_EVALUATED',
+          diagnostics: [
+            { source: 'HEADER', outcome: 'PASS', reason: 'MATCHED' },
+            {
+              source: 'TEXT_BODY',
+              outcome: 'NOT_EVALUATED',
+              reason: 'RESPONSE_UNAVAILABLE',
+            },
+          ],
         },
       });
     } finally {
