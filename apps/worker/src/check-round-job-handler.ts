@@ -114,5 +114,6 @@ function internalExecutionFailureResult(): HttpCheckResult {
     attemptDurationMs: 0,
     redirects: [],
     checkedAt: new Date(),
+    assertionEvaluation: { contractVersion: 1, outcome: 'PASS', diagnostics: [] },
   };
 }

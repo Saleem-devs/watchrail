@@ -2,12 +2,13 @@ import { isIP, type LookupFunction } from 'node:net';
 import type { SecureContextOptions } from 'node:tls';
 import { Client } from 'undici';
 import type { ResolvedHttpTarget, ValidatedAddress } from './safe-http-target.js';
-import type { HttpMethod } from './types.js';
+import type { HttpMethod, HttpResponseHeader } from './types.js';
 import type { HttpRequestHeader } from './types.js';
 
 export interface HttpTransportResponse {
   statusCode: number;
   location: string | null;
+  headers: readonly HttpResponseHeader[];
   discardBody(): Promise<void>;
 }
 
@@ -70,6 +71,7 @@ export class UndiciPinnedHttpTransport implements PinnedHttpTransport {
       return {
         statusCode: response.statusCode,
         location: headerValue(response.headers.location),
+        headers: normalizeResponseHeaders(response.headers),
         async discardBody() {
           response.body.on('error', () => undefined);
           response.body.destroy();
@@ -85,6 +87,15 @@ export class UndiciPinnedHttpTransport implements PinnedHttpTransport {
       throw error;
     }
   }
+}
+
+export function normalizeResponseHeaders(
+  headers: Record<string, string | string[] | undefined>,
+): HttpResponseHeader[] {
+  return Object.entries(headers).flatMap(([name, value]) => {
+    if (value === undefined) return [];
+    return [{ name: name.toLowerCase(), values: Array.isArray(value) ? [...value] : [value] }];
+  });
 }
 
 function headerValue(value: string | string[] | undefined): string | null {

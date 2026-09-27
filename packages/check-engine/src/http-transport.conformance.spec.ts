@@ -17,7 +17,7 @@ describe('HTTP transport conformance', () => {
     ['HEAD', 204],
   ] as const)('sends %s and returns final response headers', async (method, statusCode) => {
     const server = await startHttpTestServer((_request, response) => {
-      response.writeHead(statusCode).end();
+      response.writeHead(statusCode, { 'x-watchrail-method': method }).end();
     });
     servers.push(server);
 
@@ -26,6 +26,10 @@ describe('HTTP transport conformance', () => {
     ]);
 
     expect(response.statusCode).toBe(statusCode);
+    expect(response.headers).toContainEqual({
+      name: 'x-watchrail-method',
+      values: [method],
+    });
     expect(server.requests).toEqual([
       expect.objectContaining({
         method,
@@ -36,6 +40,23 @@ describe('HTTP transport conformance', () => {
         }),
       }),
     ]);
+    await response.discardBody();
+  });
+
+  it('preserves repeated Set-Cookie field values as a collection', async () => {
+    const server = await startHttpTestServer((_request, response) => {
+      response
+        .writeHead(200, { 'set-cookie': ['primary=true; Path=/', 'secondary=true; Path=/'] })
+        .end();
+    });
+    servers.push(server);
+
+    const response = await requestLocal(server, 'GET', '/cookies');
+
+    expect(response.headers).toContainEqual({
+      name: 'set-cookie',
+      values: ['primary=true; Path=/', 'secondary=true; Path=/'],
+    });
     await response.discardBody();
   });
 

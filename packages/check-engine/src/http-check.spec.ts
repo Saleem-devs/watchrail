@@ -8,6 +8,7 @@ import {
 import type { HttpExecutionResult, HttpExecutor } from './index.js';
 
 const checkedAt = new Date('2026-09-21T12:00:00.000Z');
+const emptyAssertionEvaluation = { contractVersion: 1, outcome: 'PASS', diagnostics: [] } as const;
 
 function createClock() {
   let elapseMs = 0;
@@ -32,6 +33,7 @@ describe('executeHttpCheck', () => {
         return Promise.resolve({
           statusCode: 200,
           type: 'RESPONSE',
+          headers: [],
           redirects: [],
           responseTimeMs: 118,
         });
@@ -60,6 +62,7 @@ describe('executeHttpCheck', () => {
       attemptDurationMs: 125,
       checkedAt,
       redirects: [],
+      assertionEvaluation: emptyAssertionEvaluation,
     });
   });
 
@@ -72,6 +75,7 @@ describe('executeHttpCheck', () => {
         wallClockTime = completionTime;
         return Promise.resolve({
           type: 'RESPONSE',
+          headers: [],
           redirects: [],
           statusCode: 200,
           responseTimeMs: 5_000,
@@ -108,6 +112,7 @@ describe('executeHttpCheck', () => {
           statusCode,
           responseTimeMs: 40,
           type: 'RESPONSE',
+          headers: [],
           redirects: [],
         }),
     };
@@ -141,6 +146,7 @@ describe('executeHttpCheck', () => {
           statusCode: 503,
           responseTimeMs: 72,
           type: 'RESPONSE',
+          headers: [],
           redirects: [],
         });
       },
@@ -168,6 +174,90 @@ describe('executeHttpCheck', () => {
       attemptDurationMs: 80,
       checkedAt,
       redirects: [],
+      assertionEvaluation: emptyAssertionEvaluation,
+    });
+  });
+
+  it('evaluates header assertions when a final response exists without changing status outcome', async () => {
+    const executor: HttpExecutor = {
+      execute: () =>
+        Promise.resolve({
+          type: 'RESPONSE',
+          statusCode: 200,
+          responseTimeMs: 10,
+          headers: [{ name: 'x-state', values: ['not-ready'] }],
+          redirects: [],
+        }),
+    };
+
+    const result = await executeHttpCheck(
+      {
+        url: 'https://example.com',
+        method: 'GET',
+        followRedirects: true,
+        timeoutMs: 10_000,
+        headerAssertions: [
+          {
+            name: 'x-state',
+            operator: 'equals',
+            target: { value: 'ready', sensitive: false },
+          },
+        ],
+      },
+      { executor, clock: createClock() },
+    );
+
+    expect(result).toMatchObject({
+      outcome: 'PASS',
+      reason: 'COMPLETED',
+      assertionEvaluation: {
+        outcome: 'FAIL',
+        diagnostics: [{ outcome: 'FAIL', reason: 'HEADER_MISMATCH' }],
+      },
+    });
+  });
+
+  it.each([
+    {
+      type: 'TARGET_FAILURE',
+      stage: 'DNS',
+      reason: 'NAME_NOT_FOUND',
+      redirects: [],
+    },
+    {
+      type: 'TARGET_FAILURE',
+      stage: 'CONNECT',
+      reason: 'CONNECTION_REFUSED',
+      redirects: [],
+    },
+    {
+      type: 'TARGET_FAILURE',
+      stage: 'TLS',
+      reason: 'CERTIFICATE_UNTRUSTED',
+      redirects: [],
+    },
+    {
+      type: 'REDIRECT_FAILURE',
+      reason: 'MISSING_REDIRECT_LOCATION',
+      statusCode: 302,
+      responseTimeMs: 10,
+      redirects: [],
+    },
+  ] as const)('does not evaluate headers without a final response: $type', async (execution) => {
+    const result = await executeHttpCheck(
+      {
+        url: 'https://example.com',
+        method: 'GET',
+        followRedirects: true,
+        timeoutMs: 10_000,
+        headerAssertions: [{ name: 'x-state', operator: 'exists' }],
+      },
+      { executor: { execute: () => Promise.resolve(execution) }, clock: createClock() },
+    );
+
+    expect(result.assertionEvaluation).toMatchObject({
+      outcome: 'NOT_EVALUATED',
+      diagnostics: [{ outcome: 'NOT_EVALUATED', reason: 'RESPONSE_UNAVAILABLE' }],
     });
   });
 
@@ -178,7 +268,13 @@ describe('executeHttpCheck', () => {
   ] as const)('evaluates final status %i against an exact policy', async (statusCode, outcome) => {
     const executor: HttpExecutor = {
       execute: () =>
-        Promise.resolve({ type: 'RESPONSE', statusCode, responseTimeMs: 25, redirects: [] }),
+        Promise.resolve({
+          type: 'RESPONSE',
+          statusCode,
+          responseTimeMs: 25,
+          headers: [],
+          redirects: [],
+        }),
     };
 
     const result = await executeHttpCheck(
@@ -203,6 +299,7 @@ describe('executeHttpCheck', () => {
           statusCode,
           responseTimeMs: 40,
           type: 'RESPONSE',
+          headers: [],
           redirects: [],
         }),
     };
@@ -249,6 +346,7 @@ describe('executeHttpCheck', () => {
           method: 'GET',
           followRedirects: true,
           timeoutMs: 5_000,
+          headerAssertions: [{ name: 'x-state', operator: 'exists' }],
         },
         {
           executor,
@@ -269,6 +367,10 @@ describe('executeHttpCheck', () => {
         reason: 'REQUEST_TIMEOUT',
         statusCode: null,
         responseTimeMs: null,
+        assertionEvaluation: {
+          outcome: 'NOT_EVALUATED',
+          diagnostics: [{ reason: 'RESPONSE_UNAVAILABLE' }],
+        },
       });
 
       expect(result.attemptDurationMs).toBeGreaterThanOrEqual(5_000);
@@ -361,6 +463,7 @@ describe('executeHttpCheck', () => {
       attemptDurationMs: 25,
       checkedAt,
       redirects: [],
+      assertionEvaluation: emptyAssertionEvaluation,
     });
   });
 
@@ -392,6 +495,7 @@ describe('executeHttpCheck', () => {
       attemptDurationMs: 10,
       checkedAt,
       redirects: [],
+      assertionEvaluation: emptyAssertionEvaluation,
     });
   });
 
@@ -422,6 +526,7 @@ describe('executeHttpCheck', () => {
         method: 'GET',
         followRedirects: true,
         timeoutMs: 10_000,
+        headerAssertions: [{ name: 'x-state', operator: 'exists' }],
       },
       {
         executor,
@@ -438,6 +543,20 @@ describe('executeHttpCheck', () => {
       attemptDurationMs: 15,
       checkedAt,
       redirects,
+      assertionEvaluation: {
+        contractVersion: 1,
+        outcome: 'NOT_EVALUATED',
+        diagnostics: [
+          {
+            index: 0,
+            source: 'HEADER',
+            subject: 'x-state',
+            operator: 'exists',
+            outcome: 'NOT_EVALUATED',
+            reason: 'RESPONSE_UNAVAILABLE',
+          },
+        ],
+      },
     });
   });
 
@@ -474,6 +593,7 @@ describe('executeHttpCheck', () => {
             statusCode: 200,
             responseTimeMs: 10,
             type: 'RESPONSE',
+            headers: [],
             redirects: [],
           }),
       };
@@ -502,6 +622,7 @@ describe('executeHttpCheck', () => {
           statusCode: 200,
           responseTimeMs: 10,
           type: 'RESPONSE',
+          headers: [],
           redirects: [],
         }),
     };

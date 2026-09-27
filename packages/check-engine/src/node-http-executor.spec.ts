@@ -20,8 +20,9 @@ function response(
   statusCode: number,
   location: string | null = null,
   discardBody = vi.fn(() => Promise.resolve()),
+  headers: HttpTransportResponse['headers'] = [],
 ) {
-  return { statusCode, location, discardBody } satisfies HttpTransportResponse;
+  return { statusCode, location, headers, discardBody } satisfies HttpTransportResponse;
 }
 
 function transportReturning(result: HttpTransportResponse): PinnedHttpTransport {
@@ -58,6 +59,7 @@ describe('NodeHttpExecutor', () => {
       type: 'RESPONSE',
       statusCode: 200,
       responseTimeMs: 37,
+      headers: [],
       redirects: [],
     });
   });
@@ -307,6 +309,64 @@ describe('NodeHttpExecutor', () => {
         },
       ],
     });
+  });
+
+  it('evaluates only final response headers after following redirects', async () => {
+    const request = vi
+      .fn<PinnedHttpTransport['request']>()
+      .mockResolvedValueOnce(
+        response(302, '/final', undefined, [{ name: 'x-state', values: ['intermediate'] }]),
+      )
+      .mockResolvedValueOnce(response(200, null, undefined, []));
+    const result = await executeHttpCheck(
+      {
+        url: 'https://example.com/start',
+        method: 'GET',
+        followRedirects: true,
+        timeoutMs: 10_000,
+        headerAssertions: [{ name: 'x-state', operator: 'exists' }],
+      },
+      {
+        executor: new NodeHttpExecutor({ resolver: publicResolver(), transport: { request } }),
+        clock: createEngineClock(),
+      },
+    );
+
+    expect(result.assertionEvaluation).toMatchObject({
+      outcome: 'FAIL',
+      diagnostics: [{ outcome: 'FAIL', reason: 'HEADER_MISMATCH' }],
+    });
+  });
+
+  it('uses first-response headers when redirect following is disabled', async () => {
+    const request = vi
+      .fn<PinnedHttpTransport['request']>()
+      .mockResolvedValueOnce(
+        response(302, '/final', undefined, [{ name: 'x-state', values: ['intermediate'] }]),
+      );
+    const result = await executeHttpCheck(
+      {
+        url: 'https://example.com/start',
+        method: 'GET',
+        followRedirects: false,
+        timeoutMs: 10_000,
+        statusPolicy: { type: 'EXACT', statusCodes: [302] },
+        headerAssertions: [
+          {
+            name: 'x-state',
+            operator: 'equals',
+            target: { value: 'intermediate', sensitive: false },
+          },
+        ],
+      },
+      {
+        executor: new NodeHttpExecutor({ resolver: publicResolver(), transport: { request } }),
+        clock: createEngineClock(),
+      },
+    );
+
+    expect(result.assertionEvaluation.outcome).toBe('PASS');
+    expect(request).toHaveBeenCalledOnce();
   });
 
   it.each([
@@ -739,6 +799,7 @@ describe('NodeHttpExecutor', () => {
       type: 'RESPONSE',
       statusCode: 204,
       responseTimeMs: 60,
+      headers: [],
       redirects: [
         {
           sequence: 1,
