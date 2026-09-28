@@ -33,6 +33,9 @@ export function evaluateJsonBodyAssertions(
   body: HttpBodyCapture,
 ): AssertionEvaluationV1 {
   assertBounded(assertions);
+  if (assertions.length === 0) {
+    return { contractVersion: 1, outcome: 'PASS', diagnostics: [] };
+  }
   if (body.state !== 'CAPTURED') {
     return notEvaluateJsonBodyAssertions(
       assertions,
@@ -212,15 +215,9 @@ function parseQuotedProperty(selector: string, start: number): { key: string; ne
       continue;
     }
     if (escape === 'u') {
-      const high = parseHexCodeUnit(selector, index + 2);
+      const codeUnit = parseHexCodeUnit(selector, index + 2);
+      key += String.fromCharCode(codeUnit);
       index += 6;
-      if (high >= 0xd800 && high <= 0xdbff) {
-        const low = parseHexCodeUnit(selector, index + 2);
-        key += String.fromCodePoint(0x10000 + ((high - 0xd800) << 10) + (low - 0xdc00));
-        index += 6;
-      } else {
-        key += String.fromCharCode(high);
-      }
       continue;
     }
     const decoded = decodeSimpleEscape(escape);

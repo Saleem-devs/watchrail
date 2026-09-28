@@ -72,6 +72,55 @@ describe('evaluateJsonBodyAssertions', () => {
   });
 
   it.each([
+    [String.raw`$['\uD800']`, 'lone high surrogate'],
+    [String.raw`$['\uDE00']`, 'lone low surrogate'],
+    [String.raw`$['\uD83D\u0041']`, 'high surrogate followed by a non-low surrogate'],
+  ])('treats %s (%s) as safely missing', (selector) => {
+    expect(
+      evaluateJsonBodyAssertions([{ selector, operator: 'does_not_exist' }], {
+        state: 'CAPTURED',
+        text: '{"😀A":"different key"}',
+      }),
+    ).toMatchObject({
+      outcome: 'PASS',
+      diagnostics: [{ outcome: 'PASS', reason: 'MATCHED' }],
+    });
+  });
+
+  it('decodes a valid surrogate pair into the matching property', () => {
+    expect(
+      evaluateJsonBodyAssertions(
+        [
+          {
+            selector: String.raw`$['\uD83D\uDE00']`,
+            operator: 'equals',
+            target: target({ type: 'string', value: 'emoji' }),
+          },
+        ],
+        { state: 'CAPTURED', text: '{"😀":"emoji"}' },
+      ),
+    ).toMatchObject({
+      outcome: 'PASS',
+      diagnostics: [{ outcome: 'PASS', reason: 'MATCHED' }],
+    });
+  });
+
+  it('does not inspect or parse a captured body when no JSON assertions exist', () => {
+    const body = {
+      state: 'CAPTURED' as const,
+      get text(): string {
+        throw new Error('body text must not be read');
+      },
+    };
+
+    expect(evaluateJsonBodyAssertions([], body)).toEqual({
+      contractVersion: 1,
+      outcome: 'PASS',
+      diagnostics: [],
+    });
+  });
+
+  it.each([
     ['exists', '$.present', true],
     ['exists', '$.missing', false],
     ['does_not_exist', '$.missing', true],
