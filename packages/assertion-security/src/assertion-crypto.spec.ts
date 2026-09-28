@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { EMPTY_ASSERTION_CONFIGURATION } from '@watchrail/domain';
 import {
   AssertionRetentionError,
+  loadAssertionEncryptionKeyring,
   resolveResponseAssertions,
   storeResponseAssertions,
   StoredAssertionResolutionError,
@@ -18,6 +19,57 @@ const keyring: AssertionEncryptionKeyring = {
 };
 
 describe('assertion encryption', () => {
+  it.each([
+    ['NUL-heavy', '\u0000'.repeat(4_096)],
+    ['lone-surrogate', String.fromCharCode(0xd800).repeat(4_096)],
+  ])('round-trips a maximum-length %s sensitive JSON string', (_case, value) => {
+    const stored = storeResponseAssertions(
+      {
+        headers: [],
+        textBody: [],
+        jsonBody: [
+          {
+            selector: '$.value',
+            operator: 'equals',
+            target: { sensitive: true, value: { type: 'string', value } },
+          },
+        ],
+      },
+      EMPTY_ASSERTION_CONFIGURATION,
+      'GET',
+      context,
+      keyring,
+      { allowRetain: false },
+    );
+
+    expect(stored.assertions.jsonBody[0]).toMatchObject({
+      target: { sensitive: true },
+    });
+    expect(JSON.stringify(stored)).not.toContain(value);
+    expect(resolveResponseAssertions(stored, 'GET', context, keyring)).toEqual({
+      headers: [],
+      textBody: [],
+      jsonBody: [
+        {
+          selector: '$.value',
+          operator: 'equals',
+          target: { sensitive: true, value: { type: 'string', value } },
+        },
+      ],
+    });
+  });
+
+  it('rejects an active key ID beyond the stored-envelope bound at startup', () => {
+    expect(() =>
+      loadAssertionEncryptionKeyring({
+        ASSERTION_ACTIVE_KEY_ID: 'x'.repeat(121),
+        ASSERTION_ENCRYPTION_KEYS: JSON.stringify({
+          ['x'.repeat(121)]: Buffer.alloc(32).toString('base64'),
+        }),
+      }),
+    ).toThrow('Every assertion encryption key');
+  });
+
   it('encrypts every sensitive target, preserves plaintext targets, and resolves all categories', () => {
     const secret = '🔐'.repeat(2_048);
     const stored = storeResponseAssertions(

@@ -60,7 +60,7 @@ export function loadAssertionEncryptionKeyring(
   }
   const keys = new Map<string, Buffer>();
   for (const [keyId, encoded] of Object.entries(value)) {
-    if (!keyId || typeof encoded !== 'string') {
+    if (!keyId || keyId.length > 120 || typeof encoded !== 'string') {
       throw new Error('Every assertion encryption key must have a string ID and value.');
     }
     const key = decodeBase64Key(encoded);
@@ -245,7 +245,7 @@ function storeStringTarget(
   keyring: AssertionEncryptionKeyring,
 ): StoredStringAssertionTarget {
   return target.sensitive
-    ? { sensitive: true, encryptedValue: encrypt(target.value, context, keyring) }
+    ? { sensitive: true, encryptedValue: encrypt(encodeString(target.value), context, keyring) }
     : { sensitive: false, value: target.value };
 }
 
@@ -255,7 +255,7 @@ function storeJsonTarget(
   keyring: AssertionEncryptionKeyring,
 ): StoredJsonAssertionTarget {
   return target.sensitive
-    ? { sensitive: true, encryptedValue: encrypt(JSON.stringify(target.value), context, keyring) }
+    ? { sensitive: true, encryptedValue: encrypt(encodeJsonScalar(target.value), context, keyring) }
     : { sensitive: false, value: target.value };
 }
 
@@ -265,7 +265,7 @@ function resolveStringTarget(
   keyring: AssertionEncryptionKeyring,
 ) {
   return target.sensitive
-    ? { sensitive: true, value: decrypt(target.encryptedValue, context, keyring) }
+    ? { sensitive: true, value: decodeString(decrypt(target.encryptedValue, context, keyring)) }
     : target;
 }
 
@@ -275,17 +275,10 @@ function resolveJsonTarget(
   keyring: AssertionEncryptionKeyring,
 ) {
   if (!target.sensitive) return target;
-  try {
-    return {
-      sensitive: true,
-      value: JSON.parse(decrypt(target.encryptedValue, context, keyring)) as unknown,
-    };
-  } catch (error) {
-    if (error instanceof StoredAssertionResolutionError || error instanceof SyntaxError) {
-      throw new StoredAssertionResolutionError({ cause: error });
-    }
-    throw error;
-  }
+  return {
+    sensitive: true,
+    value: decodeJsonScalar(decrypt(target.encryptedValue, context, keyring)),
+  };
 }
 
 interface FullContext extends AssertionEncryptionContext {
@@ -306,11 +299,10 @@ function contextFor(
 }
 
 function encrypt(
-  plaintext: string,
+  bytes: Buffer,
   context: FullContext,
   keyring: AssertionEncryptionKeyring,
 ): EncryptedAssertionValueV1 {
-  const bytes = Buffer.from(plaintext, 'utf8');
   if (bytes.length > ASSERTION_LIMITS.maxEncryptedValueBytes)
     throw new AssertionInputError(['Sensitive assertion target is too large.']);
   const key = keyring.keys.get(keyring.activeKeyId);
@@ -333,7 +325,7 @@ function decrypt(
   envelope: EncryptedAssertionValueV1,
   context: FullContext,
   keyring: AssertionEncryptionKeyring,
-): string {
+): Buffer {
   try {
     const key = keyring.keys.get(envelope.keyId);
     if (!key) throw new UnavailableAssertionKeyError();
@@ -343,12 +335,58 @@ function decrypt(
     return Buffer.concat([
       decipher.update(Buffer.from(envelope.ciphertext, 'base64url')),
       decipher.final(),
-    ]).toString('utf8');
+    ]);
   } catch (error) {
     if (error instanceof UnavailableAssertionKeyError || error instanceof Error)
       throw new StoredAssertionResolutionError({ cause: error });
     throw error;
   }
+}
+
+const STRING_TAG = 0x01;
+const JSON_STRING_TAG = 0x11;
+const JSON_NUMBER_TAG = 0x12;
+const JSON_FALSE_TAG = 0x13;
+const JSON_TRUE_TAG = 0x14;
+const JSON_NULL_TAG = 0x15;
+
+function encodeString(value: string): Buffer {
+  return Buffer.concat([Buffer.from([STRING_TAG]), Buffer.from(value, 'utf16le')]);
+}
+
+function decodeString(value: Buffer): string {
+  if (value[0] !== STRING_TAG || value.length % 2 !== 1) {
+    throw new StoredAssertionResolutionError();
+  }
+  return value.subarray(1).toString('utf16le');
+}
+
+function encodeJsonScalar(value: JsonScalarTarget): Buffer {
+  switch (value.type) {
+    case 'string':
+      return Buffer.concat([Buffer.from([JSON_STRING_TAG]), Buffer.from(value.value, 'utf16le')]);
+    case 'number':
+      return Buffer.concat([Buffer.from([JSON_NUMBER_TAG]), Buffer.from(value.value, 'ascii')]);
+    case 'boolean':
+      return Buffer.from([value.value ? JSON_TRUE_TAG : JSON_FALSE_TAG]);
+    case 'null':
+      return Buffer.from([JSON_NULL_TAG]);
+  }
+}
+
+function decodeJsonScalar(value: Buffer): unknown {
+  const tag = value[0];
+  const payload = value.subarray(1);
+  if (tag === JSON_STRING_TAG && value.length % 2 === 1) {
+    return { type: 'string', value: payload.toString('utf16le') };
+  }
+  if (tag === JSON_NUMBER_TAG && payload.length > 0) {
+    return { type: 'number', value: payload.toString('ascii') };
+  }
+  if (tag === JSON_FALSE_TAG && payload.length === 0) return { type: 'boolean', value: false };
+  if (tag === JSON_TRUE_TAG && payload.length === 0) return { type: 'boolean', value: true };
+  if (tag === JSON_NULL_TAG && payload.length === 0) return { type: 'null' };
+  throw new StoredAssertionResolutionError();
 }
 
 function aad(context: FullContext): Buffer {
