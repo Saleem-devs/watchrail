@@ -16,6 +16,8 @@ import {
   type MonitorRecord,
 } from '@watchrail/db';
 import {
+  AssertionInputError,
+  EMPTY_ASSERTION_CONFIGURATION,
   createMonitor,
   MonitorInputError,
   normalizeRequestHeaderUpdates,
@@ -25,6 +27,7 @@ import {
 } from '@watchrail/domain';
 import type { CreateMonitorCommand } from '@watchrail/domain';
 import { storeRequestHeaders } from '@watchrail/http-header-security';
+import { AssertionRetentionError, storeResponseAssertions } from '@watchrail/assertion-security';
 import { APP_CONFIG, type AppConfig } from './config.js';
 import type { RequestContext } from './request-context.js';
 
@@ -46,13 +49,27 @@ export class MonitorsService {
         { organizationId: context.organizationId, monitorId },
         this.config.headerEncryptionKeyring,
       );
-      return await this.monitors.create(context.organizationId, monitorId, monitor, requestHeaders);
+      const assertions = storeResponseAssertions(
+        monitor.assertions,
+        EMPTY_ASSERTION_CONFIGURATION,
+        monitor.method,
+        { organizationId: context.organizationId, monitorId },
+        this.config.assertionEncryptionKeyring,
+        { allowRetain: false },
+      );
+      return await this.monitors.create(
+        context.organizationId,
+        monitorId,
+        monitor,
+        requestHeaders,
+        assertions,
+      );
     } catch (error) {
-      if (error instanceof MonitorInputError) {
+      if (error instanceof MonitorInputError || error instanceof AssertionInputError) {
         throw new BadRequestException({
           code: 'VALIDATION_FAILED',
           message: error.message,
-          fields: error.fields,
+          fields: error instanceof MonitorInputError ? error.fields : { assertions: error.issues },
         });
       }
       throw error;
@@ -99,6 +116,42 @@ export class MonitorsService {
     }
   }
 
+  async updateAssertions(
+    context: RequestContext,
+    monitorId: string,
+    value: unknown,
+  ): Promise<MonitorRecord> {
+    try {
+      return await this.monitors.updateAssertions(
+        context.organizationId,
+        monitorId,
+        (current, method) =>
+          storeResponseAssertions(
+            value,
+            current,
+            method,
+            { organizationId: context.organizationId, monitorId },
+            this.config.assertionEncryptionKeyring,
+            { allowRetain: true },
+          ),
+      );
+    } catch (error) {
+      if (error instanceof AssertionInputError || error instanceof AssertionRetentionError) {
+        throw new BadRequestException({
+          code: 'VALIDATION_FAILED',
+          message: 'Response assertions are invalid.',
+          fields: {
+            assertions: error instanceof AssertionInputError ? error.issues : [error.message],
+          },
+        });
+      }
+      if (error instanceof MonitorUpdateNotFoundError) {
+        throw new NotFoundException({ code: 'MONITOR_NOT_FOUND', message: error.message });
+      }
+      throw error;
+    }
+  }
+
   list(context: RequestContext): Promise<MonitorRecord[]> {
     return this.monitors.listForOrganization(context.organizationId);
   }
@@ -112,11 +165,11 @@ export class MonitorsService {
       const settings = parseHttpMonitorSettings(value);
       return await this.monitors.updateHttpSettings(context.organizationId, monitorId, settings);
     } catch (error) {
-      if (error instanceof MonitorInputError) {
+      if (error instanceof MonitorInputError || error instanceof AssertionInputError) {
         throw new BadRequestException({
           code: 'VALIDATION_FAILED',
           message: error.message,
-          fields: error.fields,
+          fields: error instanceof MonitorInputError ? error.fields : { assertions: error.issues },
         });
       }
       if (error instanceof MonitorUpdateNotFoundError) {

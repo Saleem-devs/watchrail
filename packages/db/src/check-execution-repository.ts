@@ -4,6 +4,7 @@ import {
   type HttpMethod,
   type HttpRedirectHop,
   type HttpStatusPolicy,
+  type ResponseAssertionConfigurationV1,
   type StoredRequestHeader,
 } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
@@ -27,6 +28,7 @@ export interface ClaimedCheckExecution {
   organizationId: string;
   monitorId: string;
   requestHeaders: readonly StoredRequestHeader[];
+  assertions: ResponseAssertionConfigurationV1;
 }
 
 export type CheckExecutionClaimResult =
@@ -70,6 +72,7 @@ export class CheckExecutionRepository {
           organizationId: monitorConfigurationVersions.organizationId,
           monitorId: monitorConfigurationVersions.monitorId,
           requestHeaders: monitorConfigurationVersions.requestHeaders,
+          assertions: monitorConfigurationVersions.assertions,
         })
         .from(checkExecutionAssignments)
         .innerJoin(
@@ -128,6 +131,7 @@ export class CheckExecutionRepository {
           organizationId: candidate.organizationId,
           monitorId: candidate.monitorId,
           requestHeaders: candidate.requestHeaders,
+          assertions: candidate.assertions,
         },
       };
     });

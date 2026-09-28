@@ -4,6 +4,8 @@ import { loadAppConfig } from './config.js';
 const encryptionEnvironment = {
   HTTP_HEADER_ACTIVE_KEY_ID: 'test',
   HTTP_HEADER_ENCRYPTION_KEYS: JSON.stringify({ test: Buffer.alloc(32).toString('base64') }),
+  ASSERTION_ACTIVE_KEY_ID: 'test',
+  ASSERTION_ENCRYPTION_KEYS: JSON.stringify({ test: Buffer.alloc(32).toString('base64') }),
 };
 
 describe('loadAppConfig', () => {

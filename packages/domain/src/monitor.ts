@@ -1,3 +1,9 @@
+import {
+  AssertionInputError,
+  parseResponseAssertions,
+  type ResponseAssertions,
+} from './assertion.js';
+
 export const HTTP_METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] as const;
 export const HTTP_MONITOR_METHODS = ['GET', 'HEAD'] as const;
 export const MONITOR_LIFECYCLE_STATES = ['ENABLED', 'PAUSED', 'ARCHIVED'] as const;
@@ -29,6 +35,7 @@ export interface CreateMonitorCommand {
   url: unknown;
   statusPolicy?: unknown;
   requestHeaders?: unknown;
+  assertions?: unknown;
 }
 
 export interface NewMonitor {
@@ -40,6 +47,7 @@ export interface NewMonitor {
   followRedirects: boolean;
   statusPolicy: HttpStatusPolicy;
   requestHeaders: RequestHeaderUpdate[];
+  assertions: ResponseAssertions;
   locations: string[];
 }
 
@@ -48,6 +56,7 @@ export interface MonitorFieldErrors {
   url?: string[];
   statusPolicy?: string[];
   requestHeaders?: string[];
+  assertions?: string[];
   method?: string[];
   timeoutMs?: string[];
   followRedirects?: string[];
@@ -77,6 +86,7 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
   const url = normalizeUrl(command.url, fields);
   const statusPolicy = normalizeStatusPolicy(command.statusPolicy, fields);
   const requestHeaders = normalizeHeaders(command.requestHeaders, fields);
+  const assertions = normalizeAssertions(command.assertions, fields);
 
   if (Object.keys(fields).length > 0) throw new MonitorInputError(fields);
 
@@ -89,8 +99,21 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
     followRedirects: MONITOR_DEFAULTS.followRedirects,
     statusPolicy,
     requestHeaders,
+    assertions,
     locations: [...MONITOR_DEFAULTS.locations],
   };
+}
+
+function normalizeAssertions(value: unknown, fields: MonitorFieldErrors): ResponseAssertions {
+  try {
+    return parseResponseAssertions(value, MONITOR_DEFAULTS.method);
+  } catch (error) {
+    if (error instanceof AssertionInputError) {
+      fields.assertions = error.issues;
+      return { headers: [], textBody: [], jsonBody: [] };
+    }
+    throw error;
+  }
 }
 
 function normalizeHeaders(value: unknown, fields: MonitorFieldErrors): RequestHeaderUpdate[] {

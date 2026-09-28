@@ -4,6 +4,12 @@ import type { HttpCheckResult, HttpExecutor } from '@watchrail/check-engine';
 import type { ExecuteCheckRoundJobV1 } from '@watchrail/contracts';
 import type { CheckExecutionRepository } from '@watchrail/db';
 import { StoredRequestHeadersInvariantError } from '@watchrail/domain';
+import { StoredAssertionContractError } from '@watchrail/domain';
+import {
+  resolveResponseAssertions,
+  StoredAssertionResolutionError,
+  type AssertionEncryptionKeyring,
+} from '@watchrail/assertion-security';
 import type { CheckJobHandler } from '@watchrail/queue';
 import {
   resolveRequestHeaders,
@@ -34,6 +40,7 @@ export class CheckRoundJobHandler implements CheckJobHandler {
     private readonly executor: HttpExecutor,
     private readonly leaseDurationMs: number,
     private readonly headerEncryptionKeyring: HeaderEncryptionKeyring,
+    private readonly assertionEncryptionKeyring: AssertionEncryptionKeyring,
   ) {}
 
   async handle(payload: ExecuteCheckRoundJobV1): Promise<void> {
@@ -54,6 +61,7 @@ export class CheckRoundJobHandler implements CheckJobHandler {
 
     if (isSupportedMethod(claim.execution.method)) {
       let requestHeaders;
+      let assertions;
       try {
         requestHeaders = resolveRequestHeaders(
           claim.execution.requestHeaders,
@@ -63,19 +71,35 @@ export class CheckRoundJobHandler implements CheckJobHandler {
           },
           this.headerEncryptionKeyring,
         );
+        assertions = resolveResponseAssertions(
+          claim.execution.assertions,
+          claim.execution.method,
+          {
+            organizationId: claim.execution.organizationId,
+            monitorId: claim.execution.monitorId,
+          },
+          this.assertionEncryptionKeyring,
+        );
       } catch (error) {
         if (
           !(error instanceof StoredRequestHeadersInvariantError) &&
-          !(error instanceof StoredRequestHeaderResolutionError)
+          !(error instanceof StoredRequestHeaderResolutionError) &&
+          !(error instanceof StoredAssertionContractError) &&
+          !(error instanceof StoredAssertionResolutionError)
         ) {
           throw error;
         }
+        const subject =
+          error instanceof StoredAssertionContractError ||
+          error instanceof StoredAssertionResolutionError
+            ? 'assertion'
+            : 'request-header';
         this.logger.error(
-          `Stored request-header configuration is invalid for assignment ${claim.execution.assignmentId}.`,
+          `Stored ${subject} configuration is invalid for assignment ${claim.execution.assignmentId}.`,
         );
       }
 
-      if (requestHeaders !== undefined) {
+      if (requestHeaders !== undefined && assertions !== undefined) {
         result = await executeHttpCheck(
           {
             url: claim.execution.url,
@@ -84,6 +108,9 @@ export class CheckRoundJobHandler implements CheckJobHandler {
             followRedirects: claim.execution.followRedirects,
             statusPolicy: claim.execution.statusPolicy,
             requestHeaders,
+            headerAssertions: assertions.headers,
+            textBodyAssertions: assertions.textBody,
+            jsonBodyAssertions: assertions.jsonBody,
           },
           { executor: this.executor },
         );

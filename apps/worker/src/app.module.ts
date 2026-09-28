@@ -62,6 +62,7 @@ import { WorkerRuntime } from './worker-runtime.js';
           executor,
           config.checkExecutionLeaseDurationMs,
           config.headerEncryptionKeyring,
+          config.assertionEncryptionKeyring,
         ),
     },
     {
