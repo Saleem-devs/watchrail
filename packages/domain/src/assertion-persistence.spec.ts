@@ -4,6 +4,7 @@ import {
   parseStoredAssertionEvaluation,
   StoredAssertionContractError,
 } from './assertion-persistence.js';
+import { ASSERTION_LIMITS } from './assertion.js';
 
 const encryptedValue = {
   version: 1,
@@ -85,7 +86,9 @@ describe('parseStoredAssertionConfiguration', () => {
                 sensitive: true,
                 encryptedValue: {
                   ...encryptedValue,
-                  ciphertext: 'A'.repeat(6_000),
+                  ciphertext: 'A'.repeat(
+                    Math.ceil(((ASSERTION_LIMITS.maxEncryptedValueBytes + 1) * 4) / 3),
+                  ),
                 },
               },
             },

@@ -28,7 +28,9 @@ export const ASSERTION_LIMITS = {
   maxSelectorDepth: 32,
   maxJsonNumberDigits: 256,
   maxAbsoluteJsonExponent: 1_000_255,
-  maxEncryptedValueBytes: 4_352,
+  // 4,096 UTF-16 code units can require up to 12,288 UTF-8 bytes. The
+  // additional room covers the tagged JSON scalar representation.
+  maxEncryptedValueBytes: 16_384,
 } as const;
 
 export type HeaderAssertionOperator = (typeof HEADER_ASSERTION_OPERATORS)[number];

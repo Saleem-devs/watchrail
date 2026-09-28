@@ -70,6 +70,11 @@ export interface AssertionEvaluationV1 {
   diagnostics: AssertionDiagnostic[];
 }
 
+export const EMPTY_ASSERTION_CONFIGURATION: ResponseAssertionConfigurationV1 = {
+  contractVersion: 1,
+  assertions: { headers: [], textBody: [], jsonBody: [] },
+};
+
 export class StoredAssertionContractError extends Error {
   constructor() {
     super('Stored assertion data violates the versioned persistence contract.');

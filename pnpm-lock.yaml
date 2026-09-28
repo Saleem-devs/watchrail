@@ -208,6 +208,9 @@ importers:
       '@nestjs/platform-express':
         specifier: 12.1.0
         version: 12.1.0(@nestjs/common@12.1.0(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@12.1.0)(supports-color@7.2.0)
+      '@watchrail/assertion-security':
+        specifier: workspace:*
+        version: link:../../packages/assertion-security
       '@watchrail/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -309,6 +312,9 @@ importers:
       '@nestjs/drizzle':
         specifier: 0.0.1
         version: 0.0.1(@nestjs/common@12.1.0(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@12.1.0)(drizzle-orm@0.45.2(@types/pg@8.23.1)(pg@8.23.0))(reflect-metadata@0.2.2)
+      '@watchrail/assertion-security':
+        specifier: workspace:*
+        version: link:../../packages/assertion-security
       '@watchrail/check-engine':
         specifier: workspace:*
         version: link:../../packages/check-engine
@@ -318,6 +324,9 @@ importers:
       '@watchrail/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@watchrail/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@watchrail/http-header-security':
         specifier: workspace:*
         version: link:../../packages/http-header-security
@@ -343,9 +352,6 @@ importers:
       '@testcontainers/redis':
         specifier: 12.1.0
         version: 12.1.0(supports-color@7.2.0)
-      '@watchrail/domain':
-        specifier: workspace:*
-        version: link:../../packages/domain
       bullmq:
         specifier: 6.3.8
         version: 6.3.8(pg@8.23.0)(redis@6.2.1)
@@ -361,6 +367,22 @@ importers:
       tsx:
         specifier: 4.23.13
         version: 4.23.13
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: 5.0.1
+        version: 5.0.1(@types/node@24.13.6)(jsdom@30.1.0(@noble/hashes@1.8.0))(vite@8.3.0(@types/node@24.13.6)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.1))
+
+  packages/assertion-security:
+    dependencies:
+      '@watchrail/domain':
+        specifier: workspace:*
+        version: link:../domain
+    devDependencies:
+      '@types/node':
+        specifier: 24.13.6
+        version: 24.13.6
       typescript:
         specifier: 6.0.3
         version: 6.0.3

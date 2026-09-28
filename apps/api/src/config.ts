@@ -6,6 +6,7 @@ export interface AppConfig {
   databaseUrl: string;
   developmentIdentityEnabled: boolean;
   headerEncryptionKeyring: HeaderEncryptionKeyring;
+  assertionEncryptionKeyring: AssertionEncryptionKeyring;
 }
 
 export function loadAppConfig(environment: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -33,6 +34,7 @@ export function loadAppConfig(environment: NodeJS.ProcessEnv = process.env): App
     databaseUrl,
     developmentIdentityEnabled,
     headerEncryptionKeyring: loadHeaderEncryptionKeyring(environment),
+    assertionEncryptionKeyring: loadAssertionEncryptionKeyring(environment),
   };
 }
 
@@ -51,3 +53,7 @@ import {
   loadHeaderEncryptionKeyring,
   type HeaderEncryptionKeyring,
 } from '@watchrail/http-header-security';
+import {
+  loadAssertionEncryptionKeyring,
+  type AssertionEncryptionKeyring,
+} from '@watchrail/assertion-security';

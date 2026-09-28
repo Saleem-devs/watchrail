@@ -4,6 +4,11 @@ import type { HttpExecutor } from '@watchrail/check-engine';
 import type { CheckExecutionRepository } from '@watchrail/db';
 import { encryptHeaderValue, type HeaderEncryptionKeyring } from '@watchrail/http-header-security';
 import {
+  storeResponseAssertions,
+  type AssertionEncryptionKeyring,
+} from '@watchrail/assertion-security';
+import { EMPTY_ASSERTION_CONFIGURATION } from '@watchrail/domain';
+import {
   CheckExecutionAlreadyClaimedError,
   CheckExecutionClaimLostError,
   CheckRoundJobHandler,
@@ -26,19 +31,27 @@ const claimedExecution = {
   organizationId: '44444444-4444-4444-8444-444444444444',
   monitorId: '55555555-5555-4555-8555-555555555555',
   requestHeaders: [],
+  assertions: EMPTY_ASSERTION_CONFIGURATION,
 } as const;
 
 const keyring: HeaderEncryptionKeyring = {
   activeKeyId: 'v1',
   keys: new Map([['v1', Buffer.alloc(32)]]),
 };
+const assertionKeyring: AssertionEncryptionKeyring = keyring;
 
 function createHandler(
   executions: CheckExecutionRepository,
   executor: HttpExecutor,
   encryptionKeyring: HeaderEncryptionKeyring = keyring,
 ) {
-  return new CheckRoundJobHandler(executions, executor, 45_000, encryptionKeyring);
+  return new CheckRoundJobHandler(
+    executions,
+    executor,
+    45_000,
+    encryptionKeyring,
+    assertionKeyring,
+  );
 }
 
 function createDependencies() {
@@ -90,6 +103,57 @@ describe('CheckRoundJobHandler', () => {
         reason: 'COMPLETED',
         statusCode: 200,
         responseTimeMs: 12,
+      }),
+    );
+  });
+
+  it('decrypts the immutable assertion configuration and passes all categories to the engine', async () => {
+    const { executions, executor, claim, complete, execute } = createDependencies();
+    const assertions = storeResponseAssertions(
+      {
+        headers: [{ name: 'x-state', operator: 'exists' }],
+        textBody: [{ operator: 'contains', target: { sensitive: true, value: 'ready secret' } }],
+        jsonBody: [{ selector: '$.ready', operator: 'exists' }],
+      },
+      EMPTY_ASSERTION_CONFIGURATION,
+      'GET',
+      {
+        organizationId: claimedExecution.organizationId,
+        monitorId: claimedExecution.monitorId,
+      },
+      assertionKeyring,
+      { allowRetain: false },
+    );
+    claim.mockResolvedValue({
+      state: 'CLAIMED',
+      execution: { ...claimedExecution, assertions },
+    });
+    execute.mockResolvedValue({
+      type: 'RESPONSE',
+      headers: [],
+      body: { state: 'CAPTURED', text: '{"ready":true}' },
+      statusCode: 200,
+      responseTimeMs: 12,
+      redirects: [],
+    });
+    complete.mockResolvedValue(true);
+
+    await createHandler(executions, executor).handle(payload);
+
+    expect(execute).toHaveBeenCalledWith(expect.objectContaining({ captureResponseBody: true }));
+    expect(complete).toHaveBeenCalledWith(
+      claimedExecution.assignmentId,
+      claimedExecution.claimToken,
+      expect.objectContaining({
+        assertionEvaluation: {
+          contractVersion: 1,
+          outcome: 'FAIL',
+          diagnostics: [
+            expect.objectContaining({ source: 'HEADER', outcome: 'FAIL' }),
+            expect.objectContaining({ source: 'TEXT_BODY', outcome: 'FAIL' }),
+            expect.objectContaining({ source: 'JSON_BODY', outcome: 'PASS' }),
+          ],
+        },
       }),
     );
   });
@@ -193,6 +257,48 @@ describe('CheckRoundJobHandler', () => {
     );
     expect(logger).toHaveBeenCalledWith(
       `Stored request-header configuration is invalid for assignment ${claimedExecution.assignmentId}.`,
+    );
+    expect(JSON.stringify({ logs: logger.mock.calls, result: complete.mock.calls })).not.toContain(
+      sentinel,
+    );
+    logger.mockRestore();
+  });
+
+  it('turns corrupted stored assertions into redacted terminal internal evidence', async () => {
+    const sentinel = 'WATCHRAIL_ASSERTION_SENTINEL_SECRET';
+    const logger = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const { executions, executor, claim, complete, execute } = createDependencies();
+    claim.mockResolvedValue({
+      state: 'CLAIMED',
+      execution: {
+        ...claimedExecution,
+        assertions: {
+          contractVersion: 1,
+          assertions: {
+            headers: [],
+            textBody: [
+              {
+                operator: 'equals',
+                target: { sensitive: true, encryptedValue: sentinel },
+              },
+            ],
+            jsonBody: [],
+          },
+        } as never,
+      },
+    });
+    complete.mockResolvedValue(true);
+
+    await createHandler(executions, executor).handle(payload);
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(complete).toHaveBeenCalledWith(
+      claimedExecution.assignmentId,
+      claimedExecution.claimToken,
+      expect.objectContaining({ outcome: 'UNKNOWN', stage: 'PROBE', reason: 'INTERNAL_ERROR' }),
+    );
+    expect(logger).toHaveBeenCalledWith(
+      `Stored assertion configuration is invalid for assignment ${claimedExecution.assignmentId}.`,
     );
     expect(JSON.stringify({ logs: logger.mock.calls, result: complete.mock.calls })).not.toContain(
       sentinel,

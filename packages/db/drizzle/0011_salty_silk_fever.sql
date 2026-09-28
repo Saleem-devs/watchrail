@@ -1,0 +1,4 @@
+ALTER TABLE "monitor_configuration_versions" ADD COLUMN "assertions" jsonb DEFAULT '{"contractVersion":1,"assertions":{"headers":[],"textBody":[],"jsonBody":[]}}'::jsonb NOT NULL;--> statement-breakpoint
+ALTER TABLE "monitors" ADD COLUMN "assertions" jsonb DEFAULT '{"contractVersion":1,"assertions":{"headers":[],"textBody":[],"jsonBody":[]}}'::jsonb NOT NULL;--> statement-breakpoint
+ALTER TABLE "monitor_configuration_versions" ADD CONSTRAINT "monitor_configuration_versions_assertions_object" CHECK (jsonb_typeof("monitor_configuration_versions"."assertions") = 'object');--> statement-breakpoint
+ALTER TABLE "monitors" ADD CONSTRAINT "monitors_assertions_object" CHECK (jsonb_typeof("monitors"."assertions") = 'object');

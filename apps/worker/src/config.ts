@@ -11,6 +11,7 @@ export interface WorkerConfig {
   idlePollIntervalMs: number;
   dependencyErrorDelayMs: number;
   headerEncryptionKeyring: HeaderEncryptionKeyring;
+  assertionEncryptionKeyring: AssertionEncryptionKeyring;
 }
 
 export function loadWorkerConfig(environment: NodeJS.ProcessEnv = process.env): WorkerConfig {
@@ -59,6 +60,7 @@ export function loadWorkerConfig(environment: NodeJS.ProcessEnv = process.env): 
       1_000,
     ),
     headerEncryptionKeyring: loadHeaderEncryptionKeyring(environment),
+    assertionEncryptionKeyring: loadAssertionEncryptionKeyring(environment),
   };
 }
 
@@ -93,3 +95,7 @@ import {
   loadHeaderEncryptionKeyring,
   type HeaderEncryptionKeyring,
 } from '@watchrail/http-header-security';
+import {
+  loadAssertionEncryptionKeyring,
+  type AssertionEncryptionKeyring,
+} from '@watchrail/assertion-security';

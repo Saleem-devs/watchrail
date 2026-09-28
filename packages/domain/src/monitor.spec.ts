@@ -13,8 +13,39 @@ describe('createMonitor', () => {
       url: 'https://example.com/health',
       ...MONITOR_DEFAULTS,
       requestHeaders: [],
+      assertions: { headers: [], textBody: [], jsonBody: [] },
       locations: ['local'],
     });
+  });
+
+  it('normalizes assertions and rejects retained assertion secrets during creation', () => {
+    expect(
+      createMonitor({
+        name: 'API',
+        url: 'https://example.com',
+        assertions: {
+          headers: [{ name: 'x-state', operator: 'exists' }],
+          textBody: [],
+          jsonBody: [],
+        },
+      }).assertions,
+    ).toEqual({
+      headers: [{ name: 'x-state', operator: 'exists' }],
+      textBody: [],
+      jsonBody: [],
+    });
+
+    expect(() =>
+      createMonitor({
+        name: 'API',
+        url: 'https://example.com',
+        assertions: {
+          headers: [],
+          textBody: [{ operator: 'equals', target: { sensitive: true, retain: true } }],
+          jsonBody: [],
+        },
+      }),
+    ).toThrow(MonitorInputError);
   });
 
   it('normalizes request headers and rejects retained secrets during creation', () => {

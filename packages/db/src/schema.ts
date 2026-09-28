@@ -25,6 +25,8 @@ import {
   type HttpStatusPolicy,
   type HttpRedirectHop,
   type StoredRequestHeader,
+  type ResponseAssertionConfigurationV1,
+  EMPTY_ASSERTION_CONFIGURATION,
 } from '@watchrail/domain';
 
 export const httpMethodEnum = pgEnum('http_method', HTTP_METHODS);
@@ -92,6 +94,10 @@ export const monitors = pgTable(
       .notNull()
       .default({ type: 'ANY_2XX' }),
     requestHeaders: jsonb('request_headers').$type<StoredRequestHeader[]>().notNull().default([]),
+    assertions: jsonb('assertions')
+      .$type<ResponseAssertionConfigurationV1>()
+      .notNull()
+      .default(EMPTY_ASSERTION_CONFIGURATION),
     locations: jsonb('locations').$type<string[]>().notNull().default(['local']),
 
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -133,6 +139,7 @@ export const monitors = pgTable(
       sql`jsonb_typeof(${table.locations}) = 'array' and jsonb_array_length(${table.locations}) > 0`,
     ),
     check('monitors_request_headers_array', sql`jsonb_typeof(${table.requestHeaders}) = 'array'`),
+    check('monitors_assertions_object', sql`jsonb_typeof(${table.assertions}) = 'object'`),
   ],
 );
 
@@ -155,6 +162,10 @@ export const monitorConfigurationVersions = pgTable(
       .notNull()
       .default({ type: 'ANY_2XX' }),
     requestHeaders: jsonb('request_headers').$type<StoredRequestHeader[]>().notNull().default([]),
+    assertions: jsonb('assertions')
+      .$type<ResponseAssertionConfigurationV1>()
+      .notNull()
+      .default(EMPTY_ASSERTION_CONFIGURATION),
 
     locations: jsonb('locations').$type<string[]>().notNull(),
 
@@ -224,6 +235,10 @@ export const monitorConfigurationVersions = pgTable(
     check(
       'monitor_configuration_versions_request_headers_array',
       sql`jsonb_typeof(${table.requestHeaders}) = 'array'`,
+    ),
+    check(
+      'monitor_configuration_versions_assertions_object',
+      sql`jsonb_typeof(${table.assertions}) = 'object'`,
     ),
   ],
 );

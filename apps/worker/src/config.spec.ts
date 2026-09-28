@@ -6,6 +6,8 @@ const requiredEnvironment = {
   REDIS_URL: 'redis://localhost:6379',
   HTTP_HEADER_ACTIVE_KEY_ID: 'test',
   HTTP_HEADER_ENCRYPTION_KEYS: JSON.stringify({ test: Buffer.alloc(32).toString('base64') }),
+  ASSERTION_ACTIVE_KEY_ID: 'test',
+  ASSERTION_ENCRYPTION_KEYS: JSON.stringify({ test: Buffer.alloc(32).toString('base64') }),
 };
 
 describe('loadWorkerConfig', () => {
@@ -21,6 +23,7 @@ describe('loadWorkerConfig', () => {
       idlePollIntervalMs: 500,
       dependencyErrorDelayMs: 1_000,
       headerEncryptionKeyring: { activeKeyId: 'test' },
+      assertionEncryptionKeyring: { activeKeyId: 'test' },
     });
   });
 

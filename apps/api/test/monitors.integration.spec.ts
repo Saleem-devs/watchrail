@@ -25,6 +25,10 @@ describe('monitor API', () => {
     process.env.HTTP_HEADER_ENCRYPTION_KEYS = JSON.stringify({
       test: Buffer.alloc(32).toString('base64'),
     });
+    process.env.ASSERTION_ACTIVE_KEY_ID = 'test';
+    process.env.ASSERTION_ENCRYPTION_KEYS = JSON.stringify({
+      test: Buffer.alloc(32).toString('base64'),
+    });
 
     const migrationConnection = createDatabaseConnection(container.getConnectionUri());
     await migrateDatabase(migrationConnection, resolve(process.cwd(), '../../packages/db/drizzle'));
@@ -301,6 +305,144 @@ describe('monitor API', () => {
     await request(app.getHttpServer())
       .patch(`/api/monitors/${String(created.body.data.id)}/request-headers`)
       .send({ requestHeaders: [{ name: 'Authorization', sensitive: true, retain: true }] })
+      .expect(400);
+  });
+
+  it('encrypts, redacts, retains, and immutably snapshots response assertions', async () => {
+    const sentinel = 'WATCHRAIL_ASSERTION_SENTINEL_SECRET';
+    const created = await request(app.getHttpServer())
+      .post('/api/monitors')
+      .send({ name: 'Assertion target', url: 'https://example.com' })
+      .expect(201);
+    const monitorId = created.body.data.id as string;
+    expect(created.body.data.assertions).toEqual({
+      contractVersion: 1,
+      assertions: { headers: [], textBody: [], jsonBody: [] },
+    });
+
+    const configured = await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/assertions`)
+      .send({
+        headers: [
+          {
+            name: 'x-state',
+            operator: 'equals',
+            target: { sensitive: false, value: 'ready' },
+          },
+        ],
+        textBody: [],
+        jsonBody: [
+          {
+            selector: '$.token',
+            operator: 'equals',
+            target: {
+              sensitive: true,
+              value: { type: 'string', value: sentinel },
+            },
+          },
+        ],
+      })
+      .expect(200);
+
+    expect(configured.body.data.assertions).toMatchObject({
+      assertions: {
+        headers: [{ target: { sensitive: false, value: 'ready' } }],
+        jsonBody: [{ target: { sensitive: true, hasValue: true } }],
+      },
+    });
+    expect(JSON.stringify(configured.body)).not.toContain(sentinel);
+    expect(JSON.stringify(configured.body)).not.toContain('ciphertext');
+
+    const oldRound = await request(app.getHttpServer())
+      .post(`/api/monitors/${monitorId}/check-rounds`)
+      .expect(202);
+
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/assertions`)
+      .send({
+        headers: [],
+        textBody: [],
+        jsonBody: [
+          {
+            selector: '$.token',
+            operator: 'equals',
+            target: { sensitive: true, retain: true },
+          },
+        ],
+      })
+      .expect(200);
+
+    const stored = await database.$client.query<{ assertions: unknown }>(
+      `select assertions from monitor_configuration_versions
+       where monitor_id = $1 order by version_number`,
+      [monitorId],
+    );
+    expect(stored.rows).toHaveLength(3);
+    expect(JSON.stringify(stored.rows)).not.toContain(sentinel);
+    const versionTwo = stored.rows[1]?.assertions as {
+      assertions: { jsonBody: Array<{ target?: unknown }> };
+    };
+    const versionThree = stored.rows[2]?.assertions as {
+      assertions: { jsonBody: Array<{ target?: unknown }> };
+    };
+    expect(versionThree.assertions.jsonBody[0]?.target).toEqual(
+      versionTwo.assertions.jsonBody[0]?.target,
+    );
+
+    const claim = await new CheckExecutionRepository(database).claim(
+      oldRound.body.data.id as string,
+      30_000,
+    );
+    expect(claim.state).toBe('CLAIMED');
+    if (claim.state !== 'CLAIMED') throw new Error('Expected old round claim.');
+    expect(claim.execution.assertions).toEqual(stored.rows[1]?.assertions);
+  });
+
+  it('enforces HEAD and body-assertion compatibility in both update directions', async () => {
+    const created = await request(app.getHttpServer())
+      .post('/api/monitors')
+      .send({ name: 'Compatibility target', url: 'https://example.com' })
+      .expect(201);
+    const monitorId = created.body.data.id as string;
+
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/assertions`)
+      .send({
+        headers: [],
+        textBody: [{ operator: 'contains', target: { sensitive: false, value: 'ready' } }],
+        jsonBody: [],
+      })
+      .expect(200);
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/http-settings`)
+      .send({
+        url: 'https://example.com',
+        method: 'HEAD',
+        timeoutMs: 10_000,
+        followRedirects: true,
+      })
+      .expect(400);
+
+    const head = await request(app.getHttpServer())
+      .post('/api/monitors')
+      .send({ name: 'HEAD target', url: 'https://example.com' })
+      .expect(201);
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${head.body.data.id as string}/http-settings`)
+      .send({
+        url: 'https://example.com',
+        method: 'HEAD',
+        timeoutMs: 10_000,
+        followRedirects: true,
+      })
+      .expect(200);
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${head.body.data.id as string}/assertions`)
+      .send({
+        headers: [],
+        textBody: [{ operator: 'contains', target: { sensitive: false, value: 'ready' } }],
+        jsonBody: [],
+      })
       .expect(400);
   });
 
