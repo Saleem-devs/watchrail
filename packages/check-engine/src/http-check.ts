@@ -5,6 +5,10 @@ import {
 } from './errors.js';
 import { evaluateHeaderAssertions, notEvaluateHeaderAssertions } from './header-assertions.js';
 import {
+  evaluateJsonBodyAssertions,
+  notEvaluateJsonBodyAssertions,
+} from './json-body-assertions.js';
+import {
   evaluateTextBodyAssertions,
   notEvaluateTextBodyAssertions,
 } from './text-body-assertions.js';
@@ -36,10 +40,17 @@ export async function executeHttpCheck(
   assertValidStatusPolicy(input.statusPolicy);
   const headerAssertions = input.headerAssertions ?? [];
   const textBodyAssertions = input.textBodyAssertions ?? [];
-  assertValidAssertionConfiguration(input.method, headerAssertions, textBodyAssertions);
+  const jsonBodyAssertions = input.jsonBodyAssertions ?? [];
+  assertValidAssertionConfiguration(
+    input.method,
+    headerAssertions,
+    textBodyAssertions,
+    jsonBodyAssertions,
+  );
   const unavailableAssertions = combineAssertionEvaluations(
     notEvaluateHeaderAssertions(headerAssertions),
     notEvaluateTextBodyAssertions(textBodyAssertions),
+    notEvaluateJsonBodyAssertions(jsonBodyAssertions),
   );
 
   const clock = dependencies.clock ?? defaultClock;
@@ -69,7 +80,7 @@ export async function executeHttpCheck(
       signal: controller.signal,
       followRedirects: input.followRedirects,
       requestHeaders: input.requestHeaders ?? [],
-      captureResponseBody: textBodyAssertions.length > 0,
+      captureResponseBody: textBodyAssertions.length > 0 || jsonBodyAssertions.length > 0,
       onEvidence: (evidence) => {
         redirects = [...evidence.redirects];
         if (evidence.finalResponse !== undefined) {
@@ -85,6 +96,7 @@ export async function executeHttpCheck(
       statusPolicy: input.statusPolicy ?? { type: 'ANY_2XX' },
       headerAssertions: input.headerAssertions ?? [],
       textBodyAssertions,
+      jsonBodyAssertions,
       checkedAt,
       attemptDurationMs: elapsed(clock, startedAt),
     });
@@ -106,6 +118,7 @@ export async function executeHttpCheck(
             : combineAssertionEvaluations(
                 evaluateHeaderAssertions(headerAssertions, responseEvidence.headers),
                 notEvaluateTextBodyAssertions(textBodyAssertions),
+                notEvaluateJsonBodyAssertions(jsonBodyAssertions),
               ),
       } as const;
       return responseEvidence === undefined
@@ -140,6 +153,7 @@ function classifyHttpExecution(input: {
   statusPolicy: NonNullable<HttpCheckInput['statusPolicy']>;
   headerAssertions: NonNullable<HttpCheckInput['headerAssertions']>;
   textBodyAssertions: NonNullable<HttpCheckInput['textBodyAssertions']>;
+  jsonBodyAssertions: NonNullable<HttpCheckInput['jsonBodyAssertions']>;
   checkedAt: Date;
   attemptDurationMs: number;
 }): HttpCheckResult {
@@ -148,12 +162,14 @@ function classifyHttpExecution(input: {
     statusPolicy,
     headerAssertions,
     textBodyAssertions,
+    jsonBodyAssertions,
     checkedAt,
     attemptDurationMs,
   } = input;
   const unavailableAssertions = combineAssertionEvaluations(
     notEvaluateHeaderAssertions(headerAssertions),
     notEvaluateTextBodyAssertions(textBodyAssertions),
+    notEvaluateJsonBodyAssertions(jsonBodyAssertions),
   );
 
   if (execution.type === 'POLICY_REJECTION') {
@@ -197,6 +213,7 @@ function classifyHttpExecution(input: {
   const assertionEvaluation = combineAssertionEvaluations(
     evaluateHeaderAssertions(headerAssertions, execution.headers),
     evaluateTextBodyAssertions(textBodyAssertions, execution.body),
+    evaluateJsonBodyAssertions(jsonBodyAssertions, execution.body),
   );
 
   if (successful) {
@@ -266,15 +283,19 @@ function assertValidAssertionConfiguration(
   method: HttpMethod,
   headerAssertions: NonNullable<HttpCheckInput['headerAssertions']>,
   textBodyAssertions: NonNullable<HttpCheckInput['textBodyAssertions']>,
+  jsonBodyAssertions: NonNullable<HttpCheckInput['jsonBodyAssertions']>,
 ): void {
-  if (headerAssertions.length + textBodyAssertions.length > ASSERTION_LIMITS.maxAssertions) {
+  if (
+    headerAssertions.length + textBodyAssertions.length + jsonBodyAssertions.length >
+    ASSERTION_LIMITS.maxAssertions
+  ) {
     throw new AssertionInputError([
       `Configure at most ${ASSERTION_LIMITS.maxAssertions} assertions.`,
     ]);
   }
   assertAssertionsCompatibleWithMethod(method, {
     textBody: textBodyAssertions,
-    jsonBody: [],
+    jsonBody: jsonBodyAssertions,
   });
 }
 

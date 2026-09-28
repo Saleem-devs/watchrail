@@ -6,6 +6,10 @@ export {
   notEvaluateTextBodyAssertions,
 } from './text-body-assertions.js';
 export {
+  evaluateJsonBodyAssertions,
+  notEvaluateJsonBodyAssertions,
+} from './json-body-assertions.js';
+export {
   parseStrictJson,
   STRICT_JSON_LIMITS,
   type StrictJsonMember,

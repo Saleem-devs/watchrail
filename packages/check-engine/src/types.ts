@@ -43,6 +43,7 @@ export interface HttpCheckInput {
   requestHeaders?: readonly HttpRequestHeader[];
   headerAssertions?: readonly HeaderAssertion[];
   textBodyAssertions?: readonly TextBodyAssertion[];
+  jsonBodyAssertions?: readonly JsonBodyAssertion[];
 }
 
 interface HttpCheckTiming {
@@ -220,5 +221,6 @@ import type {
   AssertionEvaluationV1,
   HeaderAssertion,
   HttpRedirectHop,
+  JsonBodyAssertion,
   TextBodyAssertion,
 } from '@watchrail/domain';

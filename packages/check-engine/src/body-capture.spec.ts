@@ -373,6 +373,7 @@ describe('bounded response-body capture', () => {
               target: { value: 'ready', sensitive: false },
             },
           ],
+          jsonBodyAssertions: [{ selector: '$.ready', operator: 'exists' }],
         },
         {
           executor: nodeExecutor,
@@ -391,6 +392,11 @@ describe('bounded response-body capture', () => {
             { source: 'HEADER', outcome: 'PASS', reason: 'MATCHED' },
             {
               source: 'TEXT_BODY',
+              outcome: 'NOT_EVALUATED',
+              reason: 'RESPONSE_UNAVAILABLE',
+            },
+            {
+              source: 'JSON_BODY',
               outcome: 'NOT_EVALUATED',
               reason: 'RESPONSE_UNAVAILABLE',
             },
