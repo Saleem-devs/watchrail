@@ -3,7 +3,7 @@ import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createMonitor } from '@watchrail/domain';
+import { createMonitor, EMPTY_ASSERTION_EVALUATION } from '@watchrail/domain';
 import { CheckExecutionRepository } from './check-execution-repository.js';
 import { createDatabaseConnection } from './client.js';
 import type { DatabaseConnection } from './client.js';
@@ -111,6 +111,36 @@ describe('CheckExecutionRepository', () => {
         headers: 'STRIPPED' as const,
       },
     ];
+    const assertionEvaluation = {
+      contractVersion: 1 as const,
+      outcome: 'PASS' as const,
+      diagnostics: [
+        {
+          index: 0,
+          source: 'HEADER' as const,
+          subject: 'x-state',
+          operator: 'exists' as const,
+          outcome: 'PASS' as const,
+          reason: 'MATCHED' as const,
+        },
+        {
+          index: 0,
+          source: 'TEXT_BODY' as const,
+          subject: null,
+          operator: 'contains' as const,
+          outcome: 'PASS' as const,
+          reason: 'MATCHED' as const,
+        },
+        {
+          index: 0,
+          source: 'JSON_BODY' as const,
+          subject: '$.ready',
+          operator: 'exists' as const,
+          outcome: 'PASS' as const,
+          reason: 'MATCHED' as const,
+        },
+      ],
+    };
 
     await expect(
       repository.complete(claim.execution.assignmentId, claim.execution.claimToken, {
@@ -121,6 +151,7 @@ describe('CheckExecutionRepository', () => {
         responseTimeMs: 12.5,
         attemptDurationMs: 14.25,
         redirects,
+        assertionEvaluation,
         checkedAt,
       }),
     ).resolves.toBe(true);
@@ -150,10 +181,185 @@ describe('CheckExecutionRepository', () => {
       responseTimeMs: 12.5,
       attemptDurationMs: 14.25,
       redirects,
+      assertionEvaluation,
       checkedAt,
     });
     expect(completedRound?.status).toBe('COMPLETED');
     await expect(repository.claim(round.id, 45_000)).resolves.toEqual({ state: 'COMPLETED' });
+  });
+
+  it.each([
+    ['contract version', { contractVersion: 2, outcome: 'PASS', diagnostics: [] }],
+    [
+      'too many diagnostics',
+      {
+        contractVersion: 1,
+        outcome: 'PASS',
+        diagnostics: Array.from({ length: 33 }, (_, index) => ({
+          index,
+          source: 'HEADER',
+          subject: 'x-state',
+          operator: 'exists',
+          outcome: 'PASS',
+          reason: 'MATCHED',
+        })),
+      },
+    ],
+    [
+      'duplicate identity',
+      {
+        contractVersion: 1,
+        outcome: 'PASS',
+        diagnostics: [
+          {
+            index: 0,
+            source: 'HEADER',
+            subject: 'x-state',
+            operator: 'exists',
+            outcome: 'PASS',
+            reason: 'MATCHED',
+          },
+          {
+            index: 0,
+            source: 'HEADER',
+            subject: 'x-other',
+            operator: 'exists',
+            outcome: 'PASS',
+            reason: 'MATCHED',
+          },
+        ],
+      },
+    ],
+    [
+      'aggregate mismatch',
+      {
+        contractVersion: 1,
+        outcome: 'PASS',
+        diagnostics: [
+          {
+            index: 0,
+            source: 'HEADER',
+            subject: 'x-state',
+            operator: 'exists',
+            outcome: 'FAIL',
+            reason: 'HEADER_MISMATCH',
+          },
+        ],
+      },
+    ],
+    [
+      'reason/source mismatch',
+      {
+        contractVersion: 1,
+        outcome: 'FAIL',
+        diagnostics: [
+          {
+            index: 0,
+            source: 'HEADER',
+            subject: 'x-state',
+            operator: 'exists',
+            outcome: 'FAIL',
+            reason: 'JSON_BODY_MISMATCH',
+          },
+        ],
+      },
+    ],
+  ])('rejects an invalid assertion evaluation with %s before completion', async (_case, value) => {
+    const round = await createRound();
+    const claim = await repository.claim(round.id, 45_000);
+    if (claim.state !== 'CLAIMED') throw new Error('Expected an execution claim.');
+
+    await expect(
+      repository.complete(claim.execution.assignmentId, claim.execution.claimToken, {
+        outcome: 'PASS',
+        stage: 'HTTP',
+        reason: 'COMPLETED',
+        statusCode: 200,
+        responseTimeMs: 10,
+        attemptDurationMs: 12,
+        redirects: [],
+        assertionEvaluation: value as never,
+        checkedAt: new Date(),
+      }),
+    ).rejects.toMatchObject({ name: 'StoredAssertionContractError' });
+
+    const [assignment] = await connection.db
+      .select()
+      .from(checkExecutionAssignments)
+      .where(eq(checkExecutionAssignments.id, claim.execution.assignmentId));
+    expect(assignment?.status).toBe('RUNNING');
+    expect(await connection.db.select().from(checkExecutionResults)).toEqual([]);
+  });
+
+  it.each([
+    [
+      'FAIL',
+      {
+        contractVersion: 1 as const,
+        outcome: 'FAIL' as const,
+        diagnostics: [
+          {
+            index: 0,
+            source: 'JSON_BODY' as const,
+            subject: '$.status',
+            operator: 'equals' as const,
+            outcome: 'FAIL' as const,
+            reason: 'JSON_BODY_MISMATCH' as const,
+          },
+        ],
+      },
+    ],
+    [
+      'NOT_EVALUATED',
+      {
+        contractVersion: 1 as const,
+        outcome: 'NOT_EVALUATED' as const,
+        diagnostics: [
+          {
+            index: 0,
+            source: 'HEADER' as const,
+            subject: 'content-type',
+            operator: 'exists' as const,
+            outcome: 'PASS' as const,
+            reason: 'MATCHED' as const,
+          },
+          {
+            index: 0,
+            source: 'JSON_BODY' as const,
+            subject: '$.status',
+            operator: 'equals' as const,
+            outcome: 'NOT_EVALUATED' as const,
+            reason: 'RESPONSE_UNAVAILABLE' as const,
+          },
+        ],
+      },
+    ],
+  ])('round-trips %s assertion evidence without changing HTTP PASS', async (_case, evaluation) => {
+    const round = await createRound();
+    const claim = await repository.claim(round.id, 45_000);
+    if (claim.state !== 'CLAIMED') throw new Error('Expected an execution claim.');
+    await repository.complete(claim.execution.assignmentId, claim.execution.claimToken, {
+      outcome: 'PASS',
+      stage: 'HTTP',
+      reason: 'COMPLETED',
+      statusCode: 200,
+      responseTimeMs: 10,
+      attemptDurationMs: 12,
+      redirects: [],
+      assertionEvaluation: evaluation,
+      checkedAt: new Date(),
+    });
+
+    const stored = await new ManualRoundRepository(connection.db).findForOrganization(
+      organizationId,
+      round.monitorId,
+      round.id,
+    );
+    expect(stored?.result).toMatchObject({
+      outcome: 'PASS',
+      reason: 'COMPLETED',
+      assertionEvaluation: evaluation,
+    });
   });
 
   it('rejects corrupted redirect JSONB instead of exposing extra fields', async () => {
@@ -169,6 +375,7 @@ describe('CheckExecutionRepository', () => {
       responseTimeMs: 10,
       attemptDurationMs: 12,
       redirects: [],
+      assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
       checkedAt: new Date(),
     });
 
@@ -201,6 +408,56 @@ describe('CheckExecutionRepository', () => {
     ).rejects.toMatchObject({ name: 'HttpRedirectDiagnosticsInvariantError' });
   });
 
+  it('re-parses and rejects corrupted stored assertion evaluation JSONB', async () => {
+    const round = await createRound();
+    const claim = await repository.claim(round.id, 45_000);
+    if (claim.state !== 'CLAIMED') throw new Error('Expected an execution claim.');
+
+    await repository.complete(claim.execution.assignmentId, claim.execution.claimToken, {
+      outcome: 'PASS',
+      stage: 'HTTP',
+      reason: 'COMPLETED',
+      statusCode: 200,
+      responseTimeMs: 10,
+      attemptDurationMs: 12,
+      redirects: [],
+      assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
+      checkedAt: new Date(),
+    });
+
+    await connection.pool.query(
+      `update check_execution_results
+       set assertion_evaluation = $1::jsonb
+       where assignment_id = $2`,
+      [
+        JSON.stringify({
+          contractVersion: 1,
+          outcome: 'PASS',
+          diagnostics: [
+            {
+              index: 0,
+              source: 'JSON_BODY',
+              subject: '$.secret',
+              operator: 'equals',
+              outcome: 'FAIL',
+              reason: 'JSON_BODY_MISMATCH',
+              receivedValue: 'WATCHRAIL_RECEIVED_RESPONSE_SECRET',
+            },
+          ],
+        }),
+        claim.execution.assignmentId,
+      ],
+    );
+
+    await expect(
+      new ManualRoundRepository(connection.db).findForOrganization(
+        organizationId,
+        round.monitorId,
+        round.id,
+      ),
+    ).rejects.toMatchObject({ name: 'StoredAssertionContractError' });
+  });
+
   it('rejects a stale claimant after an expired assignment is reclaimed', async () => {
     const round = await createRound();
     const first = await repository.claim(round.id, 45_000);
@@ -224,6 +481,7 @@ describe('CheckExecutionRepository', () => {
       responseTimeMs: 20,
       attemptDurationMs: 21,
       redirects: [],
+      assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
       checkedAt: new Date(),
     } as const;
 

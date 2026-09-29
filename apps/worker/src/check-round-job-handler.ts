@@ -3,8 +3,11 @@ import { executeHttpCheck } from '@watchrail/check-engine';
 import type { HttpCheckResult, HttpExecutor } from '@watchrail/check-engine';
 import type { ExecuteCheckRoundJobV1 } from '@watchrail/contracts';
 import type { CheckExecutionRepository } from '@watchrail/db';
-import { StoredRequestHeadersInvariantError } from '@watchrail/domain';
-import { StoredAssertionContractError } from '@watchrail/domain';
+import {
+  EMPTY_ASSERTION_EVALUATION,
+  StoredAssertionContractError,
+  StoredRequestHeadersInvariantError,
+} from '@watchrail/domain';
 import {
   resolveResponseAssertions,
   StoredAssertionResolutionError,
@@ -141,6 +144,6 @@ function internalExecutionFailureResult(): HttpCheckResult {
     attemptDurationMs: 0,
     redirects: [],
     checkedAt: new Date(),
-    assertionEvaluation: { contractVersion: 1, outcome: 'PASS', diagnostics: [] },
+    assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
   };
 }
