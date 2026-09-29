@@ -1,0 +1,2 @@
+ALTER TABLE "check_execution_results" ADD COLUMN "assertion_evaluation" jsonb DEFAULT '{"contractVersion":1,"outcome":"PASS","diagnostics":[]}'::jsonb NOT NULL;--> statement-breakpoint
+ALTER TABLE "check_execution_results" ADD CONSTRAINT "check_execution_results_assertion_evaluation_object" CHECK (jsonb_typeof("check_execution_results"."assertion_evaluation") = 'object');

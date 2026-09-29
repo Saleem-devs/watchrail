@@ -2,6 +2,8 @@ import { and, desc, eq } from 'drizzle-orm';
 import { createExecuteCheckRoundJob } from '@watchrail/contracts';
 import {
   parseHttpRedirectHops,
+  parseStoredAssertionEvaluation,
+  type AssertionEvaluationV1,
   type HttpRedirectHop,
   type MonitorLifecycleState,
 } from '@watchrail/domain';
@@ -32,6 +34,7 @@ export interface ManualRoundResult {
     responseTimeMs: number | null;
     attemptDurationMs: number;
     redirects: HttpRedirectHop[];
+    assertionEvaluation: AssertionEvaluationV1;
     checkedAt: Date;
   } | null;
 }
@@ -161,6 +164,7 @@ export class ManualRoundRepository {
         status: checkRounds.status,
         assignmentStatus: checkExecutionAssignments.status,
         createdAt: checkRounds.createdAt,
+        resultId: checkExecutionResults.id,
         outcome: checkExecutionResults.outcome,
         stage: checkExecutionResults.stage,
         reason: checkExecutionResults.reason,
@@ -168,6 +172,7 @@ export class ManualRoundRepository {
         responseTimeMs: checkExecutionResults.responseTimeMs,
         attemptDurationMs: checkExecutionResults.attemptDurationMs,
         redirects: checkExecutionResults.redirects,
+        assertionEvaluation: checkExecutionResults.assertionEvaluation,
         checkedAt: checkExecutionResults.checkedAt,
       })
       .from(checkRounds)
@@ -200,20 +205,17 @@ export class ManualRoundRepository {
     if (!round) return null;
 
     const result =
-      round.outcome &&
-      round.stage &&
-      round.reason &&
-      round.attemptDurationMs !== null &&
-      round.checkedAt
+      round.resultId !== null
         ? {
-            outcome: round.outcome,
-            stage: round.stage,
-            reason: round.reason,
+            outcome: required(round.outcome),
+            stage: required(round.stage),
+            reason: required(round.reason),
             statusCode: round.statusCode,
             responseTimeMs: round.responseTimeMs,
-            attemptDurationMs: round.attemptDurationMs,
+            attemptDurationMs: required(round.attemptDurationMs),
             redirects: parseHttpRedirectHops(round.redirects ?? []),
-            checkedAt: round.checkedAt,
+            assertionEvaluation: parseStoredAssertionEvaluation(round.assertionEvaluation),
+            checkedAt: required(round.checkedAt),
           }
         : null;
 
@@ -226,4 +228,9 @@ export class ManualRoundRepository {
       result,
     };
   }
+}
+
+function required<T>(value: T | null): T {
+  if (value === null) throw new Error('Completed check result is missing required data.');
+  return value;
 }

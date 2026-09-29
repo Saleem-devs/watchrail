@@ -544,6 +544,20 @@ describe('monitor API', () => {
         headers: 'STRIPPED' as const,
       },
     ];
+    const assertionEvaluation = {
+      contractVersion: 1 as const,
+      outcome: 'FAIL' as const,
+      diagnostics: [
+        {
+          index: 0,
+          source: 'JSON_BODY' as const,
+          subject: '$.status',
+          operator: 'equals' as const,
+          outcome: 'FAIL' as const,
+          reason: 'JSON_BODY_MISMATCH' as const,
+        },
+      ],
+    };
     await executions.complete(claim.execution.assignmentId, claim.execution.claimToken, {
       outcome: 'PASS',
       stage: 'HTTP',
@@ -553,6 +567,7 @@ describe('monitor API', () => {
       attemptDurationMs: 46.25,
       checkedAt,
       redirects,
+      assertionEvaluation,
     });
 
     const completed = await request(app.getHttpServer())
@@ -573,6 +588,7 @@ describe('monitor API', () => {
         responseTimeMs: 42.5,
         attemptDurationMs: 46.25,
         redirects,
+        assertionEvaluation,
         checkedAt: checkedAt.toISOString(),
       },
     });

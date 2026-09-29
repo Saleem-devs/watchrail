@@ -23,10 +23,12 @@ import {
   HTTP_METHODS,
   MONITOR_LIFECYCLE_STATES,
   type HttpStatusPolicy,
+  type AssertionEvaluationV1,
   type HttpRedirectHop,
   type StoredRequestHeader,
   type ResponseAssertionConfigurationV1,
   EMPTY_ASSERTION_CONFIGURATION,
+  EMPTY_ASSERTION_EVALUATION,
 } from '@watchrail/domain';
 
 export const httpMethodEnum = pgEnum('http_method', HTTP_METHODS);
@@ -360,6 +362,10 @@ export const checkExecutionResults = pgTable(
     responseTimeMs: doublePrecision('response_time_ms'),
     attemptDurationMs: doublePrecision('attempt_duration_ms').notNull(),
     redirects: jsonb('redirects').$type<HttpRedirectHop[]>().notNull().default([]),
+    assertionEvaluation: jsonb('assertion_evaluation')
+      .$type<AssertionEvaluationV1>()
+      .notNull()
+      .default(EMPTY_ASSERTION_EVALUATION),
     checkedAt: timestamp('checked_at', { withTimezone: true }).notNull(),
 
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -405,6 +411,10 @@ export const checkExecutionResults = pgTable(
     check(
       'check_execution_results_redirects_array',
       sql`jsonb_typeof(${table.redirects}) = 'array'`,
+    ),
+    check(
+      'check_execution_results_assertion_evaluation_object',
+      sql`jsonb_typeof(${table.assertionEvaluation}) = 'object'`,
     ),
   ],
 );

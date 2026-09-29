@@ -1,6 +1,8 @@
 import { and, eq, sql } from 'drizzle-orm';
 import {
   parseHttpRedirectHops,
+  parseStoredAssertionEvaluation,
+  type AssertionEvaluationV1,
   type HttpMethod,
   type HttpRedirectHop,
   type HttpStatusPolicy,
@@ -45,6 +47,7 @@ export interface AuthoritativeCheckResult {
   responseTimeMs: number | null;
   attemptDurationMs: number;
   redirects: readonly HttpRedirectHop[];
+  assertionEvaluation: AssertionEvaluationV1;
   checkedAt: Date;
 }
 
@@ -142,6 +145,9 @@ export class CheckExecutionRepository {
     claimToken: string,
     result: AuthoritativeCheckResult,
   ): Promise<boolean> {
+    const redirects = parseHttpRedirectHops(result.redirects);
+    const assertionEvaluation = parseStoredAssertionEvaluation(result.assertionEvaluation);
+
     return this.db.transaction(async (tx) => {
       const [completed] = await tx
         .update(checkExecutionAssignments)
@@ -165,8 +171,6 @@ export class CheckExecutionRepository {
 
       if (!completed) return false;
 
-      const redirects = parseHttpRedirectHops(result.redirects);
-
       await tx.insert(checkExecutionResults).values({
         organizationId: completed.organizationId,
         roundId: completed.roundId,
@@ -178,6 +182,7 @@ export class CheckExecutionRepository {
         responseTimeMs: result.responseTimeMs,
         attemptDurationMs: result.attemptDurationMs,
         redirects,
+        assertionEvaluation,
         checkedAt: result.checkedAt,
       });
 

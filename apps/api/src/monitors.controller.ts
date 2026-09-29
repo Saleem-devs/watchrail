@@ -6,6 +6,7 @@ import {
   parseStoredAssertionConfiguration,
   type HttpRedirectHop,
   type HttpStatusPolicy,
+  type AssertionEvaluationV1,
 } from '@watchrail/domain';
 import { MonitorsService } from './monitors.service.js';
 import type { RequestWithContext } from './request-context.js';
@@ -45,6 +46,7 @@ interface ManualRoundResponse {
     responseTimeMs: number | null;
     attemptDurationMs: number;
     redirects: HttpRedirectHop[];
+    assertionEvaluation: AssertionEvaluationV1;
     checkedAt: string;
   } | null;
 }
