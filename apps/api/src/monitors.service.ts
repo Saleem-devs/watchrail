@@ -10,6 +10,7 @@ import {
   MonitorNotFoundError,
   MonitorNotRunnableError,
   MonitorRepository,
+  ArchivedMonitorLifecycleError,
   MonitorUpdateNotFoundError,
   type CheckRoundRecord,
   type ManualRoundResult,
@@ -23,6 +24,8 @@ import {
   normalizeRequestHeaderUpdates,
   parseHttpMonitorSettings,
   parseHttpStatusPolicy,
+  parseMonitorLifecycleSettings,
+  parseMonitorScheduleSettings,
   RequestHeaderInputError,
 } from '@watchrail/domain';
 import type { CreateMonitorCommand } from '@watchrail/domain';
@@ -201,6 +204,59 @@ export class MonitorsService {
       }
       if (error instanceof MonitorUpdateNotFoundError) {
         throw new NotFoundException({ code: 'MONITOR_NOT_FOUND', message: error.message });
+      }
+      throw error;
+    }
+  }
+
+  async updateScheduleSettings(
+    context: RequestContext,
+    monitorId: string,
+    value: unknown,
+  ): Promise<MonitorRecord> {
+    try {
+      const { intervalSeconds } = parseMonitorScheduleSettings(value);
+      return await this.monitors.updateScheduleSettings(
+        context.organizationId,
+        monitorId,
+        intervalSeconds,
+      );
+    } catch (error) {
+      if (error instanceof MonitorInputError) {
+        throw new BadRequestException({
+          code: 'VALIDATION_FAILED',
+          message: error.message,
+          fields: error.fields,
+        });
+      }
+      if (error instanceof MonitorUpdateNotFoundError) {
+        throw new NotFoundException({ code: 'MONITOR_NOT_FOUND', message: error.message });
+      }
+      throw error;
+    }
+  }
+
+  async updateLifecycle(
+    context: RequestContext,
+    monitorId: string,
+    value: unknown,
+  ): Promise<MonitorRecord> {
+    try {
+      const { lifecycleState } = parseMonitorLifecycleSettings(value);
+      return await this.monitors.updateLifecycle(context.organizationId, monitorId, lifecycleState);
+    } catch (error) {
+      if (error instanceof MonitorInputError) {
+        throw new BadRequestException({
+          code: 'VALIDATION_FAILED',
+          message: error.message,
+          fields: error.fields,
+        });
+      }
+      if (error instanceof MonitorUpdateNotFoundError) {
+        throw new NotFoundException({ code: 'MONITOR_NOT_FOUND', message: error.message });
+      }
+      if (error instanceof ArchivedMonitorLifecycleError) {
+        throw new ConflictException({ code: 'MONITOR_ARCHIVED', message: error.message });
       }
       throw error;
     }

@@ -96,6 +96,9 @@ describe('database migrations', () => {
     `);
 
     await applyMigration(migrations, 3);
+    for (let index = 4; index < migrations.length; index += 1) {
+      await applyMigration(migrations, index);
+    }
 
     const result = await connection.db.execute<{
       table_name: string;
@@ -130,6 +133,7 @@ describe('database migrations', () => {
       url: string;
       method: string;
       timeout_ms: number;
+      interval_seconds: number;
       locations: string[];
     }>(sql`
       select
@@ -139,6 +143,7 @@ describe('database migrations', () => {
         url,
         method,
         timeout_ms,
+        interval_seconds,
         locations
       from monitor_configuration_versions
       where monitor_id = ${existingMonitor.id}
@@ -152,9 +157,27 @@ describe('database migrations', () => {
         url: 'https://example.com/health',
         method: 'GET',
         timeout_ms: 10_000,
+        interval_seconds: 60,
         locations: ['local'],
       },
     ]);
+
+    const scheduling = await connection.db.execute<{
+      lifecycle_state: string;
+      interval_seconds: number;
+      next_check_at: string | null;
+    }>(sql`
+      select lifecycle_state, interval_seconds, next_check_at
+      from monitors
+      where id = ${existingMonitor.id}
+    `);
+
+    expect(scheduling.rows).toHaveLength(1);
+    expect(scheduling.rows[0]).toMatchObject({
+      lifecycle_state: 'ENABLED',
+      interval_seconds: 60,
+    });
+    expect(Number.isNaN(new Date(scheduling.rows[0]!.next_check_at!).getTime())).toBe(false);
 
     const outbox = await connection.db.execute<{
       available_at: string;

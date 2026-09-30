@@ -90,6 +90,8 @@ export const monitors = pgTable(
     method: httpMethodEnum('method').notNull().default('GET'),
     lifecycleState: monitorLifecycleEnum('lifecycle_state').notNull().default('ENABLED'),
     timeoutMs: integer('timeout_ms').notNull().default(10_000),
+    intervalSeconds: integer('interval_seconds').notNull().default(60),
+    nextCheckAt: timestamp('next_check_at', { withTimezone: true }),
     followRedirects: boolean('follow_redirects').notNull().default(true),
     statusPolicy: jsonb('status_policy')
       .$type<HttpStatusPolicy>()
@@ -116,6 +118,18 @@ export const monitors = pgTable(
     check('monitors_url_length', sql`length(${table.url}) <= 2048`),
 
     check('monitors_timeout_range', sql`${table.timeoutMs} between 1000 and 30000`),
+    check('monitors_interval_range', sql`${table.intervalSeconds} between 60 and 86400`),
+    check(
+      'monitors_lifecycle_schedule_consistent',
+      sql`(
+        (${table.lifecycleState} = 'ENABLED' and ${table.nextCheckAt} is not null)
+        or
+        (${table.lifecycleState} in ('PAUSED', 'ARCHIVED') and ${table.nextCheckAt} is null)
+      )`,
+    ),
+    index('monitors_due_enabled_idx')
+      .on(table.nextCheckAt, table.id)
+      .where(sql`${table.lifecycleState} = 'ENABLED'`),
 
     check(
       'monitors_status_policy_shape',
@@ -158,6 +172,7 @@ export const monitorConfigurationVersions = pgTable(
     url: text('url').notNull(),
     method: httpMethodEnum('method').notNull(),
     timeoutMs: integer('timeout_ms').notNull(),
+    intervalSeconds: integer('interval_seconds').notNull().default(60),
     followRedirects: boolean('follow_redirects').notNull().default(true),
     statusPolicy: jsonb('status_policy')
       .$type<HttpStatusPolicy>()
@@ -225,6 +240,10 @@ export const monitorConfigurationVersions = pgTable(
           )
         )
       `,
+    ),
+    check(
+      'monitor_configuration_versions_interval_range',
+      sql`${table.intervalSeconds} between 60 and 86400`,
     ),
 
     check(

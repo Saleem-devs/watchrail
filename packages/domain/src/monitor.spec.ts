@@ -4,6 +4,8 @@ import {
   MONITOR_DEFAULTS,
   MonitorInputError,
   parseHttpMonitorSettings,
+  parseMonitorLifecycleSettings,
+  parseMonitorScheduleSettings,
 } from './monitor.js';
 
 describe('createMonitor', () => {
@@ -16,6 +18,16 @@ describe('createMonitor', () => {
       assertions: { headers: [], textBody: [], jsonBody: [] },
       locations: ['local'],
     });
+  });
+
+  it('accepts an optional creation interval and rejects invalid values', () => {
+    expect(
+      createMonitor({ name: 'API', url: 'https://example.com', intervalSeconds: 300 })
+        .intervalSeconds,
+    ).toBe(300);
+    expect(() =>
+      createMonitor({ name: 'API', url: 'https://example.com', intervalSeconds: '300' }),
+    ).toThrow(MonitorInputError);
   });
 
   it('normalizes assertions and rejects retained assertion secrets during creation', () => {
@@ -103,6 +115,40 @@ describe('createMonitor', () => {
       MonitorInputError,
     );
   });
+});
+
+describe('monitor scheduling settings', () => {
+  it.each([60, 86_400])('accepts interval boundary %i', (intervalSeconds) => {
+    expect(parseMonitorScheduleSettings({ intervalSeconds })).toEqual({ intervalSeconds });
+  });
+
+  it.each([undefined, '60', 59, 86_401, 60.5, 0, -1])(
+    'rejects invalid interval %s',
+    (intervalSeconds) => {
+      expect(() => parseMonitorScheduleSettings({ intervalSeconds })).toThrow(MonitorInputError);
+    },
+  );
+
+  it('rejects missing and additional schedule properties', () => {
+    expect(() => parseMonitorScheduleSettings({})).toThrow(MonitorInputError);
+    expect(() => parseMonitorScheduleSettings({ intervalSeconds: 60, nextCheckAt: null })).toThrow(
+      MonitorInputError,
+    );
+  });
+
+  it.each(['ENABLED', 'PAUSED', 'ARCHIVED'] as const)(
+    'accepts lifecycle state %s',
+    (lifecycleState) => {
+      expect(parseMonitorLifecycleSettings({ lifecycleState })).toEqual({ lifecycleState });
+    },
+  );
+
+  it.each(['enabled', 'DELETED', undefined, null])(
+    'rejects invalid lifecycle state %s',
+    (lifecycleState) => {
+      expect(() => parseMonitorLifecycleSettings({ lifecycleState })).toThrow(MonitorInputError);
+    },
+  );
 });
 
 describe('parseHttpMonitorSettings', () => {
