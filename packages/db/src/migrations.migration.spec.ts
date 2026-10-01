@@ -11,6 +11,9 @@ const existingMonitor = {
   organizationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 } as const;
 
+const existingPausedMonitorId = '55555555-5555-4555-8555-555555555555';
+const existingArchivedMonitorId = '66666666-6666-4666-8666-666666666666';
+
 const existingRound = {
   id: '22222222-2222-4222-8222-222222222222',
   assignmentId: '44444444-4444-4444-8444-444444444444',
@@ -39,13 +42,29 @@ describe('database migrations', () => {
     await applyMigration(migrations, 0);
 
     await connection.db.execute(sql`
-      insert into monitors (id, organization_id, name, url)
-      values (
-        ${existingMonitor.id},
-        ${existingMonitor.organizationId},
-        'Existing monitor',
-        'https://example.com/health'
-      )
+      insert into monitors (id, organization_id, name, url, lifecycle_state)
+      values
+        (
+          ${existingMonitor.id},
+          ${existingMonitor.organizationId},
+          'Existing monitor',
+          'https://example.com/health',
+          'ENABLED'
+        ),
+        (
+          ${existingPausedMonitorId},
+          ${existingMonitor.organizationId},
+          'Existing paused monitor',
+          'https://paused.example.com/health',
+          'PAUSED'
+        ),
+        (
+          ${existingArchivedMonitorId},
+          ${existingMonitor.organizationId},
+          'Existing archived monitor',
+          'https://archived.example.com/health',
+          'ARCHIVED'
+        )
     `);
 
     await applyMigration(migrations, 1);
@@ -169,15 +188,24 @@ describe('database migrations', () => {
     }>(sql`
       select lifecycle_state, interval_seconds, next_check_at
       from monitors
-      where id = ${existingMonitor.id}
+      where id in (
+        ${existingMonitor.id},
+        ${existingPausedMonitorId},
+        ${existingArchivedMonitorId}
+      )
+      order by id
     `);
 
-    expect(scheduling.rows).toHaveLength(1);
+    expect(scheduling.rows).toHaveLength(3);
     expect(scheduling.rows[0]).toMatchObject({
       lifecycle_state: 'ENABLED',
       interval_seconds: 60,
     });
     expect(Number.isNaN(new Date(scheduling.rows[0]!.next_check_at!).getTime())).toBe(false);
+    expect(scheduling.rows.slice(1)).toEqual([
+      { lifecycle_state: 'PAUSED', interval_seconds: 60, next_check_at: null },
+      { lifecycle_state: 'ARCHIVED', interval_seconds: 60, next_check_at: null },
+    ]);
 
     const outbox = await connection.db.execute<{
       available_at: string;
