@@ -8,6 +8,10 @@ export const HTTP_METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'O
 export const HTTP_MONITOR_METHODS = ['GET', 'HEAD'] as const;
 export const MONITOR_LIFECYCLE_STATES = ['ENABLED', 'PAUSED', 'ARCHIVED'] as const;
 export const MONITOR_LOCATIONS = ['local'] as const;
+export const MONITOR_INTERVAL_LIMITS = {
+  minimumSeconds: 60,
+  maximumSeconds: 86_400,
+} as const;
 
 export type HttpMethod = (typeof HTTP_METHODS)[number];
 export type HttpMonitorMethod = (typeof HTTP_MONITOR_METHODS)[number];
@@ -18,6 +22,7 @@ export const MONITOR_DEFAULTS = {
   method: 'GET',
   lifecycleState: 'ENABLED',
   timeoutMs: 10_000,
+  intervalSeconds: 60,
   followRedirects: true,
   statusPolicy: { type: 'ANY_2XX' } as const,
   locations: [...MONITOR_LOCATIONS],
@@ -25,6 +30,7 @@ export const MONITOR_DEFAULTS = {
   method: HttpMethod;
   lifecycleState: MonitorLifecycleState;
   timeoutMs: number;
+  intervalSeconds: number;
   followRedirects: boolean;
   statusPolicy: HttpStatusPolicy;
   locations: readonly string[];
@@ -36,6 +42,7 @@ export interface CreateMonitorCommand {
   statusPolicy?: unknown;
   requestHeaders?: unknown;
   assertions?: unknown;
+  intervalSeconds?: unknown;
 }
 
 export interface NewMonitor {
@@ -44,6 +51,7 @@ export interface NewMonitor {
   method: HttpMonitorMethod;
   lifecycleState: MonitorLifecycleState;
   timeoutMs: number;
+  intervalSeconds: number;
   followRedirects: boolean;
   statusPolicy: HttpStatusPolicy;
   requestHeaders: RequestHeaderUpdate[];
@@ -61,6 +69,8 @@ export interface MonitorFieldErrors {
   timeoutMs?: string[];
   followRedirects?: string[];
   httpSettings?: string[];
+  intervalSeconds?: string[];
+  lifecycleState?: string[];
 }
 
 export interface HttpMonitorSettings {
@@ -87,6 +97,7 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
   const statusPolicy = normalizeStatusPolicy(command.statusPolicy, fields);
   const requestHeaders = normalizeHeaders(command.requestHeaders, fields);
   const assertions = normalizeAssertions(command.assertions, fields);
+  const intervalSeconds = normalizeIntervalSeconds(command.intervalSeconds, fields, true);
 
   if (Object.keys(fields).length > 0) throw new MonitorInputError(fields);
 
@@ -96,12 +107,76 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
     method: MONITOR_DEFAULTS.method,
     lifecycleState: MONITOR_DEFAULTS.lifecycleState,
     timeoutMs: MONITOR_DEFAULTS.timeoutMs,
+    intervalSeconds,
     followRedirects: MONITOR_DEFAULTS.followRedirects,
     statusPolicy,
     requestHeaders,
     assertions,
     locations: [...MONITOR_DEFAULTS.locations],
   };
+}
+
+export interface MonitorScheduleSettings {
+  intervalSeconds: number;
+}
+
+export interface MonitorLifecycleSettings {
+  lifecycleState: MonitorLifecycleState;
+}
+
+export function parseMonitorScheduleSettings(value: unknown): MonitorScheduleSettings {
+  const fields: MonitorFieldErrors = {};
+  if (!hasExactKeys(value, ['intervalSeconds'])) {
+    throw new MonitorInputError({
+      intervalSeconds: ['Provide exactly intervalSeconds.'],
+    });
+  }
+  const intervalSeconds = normalizeIntervalSeconds(value.intervalSeconds, fields, false);
+  if (fields.intervalSeconds) throw new MonitorInputError(fields);
+  return { intervalSeconds };
+}
+
+export function parseMonitorLifecycleSettings(value: unknown): MonitorLifecycleSettings {
+  if (!hasExactKeys(value, ['lifecycleState'])) {
+    throw new MonitorInputError({ lifecycleState: ['Provide exactly lifecycleState.'] });
+  }
+  if (
+    typeof value.lifecycleState !== 'string' ||
+    !MONITOR_LIFECYCLE_STATES.includes(value.lifecycleState as MonitorLifecycleState)
+  ) {
+    throw new MonitorInputError({ lifecycleState: ['Choose ENABLED, PAUSED, or ARCHIVED.'] });
+  }
+  return { lifecycleState: value.lifecycleState as MonitorLifecycleState };
+}
+
+function normalizeIntervalSeconds(
+  value: unknown,
+  fields: MonitorFieldErrors,
+  optional: boolean,
+): number {
+  if (optional && value === undefined) return MONITOR_DEFAULTS.intervalSeconds;
+  if (
+    typeof value !== 'number' ||
+    !Number.isInteger(value) ||
+    value < MONITOR_INTERVAL_LIMITS.minimumSeconds ||
+    value > MONITOR_INTERVAL_LIMITS.maximumSeconds
+  ) {
+    fields.intervalSeconds = [
+      `Use a whole-number interval from ${MONITOR_INTERVAL_LIMITS.minimumSeconds} to ${MONITOR_INTERVAL_LIMITS.maximumSeconds} seconds.`,
+    ];
+    return MONITOR_DEFAULTS.intervalSeconds;
+  }
+  return value;
+}
+
+function hasExactKeys(
+  value: unknown,
+  expected: readonly string[],
+): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const keys = Object.keys(value).sort();
+  const required = [...expected].sort();
+  return keys.length === required.length && keys.every((key, index) => key === required[index]);
 }
 
 function normalizeAssertions(value: unknown, fields: MonitorFieldErrors): ResponseAssertions {

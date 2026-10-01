@@ -81,6 +81,7 @@ describe('monitor API', () => {
       method: 'GET',
       lifecycleState: 'ENABLED',
       timeoutMs: 10_000,
+      intervalSeconds: 60,
       followRedirects: true,
       statusPolicy: { type: 'ANY_2XX' },
       locations: ['local'],
@@ -89,6 +90,172 @@ describe('monitor API', () => {
     const listed = await request(app.getHttpServer()).get('/api/monitors').expect(200);
     expect(listed.body.data).toHaveLength(1);
     expect(listed.body.data[0].id).toBe(created.body.data.id);
+  });
+
+  it('versions interval settings and enforces lifecycle scheduling invariants', async () => {
+    const beforeCreate = Date.now();
+    const created = await request(app.getHttpServer())
+      .post('/api/monitors')
+      .send({
+        name: 'Scheduled API',
+        url: 'https://example.com/health',
+        intervalSeconds: 300,
+      })
+      .expect(201);
+    const monitorId = created.body.data.id as string;
+    const originalNextCheckAt = created.body.data.nextCheckAt as string;
+    expect(created.body.data.intervalSeconds).toBe(300);
+    expect(Date.parse(originalNextCheckAt)).toBeGreaterThanOrEqual(beforeCreate + 299_000);
+
+    const unchanged = await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/schedule-settings`)
+      .send({ intervalSeconds: 300 })
+      .expect(200);
+    expect(unchanged.body.data.nextCheckAt).toBe(originalNextCheckAt);
+
+    const changed = await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/schedule-settings`)
+      .send({ intervalSeconds: 600 })
+      .expect(200);
+    expect(changed.body.data.intervalSeconds).toBe(600);
+    expect(Date.parse(changed.body.data.nextCheckAt as string)).toBeGreaterThan(
+      Date.parse(originalNextCheckAt),
+    );
+
+    const versions = await database.$client.query<{
+      version_number: number;
+      interval_seconds: number;
+    }>(
+      `select version_number, interval_seconds
+       from monitor_configuration_versions
+       where monitor_id = $1
+       order by version_number`,
+      [monitorId],
+    );
+    expect(versions.rows).toEqual([
+      { version_number: 1, interval_seconds: 300 },
+      { version_number: 2, interval_seconds: 600 },
+    ]);
+
+    const paused = await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/lifecycle`)
+      .send({ lifecycleState: 'PAUSED' })
+      .expect(200);
+    expect(paused.body.data).toMatchObject({ lifecycleState: 'PAUSED', nextCheckAt: null });
+
+    const pausedSchedule = await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/schedule-settings`)
+      .send({ intervalSeconds: 900 })
+      .expect(200);
+    expect(pausedSchedule.body.data).toMatchObject({
+      lifecycleState: 'PAUSED',
+      intervalSeconds: 900,
+      nextCheckAt: null,
+    });
+
+    const enabled = await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/lifecycle`)
+      .send({ lifecycleState: 'ENABLED' })
+      .expect(200);
+    expect(enabled.body.data.lifecycleState).toBe('ENABLED');
+    expect(enabled.body.data.nextCheckAt).toEqual(expect.any(String));
+
+    const unchangedEnabled = await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/lifecycle`)
+      .send({ lifecycleState: 'ENABLED' })
+      .expect(200);
+    expect(unchangedEnabled.body.data.nextCheckAt).toBe(enabled.body.data.nextCheckAt);
+
+    const nextBeforeManual = enabled.body.data.nextCheckAt as string;
+    await request(app.getHttpServer()).post(`/api/monitors/${monitorId}/check-rounds`).expect(202);
+    const [afterManual] = (
+      await database.$client.query<{ next_check_at: Date }>(
+        'select next_check_at from monitors where id = $1',
+        [monitorId],
+      )
+    ).rows;
+    expect(afterManual?.next_check_at.toISOString()).toBe(nextBeforeManual);
+
+    const archived = await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/lifecycle`)
+      .send({ lifecycleState: 'ARCHIVED' })
+      .expect(200);
+    expect(archived.body.data).toMatchObject({ lifecycleState: 'ARCHIVED', nextCheckAt: null });
+    const listed = await request(app.getHttpServer()).get('/api/monitors').expect(200);
+    expect(listed.body.data).toEqual([]);
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/lifecycle`)
+      .send({ lifecycleState: 'ENABLED' })
+      .expect(409);
+  });
+
+  it.each([
+    {},
+    { intervalSeconds: '60' },
+    { intervalSeconds: 59 },
+    { intervalSeconds: 86_401 },
+    { intervalSeconds: 60.5 },
+    { intervalSeconds: 60, nextCheckAt: null },
+  ])('rejects invalid schedule settings %#', async (body) => {
+    const created = await request(app.getHttpServer())
+      .post('/api/monitors')
+      .send({ name: 'Schedule validation', url: 'https://example.com' })
+      .expect(201);
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${created.body.data.id as string}/schedule-settings`)
+      .send(body)
+      .expect(400);
+  });
+
+  it('preserves interval settings through every unrelated configuration writer', async () => {
+    const created = await request(app.getHttpServer())
+      .post('/api/monitors')
+      .send({ name: 'Immutable schedule', url: 'https://example.com', intervalSeconds: 300 })
+      .expect(201);
+    const monitorId = created.body.data.id as string;
+
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/status-policy`)
+      .send({ statusPolicy: { type: 'EXACT', statusCodes: [204] } })
+      .expect(200);
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/request-headers`)
+      .send({ requestHeaders: [{ name: 'x-watchrail', sensitive: false, value: 'test' }] })
+      .expect(200);
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/http-settings`)
+      .send({
+        url: 'https://status.example.com',
+        method: 'GET',
+        timeoutMs: 5_000,
+        followRedirects: false,
+      })
+      .expect(200);
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/assertions`)
+      .send({
+        headers: [{ name: 'content-type', operator: 'exists' }],
+        textBody: [],
+        jsonBody: [],
+      })
+      .expect(200);
+
+    const versions = await database.$client.query<{
+      version_number: number;
+      interval_seconds: number;
+    }>(
+      `select version_number, interval_seconds
+       from monitor_configuration_versions
+       where monitor_id = $1
+       order by version_number`,
+      [monitorId],
+    );
+    expect(versions.rows).toEqual(
+      [1, 2, 3, 4, 5].map((version_number) => ({
+        version_number,
+        interval_seconds: 300,
+      })),
+    );
   });
 
   it('normalizes and versions exact status-policy edits', async () => {

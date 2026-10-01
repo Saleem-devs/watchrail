@@ -204,6 +204,7 @@ describe('ManualRoundRepository', () => {
         .update(monitors)
         .set({
           lifecycleState,
+          nextCheckAt: null,
           updatedAt: new Date(),
         })
         .where(eq(monitors.id, monitor.id));
@@ -338,4 +339,120 @@ describe('ManualRoundRepository', () => {
       roundId: round.id,
     });
   });
+
+  it('serializes a schedule update with manual-round version capture', async () => {
+    const monitor = await createMonitorForOrganization(organizationA);
+    const scheduleConnection = createNamedConnection('schedule-update');
+    const roundConnection = createNamedConnection('round-after-schedule');
+    const monitorsRepository = new MonitorRepository(scheduleConnection.db);
+    const roundsRepository = new ManualRoundRepository(roundConnection.db);
+
+    let updatePromise!: ReturnType<MonitorRepository['updateScheduleSettings']>;
+    let roundPromise!: ReturnType<ManualRoundRepository['create']>;
+    let updated;
+    let round;
+    try {
+      await connection.db.transaction(async (tx) => {
+        await tx
+          .select({ id: monitors.id })
+          .from(monitors)
+          .where(eq(monitors.id, monitor.id))
+          .for('update');
+
+        updatePromise = monitorsRepository.updateScheduleSettings(organizationA, monitor.id, 300);
+        await waitForApplicationLock('schedule-update');
+        roundPromise = roundsRepository.create(organizationA, monitor.id);
+        await waitForApplicationLock('round-after-schedule');
+      });
+      [updated, round] = await Promise.all([updatePromise, roundPromise]);
+    } finally {
+      await Promise.all([scheduleConnection.pool.end(), roundConnection.pool.end()]);
+    }
+
+    expect(updated.intervalSeconds).toBe(300);
+    const versions = await connection.db
+      .select()
+      .from(monitorConfigurationVersions)
+      .where(eq(monitorConfigurationVersions.monitorId, monitor.id))
+      .orderBy(monitorConfigurationVersions.versionNumber);
+    expect(versions.map((version) => version.versionNumber)).toEqual([1, 2]);
+
+    const captured = versions.find((version) => version.id === round.monitorConfigurationVersionId);
+    expect(captured?.intervalSeconds).toBe(300);
+  });
+
+  it('keeps lifecycle and manual-round creation consistent under concurrency', async () => {
+    const monitor = await createMonitorForOrganization(organizationA);
+    const lifecycleConnection = createNamedConnection('lifecycle-update');
+    const roundConnection = createNamedConnection('round-after-lifecycle');
+    const monitorsRepository = new MonitorRepository(lifecycleConnection.db);
+    const roundsRepository = new ManualRoundRepository(roundConnection.db);
+
+    let lifecyclePromise!: ReturnType<MonitorRepository['updateLifecycle']>;
+    let roundPromise!: ReturnType<ManualRoundRepository['create']>;
+    let outcomes;
+    try {
+      await connection.db.transaction(async (tx) => {
+        await tx
+          .select({ id: monitors.id })
+          .from(monitors)
+          .where(eq(monitors.id, monitor.id))
+          .for('update');
+
+        lifecyclePromise = monitorsRepository.updateLifecycle(organizationA, monitor.id, 'PAUSED');
+        await waitForApplicationLock('lifecycle-update');
+        roundPromise = roundsRepository.create(organizationA, monitor.id);
+        await waitForApplicationLock('round-after-lifecycle');
+      });
+      outcomes = await Promise.allSettled([roundPromise, lifecyclePromise]);
+    } finally {
+      await Promise.all([lifecycleConnection.pool.end(), roundConnection.pool.end()]);
+    }
+
+    expect(outcomes[1]).toMatchObject({
+      status: 'fulfilled',
+      value: expect.objectContaining({ lifecycleState: 'PAUSED', nextCheckAt: null }),
+    });
+    expect(outcomes[0]).toMatchObject({
+      status: 'rejected',
+      reason: expect.objectContaining({
+        name: 'MonitorNotRunnableError',
+        lifecycleState: 'PAUSED',
+      }),
+    });
+
+    const [projection] = await connection.db
+      .select()
+      .from(monitors)
+      .where(eq(monitors.id, monitor.id));
+    expect(projection).toMatchObject({ lifecycleState: 'PAUSED', nextCheckAt: null });
+  });
+
+  function createNamedConnection(applicationName: string): DatabaseConnection {
+    const uri = new URL(container.getConnectionUri());
+    uri.searchParams.set('application_name', applicationName);
+    return createDatabaseConnection(uri.toString());
+  }
+
+  async function waitForApplicationLock(applicationName: string): Promise<void> {
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      const result = await connection.pool.query<{ waiting: boolean }>(
+        `select exists (
+           select 1
+           from pg_stat_activity
+           where application_name = $1
+             and wait_event_type = 'Lock'
+         ) as waiting`,
+        [applicationName],
+      );
+      if (result.rows[0]?.waiting === true) return;
+      await delay(10);
+    }
+    throw new Error(`Timed out waiting for ${applicationName} to block on the monitor lock.`);
+  }
 });
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
+}

@@ -1,7 +1,7 @@
 // packages/db/src/monitor-repository.ts
 
 import { randomUUID } from 'node:crypto';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, ne, sql } from 'drizzle-orm';
 import {
   EMPTY_ASSERTION_CONFIGURATION,
   assertAssertionsCompatibleWithMethod,
@@ -11,6 +11,7 @@ import {
   type HttpMonitorMethod,
   type HttpStatusPolicy,
   type NewMonitor,
+  type MonitorLifecycleState,
   type StoredRequestHeader,
 } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
@@ -44,6 +45,8 @@ export class MonitorRepository {
           method: monitor.method,
           lifecycleState: monitor.lifecycleState,
           timeoutMs: monitor.timeoutMs,
+          intervalSeconds: monitor.intervalSeconds,
+          nextCheckAt: sql`clock_timestamp() + (${monitor.intervalSeconds} * interval '1 second')`,
           followRedirects: monitor.followRedirects,
           statusPolicy: monitor.statusPolicy,
           requestHeaders,
@@ -64,6 +67,7 @@ export class MonitorRepository {
         url: created.url,
         method: created.method,
         timeoutMs: created.timeoutMs,
+        intervalSeconds: created.intervalSeconds,
         followRedirects: created.followRedirects,
         statusPolicy: created.statusPolicy,
         requestHeaders: created.requestHeaders,
@@ -79,7 +83,9 @@ export class MonitorRepository {
     return this.db
       .select()
       .from(monitors)
-      .where(eq(monitors.organizationId, organizationId))
+      .where(
+        and(eq(monitors.organizationId, organizationId), ne(monitors.lifecycleState, 'ARCHIVED')),
+      )
       .orderBy(desc(monitors.createdAt));
   }
 
@@ -127,6 +133,7 @@ export class MonitorRepository {
         url: configuration.url,
         method: configuration.method,
         timeoutMs: configuration.timeoutMs,
+        intervalSeconds: configuration.intervalSeconds,
         followRedirects: configuration.followRedirects,
         statusPolicy,
         requestHeaders: configuration.requestHeaders,
@@ -183,6 +190,7 @@ export class MonitorRepository {
         url: configuration.url,
         method: configuration.method,
         timeoutMs: configuration.timeoutMs,
+        intervalSeconds: configuration.intervalSeconds,
         followRedirects: configuration.followRedirects,
         statusPolicy: configuration.statusPolicy,
         requestHeaders,
@@ -239,6 +247,7 @@ export class MonitorRepository {
         monitorId,
         versionNumber: configuration.versionNumber + 1,
         ...settings,
+        intervalSeconds: configuration.intervalSeconds,
         statusPolicy: configuration.statusPolicy,
         requestHeaders: configuration.requestHeaders,
         assertions: configuration.assertions,
@@ -300,6 +309,7 @@ export class MonitorRepository {
         url: configuration.url,
         method: configuration.method,
         timeoutMs: configuration.timeoutMs,
+        intervalSeconds: configuration.intervalSeconds,
         followRedirects: configuration.followRedirects,
         statusPolicy: configuration.statusPolicy,
         requestHeaders: configuration.requestHeaders,
@@ -309,11 +319,114 @@ export class MonitorRepository {
       return updated;
     });
   }
+
+  async updateScheduleSettings(
+    organizationId: string,
+    monitorId: string,
+    intervalSeconds: number,
+  ): Promise<MonitorRecord> {
+    return this.db.transaction(async (tx) => {
+      const [monitor] = await tx
+        .select()
+        .from(monitors)
+        .where(and(eq(monitors.id, monitorId), eq(monitors.organizationId, organizationId)))
+        .limit(1)
+        .for('update');
+      if (!monitor) throw new MonitorUpdateNotFoundError();
+
+      if (monitor.intervalSeconds === intervalSeconds) return monitor;
+
+      const [configuration] = await tx
+        .select()
+        .from(monitorConfigurationVersions)
+        .where(
+          and(
+            eq(monitorConfigurationVersions.monitorId, monitorId),
+            eq(monitorConfigurationVersions.organizationId, organizationId),
+          ),
+        )
+        .orderBy(desc(monitorConfigurationVersions.versionNumber))
+        .limit(1);
+      if (!configuration) throw new Error('Monitor has no configuration version.');
+
+      const [updated] = await tx
+        .update(monitors)
+        .set({
+          intervalSeconds,
+          nextCheckAt:
+            monitor.lifecycleState === 'ENABLED'
+              ? sql`clock_timestamp() + (${intervalSeconds} * interval '1 second')`
+              : null,
+          updatedAt: sql`clock_timestamp()`,
+        })
+        .where(and(eq(monitors.id, monitorId), eq(monitors.organizationId, organizationId)))
+        .returning();
+      if (!updated) throw new Error('The monitor update returned no record.');
+
+      await tx.insert(monitorConfigurationVersions).values({
+        organizationId,
+        monitorId,
+        versionNumber: configuration.versionNumber + 1,
+        url: configuration.url,
+        method: configuration.method,
+        timeoutMs: configuration.timeoutMs,
+        intervalSeconds,
+        followRedirects: configuration.followRedirects,
+        statusPolicy: configuration.statusPolicy,
+        requestHeaders: configuration.requestHeaders,
+        assertions: configuration.assertions,
+        locations: configuration.locations,
+      });
+      return updated;
+    });
+  }
+
+  async updateLifecycle(
+    organizationId: string,
+    monitorId: string,
+    lifecycleState: MonitorLifecycleState,
+  ): Promise<MonitorRecord> {
+    return this.db.transaction(async (tx) => {
+      const [monitor] = await tx
+        .select()
+        .from(monitors)
+        .where(and(eq(monitors.id, monitorId), eq(monitors.organizationId, organizationId)))
+        .limit(1)
+        .for('update');
+      if (!monitor) throw new MonitorUpdateNotFoundError();
+      if (monitor.lifecycleState === 'ARCHIVED' && lifecycleState !== 'ARCHIVED') {
+        throw new ArchivedMonitorLifecycleError();
+      }
+      if (monitor.lifecycleState === lifecycleState) return monitor;
+
+      const [updated] = await tx
+        .update(monitors)
+        .set({
+          lifecycleState,
+          nextCheckAt:
+            lifecycleState === 'ENABLED'
+              ? sql`clock_timestamp() + (${monitor.intervalSeconds} * interval '1 second')`
+              : null,
+          updatedAt: sql`clock_timestamp()`,
+        })
+        .where(and(eq(monitors.id, monitorId), eq(monitors.organizationId, organizationId)))
+        .returning();
+      if (!updated) throw new Error('The monitor update returned no record.');
+      return updated;
+    });
+  }
 }
 
 export class MonitorUpdateNotFoundError extends Error {
   constructor() {
     super('Monitor not found.');
     this.name = 'MonitorUpdateNotFoundError';
+  }
+}
+
+export class ArchivedMonitorLifecycleError extends Error {
+  constructor() {
+    super('Archived monitors cannot change lifecycle state.');
+    this.name = 'ArchivedMonitorLifecycleError';
   }
 }
