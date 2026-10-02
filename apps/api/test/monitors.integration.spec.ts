@@ -787,6 +787,12 @@ describe('monitor API', () => {
       roundId,
       trigger: 'MANUAL',
     });
+
+    const updated = await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/status-policy`)
+      .send({ statusPolicy: { type: 'EXACT', statusCodes: [200] } })
+      .expect(200);
+    expect(updated.body.data.currentCheck).toEqual(listed.body.data[0].currentCheck);
   });
 
   it('rejects invalid history queries and isolates monitor history', async () => {

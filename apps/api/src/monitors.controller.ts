@@ -88,7 +88,7 @@ export class MonitorsController {
     @Body() command: CreateMonitorCommand,
   ): Promise<{ data: MonitorResponse }> {
     const monitor = await this.monitors.create(request.watchrailContext, command);
-    return { data: toResponse(monitor) };
+    return { data: await this.toMonitorResponse(request, monitor) };
   }
 
   @Get()
@@ -110,7 +110,7 @@ export class MonitorsController {
       monitorId,
       body.statusPolicy,
     );
-    return { data: toResponse(monitor) };
+    return { data: await this.toMonitorResponse(request, monitor) };
   }
 
   @Patch(':monitorId/http-settings')
@@ -124,7 +124,7 @@ export class MonitorsController {
       monitorId,
       body,
     );
-    return { data: toResponse(monitor) };
+    return { data: await this.toMonitorResponse(request, monitor) };
   }
 
   @Patch(':monitorId/request-headers')
@@ -138,7 +138,7 @@ export class MonitorsController {
       monitorId,
       body.requestHeaders,
     );
-    return { data: toResponse(monitor) };
+    return { data: await this.toMonitorResponse(request, monitor) };
   }
 
   @Patch(':monitorId/schedule-settings')
@@ -152,7 +152,7 @@ export class MonitorsController {
       monitorId,
       body,
     );
-    return { data: toResponse(monitor) };
+    return { data: await this.toMonitorResponse(request, monitor) };
   }
 
   @Patch(':monitorId/lifecycle')
@@ -162,7 +162,7 @@ export class MonitorsController {
     @Body() body: unknown,
   ): Promise<{ data: MonitorResponse }> {
     const monitor = await this.monitors.updateLifecycle(request.watchrailContext, monitorId, body);
-    return { data: toResponse(monitor) };
+    return { data: await this.toMonitorResponse(request, monitor) };
   }
 
   @Patch(':monitorId/assertions')
@@ -172,7 +172,7 @@ export class MonitorsController {
     @Body() body: unknown,
   ): Promise<{ data: MonitorResponse }> {
     const monitor = await this.monitors.updateAssertions(request.watchrailContext, monitorId, body);
-    return { data: toResponse(monitor) };
+    return { data: await this.toMonitorResponse(request, monitor) };
   }
 
   @Post(':monitorId/check-rounds')
@@ -213,6 +213,14 @@ export class MonitorsController {
   ): Promise<{ data: CheckRoundResponse }> {
     const round = await this.monitors.getCheckRound(request.watchrailContext, monitorId, roundId);
     return { data: toCheckRoundResponse(round) };
+  }
+
+  private async toMonitorResponse(
+    request: RequestWithContext,
+    monitor: MonitorRecord,
+  ): Promise<MonitorResponse> {
+    const currentCheck = await this.monitors.currentCheck(request.watchrailContext, monitor.id);
+    return toResponse(monitor, currentCheck);
   }
 }
 

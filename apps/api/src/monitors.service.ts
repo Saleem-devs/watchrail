@@ -175,6 +175,10 @@ export class MonitorsService {
     }));
   }
 
+  currentCheck(context: RequestContext, monitorId: string): Promise<CurrentCheck | null> {
+    return this.history.currentForMonitor(context.organizationId, monitorId);
+  }
+
   async updateHttpSettings(
     context: RequestContext,
     monitorId: string,

@@ -144,6 +144,49 @@ export class CheckHistoryRepository {
     );
   }
 
+  async currentForMonitor(organizationId: string, monitorId: string): Promise<CurrentCheck | null> {
+    const [row] = await this.db
+      .select({
+        roundId: checkRounds.id,
+        trigger: checkRounds.trigger,
+        outcome: checkExecutionResults.outcome,
+        responseTimeMs: checkExecutionResults.responseTimeMs,
+        checkedAt: checkExecutionResults.checkedAt,
+      })
+      .from(checkRounds)
+      .innerJoin(
+        checkExecutionAssignments,
+        and(
+          eq(checkExecutionAssignments.organizationId, checkRounds.organizationId),
+          eq(checkExecutionAssignments.roundId, checkRounds.id),
+          eq(checkExecutionAssignments.location, 'local'),
+        ),
+      )
+      .innerJoin(
+        checkExecutionResults,
+        and(
+          eq(checkExecutionResults.organizationId, checkRounds.organizationId),
+          eq(checkExecutionResults.roundId, checkRounds.id),
+          eq(checkExecutionResults.assignmentId, checkExecutionAssignments.id),
+        ),
+      )
+      .where(
+        and(eq(checkRounds.organizationId, organizationId), eq(checkRounds.monitorId, monitorId)),
+      )
+      .orderBy(desc(checkRounds.createdAt), desc(checkRounds.id))
+      .limit(1);
+
+    return row
+      ? {
+          availability: availabilityFor(row.outcome),
+          responseTimeMs: row.responseTimeMs,
+          checkedAt: row.checkedAt,
+          roundId: row.roundId,
+          trigger: row.trigger,
+        }
+      : null;
+  }
+
   async listForMonitor(
     organizationId: string,
     monitorId: string,

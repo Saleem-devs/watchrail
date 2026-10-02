@@ -296,6 +296,13 @@ describe('Dashboard', () => {
       statusPolicy: { type: 'ANY_2XX' },
       locations: ['local'],
       createdAt: new Date().toISOString(),
+      currentCheck: {
+        availability: 'AVAILABLE',
+        responseTimeMs: 42,
+        checkedAt: '2026-09-24T12:00:00.000Z',
+        roundId: 'round-1',
+        trigger: 'MANUAL',
+      },
     };
     const updated = {
       ...monitor,
@@ -323,6 +330,7 @@ describe('Dashboard', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Save HTTP settings' }));
 
     expect(await screen.findByText('redirects final')).toBeInTheDocument();
+    expect(screen.getByLabelText('Current availability: available')).toBeInTheDocument();
     expect(fetchMock).toHaveBeenLastCalledWith(
       '/api/monitors/monitor-1/http-settings',
       expect.objectContaining({

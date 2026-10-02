@@ -120,6 +120,10 @@ describe('CheckHistoryRepository', () => {
     });
     expect(current.get(unavailable.id)?.availability).toBe('UNAVAILABLE');
     expect(current.get(unknown.id)?.availability).toBe('UNKNOWN');
+    await expect(history.currentForMonitor(organizationId, available.id)).resolves.toEqual(
+      current.get(available.id),
+    );
+    await expect(history.currentForMonitor(otherOrganizationId, available.id)).resolves.toBeNull();
   });
 
   it('returns full scheduled details while enforcing organization isolation and archived access', async () => {
