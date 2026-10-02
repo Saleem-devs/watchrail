@@ -13,6 +13,15 @@ interface Monitor {
   statusPolicy: { type: 'ANY_2XX' } | { type: 'EXACT'; statusCodes: number[] };
   locations: string[];
   createdAt: string;
+  currentCheck: CurrentCheck | null;
+}
+
+interface CurrentCheck {
+  availability: 'AVAILABLE' | 'UNAVAILABLE' | 'UNKNOWN';
+  responseTimeMs: number | null;
+  checkedAt: string;
+  roundId: string;
+  trigger: 'MANUAL' | 'SCHEDULED';
 }
 
 interface FieldErrors {
@@ -29,6 +38,7 @@ interface ApiError {
 interface ManualRound {
   id: string;
   monitorId: string;
+  trigger: 'MANUAL' | 'SCHEDULED';
   status: 'PENDING' | 'COMPLETED';
   assignmentStatus: 'PENDING' | 'RUNNING' | 'COMPLETED';
   createdAt: string;
@@ -51,6 +61,11 @@ interface ManualRound {
   } | null;
 }
 
+interface HistoryPage {
+  items: ManualRound[];
+  nextCursor: string | null;
+}
+
 export function Dashboard() {
   const [monitors, setMonitors] = useState<Monitor[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -62,6 +77,9 @@ export function Dashboard() {
   const [manualRounds, setManualRounds] = useState<Record<string, ManualRound>>({});
   const [runningMonitorIds, setRunningMonitorIds] = useState<Set<string>>(() => new Set());
   const [runErrors, setRunErrors] = useState<Record<string, string>>({});
+  const [history, setHistory] = useState<Record<string, HistoryPage>>({});
+  const [visibleHistoryIds, setVisibleHistoryIds] = useState<Set<string>>(() => new Set());
+  const [loadingHistoryIds, setLoadingHistoryIds] = useState<Set<string>>(() => new Set());
   const pollTimeouts = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   useEffect(() => {
@@ -255,6 +273,8 @@ export function Dashboard() {
       if (body.data.status === 'COMPLETED') {
         pollTimeouts.current.delete(monitorId);
         setMonitorRunning(monitorId, false);
+        await loadMonitors();
+        if (visibleHistoryIds.has(monitorId)) await loadHistory(monitorId);
         return;
       }
 
@@ -266,6 +286,53 @@ export function Dashboard() {
         ...current,
         [monitorId]: 'Watchrail lost contact while waiting for this diagnostic result.',
       }));
+    }
+  }
+
+  async function toggleHistory(monitorId: string): Promise<void> {
+    if (visibleHistoryIds.has(monitorId)) {
+      setVisibleHistoryIds((current) => {
+        const next = new Set(current);
+        next.delete(monitorId);
+        return next;
+      });
+      return;
+    }
+    setVisibleHistoryIds((current) => new Set(current).add(monitorId));
+    if (!history[monitorId]) await loadHistory(monitorId);
+  }
+
+  async function loadHistory(monitorId: string, append = false): Promise<void> {
+    setLoadingHistoryIds((current) => new Set(current).add(monitorId));
+    try {
+      const cursor = append ? history[monitorId]?.nextCursor : null;
+      const query = cursor ? `?limit=10&cursor=${encodeURIComponent(cursor)}` : '?limit=10';
+      const response = await fetch(`/api/monitors/${monitorId}/check-rounds${query}`, {
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) throw new Error('Could not load check history.');
+      const body = (await response.json()) as {
+        data: ManualRound[];
+        page: { nextCursor: string | null };
+      };
+      setHistory((current) => ({
+        ...current,
+        [monitorId]: {
+          items: append ? [...(current[monitorId]?.items ?? []), ...body.data] : body.data,
+          nextCursor: body.page.nextCursor,
+        },
+      }));
+    } catch {
+      setRunErrors((current) => ({
+        ...current,
+        [monitorId]: 'Watchrail could not load this monitor history.',
+      }));
+    } finally {
+      setLoadingHistoryIds((current) => {
+        const next = new Set(current);
+        next.delete(monitorId);
+        return next;
+      });
     }
   }
 
@@ -431,8 +498,8 @@ export function Dashboard() {
               {monitors.map((monitor) => (
                 <li key={monitor.id} className="monitor-card">
                   <div
-                    className={`monitor-status monitor-status-${monitorState(manualRounds[monitor.id])}`}
-                    aria-label={monitorStateLabel(manualRounds[monitor.id])}
+                    className={`monitor-status monitor-status-${monitorState(monitor.currentCheck)}`}
+                    aria-label={monitorStateLabel(monitor.currentCheck)}
                   >
                     <span aria-hidden="true" />
                   </div>
@@ -538,6 +605,20 @@ export function Dashboard() {
                       round={manualRounds[monitor.id]}
                       error={runErrors[monitor.id]}
                     />
+                    <button
+                      className="quiet-button"
+                      type="button"
+                      onClick={() => void toggleHistory(monitor.id)}
+                    >
+                      {visibleHistoryIds.has(monitor.id) ? 'Hide history' : 'Show history'}
+                    </button>
+                    {visibleHistoryIds.has(monitor.id) ? (
+                      <CheckHistory
+                        page={history[monitor.id]}
+                        loading={loadingHistoryIds.has(monitor.id)}
+                        onLoadMore={() => void loadHistory(monitor.id, true)}
+                      />
+                    ) : null}
                   </div>
                 </li>
               ))}
@@ -653,19 +734,50 @@ function humanize(value: string): string {
   return value.toLowerCase().replaceAll('_', ' ');
 }
 
-function monitorState(
-  round: ManualRound | undefined,
-): 'awaiting' | 'pending' | 'pass' | 'fail' | 'unknown' {
-  if (!round) return 'awaiting';
-  if (!round.result) return 'pending';
-  return round.result.outcome.toLowerCase() as 'pass' | 'fail' | 'unknown';
+function monitorState(check: CurrentCheck | null): 'awaiting' | 'pass' | 'fail' | 'unknown' {
+  if (!check) return 'awaiting';
+  if (check.availability === 'AVAILABLE') return 'pass';
+  if (check.availability === 'UNAVAILABLE') return 'fail';
+  return 'unknown';
 }
 
-function monitorStateLabel(round: ManualRound | undefined): string {
-  const state = monitorState(round);
-  if (state === 'awaiting') return 'Awaiting manual diagnostic';
-  if (state === 'pending') return 'Manual diagnostic in progress';
-  return `Latest manual diagnostic: ${state}`;
+function monitorStateLabel(check: CurrentCheck | null): string {
+  if (!check) return 'No completed check';
+  return `Current availability: ${check.availability.toLowerCase()}`;
+}
+
+function CheckHistory({
+  page,
+  loading,
+  onLoadMore,
+}: {
+  page: HistoryPage | undefined;
+  loading: boolean;
+  onLoadMore: () => void;
+}) {
+  if (!page && loading) return <p role="status">Loading check history…</p>;
+  if (!page || page.items.length === 0) return <p>No checks recorded yet.</p>;
+  return (
+    <section aria-label="Check history">
+      <ol>
+        {page.items.map((round) => (
+          <li key={round.id}>
+            <strong>{round.trigger}</strong>{' '}
+            {round.result
+              ? `${round.result.outcome} · ${round.result.reason}`
+              : round.assignmentStatus}
+            {' · '}
+            <time dateTime={round.createdAt}>{new Date(round.createdAt).toLocaleString()}</time>
+          </li>
+        ))}
+      </ol>
+      {page.nextCursor ? (
+        <button className="quiet-button" type="button" disabled={loading} onClick={onLoadMore}>
+          {loading ? 'Loading…' : 'Load more'}
+        </button>
+      ) : null}
+    </section>
+  );
 }
 
 function omitKey<T>(record: Record<string, T>, key: string): Record<string, T> {

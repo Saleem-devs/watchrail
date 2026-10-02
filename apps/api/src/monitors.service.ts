@@ -7,14 +7,20 @@ import {
 } from '@nestjs/common';
 import {
   ManualRoundRepository,
+  CheckHistoryRepository,
+  CheckHistoryMonitorNotFoundError,
+  CheckHistoryQueryError,
   MonitorNotFoundError,
   MonitorNotRunnableError,
   MonitorRepository,
   ArchivedMonitorLifecycleError,
   MonitorUpdateNotFoundError,
   type CheckRoundRecord,
-  type ManualRoundResult,
+  type CheckHistoryDetail,
+  type CheckHistoryPage,
+  type CurrentCheck,
   type MonitorRecord,
+  parseCheckHistoryQuery,
 } from '@watchrail/db';
 import {
   AssertionInputError,
@@ -39,6 +45,7 @@ export class MonitorsService {
   constructor(
     @Inject(MonitorRepository) private readonly monitors: MonitorRepository,
     @Inject(ManualRoundRepository) private readonly manualRounds: ManualRoundRepository,
+    @Inject(CheckHistoryRepository) private readonly history: CheckHistoryRepository,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
@@ -155,8 +162,21 @@ export class MonitorsService {
     }
   }
 
-  list(context: RequestContext): Promise<MonitorRecord[]> {
-    return this.monitors.listForOrganization(context.organizationId);
+  async list(
+    context: RequestContext,
+  ): Promise<Array<{ monitor: MonitorRecord; currentCheck: CurrentCheck | null }>> {
+    const [monitors, currentChecks] = await Promise.all([
+      this.monitors.listForOrganization(context.organizationId),
+      this.history.currentForOrganization(context.organizationId),
+    ]);
+    return monitors.map((monitor) => ({
+      monitor,
+      currentCheck: currentChecks.get(monitor.id) ?? null,
+    }));
+  }
+
+  currentCheck(context: RequestContext, monitorId: string): Promise<CurrentCheck | null> {
+    return this.history.currentForMonitor(context.organizationId, monitorId);
   }
 
   async updateHttpSettings(
@@ -278,21 +298,39 @@ export class MonitorsService {
     }
   }
 
-  async getManualRound(
+  async listCheckHistory(
+    context: RequestContext,
+    monitorId: string,
+    query: Record<string, unknown>,
+  ): Promise<CheckHistoryPage> {
+    try {
+      return await this.history.listForMonitor(
+        context.organizationId,
+        monitorId,
+        parseCheckHistoryQuery(query),
+      );
+    } catch (error) {
+      if (error instanceof CheckHistoryQueryError) {
+        throw new BadRequestException({ code: 'INVALID_HISTORY_QUERY', message: error.message });
+      }
+      if (error instanceof CheckHistoryMonitorNotFoundError) {
+        throw new NotFoundException({ code: 'MONITOR_NOT_FOUND', message: error.message });
+      }
+      throw error;
+    }
+  }
+
+  async getCheckRound(
     context: RequestContext,
     monitorId: string,
     roundId: string,
-  ): Promise<ManualRoundResult> {
-    const round = await this.manualRounds.findForOrganization(
-      context.organizationId,
-      monitorId,
-      roundId,
-    );
+  ): Promise<CheckHistoryDetail> {
+    const round = await this.history.findForMonitor(context.organizationId, monitorId, roundId);
 
     if (!round) {
       throw new NotFoundException({
         code: 'CHECK_ROUND_NOT_FOUND',
-        message: 'Manual check round not found.',
+        message: 'Check round not found.',
       });
     }
 

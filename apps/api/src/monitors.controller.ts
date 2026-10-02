@@ -1,5 +1,22 @@
-import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post, Req } from '@nestjs/common';
-import type { CheckRoundRecord, ManualRoundResult, MonitorRecord } from '@watchrail/db';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Inject,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+} from '@nestjs/common';
+import type {
+  CheckHistoryDetail,
+  CheckHistoryListItem,
+  CheckRoundRecord,
+  CurrentCheck,
+  MonitorRecord,
+} from '@watchrail/db';
 import type { CreateMonitorCommand } from '@watchrail/domain';
 import {
   parseStoredRequestHeaders,
@@ -32,11 +49,19 @@ interface MonitorResponse {
   locations: string[];
   createdAt: string;
   updatedAt: string;
+  currentCheck: {
+    availability: CurrentCheck['availability'];
+    responseTimeMs: number | null;
+    checkedAt: string;
+    roundId: string;
+    trigger: CurrentCheck['trigger'];
+  } | null;
 }
 
-interface ManualRoundResponse {
+interface CheckRoundResponse {
   id: string;
   monitorId: string;
+  trigger: 'MANUAL' | 'SCHEDULED';
   status: string;
   assignmentStatus: string;
   createdAt: string;
@@ -63,13 +88,15 @@ export class MonitorsController {
     @Body() command: CreateMonitorCommand,
   ): Promise<{ data: MonitorResponse }> {
     const monitor = await this.monitors.create(request.watchrailContext, command);
-    return { data: toResponse(monitor) };
+    return { data: await this.toMonitorResponse(request, monitor) };
   }
 
   @Get()
   async list(@Req() request: RequestWithContext): Promise<{ data: MonitorResponse[] }> {
     const monitors = await this.monitors.list(request.watchrailContext);
-    return { data: monitors.map(toResponse) };
+    return {
+      data: monitors.map(({ monitor, currentCheck }) => toResponse(monitor, currentCheck)),
+    };
   }
 
   @Patch(':monitorId/status-policy')
@@ -83,7 +110,7 @@ export class MonitorsController {
       monitorId,
       body.statusPolicy,
     );
-    return { data: toResponse(monitor) };
+    return { data: await this.toMonitorResponse(request, monitor) };
   }
 
   @Patch(':monitorId/http-settings')
@@ -97,7 +124,7 @@ export class MonitorsController {
       monitorId,
       body,
     );
-    return { data: toResponse(monitor) };
+    return { data: await this.toMonitorResponse(request, monitor) };
   }
 
   @Patch(':monitorId/request-headers')
@@ -111,7 +138,7 @@ export class MonitorsController {
       monitorId,
       body.requestHeaders,
     );
-    return { data: toResponse(monitor) };
+    return { data: await this.toMonitorResponse(request, monitor) };
   }
 
   @Patch(':monitorId/schedule-settings')
@@ -125,7 +152,7 @@ export class MonitorsController {
       monitorId,
       body,
     );
-    return { data: toResponse(monitor) };
+    return { data: await this.toMonitorResponse(request, monitor) };
   }
 
   @Patch(':monitorId/lifecycle')
@@ -135,7 +162,7 @@ export class MonitorsController {
     @Body() body: unknown,
   ): Promise<{ data: MonitorResponse }> {
     const monitor = await this.monitors.updateLifecycle(request.watchrailContext, monitorId, body);
-    return { data: toResponse(monitor) };
+    return { data: await this.toMonitorResponse(request, monitor) };
   }
 
   @Patch(':monitorId/assertions')
@@ -145,7 +172,7 @@ export class MonitorsController {
     @Body() body: unknown,
   ): Promise<{ data: MonitorResponse }> {
     const monitor = await this.monitors.updateAssertions(request.watchrailContext, monitorId, body);
-    return { data: toResponse(monitor) };
+    return { data: await this.toMonitorResponse(request, monitor) };
   }
 
   @Post(':monitorId/check-rounds')
@@ -153,23 +180,54 @@ export class MonitorsController {
   async runNow(
     @Req() request: RequestWithContext,
     @Param('monitorId') monitorId: string,
-  ): Promise<{ data: ManualRoundResponse }> {
+  ): Promise<{ data: CheckRoundResponse }> {
     const round = await this.monitors.runNow(request.watchrailContext, monitorId);
     return { data: toPendingRoundResponse(round) };
   }
 
+  @Get(':monitorId/check-rounds')
+  async listCheckHistory(
+    @Req() request: RequestWithContext,
+    @Param('monitorId') monitorId: string,
+    @Query() query: Record<string, unknown>,
+  ): Promise<{
+    data: ReturnType<typeof toHistoryListItem>[];
+    page: { nextCursor: string | null };
+  }> {
+    const history = await this.monitors.listCheckHistory(
+      request.watchrailContext,
+      monitorId,
+      query,
+    );
+    return {
+      data: history.items.map(toHistoryListItem),
+      page: { nextCursor: history.nextCursor },
+    };
+  }
+
   @Get(':monitorId/check-rounds/:roundId')
-  async getManualRound(
+  async getCheckRound(
     @Req() request: RequestWithContext,
     @Param('monitorId') monitorId: string,
     @Param('roundId') roundId: string,
-  ): Promise<{ data: ManualRoundResponse }> {
-    const round = await this.monitors.getManualRound(request.watchrailContext, monitorId, roundId);
-    return { data: toManualRoundResponse(round) };
+  ): Promise<{ data: CheckRoundResponse }> {
+    const round = await this.monitors.getCheckRound(request.watchrailContext, monitorId, roundId);
+    return { data: toCheckRoundResponse(round) };
+  }
+
+  private async toMonitorResponse(
+    request: RequestWithContext,
+    monitor: MonitorRecord,
+  ): Promise<MonitorResponse> {
+    const currentCheck = await this.monitors.currentCheck(request.watchrailContext, monitor.id);
+    return toResponse(monitor, currentCheck);
   }
 }
 
-function toResponse(monitor: MonitorRecord): MonitorResponse {
+function toResponse(
+  monitor: MonitorRecord,
+  currentCheck: CurrentCheck | null = null,
+): MonitorResponse {
   return {
     id: monitor.id,
     name: monitor.name,
@@ -186,6 +244,9 @@ function toResponse(monitor: MonitorRecord): MonitorResponse {
     locations: monitor.locations,
     createdAt: monitor.createdAt.toISOString(),
     updatedAt: monitor.updatedAt.toISOString(),
+    currentCheck: currentCheck
+      ? { ...currentCheck, checkedAt: currentCheck.checkedAt.toISOString() }
+      : null,
   };
 }
 
@@ -232,10 +293,11 @@ function redactAssertions(value: unknown): unknown {
   };
 }
 
-function toPendingRoundResponse(round: CheckRoundRecord): ManualRoundResponse {
+function toPendingRoundResponse(round: CheckRoundRecord): CheckRoundResponse {
   return {
     id: round.id,
     monitorId: round.monitorId,
+    trigger: round.trigger,
     status: round.status,
     assignmentStatus: 'PENDING',
     createdAt: round.createdAt.toISOString(),
@@ -243,10 +305,11 @@ function toPendingRoundResponse(round: CheckRoundRecord): ManualRoundResponse {
   };
 }
 
-function toManualRoundResponse(round: ManualRoundResult): ManualRoundResponse {
+function toCheckRoundResponse(round: CheckHistoryDetail): CheckRoundResponse {
   return {
     id: round.id,
     monitorId: round.monitorId,
+    trigger: round.trigger,
     status: round.status,
     assignmentStatus: round.assignmentStatus,
     createdAt: round.createdAt.toISOString(),
@@ -255,6 +318,16 @@ function toManualRoundResponse(round: ManualRoundResult): ManualRoundResponse {
           ...round.result,
           checkedAt: round.result.checkedAt.toISOString(),
         }
+      : null,
+  };
+}
+
+function toHistoryListItem(round: CheckHistoryListItem) {
+  return {
+    ...round,
+    createdAt: round.createdAt.toISOString(),
+    result: round.result
+      ? { ...round.result, checkedAt: round.result.checkedAt.toISOString() }
       : null,
   };
 }

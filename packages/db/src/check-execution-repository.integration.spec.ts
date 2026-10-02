@@ -5,6 +5,7 @@ import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createMonitor, EMPTY_ASSERTION_EVALUATION } from '@watchrail/domain';
 import { CheckExecutionRepository } from './check-execution-repository.js';
+import { CheckHistoryRepository } from './check-history-repository.js';
 import { createDatabaseConnection } from './client.js';
 import type { DatabaseConnection } from './client.js';
 import { ManualRoundRepository } from './manual-round-repository.js';
@@ -350,7 +351,7 @@ describe('CheckExecutionRepository', () => {
       checkedAt: new Date(),
     });
 
-    const stored = await new ManualRoundRepository(connection.db).findForOrganization(
+    const stored = await new CheckHistoryRepository(connection.db).findForMonitor(
       organizationId,
       round.monitorId,
       round.id,
@@ -400,7 +401,7 @@ describe('CheckExecutionRepository', () => {
     );
 
     await expect(
-      new ManualRoundRepository(connection.db).findForOrganization(
+      new CheckHistoryRepository(connection.db).findForMonitor(
         organizationId,
         round.monitorId,
         round.id,
@@ -450,7 +451,7 @@ describe('CheckExecutionRepository', () => {
     );
 
     await expect(
-      new ManualRoundRepository(connection.db).findForOrganization(
+      new CheckHistoryRepository(connection.db).findForMonitor(
         organizationId,
         round.monitorId,
         round.id,
