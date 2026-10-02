@@ -12,6 +12,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
@@ -73,6 +74,8 @@ export const checkResultReasonEnum = pgEnum('check_result_reason', [
   'INSECURE_REDIRECT',
   'INTERNAL_ERROR',
 ]);
+
+export const incidentStatusEnum = pgEnum('incident_status', ['OPEN', 'RESOLVED']);
 
 export const monitors = pgTable(
   'monitors',
@@ -435,6 +438,89 @@ export const checkExecutionResults = pgTable(
     check(
       'check_execution_results_assertion_evaluation_object',
       sql`jsonb_typeof(${table.assertionEvaluation}) = 'object'`,
+    ),
+  ],
+);
+
+export const monitorIncidentState = pgTable(
+  'monitor_incident_state',
+  {
+    organizationId: uuid('organization_id').notNull(),
+    monitorId: uuid('monitor_id').primaryKey(),
+    consecutiveFailures: integer('consecutive_failures').notNull().default(0),
+    failureStreakStartedAt: timestamp('failure_streak_started_at', { withTimezone: true }),
+    failureStreakStartedRoundId: uuid('failure_streak_started_round_id'),
+    lastProcessedRoundCreatedAt: timestamp('last_processed_round_created_at', {
+      withTimezone: true,
+    }),
+    lastProcessedRoundId: uuid('last_processed_round_id'),
+    trackingStartedAt: timestamp('tracking_started_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'monitor_incident_state_monitor_fk',
+      columns: [table.monitorId, table.organizationId],
+      foreignColumns: [monitors.id, monitors.organizationId],
+    }).onDelete('cascade'),
+    unique('monitor_incident_state_identity_unique').on(table.organizationId, table.monitorId),
+    check('monitor_incident_state_failures_non_negative', sql`${table.consecutiveFailures} >= 0`),
+    check(
+      'monitor_incident_state_streak_consistent',
+      sql`(${table.consecutiveFailures} = 0) = (${table.failureStreakStartedAt} is null and ${table.failureStreakStartedRoundId} is null)`,
+    ),
+    check(
+      'monitor_incident_state_last_processed_consistent',
+      sql`(${table.lastProcessedRoundCreatedAt} is null) = (${table.lastProcessedRoundId} is null)`,
+    ),
+  ],
+);
+
+export const incidents = pgTable(
+  'incidents',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull(),
+    monitorId: uuid('monitor_id').notNull(),
+    status: incidentStatusEnum('status').notNull().default('OPEN'),
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull(),
+    openedAt: timestamp('opened_at', { withTimezone: true }).notNull(),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    startedByRoundId: uuid('started_by_round_id').notNull(),
+    openedByRoundId: uuid('opened_by_round_id').notNull(),
+    resolvedByRoundId: uuid('resolved_by_round_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'incidents_monitor_fk',
+      columns: [table.monitorId, table.organizationId],
+      foreignColumns: [monitors.id, monitors.organizationId],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'incidents_started_round_fk',
+      columns: [table.organizationId, table.startedByRoundId],
+      foreignColumns: [checkRounds.organizationId, checkRounds.id],
+    }),
+    foreignKey({
+      name: 'incidents_opened_round_fk',
+      columns: [table.organizationId, table.openedByRoundId],
+      foreignColumns: [checkRounds.organizationId, checkRounds.id],
+    }),
+    foreignKey({
+      name: 'incidents_resolved_round_fk',
+      columns: [table.organizationId, table.resolvedByRoundId],
+      foreignColumns: [checkRounds.organizationId, checkRounds.id],
+    }),
+    unique('incidents_identity_unique').on(table.organizationId, table.id),
+    uniqueIndex('incidents_monitor_open_unique')
+      .on(table.organizationId, table.monitorId)
+      .where(sql`${table.status} = 'OPEN'`),
+    check(
+      'incidents_resolution_consistent',
+      sql`(${table.status} = 'RESOLVED') = (${table.resolvedAt} is not null and ${table.resolvedByRoundId} is not null)`,
     ),
   ],
 );
