@@ -303,6 +303,7 @@ export const checkRounds = pgTable(
       table.organizationId,
       table.monitorId,
       table.createdAt,
+      table.id,
     ),
   ],
 );

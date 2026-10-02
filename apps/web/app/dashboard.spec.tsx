@@ -80,6 +80,7 @@ describe('Dashboard', () => {
       statusPolicy: { type: 'ANY_2XX' },
       locations: ['local'],
       createdAt: new Date().toISOString(),
+      currentCheck: null,
     };
     const round = {
       id: 'round-1',
@@ -124,6 +125,25 @@ describe('Dashboard', () => {
           }),
           { status: 200 },
         ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                ...monitor,
+                currentCheck: {
+                  availability: 'AVAILABLE',
+                  responseTimeMs: 42.5,
+                  checkedAt: '2026-09-24T12:00:00.000Z',
+                  roundId: round.id,
+                  trigger: 'MANUAL',
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
       );
 
     render(<Dashboard />);
@@ -143,6 +163,7 @@ describe('Dashboard', () => {
       '302 · 12 ms · stripped',
     );
     expect(screen.getByRole('button', { name: 'Run now' })).toBeEnabled();
+    expect(await screen.findByLabelText('Current availability: available')).toBeInTheDocument();
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       '/api/monitors/monitor-1/check-rounds',
@@ -151,6 +172,71 @@ describe('Dashboard', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       3,
       '/api/monitors/monitor-1/check-rounds/round-1',
+      expect.objectContaining({ headers: { Accept: 'application/json' } }),
+    );
+  });
+
+  it('renders durable current availability after reload and lazily loads mixed history', async () => {
+    const monitor = {
+      id: 'monitor-1',
+      name: 'Production API',
+      url: 'https://example.com/health',
+      method: 'GET',
+      lifecycleState: 'ENABLED',
+      timeoutMs: 10_000,
+      followRedirects: true,
+      statusPolicy: { type: 'ANY_2XX' },
+      locations: ['local'],
+      createdAt: new Date().toISOString(),
+      currentCheck: {
+        availability: 'UNAVAILABLE',
+        responseTimeMs: 91,
+        checkedAt: '2026-09-24T12:00:00.000Z',
+        roundId: 'scheduled-round',
+        trigger: 'SCHEDULED',
+      },
+    };
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [monitor] }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: 'scheduled-round',
+                monitorId: monitor.id,
+                trigger: 'SCHEDULED',
+                status: 'COMPLETED',
+                assignmentStatus: 'COMPLETED',
+                createdAt: monitor.currentCheck.checkedAt,
+                result: {
+                  outcome: 'FAIL',
+                  stage: 'HTTP',
+                  reason: 'UNEXPECTED_STATUS',
+                  statusCode: 503,
+                  responseTimeMs: 91,
+                  attemptDurationMs: 94,
+                  assertionOutcome: 'PASS',
+                  checkedAt: monitor.currentCheck.checkedAt,
+                },
+              },
+            ],
+            page: { nextCursor: null },
+          }),
+          { status: 200 },
+        ),
+      );
+
+    render(<Dashboard />);
+    expect(await screen.findByLabelText('Current availability: unavailable')).toBeInTheDocument();
+    expect(screen.getByText('No manual diagnostic started.')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Show history' }));
+    expect(await screen.findByRole('region', { name: 'Check history' })).toHaveTextContent(
+      'SCHEDULED FAIL · UNEXPECTED_STATUS',
+    );
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      '/api/monitors/monitor-1/check-rounds?limit=10',
       expect.objectContaining({ headers: { Accept: 'application/json' } }),
     );
   });

@@ -678,6 +678,7 @@ describe('monitor API', () => {
 
     expect(accepted.body.data).toMatchObject({
       monitorId,
+      trigger: 'MANUAL',
       status: 'PENDING',
       assignmentStatus: 'PENDING',
       result: null,
@@ -690,6 +691,7 @@ describe('monitor API', () => {
 
     expect(pending.body.data).toMatchObject({
       id: roundId,
+      trigger: 'MANUAL',
       status: 'PENDING',
       assignmentStatus: 'PENDING',
       result: null,
@@ -744,6 +746,7 @@ describe('monitor API', () => {
     expect(completed.body.data).toEqual({
       id: roundId,
       monitorId,
+      trigger: 'MANUAL',
       status: 'COMPLETED',
       assignmentStatus: 'COMPLETED',
       createdAt: accepted.body.data.createdAt,
@@ -760,6 +763,49 @@ describe('monitor API', () => {
       },
     });
     expect(JSON.stringify(completed.body.data.result)).not.toContain('/health');
+
+    const history = await request(app.getHttpServer())
+      .get(`/api/monitors/${monitorId}/check-rounds?limit=1&trigger=MANUAL`)
+      .expect(200);
+    expect(history.body).toMatchObject({
+      data: [
+        {
+          id: roundId,
+          trigger: 'MANUAL',
+          result: { outcome: 'PASS', assertionOutcome: 'FAIL' },
+        },
+      ],
+      page: { nextCursor: null },
+    });
+    expect(history.body.data[0].result).not.toHaveProperty('redirects');
+    expect(history.body.data[0].result).not.toHaveProperty('assertionEvaluation');
+
+    const listed = await request(app.getHttpServer()).get('/api/monitors').expect(200);
+    expect(listed.body.data[0].currentCheck).toMatchObject({
+      availability: 'AVAILABLE',
+      responseTimeMs: 42.5,
+      roundId,
+      trigger: 'MANUAL',
+    });
+  });
+
+  it('rejects invalid history queries and isolates monitor history', async () => {
+    const created = await request(app.getHttpServer())
+      .post('/api/monitors')
+      .send({ name: 'History API', url: 'https://example.com' })
+      .expect(201);
+    const monitorId = created.body.data.id as string;
+
+    await request(app.getHttpServer())
+      .get(`/api/monitors/${monitorId}/check-rounds?limit=0`)
+      .expect(400)
+      .expect(({ body }) => expect(body).toMatchObject({ code: 'INVALID_HISTORY_QUERY' }));
+    await request(app.getHttpServer())
+      .get(`/api/monitors/${monitorId}/check-rounds?cursor=not-a-cursor`)
+      .expect(400);
+    await request(app.getHttpServer())
+      .get('/api/monitors/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/check-rounds')
+      .expect(404);
   });
 
   it('does not create or reveal manual rounds for unknown monitor identities', async () => {
