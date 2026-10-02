@@ -10,6 +10,8 @@ export interface WorkerConfig {
   outboxLeaseDurationMs: number;
   idlePollIntervalMs: number;
   dependencyErrorDelayMs: number;
+  scheduleDispatchBatchSize: number;
+  scheduleIdlePollIntervalMs: number;
   headerEncryptionKeyring: HeaderEncryptionKeyring;
   assertionEncryptionKeyring: AssertionEncryptionKeyring;
 }
@@ -59,9 +61,35 @@ export function loadWorkerConfig(environment: NodeJS.ProcessEnv = process.env): 
       'OUTBOX_DEPENDENCY_ERROR_DELAY_MS',
       1_000,
     ),
+    scheduleDispatchBatchSize: parseIntegerRange(
+      environment.SCHEDULE_DISPATCH_BATCH_SIZE,
+      'SCHEDULE_DISPATCH_BATCH_SIZE',
+      100,
+      1,
+      1_000,
+    ),
+    scheduleIdlePollIntervalMs: parsePositiveInteger(
+      environment.SCHEDULE_IDLE_POLL_INTERVAL_MS,
+      'SCHEDULE_IDLE_POLL_INTERVAL_MS',
+      1_000,
+    ),
     headerEncryptionKeyring: loadHeaderEncryptionKeyring(environment),
     assertionEncryptionKeyring: loadAssertionEncryptionKeyring(environment),
   };
+}
+
+function parseIntegerRange(
+  value: string | undefined,
+  name: string,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
+  const parsed = value === undefined ? fallback : Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
+    throw new Error(`${name} must be an integer from ${minimum} to ${maximum}.`);
+  }
+  return parsed;
 }
 
 function requireUrl(value: string | undefined, name: string, protocols: string[]): string {

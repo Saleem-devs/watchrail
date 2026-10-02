@@ -1,4 +1,4 @@
-export const CHECK_ROUND_TRIGGERS = ['MANUAL'] as const;
+export const CHECK_ROUND_TRIGGERS = ['MANUAL', 'SCHEDULED'] as const;
 export const CHECK_ROUND_STATUSES = ['PENDING', 'COMPLETED'] as const;
 export const EXECUTION_ASSIGNMENT_STATUSES = ['PENDING', 'RUNNING', 'COMPLETED'] as const;
 

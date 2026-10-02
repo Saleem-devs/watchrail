@@ -1,0 +1,1 @@
+ALTER TYPE "public"."check_round_trigger" ADD VALUE 'SCHEDULED';

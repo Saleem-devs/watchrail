@@ -10,10 +10,12 @@ import type { StartedRedisContainer } from '@testcontainers/redis';
 import { eq } from 'drizzle-orm';
 import {
   checkExecutionResults,
+  checkRounds,
   createDatabaseConnection,
   ManualRoundRepository,
   migrateDatabase,
   MonitorRepository,
+  monitors,
 } from '@watchrail/db';
 import type { WatchrailDatabase } from '@watchrail/db';
 import { createMonitor } from '@watchrail/domain';
@@ -35,6 +37,7 @@ describe('worker application lifecycle', () => {
     headerEncryptionKeys: process.env.HTTP_HEADER_ENCRYPTION_KEYS,
     assertionActiveKeyId: process.env.ASSERTION_ACTIVE_KEY_ID,
     assertionEncryptionKeys: process.env.ASSERTION_ENCRYPTION_KEYS,
+    scheduleIdlePollIntervalMs: process.env.SCHEDULE_IDLE_POLL_INTERVAL_MS,
   };
 
   beforeAll(async () => {
@@ -47,6 +50,7 @@ describe('worker application lifecycle', () => {
     process.env.REDIS_URL = redis.getConnectionUrl();
     process.env.OUTBOX_IDLE_POLL_INTERVAL_MS = '10';
     process.env.OUTBOX_DEPENDENCY_ERROR_DELAY_MS = '10';
+    process.env.SCHEDULE_IDLE_POLL_INTERVAL_MS = '10';
     process.env.HTTP_HEADER_ACTIVE_KEY_ID = 'test';
     process.env.HTTP_HEADER_ENCRYPTION_KEYS = JSON.stringify({
       test: Buffer.alloc(32).toString('base64'),
@@ -78,6 +82,10 @@ describe('worker application lifecycle', () => {
     restoreEnvironment('HTTP_HEADER_ENCRYPTION_KEYS', originalEnvironment.headerEncryptionKeys);
     restoreEnvironment('ASSERTION_ACTIVE_KEY_ID', originalEnvironment.assertionActiveKeyId);
     restoreEnvironment('ASSERTION_ENCRYPTION_KEYS', originalEnvironment.assertionEncryptionKeys);
+    restoreEnvironment(
+      'SCHEDULE_IDLE_POLL_INTERVAL_MS',
+      originalEnvironment.scheduleIdlePollIntervalMs,
+    );
     restoreEnvironment(
       'OUTBOX_DEPENDENCY_ERROR_DELAY_MS',
       originalEnvironment.dependencyErrorDelayMs,
@@ -114,6 +122,30 @@ describe('worker application lifecycle', () => {
       responseTimeMs: null,
     });
     expect(result.attemptDurationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('autonomously dispatches and executes a due scheduled round', async () => {
+    if (!database) throw new Error('Expected the worker database to be available.');
+
+    const monitor = await new MonitorRepository(database).create(
+      'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      createMonitor({ name: 'Scheduled local target', url: 'http://127.0.0.1:65535/health' }),
+    );
+    await database
+      .update(monitors)
+      .set({ nextCheckAt: new Date('2020-01-01T00:00:00Z') })
+      .where(eq(monitors.id, monitor.id));
+
+    const round = await waitForScheduledRound(database, monitor.id);
+    const result = await waitForResult(database, round.id);
+
+    expect(round.trigger).toBe('SCHEDULED');
+    expect(result).toMatchObject({
+      roundId: round.id,
+      outcome: 'UNKNOWN',
+      stage: 'DNS',
+      reason: 'PROHIBITED_DESTINATION',
+    });
   });
 
   it('persists corrupted immutable request headers as terminal internal uncertainty', async () => {
@@ -170,6 +202,19 @@ async function waitForResult(database: WatchrailDatabase, roundId: string) {
   }
 
   throw new Error(`Timed out waiting for a result for round ${roundId}.`);
+}
+
+async function waitForScheduledRound(database: WatchrailDatabase, monitorId: string) {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const [round] = await database
+      .select()
+      .from(checkRounds)
+      .where(eq(checkRounds.monitorId, monitorId));
+    if (round) return round;
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
+  }
+  throw new Error(`Timed out waiting for a scheduled round for monitor ${monitorId}.`);
 }
 
 function restoreEnvironment(name: string, value: string | undefined): void {

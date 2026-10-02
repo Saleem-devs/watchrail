@@ -22,6 +22,8 @@ describe('loadWorkerConfig', () => {
       outboxLeaseDurationMs: 30_000,
       idlePollIntervalMs: 500,
       dependencyErrorDelayMs: 1_000,
+      scheduleDispatchBatchSize: 100,
+      scheduleIdlePollIntervalMs: 1_000,
       headerEncryptionKeyring: { activeKeyId: 'test' },
       assertionEncryptionKeyring: { activeKeyId: 'test' },
     });
@@ -45,6 +47,14 @@ describe('loadWorkerConfig', () => {
     [
       { ...requiredEnvironment, CHECK_CONSUMER_CONCURRENCY: '0' },
       'CHECK_CONSUMER_CONCURRENCY must be a positive safe integer.',
+    ],
+    [
+      { ...requiredEnvironment, SCHEDULE_DISPATCH_BATCH_SIZE: '1001' },
+      'SCHEDULE_DISPATCH_BATCH_SIZE must be an integer from 1 to 1000.',
+    ],
+    [
+      { ...requiredEnvironment, SCHEDULE_IDLE_POLL_INTERVAL_MS: '0' },
+      'SCHEDULE_IDLE_POLL_INTERVAL_MS must be a positive safe integer.',
     ],
   ])('rejects invalid environment %#', (environment, message) => {
     expect(() => loadWorkerConfig(environment)).toThrow(message);

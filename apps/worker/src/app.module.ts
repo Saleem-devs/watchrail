@@ -5,6 +5,7 @@ import { BullMqCheckJobConsumer, BullMqCheckJobPublisher } from '@watchrail/queu
 import {
   CheckExecutionRepository,
   CheckRoundOutboxRepository,
+  ScheduledRoundRepository,
   createWatchrailDatabase,
 } from '@watchrail/db';
 import type { WatchrailDatabase } from '@watchrail/db';
@@ -44,6 +45,11 @@ import { WorkerRuntime } from './worker-runtime.js';
       provide: CheckExecutionRepository,
       inject: [getDrizzleToken()],
       useFactory: (db: WatchrailDatabase) => new CheckExecutionRepository(db),
+    },
+    {
+      provide: ScheduledRoundRepository,
+      inject: [getDrizzleToken()],
+      useFactory: (db: WatchrailDatabase) => new ScheduledRoundRepository(db),
     },
     {
       provide: NodeHttpExecutor,
@@ -91,13 +97,20 @@ import { WorkerRuntime } from './worker-runtime.js';
     },
     {
       provide: WorkerRuntime,
-      inject: [CheckOutboxRelay, BullMqCheckJobConsumer, BullMqCheckJobPublisher, WORKER_CONFIG],
+      inject: [
+        CheckOutboxRelay,
+        BullMqCheckJobConsumer,
+        BullMqCheckJobPublisher,
+        ScheduledRoundRepository,
+        WORKER_CONFIG,
+      ],
       useFactory: (
         relay: CheckOutboxRelay,
         consumer: BullMqCheckJobConsumer,
         publisher: BullMqCheckJobPublisher,
+        scheduledRounds: ScheduledRoundRepository,
         config: WorkerConfig,
-      ) => new WorkerRuntime(relay, consumer, publisher, config),
+      ) => new WorkerRuntime(relay, consumer, publisher, scheduledRounds, config),
     },
   ],
 })
