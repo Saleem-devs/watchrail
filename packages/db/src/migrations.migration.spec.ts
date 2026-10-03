@@ -132,6 +132,8 @@ describe('database migrations', () => {
           'check_execution_assignments',
           'check_execution_results',
           'check_round_outbox'
+          ,'incidents'
+          ,'monitor_incident_state'
         )
       order by table_name
     `);
@@ -141,9 +143,41 @@ describe('database migrations', () => {
       'check_execution_results',
       'check_round_outbox',
       'check_rounds',
+      'incidents',
       'monitor_configuration_versions',
+      'monitor_incident_state',
       'monitors',
     ]);
+
+    const incidentStates = await connection.db.execute<{
+      monitor_id: string;
+      consecutive_failures: number;
+      tracking_started_at: string;
+      last_processed_round_id: string | null;
+    }>(sql`
+      select
+        monitor_id,
+        consecutive_failures,
+        tracking_started_at,
+        last_processed_round_id
+      from monitor_incident_state
+      order by monitor_id
+    `);
+    expect(incidentStates.rows).toHaveLength(3);
+    expect(incidentStates.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          monitor_id: existingMonitor.id,
+          consecutive_failures: 0,
+          last_processed_round_id: null,
+        }),
+      ]),
+    );
+    for (const state of incidentStates.rows) {
+      expect(Number.isNaN(new Date(state.tracking_started_at).getTime())).toBe(false);
+    }
+    const migratedIncidents = await connection.db.execute(sql`select id from incidents`);
+    expect(migratedIncidents.rows).toEqual([]);
 
     const configurations = await connection.db.execute<{
       organization_id: string;

@@ -15,7 +15,12 @@ import {
   type StoredRequestHeader,
 } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
-import { monitorConfigurationVersions, monitors, type MonitorRecord } from './schema.js';
+import {
+  monitorConfigurationVersions,
+  monitorIncidentState,
+  monitors,
+  type MonitorRecord,
+} from './schema.js';
 
 export class MonitorRepository {
   constructor(private readonly db: WatchrailDatabase) {}
@@ -73,6 +78,12 @@ export class MonitorRepository {
         requestHeaders: created.requestHeaders,
         assertions: created.assertions,
         locations: created.locations,
+      });
+
+      await tx.insert(monitorIncidentState).values({
+        organizationId,
+        monitorId: created.id,
+        trackingStartedAt: sql`clock_timestamp()`,
       });
 
       return created;

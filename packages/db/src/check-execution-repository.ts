@@ -1,5 +1,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 import {
+  classifyIncidentObservation,
+  INCIDENT_FAILURE_THRESHOLD,
   parseHttpRedirectHops,
   parseStoredAssertionEvaluation,
   type AssertionEvaluationV1,
@@ -14,6 +16,8 @@ import {
   checkExecutionAssignments,
   checkExecutionResults,
   checkRounds,
+  incidents,
+  monitorIncidentState,
   monitorConfigurationVersions,
   type CheckExecutionResultRecord,
 } from './schema.js';
@@ -191,9 +195,135 @@ export class CheckExecutionRepository {
         .set({ status: 'COMPLETED' })
         .where(eq(checkRounds.id, completed.roundId));
 
+      const [round] = await tx
+        .select({
+          id: checkRounds.id,
+          organizationId: checkRounds.organizationId,
+          monitorId: checkRounds.monitorId,
+          trigger: checkRounds.trigger,
+          createdAt: checkRounds.createdAt,
+        })
+        .from(checkRounds)
+        .where(eq(checkRounds.id, completed.roundId))
+        .limit(1);
+
+      if (!round) throw new Error('Completed check round is missing.');
+      if (round.trigger === 'SCHEDULED') {
+        await applyIncidentObservation(tx, round, result);
+      }
+
       return true;
     });
   }
+}
+
+async function applyIncidentObservation(
+  tx: Parameters<Parameters<WatchrailDatabase['transaction']>[0]>[0],
+  round: {
+    id: string;
+    organizationId: string;
+    monitorId: string;
+    createdAt: Date;
+  },
+  result: AuthoritativeCheckResult,
+): Promise<void> {
+  const [state] = await tx
+    .select()
+    .from(monitorIncidentState)
+    .where(
+      and(
+        eq(monitorIncidentState.organizationId, round.organizationId),
+        eq(monitorIncidentState.monitorId, round.monitorId),
+      ),
+    )
+    .limit(1)
+    .for('update');
+
+  if (!state) throw new Error('Monitor incident state is missing.');
+  if (round.createdAt < state.trackingStartedAt || isStaleRound(round, state)) return;
+
+  const observation = classifyIncidentObservation({
+    outcome: result.outcome,
+    reason: result.reason,
+    assertionOutcome: result.assertionEvaluation.outcome,
+  });
+  const processed = {
+    lastProcessedRoundCreatedAt: round.createdAt,
+    lastProcessedRoundId: round.id,
+    updatedAt: sql`clock_timestamp()`,
+  };
+
+  if (observation === 'INDETERMINATE') {
+    await tx
+      .update(monitorIncidentState)
+      .set(processed)
+      .where(eq(monitorIncidentState.monitorId, round.monitorId));
+    return;
+  }
+
+  if (observation === 'HEALTHY') {
+    await tx
+      .update(monitorIncidentState)
+      .set({
+        ...processed,
+        consecutiveFailures: 0,
+        failureStreakStartedAt: null,
+        failureStreakStartedRoundId: null,
+      })
+      .where(eq(monitorIncidentState.monitorId, round.monitorId));
+    await tx
+      .update(incidents)
+      .set({
+        status: 'RESOLVED',
+        resolvedAt: result.checkedAt,
+        resolvedByRoundId: round.id,
+      })
+      .where(
+        and(
+          eq(incidents.organizationId, round.organizationId),
+          eq(incidents.monitorId, round.monitorId),
+          eq(incidents.status, 'OPEN'),
+        ),
+      );
+    return;
+  }
+
+  const consecutiveFailures = state.consecutiveFailures + 1;
+  const failureStreakStartedAt = state.failureStreakStartedAt ?? result.checkedAt;
+  const failureStreakStartedRoundId = state.failureStreakStartedRoundId ?? round.id;
+  await tx
+    .update(monitorIncidentState)
+    .set({
+      ...processed,
+      consecutiveFailures,
+      failureStreakStartedAt,
+      failureStreakStartedRoundId,
+    })
+    .where(eq(monitorIncidentState.monitorId, round.monitorId));
+
+  if (consecutiveFailures === INCIDENT_FAILURE_THRESHOLD) {
+    await tx.insert(incidents).values({
+      organizationId: round.organizationId,
+      monitorId: round.monitorId,
+      status: 'OPEN',
+      startedAt: failureStreakStartedAt,
+      openedAt: result.checkedAt,
+      startedByRoundId: failureStreakStartedRoundId,
+      openedByRoundId: round.id,
+    });
+  }
+}
+
+function isStaleRound(
+  round: { id: string; createdAt: Date },
+  state: {
+    lastProcessedRoundCreatedAt: Date | null;
+    lastProcessedRoundId: string | null;
+  },
+): boolean {
+  if (!state.lastProcessedRoundCreatedAt || !state.lastProcessedRoundId) return false;
+  const timeDifference = round.createdAt.getTime() - state.lastProcessedRoundCreatedAt.getTime();
+  return timeDifference < 0 || (timeDifference === 0 && round.id <= state.lastProcessedRoundId);
 }
 
 function assertPositiveMilliseconds(value: number, name: string): void {
