@@ -10,6 +10,9 @@ import {
   CheckHistoryRepository,
   CheckHistoryMonitorNotFoundError,
   CheckHistoryQueryError,
+  IncidentHistoryQueryError,
+  IncidentMonitorNotFoundError,
+  IncidentReadRepository,
   MonitorNotFoundError,
   MonitorNotRunnableError,
   MonitorRepository,
@@ -19,8 +22,12 @@ import {
   type CheckHistoryDetail,
   type CheckHistoryPage,
   type CurrentCheck,
+  type CurrentIncidentState,
+  type IncidentDetail,
+  type IncidentHistoryPage,
   type MonitorRecord,
   parseCheckHistoryQuery,
+  parseIncidentHistoryQuery,
 } from '@watchrail/db';
 import {
   AssertionInputError,
@@ -46,6 +53,7 @@ export class MonitorsService {
     @Inject(MonitorRepository) private readonly monitors: MonitorRepository,
     @Inject(ManualRoundRepository) private readonly manualRounds: ManualRoundRepository,
     @Inject(CheckHistoryRepository) private readonly history: CheckHistoryRepository,
+    @Inject(IncidentReadRepository) private readonly incidentReads: IncidentReadRepository,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
@@ -162,21 +170,73 @@ export class MonitorsService {
     }
   }
 
-  async list(
-    context: RequestContext,
-  ): Promise<Array<{ monitor: MonitorRecord; currentCheck: CurrentCheck | null }>> {
-    const [monitors, currentChecks] = await Promise.all([
+  async list(context: RequestContext): Promise<
+    Array<{
+      monitor: MonitorRecord;
+      currentCheck: CurrentCheck | null;
+      incidentState: CurrentIncidentState;
+    }>
+  > {
+    const [monitors, currentChecks, incidentStates] = await Promise.all([
       this.monitors.listForOrganization(context.organizationId),
       this.history.currentForOrganization(context.organizationId),
+      this.incidentReads.currentForOrganization(context.organizationId),
     ]);
     return monitors.map((monitor) => ({
       monitor,
       currentCheck: currentChecks.get(monitor.id) ?? null,
+      incidentState:
+        incidentStates.get(monitor.id) ??
+        (() => {
+          throw new Error('Monitor incident state is missing.');
+        })(),
     }));
   }
 
   currentCheck(context: RequestContext, monitorId: string): Promise<CurrentCheck | null> {
     return this.history.currentForMonitor(context.organizationId, monitorId);
+  }
+
+  currentIncidentState(context: RequestContext, monitorId: string): Promise<CurrentIncidentState> {
+    return this.incidentReads.currentForMonitor(context.organizationId, monitorId);
+  }
+
+  async listIncidentHistory(
+    context: RequestContext,
+    monitorId: string,
+    query: Record<string, unknown>,
+  ): Promise<IncidentHistoryPage> {
+    try {
+      return await this.incidentReads.listForMonitor(
+        context.organizationId,
+        monitorId,
+        parseIncidentHistoryQuery(query),
+      );
+    } catch (error) {
+      if (error instanceof IncidentHistoryQueryError) {
+        throw new BadRequestException({ code: 'INVALID_INCIDENT_QUERY', message: error.message });
+      }
+      if (error instanceof IncidentMonitorNotFoundError) {
+        throw new NotFoundException({ code: 'MONITOR_NOT_FOUND', message: error.message });
+      }
+      throw error;
+    }
+  }
+
+  async getIncident(
+    context: RequestContext,
+    monitorId: string,
+    incidentId: string,
+  ): Promise<IncidentDetail> {
+    const incident = await this.incidentReads.findForMonitor(
+      context.organizationId,
+      monitorId,
+      incidentId,
+    );
+    if (!incident) {
+      throw new NotFoundException({ code: 'INCIDENT_NOT_FOUND', message: 'Incident not found.' });
+    }
+    return incident;
   }
 
   async updateHttpSettings(

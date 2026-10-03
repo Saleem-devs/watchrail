@@ -1,0 +1,1 @@
+CREATE INDEX "incidents_monitor_opened_idx" ON "incidents" USING btree ("organization_id","monitor_id","opened_at","id");

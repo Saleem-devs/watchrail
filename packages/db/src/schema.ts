@@ -518,6 +518,12 @@ export const incidents = pgTable(
     uniqueIndex('incidents_monitor_open_unique')
       .on(table.organizationId, table.monitorId)
       .where(sql`${table.status} = 'OPEN'`),
+    index('incidents_monitor_opened_idx').on(
+      table.organizationId,
+      table.monitorId,
+      table.openedAt,
+      table.id,
+    ),
     check(
       'incidents_resolution_consistent',
       sql`(${table.status} = 'RESOLVED') = (${table.resolvedAt} is not null and ${table.resolvedByRoundId} is not null)`,

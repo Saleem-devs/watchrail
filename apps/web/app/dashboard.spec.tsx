@@ -195,6 +195,15 @@ describe('Dashboard', () => {
         roundId: 'scheduled-round',
         trigger: 'SCHEDULED',
       },
+      incidentState: {
+        failureStreak: {
+          count: 2,
+          threshold: 3,
+          startedAt: '2026-09-24T11:59:00.000Z',
+          startedByRoundId: 'scheduled-round-previous',
+        },
+        currentIncident: null,
+      },
     };
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
@@ -231,6 +240,9 @@ describe('Dashboard', () => {
     render(<Dashboard />);
     expect(await screen.findByLabelText('Current availability: unavailable')).toBeInTheDocument();
     expect(screen.getByText('No manual diagnostic started.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Incident state')).toHaveTextContent(
+      'Incident watch: Failure 2/3',
+    );
     await userEvent.click(screen.getByRole('button', { name: 'Show history' }));
     expect(await screen.findByRole('region', { name: 'Check history' })).toHaveTextContent(
       'SCHEDULED FAIL · UNEXPECTED_STATUS',
@@ -238,6 +250,85 @@ describe('Dashboard', () => {
     expect(fetchMock).toHaveBeenLastCalledWith(
       '/api/monitors/monitor-1/check-rounds?limit=10',
       expect.objectContaining({ headers: { Accept: 'application/json' } }),
+    );
+  });
+
+  it('prevents duplicate incident-history pagination requests', async () => {
+    const monitor = {
+      id: 'monitor-1',
+      name: 'Production API',
+      url: 'https://example.com/health',
+      method: 'GET',
+      lifecycleState: 'ENABLED',
+      timeoutMs: 10_000,
+      followRedirects: true,
+      statusPolicy: { type: 'ANY_2XX' },
+      locations: ['local'],
+      createdAt: new Date().toISOString(),
+      currentCheck: null,
+      incidentState: { failureStreak: null, currentIncident: null },
+    };
+    let resolveNextPage: (response: Response) => void = () => undefined;
+    const nextPage = new Promise<Response>((resolve) => {
+      resolveNextPage = resolve;
+    });
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [monitor] }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: 'incident-2',
+                status: 'RESOLVED',
+                startedAt: '2026-09-24T12:00:00.000Z',
+                openedAt: '2026-09-24T12:02:00.000Z',
+                resolvedAt: '2026-09-24T12:04:00.000Z',
+              },
+            ],
+            page: { nextCursor: 'cursor-1' },
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockImplementationOnce(() => nextPage);
+
+    render(<Dashboard />);
+    await screen.findByRole('heading', { name: monitor.name });
+    await userEvent.click(screen.getByRole('button', { name: 'Show incident history' }));
+    const loadMore = await screen.findByRole('button', { name: 'Load more' });
+    loadMore.click();
+    loadMore.click();
+
+    expect(
+      fetchMock.mock.calls.filter(([url]) =>
+        typeof url === 'string' && url.includes('/incidents?limit=10&cursor=cursor-1'),
+      ),
+    ).toHaveLength(1);
+    await waitFor(() => expect(loadMore).toBeDisabled());
+
+    resolveNextPage(
+      new Response(
+        JSON.stringify({
+          data: [
+            {
+              id: 'incident-1',
+              status: 'RESOLVED',
+              startedAt: '2026-09-23T12:00:00.000Z',
+              openedAt: '2026-09-23T12:02:00.000Z',
+              resolvedAt: '2026-09-23T12:04:00.000Z',
+            },
+          ],
+          page: { nextCursor: null },
+        }),
+        { status: 200 },
+      ),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole('region', { name: 'Incident history' }).querySelectorAll('li'),
+      ).toHaveLength(2),
     );
   });
 
@@ -303,6 +394,22 @@ describe('Dashboard', () => {
         roundId: 'round-1',
         trigger: 'MANUAL',
       },
+      incidentState: {
+        failureStreak: {
+          count: 3,
+          threshold: 3,
+          startedAt: '2026-09-24T11:58:00.000Z',
+          startedByRoundId: 'round-a',
+        },
+        currentIncident: {
+          id: 'incident-1',
+          status: 'OPEN',
+          startedAt: '2026-09-24T11:58:00.000Z',
+          openedAt: '2026-09-24T12:00:00.000Z',
+          startedByRoundId: 'round-a',
+          openedByRoundId: 'round-1',
+        },
+      },
     };
     const updated = {
       ...monitor,
@@ -331,6 +438,7 @@ describe('Dashboard', () => {
 
     expect(await screen.findByText('redirects final')).toBeInTheDocument();
     expect(screen.getByLabelText('Current availability: available')).toBeInTheDocument();
+    expect(screen.getByLabelText('Incident state')).toHaveTextContent('Incident: OPEN');
     expect(fetchMock).toHaveBeenLastCalledWith(
       '/api/monitors/monitor-1/http-settings',
       expect.objectContaining({
