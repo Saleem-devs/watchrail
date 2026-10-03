@@ -253,6 +253,85 @@ describe('Dashboard', () => {
     );
   });
 
+  it('prevents duplicate incident-history pagination requests', async () => {
+    const monitor = {
+      id: 'monitor-1',
+      name: 'Production API',
+      url: 'https://example.com/health',
+      method: 'GET',
+      lifecycleState: 'ENABLED',
+      timeoutMs: 10_000,
+      followRedirects: true,
+      statusPolicy: { type: 'ANY_2XX' },
+      locations: ['local'],
+      createdAt: new Date().toISOString(),
+      currentCheck: null,
+      incidentState: { failureStreak: null, currentIncident: null },
+    };
+    let resolveNextPage: (response: Response) => void = () => undefined;
+    const nextPage = new Promise<Response>((resolve) => {
+      resolveNextPage = resolve;
+    });
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [monitor] }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: 'incident-2',
+                status: 'RESOLVED',
+                startedAt: '2026-09-24T12:00:00.000Z',
+                openedAt: '2026-09-24T12:02:00.000Z',
+                resolvedAt: '2026-09-24T12:04:00.000Z',
+              },
+            ],
+            page: { nextCursor: 'cursor-1' },
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockImplementationOnce(() => nextPage);
+
+    render(<Dashboard />);
+    await screen.findByRole('heading', { name: monitor.name });
+    await userEvent.click(screen.getByRole('button', { name: 'Show incident history' }));
+    const loadMore = await screen.findByRole('button', { name: 'Load more' });
+    loadMore.click();
+    loadMore.click();
+
+    expect(
+      fetchMock.mock.calls.filter(([url]) =>
+        typeof url === 'string' && url.includes('/incidents?limit=10&cursor=cursor-1'),
+      ),
+    ).toHaveLength(1);
+    await waitFor(() => expect(loadMore).toBeDisabled());
+
+    resolveNextPage(
+      new Response(
+        JSON.stringify({
+          data: [
+            {
+              id: 'incident-1',
+              status: 'RESOLVED',
+              startedAt: '2026-09-23T12:00:00.000Z',
+              openedAt: '2026-09-23T12:02:00.000Z',
+              resolvedAt: '2026-09-23T12:04:00.000Z',
+            },
+          ],
+          page: { nextCursor: null },
+        }),
+        { status: 200 },
+      ),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole('region', { name: 'Incident history' }).querySelectorAll('li'),
+      ).toHaveLength(2),
+    );
+  });
+
   it('updates a monitor to an exact status policy', async () => {
     const monitor = {
       id: 'monitor-1',

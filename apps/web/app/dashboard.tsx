@@ -111,7 +111,12 @@ export function Dashboard() {
   const [loadingHistoryIds, setLoadingHistoryIds] = useState<Set<string>>(() => new Set());
   const [incidentHistory, setIncidentHistory] = useState<Record<string, IncidentHistoryPage>>({});
   const [visibleIncidentIds, setVisibleIncidentIds] = useState<Set<string>>(() => new Set());
+  const [loadingIncidentHistoryIds, setLoadingIncidentHistoryIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [incidentHistoryErrors, setIncidentHistoryErrors] = useState<Record<string, string>>({});
   const pollTimeouts = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const incidentHistoryRequests = useRef(new Set<string>());
 
   useEffect(() => {
     void loadMonitors();
@@ -381,23 +386,41 @@ export function Dashboard() {
   }
 
   async function loadIncidentHistory(monitorId: string, append = false): Promise<void> {
-    const cursor = append ? incidentHistory[monitorId]?.nextCursor : null;
-    const query = cursor ? `?limit=10&cursor=${encodeURIComponent(cursor)}` : '?limit=10';
-    const response = await fetch(`/api/monitors/${monitorId}/incidents${query}`, {
-      headers: { Accept: 'application/json' },
-    });
-    if (!response.ok) return;
-    const body = (await response.json()) as {
-      data: IncidentHistoryPage['items'];
-      page: { nextCursor: string | null };
-    };
-    setIncidentHistory((current) => ({
-      ...current,
-      [monitorId]: {
-        items: append ? [...(current[monitorId]?.items ?? []), ...body.data] : body.data,
-        nextCursor: body.page.nextCursor,
-      },
-    }));
+    if (incidentHistoryRequests.current.has(monitorId)) return;
+    incidentHistoryRequests.current.add(monitorId);
+    setLoadingIncidentHistoryIds((current) => new Set(current).add(monitorId));
+    setIncidentHistoryErrors((current) => omitKey(current, monitorId));
+    try {
+      const cursor = append ? incidentHistory[monitorId]?.nextCursor : null;
+      const query = cursor ? `?limit=10&cursor=${encodeURIComponent(cursor)}` : '?limit=10';
+      const response = await fetch(`/api/monitors/${monitorId}/incidents${query}`, {
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) throw new Error('Could not load incident history.');
+      const body = (await response.json()) as {
+        data: IncidentHistoryPage['items'];
+        page: { nextCursor: string | null };
+      };
+      setIncidentHistory((current) => ({
+        ...current,
+        [monitorId]: {
+          items: append ? [...(current[monitorId]?.items ?? []), ...body.data] : body.data,
+          nextCursor: body.page.nextCursor,
+        },
+      }));
+    } catch {
+      setIncidentHistoryErrors((current) => ({
+        ...current,
+        [monitorId]: 'Watchrail could not load this incident history. Try again.',
+      }));
+    } finally {
+      incidentHistoryRequests.current.delete(monitorId);
+      setLoadingIncidentHistoryIds((current) => {
+        const next = new Set(current);
+        next.delete(monitorId);
+        return next;
+      });
+    }
   }
 
   function setMonitorRunning(monitorId: string, running: boolean): void {
@@ -682,6 +705,9 @@ export function Dashboard() {
                     {visibleIncidentIds.has(monitor.id) ? (
                       <IncidentHistory
                         page={incidentHistory[monitor.id]}
+                        loading={loadingIncidentHistoryIds.has(monitor.id)}
+                        error={incidentHistoryErrors[monitor.id]}
+                        onRetry={() => void loadIncidentHistory(monitor.id)}
                         onLoadMore={() => void loadIncidentHistory(monitor.id, true)}
                       />
                     ) : null}
@@ -883,11 +909,27 @@ function IncidentSummary({ state }: { state: IncidentState | undefined }) {
 
 function IncidentHistory({
   page,
+  loading,
+  error,
+  onRetry,
   onLoadMore,
 }: {
   page: IncidentHistoryPage | undefined;
+  loading: boolean;
+  error: string | undefined;
+  onRetry: () => void;
   onLoadMore: () => void;
 }) {
+  if (error) {
+    return (
+      <p role="alert">
+        {error}{' '}
+        <button className="quiet-button" type="button" onClick={onRetry}>
+          Retry
+        </button>
+      </p>
+    );
+  }
   if (!page) return <p role="status">Loading incident history…</p>;
   if (page.items.length === 0) return <p>No incidents recorded yet.</p>;
   return (
@@ -904,8 +946,8 @@ function IncidentHistory({
         ))}
       </ol>
       {page.nextCursor ? (
-        <button className="quiet-button" type="button" onClick={onLoadMore}>
-          Load more
+        <button className="quiet-button" type="button" disabled={loading} onClick={onLoadMore}>
+          {loading ? 'Loading…' : 'Load more'}
         </button>
       ) : null}
     </section>
