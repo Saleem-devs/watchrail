@@ -85,6 +85,7 @@ describe('monitor API', () => {
       followRedirects: true,
       statusPolicy: { type: 'ANY_2XX' },
       locations: ['local'],
+      incidentState: { failureStreak: null, currentIncident: null },
     });
 
     const listed = await request(app.getHttpServer()).get('/api/monitors').expect(200);
@@ -793,6 +794,49 @@ describe('monitor API', () => {
       .send({ statusPolicy: { type: 'EXACT', statusCodes: [200] } })
       .expect(200);
     expect(updated.body.data.currentCheck).toEqual(listed.body.data[0].currentCheck);
+    expect(updated.body.data.incidentState).toEqual({
+      failureStreak: null,
+      currentIncident: null,
+    });
+
+    const incidentId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+    await database.$client.query(
+      `update monitor_incident_state
+       set consecutive_failures = 3,
+           failure_streak_started_at = $1,
+           failure_streak_started_round_id = $2
+       where monitor_id = $3`,
+      [checkedAt, roundId, monitorId],
+    );
+    await database.$client.query(
+      `insert into incidents (
+         id, organization_id, monitor_id, status, started_at, opened_at,
+         started_by_round_id, opened_by_round_id
+       ) values ($1, $2, $3, 'OPEN', $4, $4, $5, $5)`,
+      [incidentId, '00000000-0000-4000-8000-000000000002', monitorId, checkedAt, roundId],
+    );
+    const incidentList = await request(app.getHttpServer())
+      .get(`/api/monitors/${monitorId}/incidents?limit=1`)
+      .expect(200);
+    expect(incidentList.body).toMatchObject({
+      data: [{ id: incidentId, status: 'OPEN', resolvedAt: null }],
+      page: { nextCursor: null },
+    });
+    const incidentDetail = await request(app.getHttpServer())
+      .get(`/api/monitors/${monitorId}/incidents/${incidentId}`)
+      .expect(200);
+    expect(incidentDetail.body.data).toMatchObject({
+      id: incidentId,
+      monitorId,
+      startedByRoundId: roundId,
+      openedByRoundId: roundId,
+      resolvedByRoundId: null,
+    });
+    const withIncident = await request(app.getHttpServer()).get('/api/monitors').expect(200);
+    expect(withIncident.body.data[0].incidentState).toMatchObject({
+      failureStreak: { count: 3, threshold: 3 },
+      currentIncident: { id: incidentId, status: 'OPEN' },
+    });
   });
 
   it('rejects invalid history queries and isolates monitor history', async () => {

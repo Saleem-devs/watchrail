@@ -15,6 +15,9 @@ import type {
   CheckHistoryListItem,
   CheckRoundRecord,
   CurrentCheck,
+  CurrentIncidentState,
+  IncidentDetail,
+  IncidentHistoryItem,
   MonitorRecord,
 } from '@watchrail/db';
 import type { CreateMonitorCommand } from '@watchrail/domain';
@@ -56,6 +59,7 @@ interface MonitorResponse {
     roundId: string;
     trigger: CurrentCheck['trigger'];
   } | null;
+  incidentState: ReturnType<typeof toIncidentStateResponse>;
 }
 
 interface CheckRoundResponse {
@@ -95,7 +99,9 @@ export class MonitorsController {
   async list(@Req() request: RequestWithContext): Promise<{ data: MonitorResponse[] }> {
     const monitors = await this.monitors.list(request.watchrailContext);
     return {
-      data: monitors.map(({ monitor, currentCheck }) => toResponse(monitor, currentCheck)),
+      data: monitors.map(({ monitor, currentCheck, incidentState }) =>
+        toResponse(monitor, currentCheck, incidentState),
+      ),
     };
   }
 
@@ -215,18 +221,52 @@ export class MonitorsController {
     return { data: toCheckRoundResponse(round) };
   }
 
+  @Get(':monitorId/incidents')
+  async listIncidents(
+    @Req() request: RequestWithContext,
+    @Param('monitorId') monitorId: string,
+    @Query() query: Record<string, unknown>,
+  ) {
+    const page = await this.monitors.listIncidentHistory(
+      request.watchrailContext,
+      monitorId,
+      query,
+    );
+    return {
+      data: page.items.map(toIncidentHistoryResponse),
+      page: { nextCursor: page.nextCursor },
+    };
+  }
+
+  @Get(':monitorId/incidents/:incidentId')
+  async getIncident(
+    @Req() request: RequestWithContext,
+    @Param('monitorId') monitorId: string,
+    @Param('incidentId') incidentId: string,
+  ) {
+    return {
+      data: toIncidentDetailResponse(
+        await this.monitors.getIncident(request.watchrailContext, monitorId, incidentId),
+      ),
+    };
+  }
+
   private async toMonitorResponse(
     request: RequestWithContext,
     monitor: MonitorRecord,
   ): Promise<MonitorResponse> {
-    const currentCheck = await this.monitors.currentCheck(request.watchrailContext, monitor.id);
-    return toResponse(monitor, currentCheck);
+    const [currentCheck, incidentState] = await Promise.all([
+      this.monitors.currentCheck(request.watchrailContext, monitor.id),
+      this.monitors.currentIncidentState(request.watchrailContext, monitor.id),
+    ]);
+    return toResponse(monitor, currentCheck, incidentState);
   }
 }
 
 function toResponse(
   monitor: MonitorRecord,
   currentCheck: CurrentCheck | null = null,
+  incidentState: CurrentIncidentState,
 ): MonitorResponse {
   return {
     id: monitor.id,
@@ -247,6 +287,42 @@ function toResponse(
     currentCheck: currentCheck
       ? { ...currentCheck, checkedAt: currentCheck.checkedAt.toISOString() }
       : null,
+    incidentState: toIncidentStateResponse(incidentState),
+  };
+}
+
+function toIncidentStateResponse(state: CurrentIncidentState) {
+  return {
+    failureStreak: state.failureStreak
+      ? { ...state.failureStreak, startedAt: state.failureStreak.startedAt.toISOString() }
+      : null,
+    currentIncident: state.currentIncident
+      ? {
+          ...state.currentIncident,
+          startedAt: state.currentIncident.startedAt.toISOString(),
+          openedAt: state.currentIncident.openedAt.toISOString(),
+        }
+      : null,
+  };
+}
+
+function toIncidentHistoryResponse(incident: IncidentHistoryItem) {
+  return {
+    ...incident,
+    startedAt: incident.startedAt.toISOString(),
+    openedAt: incident.openedAt.toISOString(),
+    resolvedAt: incident.resolvedAt?.toISOString() ?? null,
+  };
+}
+
+function toIncidentDetailResponse(incident: IncidentDetail) {
+  return {
+    ...toIncidentHistoryResponse(incident),
+    monitorId: incident.monitorId,
+    startedByRoundId: incident.startedByRoundId,
+    openedByRoundId: incident.openedByRoundId,
+    resolvedByRoundId: incident.resolvedByRoundId,
+    createdAt: incident.createdAt.toISOString(),
   };
 }
 

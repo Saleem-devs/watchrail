@@ -3,6 +3,7 @@ import { DrizzleModule, getDrizzleToken } from '@nestjs/drizzle';
 import {
   CheckHistoryRepository,
   createWatchrailDatabase,
+  IncidentReadRepository,
   ManualRoundRepository,
   MonitorRepository,
 } from '@watchrail/db';
@@ -36,7 +37,17 @@ import { APP_CONFIG, type AppConfig } from './config.js';
       inject: [getDrizzleToken()],
       useFactory: (db: WatchrailDatabase) => new CheckHistoryRepository(db),
     },
+    {
+      provide: IncidentReadRepository,
+      inject: [getDrizzleToken()],
+      useFactory: (db: WatchrailDatabase) => new IncidentReadRepository(db),
+    },
   ],
-  exports: [CheckHistoryRepository, ManualRoundRepository, MonitorRepository],
+  exports: [
+    CheckHistoryRepository,
+    IncidentReadRepository,
+    ManualRoundRepository,
+    MonitorRepository,
+  ],
 })
 export class DatabaseModule {}

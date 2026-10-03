@@ -2,6 +2,7 @@ export * from './client.js';
 export * from './check-execution-repository.js';
 export * from './check-history-repository.js';
 export * from './check-round-outbox-repository.js';
+export * from './incident-read-repository.js';
 export * from './manual-round-repository.js';
 export * from './migration.js';
 export * from './monitor-repository.js';

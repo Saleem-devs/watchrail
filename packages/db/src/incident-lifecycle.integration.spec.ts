@@ -10,6 +10,7 @@ import {
 } from './check-execution-repository.js';
 import { createDatabaseConnection, type DatabaseConnection } from './client.js';
 import { ManualRoundRepository } from './manual-round-repository.js';
+import { IncidentReadRepository } from './incident-read-repository.js';
 import { migrateDatabase } from './migration.js';
 import { MonitorRepository } from './monitor-repository.js';
 import { ScheduledRoundRepository } from './scheduled-round-repository.js';
@@ -91,6 +92,12 @@ describe('incident lifecycle', () => {
     await complete(fourth.id, unhealthy());
     expect(await state()).toMatchObject({ consecutiveFailures: 4 });
     expect(await connection.db.select().from(incidents)).toHaveLength(1);
+    await expect(
+      new IncidentReadRepository(connection.db).currentForMonitor(organizationId, monitorId),
+    ).resolves.toMatchObject({
+      failureStreak: { count: 4, threshold: 3, startedByRoundId: first.id },
+      currentIncident: { id: opened!.id, status: 'OPEN', openedByRoundId: third.id },
+    });
   });
 
   it('resets before threshold, resolves an open incident, and permits a later incident', async () => {
@@ -120,6 +127,26 @@ describe('incident lifecycle', () => {
     const allIncidents = await connection.db.select().from(incidents);
     expect(allIncidents).toHaveLength(2);
     expect(allIncidents.filter((incident) => incident.status === 'OPEN')).toHaveLength(1);
+
+    const reads = new IncidentReadRepository(connection.db);
+    const firstPage = await reads.listForMonitor(organizationId, monitorId, { limit: 1 });
+    expect(firstPage.items).toHaveLength(1);
+    expect(firstPage.nextCursor).not.toBeNull();
+    const secondPage = await reads.listForMonitor(organizationId, monitorId, {
+      limit: 1,
+      cursor: firstPage.nextCursor!,
+    });
+    expect(secondPage.items).toHaveLength(1);
+    expect(new Set([...firstPage.items, ...secondPage.items].map((value) => value.id)).size).toBe(
+      2,
+    );
+    const detail = await reads.findForMonitor(organizationId, monitorId, resolved!.id);
+    expect(detail).toMatchObject({
+      status: 'RESOLVED',
+      startedByRoundId: expect.any(String),
+      openedByRoundId: expect.any(String),
+      resolvedByRoundId: recovery.id,
+    });
   });
 
   it('leaves a failure streak unchanged for indeterminate results and ignores manual checks', async () => {

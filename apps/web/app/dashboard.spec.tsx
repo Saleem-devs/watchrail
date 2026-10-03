@@ -195,6 +195,15 @@ describe('Dashboard', () => {
         roundId: 'scheduled-round',
         trigger: 'SCHEDULED',
       },
+      incidentState: {
+        failureStreak: {
+          count: 2,
+          threshold: 3,
+          startedAt: '2026-09-24T11:59:00.000Z',
+          startedByRoundId: 'scheduled-round-previous',
+        },
+        currentIncident: null,
+      },
     };
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
@@ -231,6 +240,9 @@ describe('Dashboard', () => {
     render(<Dashboard />);
     expect(await screen.findByLabelText('Current availability: unavailable')).toBeInTheDocument();
     expect(screen.getByText('No manual diagnostic started.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Incident state')).toHaveTextContent(
+      'Incident watch: Failure 2/3',
+    );
     await userEvent.click(screen.getByRole('button', { name: 'Show history' }));
     expect(await screen.findByRole('region', { name: 'Check history' })).toHaveTextContent(
       'SCHEDULED FAIL · UNEXPECTED_STATUS',
@@ -303,6 +315,22 @@ describe('Dashboard', () => {
         roundId: 'round-1',
         trigger: 'MANUAL',
       },
+      incidentState: {
+        failureStreak: {
+          count: 3,
+          threshold: 3,
+          startedAt: '2026-09-24T11:58:00.000Z',
+          startedByRoundId: 'round-a',
+        },
+        currentIncident: {
+          id: 'incident-1',
+          status: 'OPEN',
+          startedAt: '2026-09-24T11:58:00.000Z',
+          openedAt: '2026-09-24T12:00:00.000Z',
+          startedByRoundId: 'round-a',
+          openedByRoundId: 'round-1',
+        },
+      },
     };
     const updated = {
       ...monitor,
@@ -331,6 +359,7 @@ describe('Dashboard', () => {
 
     expect(await screen.findByText('redirects final')).toBeInTheDocument();
     expect(screen.getByLabelText('Current availability: available')).toBeInTheDocument();
+    expect(screen.getByLabelText('Incident state')).toHaveTextContent('Incident: OPEN');
     expect(fetchMock).toHaveBeenLastCalledWith(
       '/api/monitors/monitor-1/http-settings',
       expect.objectContaining({
