@@ -2,8 +2,10 @@ import type { AssertionOutcome } from './assertion.js';
 
 export const INCIDENT_FAILURE_THRESHOLD = 3;
 
-export const INCIDENT_OBSERVATIONS = ['HEALTHY', 'UNHEALTHY', 'INDETERMINATE'] as const;
-export type IncidentObservation = (typeof INCIDENT_OBSERVATIONS)[number];
+export const SCHEDULED_OBSERVATIONS = ['HEALTHY', 'UNHEALTHY', 'INDETERMINATE'] as const;
+export type ScheduledObservation = (typeof SCHEDULED_OBSERVATIONS)[number];
+export const INCIDENT_OBSERVATIONS = SCHEDULED_OBSERVATIONS;
+export type IncidentObservation = ScheduledObservation;
 
 export interface IncidentObservationInput {
   outcome: 'PASS' | 'FAIL' | 'UNKNOWN';
@@ -11,7 +13,9 @@ export interface IncidentObservationInput {
   assertionOutcome: AssertionOutcome;
 }
 
-export function classifyIncidentObservation(input: IncidentObservationInput): IncidentObservation {
+export function classifyScheduledObservation(
+  input: IncidentObservationInput,
+): ScheduledObservation {
   if (input.reason === 'INTERNAL_ERROR' || input.reason === 'PROHIBITED_DESTINATION') {
     return 'INDETERMINATE';
   }
@@ -21,3 +25,5 @@ export function classifyIncidentObservation(input: IncidentObservationInput): In
   if (input.assertionOutcome === 'NOT_EVALUATED') return 'INDETERMINATE';
   return 'HEALTHY';
 }
+
+export const classifyIncidentObservation = classifyScheduledObservation;
