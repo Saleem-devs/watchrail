@@ -159,6 +159,59 @@ describe('notification domain outbox', () => {
     expect(await connection.db.select().from(notificationDeliveries)).toHaveLength(1);
   });
 
+  it('clamps non-monotonic observation clocks to chronological incident timestamps', async () => {
+    await new WebhookEndpointRepository(connection.db).create(organizationId, {
+      name: 'Operations',
+      url: 'https://hooks.example.com/events',
+      signingSecretEnvelope,
+    });
+    const startedAt = new Date('2026-10-06T12:10:00.000Z');
+    await complete((await scheduledRound()).id, unhealthy(startedAt));
+    await complete((await scheduledRound()).id, unhealthy(new Date('2026-10-06T12:11:00.000Z')));
+    const openingRound = await scheduledRound();
+    await complete(openingRound.id, unhealthy(new Date('2026-10-06T12:09:00.000Z')));
+
+    const [opened] = await connection.db.select().from(incidents);
+    const [openedEvent] = await connection.db.select().from(notificationEvents);
+    expect(opened).toMatchObject({
+      status: 'OPEN',
+      startedAt,
+      openedAt: startedAt,
+      resolvedAt: null,
+    });
+    expect(parseWebhookNotification(openedEvent!.payload)).toMatchObject({
+      eventType: 'INCIDENT_OPENED',
+      occurredAt: startedAt.toISOString(),
+      incident: {
+        startedAt: startedAt.toISOString(),
+        openedAt: startedAt.toISOString(),
+        resolvedAt: null,
+      },
+    });
+
+    const recoveryRound = await scheduledRound();
+    await complete(recoveryRound.id, healthy(new Date('2026-10-06T12:08:00.000Z')));
+    const [resolved] = await connection.db.select().from(incidents);
+    const resolvedEvent = (await connection.db.select().from(notificationEvents)).find(
+      (event) => event.eventType === 'INCIDENT_RESOLVED',
+    );
+    expect(resolved).toMatchObject({
+      status: 'RESOLVED',
+      startedAt,
+      openedAt: startedAt,
+      resolvedAt: startedAt,
+    });
+    expect(parseWebhookNotification(resolvedEvent!.payload)).toMatchObject({
+      eventType: 'INCIDENT_RESOLVED',
+      occurredAt: startedAt.toISOString(),
+      incident: {
+        startedAt: startedAt.toISOString(),
+        openedAt: startedAt.toISOString(),
+        resolvedAt: startedAt.toISOString(),
+      },
+    });
+  });
+
   it('claims with skip-locked leases and guards every terminal mutation by token', async () => {
     await new WebhookEndpointRepository(connection.db).create(organizationId, {
       name: 'Operations',
@@ -356,23 +409,25 @@ function result(
   };
 }
 
-function healthy() {
+function healthy(checkedAt = new Date()) {
   return result({
     outcome: 'PASS',
     stage: 'HTTP',
     reason: 'COMPLETED',
     statusCode: 200,
     responseTimeMs: 5,
+    checkedAt,
   });
 }
 
-function unhealthy() {
+function unhealthy(checkedAt = new Date()) {
   return result({
     outcome: 'FAIL',
     stage: 'HTTP',
     reason: 'UNEXPECTED_STATUS',
     statusCode: 503,
     responseTimeMs: 5,
+    checkedAt,
   });
 }
 

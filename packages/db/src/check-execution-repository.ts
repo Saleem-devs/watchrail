@@ -288,7 +288,7 @@ async function applyIncidentObservation(
       .update(incidents)
       .set({
         status: 'RESOLVED',
-        resolvedAt: result.checkedAt,
+        resolvedAt: sql`greatest(${incidents.openedAt}, ${result.checkedAt})`,
         resolvedByRoundId: round.id,
       })
       .where(
@@ -330,6 +330,7 @@ async function applyIncidentObservation(
     .where(eq(monitorIncidentState.monitorId, round.monitorId));
 
   if (consecutiveFailures === INCIDENT_FAILURE_THRESHOLD) {
+    const openedAt = laterDate(result.checkedAt, failureStreakStartedAt);
     const [opened] = await tx
       .insert(incidents)
       .values({
@@ -337,7 +338,7 @@ async function applyIncidentObservation(
         monitorId: round.monitorId,
         status: 'OPEN',
         startedAt: failureStreakStartedAt,
-        openedAt: result.checkedAt,
+        openedAt,
         startedByRoundId: failureStreakStartedRoundId,
         openedByRoundId: round.id,
       })
@@ -358,6 +359,10 @@ async function applyIncidentObservation(
     };
   }
   return { type: 'NONE' };
+}
+
+function laterDate(left: Date, right: Date): Date {
+  return left.getTime() >= right.getTime() ? left : right;
 }
 
 function isStaleRound(
