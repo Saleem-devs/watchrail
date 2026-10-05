@@ -134,6 +134,13 @@
       "when": 1791116588458,
       "tag": "0018_slim_rachel_grey",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1791217890667,
+      "tag": "0019_first_boom_boom",
+      "breakpoints": true
     }
   ]
 }
