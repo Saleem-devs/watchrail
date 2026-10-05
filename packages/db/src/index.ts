@@ -1,4 +1,5 @@
 export * from './client.js';
+export { AvailabilityRepository } from './availability-repository.js';
 export * from './check-execution-repository.js';
 export * from './check-history-repository.js';
 export * from './check-round-outbox-repository.js';

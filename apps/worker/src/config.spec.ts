@@ -24,12 +24,22 @@ describe('loadWorkerConfig', () => {
       dependencyErrorDelayMs: 1_000,
       scheduleDispatchBatchSize: 100,
       scheduleIdlePollIntervalMs: 1_000,
+      availabilityFlushBatchSize: 100,
+      availabilityFlushIntervalMs: 60_000,
       headerEncryptionKeyring: { activeKeyId: 'test' },
       assertionEncryptionKeyring: { activeKeyId: 'test' },
     });
   });
 
   it.each([
+    [
+      { ...requiredEnvironment, AVAILABILITY_FLUSH_BATCH_SIZE: '1001' },
+      'AVAILABILITY_FLUSH_BATCH_SIZE must be an integer from 1 to 1000.',
+    ],
+    [
+      { ...requiredEnvironment, AVAILABILITY_FLUSH_INTERVAL_MS: '0' },
+      'AVAILABILITY_FLUSH_INTERVAL_MS must be a positive safe integer.',
+    ],
     [{ REDIS_URL: requiredEnvironment.REDIS_URL }, 'DATABASE_URL is required.'],
     [{ DATABASE_URL: requiredEnvironment.DATABASE_URL }, 'REDIS_URL is required.'],
     [

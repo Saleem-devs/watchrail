@@ -179,6 +179,32 @@ describe('database migrations', () => {
     const migratedIncidents = await connection.db.execute(sql`select id from incidents`);
     expect(migratedIncidents.rows).toEqual([]);
 
+    const availability = await connection.pool.query<{
+      monitor_id: string;
+      current_state: string;
+      state_since: Date;
+      accounted_through: Date;
+      tracking_started_at: Date;
+      enabled_since: Date | null;
+      last_processed_round_id: string | null;
+    }>('select * from monitor_availability_state order by monitor_id');
+    expect(availability.rows).toHaveLength(3);
+    for (const state of availability.rows) {
+      expect(state.current_state).toBe(
+        state.monitor_id === existingMonitor.id ? 'UNKNOWN' : 'EXCLUDED',
+      );
+      expect(state.state_since).toEqual(state.tracking_started_at);
+      expect(state.accounted_through).toEqual(state.tracking_started_at);
+      expect(state.enabled_since).toEqual(
+        state.monitor_id === existingMonitor.id ? state.tracking_started_at : null,
+      );
+      expect(state.last_processed_round_id).toBeNull();
+    }
+    expect(new Set(availability.rows.map((s) => s.tracking_started_at.getTime())).size).toBe(1);
+    expect((await connection.pool.query('select * from monitor_availability_daily')).rows).toEqual(
+      [],
+    );
+
     const configurations = await connection.db.execute<{
       organization_id: string;
       monitor_id: string;

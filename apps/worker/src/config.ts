@@ -12,6 +12,8 @@ export interface WorkerConfig {
   dependencyErrorDelayMs: number;
   scheduleDispatchBatchSize: number;
   scheduleIdlePollIntervalMs: number;
+  availabilityFlushBatchSize: number;
+  availabilityFlushIntervalMs: number;
   headerEncryptionKeyring: HeaderEncryptionKeyring;
   assertionEncryptionKeyring: AssertionEncryptionKeyring;
 }
@@ -72,6 +74,18 @@ export function loadWorkerConfig(environment: NodeJS.ProcessEnv = process.env): 
       environment.SCHEDULE_IDLE_POLL_INTERVAL_MS,
       'SCHEDULE_IDLE_POLL_INTERVAL_MS',
       1_000,
+    ),
+    availabilityFlushBatchSize: parseIntegerRange(
+      environment.AVAILABILITY_FLUSH_BATCH_SIZE,
+      'AVAILABILITY_FLUSH_BATCH_SIZE',
+      100,
+      1,
+      1_000,
+    ),
+    availabilityFlushIntervalMs: parsePositiveInteger(
+      environment.AVAILABILITY_FLUSH_INTERVAL_MS,
+      'AVAILABILITY_FLUSH_INTERVAL_MS',
+      60_000,
     ),
     headerEncryptionKeyring: loadHeaderEncryptionKeyring(environment),
     assertionEncryptionKeyring: loadAssertionEncryptionKeyring(environment),

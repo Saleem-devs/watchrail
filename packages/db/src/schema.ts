@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   check,
   boolean,
+  date,
   foreignKey,
   doublePrecision,
   index,
@@ -9,6 +10,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -19,6 +21,7 @@ import {
 import type { ExecuteCheckRoundJobV1 } from '@watchrail/contracts';
 import {
   CHECK_ROUND_STATUSES,
+  AVAILABILITY_WINDOW_STATES,
   CHECK_ROUND_TRIGGERS,
   EXECUTION_ASSIGNMENT_STATUSES,
   HTTP_METHODS,
@@ -76,6 +79,74 @@ export const checkResultReasonEnum = pgEnum('check_result_reason', [
 ]);
 
 export const incidentStatusEnum = pgEnum('incident_status', ['OPEN', 'RESOLVED']);
+export const availabilityStateEnum = pgEnum(
+  'availability_window_state',
+  AVAILABILITY_WINDOW_STATES,
+);
+
+export const monitorAvailabilityState = pgTable(
+  'monitor_availability_state',
+  {
+    organizationId: uuid('organization_id').notNull(),
+    monitorId: uuid('monitor_id').primaryKey(),
+    currentState: availabilityStateEnum('current_state').notNull(),
+    stateSince: timestamp('state_since', { withTimezone: true }).notNull(),
+    accountedThrough: timestamp('accounted_through', { withTimezone: true }).notNull(),
+    trackingStartedAt: timestamp('tracking_started_at', { withTimezone: true }).notNull(),
+    enabledSince: timestamp('enabled_since', { withTimezone: true }),
+    lastProcessedRoundCreatedAt: timestamp('last_processed_round_created_at', {
+      withTimezone: true,
+    }),
+    lastProcessedRoundId: uuid('last_processed_round_id'),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'monitor_availability_state_monitor_fk',
+      columns: [table.monitorId, table.organizationId],
+      foreignColumns: [monitors.id, monitors.organizationId],
+    }).onDelete('cascade'),
+    check(
+      'monitor_availability_state_time_order',
+      sql`${table.trackingStartedAt} <= ${table.stateSince} and ${table.stateSince} <= ${table.accountedThrough}`,
+    ),
+    check(
+      'monitor_availability_state_epoch_consistent',
+      sql`(${table.currentState} = 'EXCLUDED') = (${table.enabledSince} is null)`,
+    ),
+    check(
+      'monitor_availability_state_watermark_consistent',
+      sql`(${table.lastProcessedRoundCreatedAt} is null) = (${table.lastProcessedRoundId} is null)`,
+    ),
+    index('monitor_availability_state_flush_idx').on(table.accountedThrough, table.monitorId),
+  ],
+);
+
+export const monitorAvailabilityDaily = pgTable(
+  'monitor_availability_daily',
+  {
+    organizationId: uuid('organization_id').notNull(),
+    monitorId: uuid('monitor_id').notNull(),
+    dayUtc: date('day_utc').notNull(),
+    availableMs: integer('available_ms').notNull().default(0),
+    unavailableMs: integer('unavailable_ms').notNull().default(0),
+    unknownMs: integer('unknown_ms').notNull().default(0),
+    excludedMs: integer('excluded_ms').notNull().default(0),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.organizationId, table.monitorId, table.dayUtc] }),
+    foreignKey({
+      name: 'monitor_availability_daily_monitor_fk',
+      columns: [table.monitorId, table.organizationId],
+      foreignColumns: [monitors.id, monitors.organizationId],
+    }).onDelete('cascade'),
+    check(
+      'monitor_availability_daily_duration_bounds',
+      sql`${table.availableMs} >= 0 and ${table.unavailableMs} >= 0 and ${table.unknownMs} >= 0 and ${table.excludedMs} >= 0 and ${table.availableMs}::bigint + ${table.unavailableMs} + ${table.unknownMs} + ${table.excludedMs} <= 86400000`,
+    ),
+  ],
+);
 
 export const monitors = pgTable(
   'monitors',
