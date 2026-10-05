@@ -1,10 +1,49 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Dashboard } from './dashboard';
 
 describe('Dashboard', () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it.each([
+    [99.94, 98.7, '99.94%', '98.70%'],
+    [null, 0, '—', '0.00%'],
+    [null, null, '—', '—'],
+  ])(
+    'shows separate uptime and coverage without turning null into 100%%',
+    async (uptimePercent, coveragePercent, uptimeText, coverageText) => {
+      const monitor = {
+        id: 'metrics-monitor',
+        name: 'Metrics monitor',
+        url: 'https://example.com',
+        method: 'GET',
+        lifecycleState: 'ENABLED',
+        timeoutMs: 10000,
+        followRedirects: true,
+        statusPolicy: { type: 'ANY_2XX' },
+        locations: ['local'],
+        createdAt: new Date().toISOString(),
+        currentCheck: null,
+        incidentState: { failureStreak: null, currentIncident: null },
+        uptime: { uptimePercent, coveragePercent },
+      };
+      vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
+        Promise.resolve(new Response(JSON.stringify({ data: [monitor] }), { status: 200 })),
+      );
+      const first = render(<Dashboard />);
+      const group = await screen.findByLabelText('Uptime metrics for Metrics monitor');
+      const values = group.querySelectorAll('dd');
+      expect(within(group).getByText('7-day uptime')).toBeInTheDocument();
+      expect(values[0]).toHaveTextContent(uptimeText);
+      expect(values[1]).toHaveTextContent(coverageText);
+      first.unmount();
+      render(<Dashboard />);
+      const reloaded = await screen.findByLabelText('Uptime metrics for Metrics monitor');
+      expect(reloaded.querySelectorAll('dd')[0]).toHaveTextContent(uptimeText);
+      expect(reloaded.querySelectorAll('dd')[1]).toHaveTextContent(coverageText);
+    },
+  );
 
   it('shows the empty state and creates a monitor', async () => {
     const fetchMock = vi
@@ -302,8 +341,8 @@ describe('Dashboard', () => {
     loadMore.click();
 
     expect(
-      fetchMock.mock.calls.filter(([url]) =>
-        typeof url === 'string' && url.includes('/incidents?limit=10&cursor=cursor-1'),
+      fetchMock.mock.calls.filter(
+        ([url]) => typeof url === 'string' && url.includes('/incidents?limit=10&cursor=cursor-1'),
       ),
     ).toHaveLength(1);
     await waitFor(() => expect(loadMore).toBeDisabled());

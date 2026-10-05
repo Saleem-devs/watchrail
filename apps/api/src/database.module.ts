@@ -6,6 +6,7 @@ import {
   IncidentReadRepository,
   ManualRoundRepository,
   MonitorRepository,
+  UptimeReadRepository,
 } from '@watchrail/db';
 import type { WatchrailDatabase } from '@watchrail/db';
 import { ConfigModule } from './config.module.js';
@@ -22,6 +23,11 @@ import { APP_CONFIG, type AppConfig } from './config.js';
     }),
   ],
   providers: [
+    {
+      provide: UptimeReadRepository,
+      inject: [getDrizzleToken()],
+      useFactory: (db: WatchrailDatabase) => new UptimeReadRepository(db),
+    },
     {
       provide: MonitorRepository,
       inject: [getDrizzleToken()],
@@ -44,6 +50,7 @@ import { APP_CONFIG, type AppConfig } from './config.js';
     },
   ],
   exports: [
+    UptimeReadRepository,
     CheckHistoryRepository,
     IncidentReadRepository,
     ManualRoundRepository,

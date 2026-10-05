@@ -15,6 +15,7 @@ interface Monitor {
   createdAt: string;
   currentCheck: CurrentCheck | null;
   incidentState: IncidentState;
+  uptime: { uptimePercent: number | null; coveragePercent: number | null };
 }
 
 interface IncidentState {
@@ -93,6 +94,10 @@ interface IncidentHistoryPage {
     resolvedAt: string | null;
   }>;
   nextCursor: string | null;
+}
+
+function formatPercent(value: number | null | undefined): string {
+  return value == null ? '—' : `${value.toFixed(2)}%`;
 }
 
 export function Dashboard() {
@@ -693,6 +698,20 @@ export function Dashboard() {
                       error={runErrors[monitor.id]}
                     />
                     <IncidentSummary state={monitor.incidentState} />
+                    <dl
+                      className="uptime-summary"
+                      aria-label={`Uptime metrics for ${monitor.name}`}
+                      title="Today and the previous six UTC calendar days, starting no earlier than availability tracking."
+                    >
+                      <div>
+                        <dt>7-day uptime</dt>
+                        <dd>{formatPercent(monitor.uptime?.uptimePercent)}</dd>
+                      </div>
+                      <div>
+                        <dt>Coverage</dt>
+                        <dd>{formatPercent(monitor.uptime?.coveragePercent)}</dd>
+                      </div>
+                    </dl>
                     <button
                       className="quiet-button"
                       type="button"
