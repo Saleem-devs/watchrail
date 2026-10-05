@@ -5,7 +5,13 @@ import { getDrizzleToken } from '@nestjs/drizzle';
 import { Test } from '@nestjs/testing';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { CheckExecutionRepository, createDatabaseConnection, migrateDatabase } from '@watchrail/db';
+import {
+  CheckExecutionRepository,
+  createDatabaseConnection,
+  migrateDatabase,
+  MonitorRepository,
+} from '@watchrail/db';
+import { createMonitor } from '@watchrail/domain';
 import type { WatchrailDatabase } from '@watchrail/db';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -91,6 +97,104 @@ describe('monitor API', () => {
     const listed = await request(app.getHttpServer()).get('/api/monitors').expect(200);
     expect(listed.body.data).toHaveLength(1);
     expect(listed.body.data[0].id).toBe(created.body.data.id);
+  });
+
+  it('reads live uptime and daily metrics without materializing the tail, retaining metrics through mutations', async () => {
+    const created = await request(app.getHttpServer())
+      .post('/api/monitors')
+      .send({ name: 'Uptime API', url: 'https://example.com' })
+      .expect(201);
+    const monitorId = created.body.data.id as string;
+    await database.$client.query(
+      `update monitor_availability_state set current_state='AVAILABLE', tracking_started_at=date_trunc('day',clock_timestamp() at time zone 'UTC') at time zone 'UTC', state_since=date_trunc('day',clock_timestamp() at time zone 'UTC') at time zone 'UTC', accounted_through=date_trunc('day',clock_timestamp() at time zone 'UTC') at time zone 'UTC', enabled_since=date_trunc('day',clock_timestamp() at time zone 'UTC') at time zone 'UTC' where monitor_id=$1`,
+      [monitorId],
+    );
+    const before = (
+      await database.$client.query('select * from monitor_availability_state where monitor_id=$1', [
+        monitorId,
+      ])
+    ).rows;
+    const uptime = await request(app.getHttpServer())
+      .get(`/api/monitors/${monitorId}/uptime?window=7d`)
+      .expect(200);
+    expect(uptime.body.data).toMatchObject({
+      uptimePercent: 100,
+      coveragePercent: 100,
+      durations: { unavailableMs: 0, unknownMs: 0, excludedMs: 0 },
+    });
+    expect(uptime.body.data.durations.availableMs).toBe(
+      new Date(uptime.body.data.window.end as string).getTime() -
+        new Date(uptime.body.data.window.start as string).getTime(),
+    );
+    const daily = await request(app.getHttpServer())
+      .get(`/api/monitors/${monitorId}/uptime/daily?window=30d`)
+      .expect(200);
+    expect(daily.body.data.days).toHaveLength(1);
+    expect(daily.body.data.days[0]).toMatchObject({ uptimePercent: 100, coveragePercent: 100 });
+    const listed = await request(app.getHttpServer()).get('/api/monitors').expect(200);
+    expect(listed.body.data[0].uptime).toMatchObject({ uptimePercent: 100, coveragePercent: 100 });
+    const saved = await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/status-policy`)
+      .send({ statusPolicy: { type: 'EXACT', statusCodes: [204] } })
+      .expect(200);
+    expect(saved.body.data.uptime).toMatchObject({ uptimePercent: 100, coveragePercent: 100 });
+    expect(
+      (
+        await database.$client.query(
+          'select * from monitor_availability_state where monitor_id=$1',
+          [monitorId],
+        )
+      ).rows,
+    ).toEqual(before);
+    expect((await database.$client.query('select * from monitor_availability_daily')).rows).toEqual(
+      [],
+    );
+  });
+
+  it('validates uptime presets, isolates organizations, and allows archived reads', async () => {
+    const created = await request(app.getHttpServer())
+      .post('/api/monitors')
+      .send({ name: 'Uptime validation', url: 'https://example.com' })
+      .expect(201);
+    const monitorId = created.body.data.id as string;
+    for (const suffix of ['uptime', 'uptime/daily']) {
+      for (const query of ['window=24h', 'window=7d&window=30d', 'window=', 'extra=true']) {
+        await request(app.getHttpServer())
+          .get(`/api/monitors/${monitorId}/${suffix}?${query}`)
+          .expect(400);
+      }
+      await request(app.getHttpServer())
+        .get(`/api/monitors/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/${suffix}`)
+        .expect(404);
+      await request(app.getHttpServer()).get(`/api/monitors/not-a-uuid/${suffix}`).expect(400);
+    }
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/lifecycle`)
+      .send({ lifecycleState: 'ARCHIVED' })
+      .expect(200);
+    await request(app.getHttpServer()).get(`/api/monitors/${monitorId}/uptime`).expect(200);
+    await request(app.getHttpServer()).get(`/api/monitors/${monitorId}/uptime/daily`).expect(200);
+    const foreign = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    // A genuine foreign monitor is created through its repository, not by bypassing composite FKs.
+    const record = await new MonitorRepository(database).create(
+      foreign,
+      createMonitor({ name: 'Foreign', url: 'https://example.com' }),
+    );
+    await request(app.getHttpServer()).get(`/api/monitors/${record.id}/uptime`).expect(404);
+    await request(app.getHttpServer()).get(`/api/monitors/${record.id}/uptime/daily`).expect(404);
+  });
+
+  it('uses one shared cutoff across the monitor-list uptime projection', async () => {
+    for (const name of ['First uptime', 'Second uptime']) {
+      await request(app.getHttpServer())
+        .post('/api/monitors')
+        .send({ name, url: 'https://example.com' })
+        .expect(201);
+    }
+    const listed = await request(app.getHttpServer()).get('/api/monitors').expect(200);
+    expect(listed.body.data[0].uptime.window.end).toBe(listed.body.data[1].uptime.window.end);
+    expect(listed.body.data[0].uptime.uptimePercent).toBeNull();
+    expect(listed.body.data[0].uptime.coveragePercent).toBe(0);
   });
 
   it('versions interval settings and enforces lifecycle scheduling invariants', async () => {

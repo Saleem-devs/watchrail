@@ -28,6 +28,11 @@ import {
   type MonitorRecord,
   parseCheckHistoryQuery,
   parseIncidentHistoryQuery,
+  UptimeReadRepository,
+  UptimeMonitorNotFoundError,
+  UptimeQueryError,
+  parseUptimeQuery,
+  type UptimeMetrics,
 } from '@watchrail/db';
 import {
   AssertionInputError,
@@ -54,6 +59,7 @@ export class MonitorsService {
     @Inject(ManualRoundRepository) private readonly manualRounds: ManualRoundRepository,
     @Inject(CheckHistoryRepository) private readonly history: CheckHistoryRepository,
     @Inject(IncidentReadRepository) private readonly incidentReads: IncidentReadRepository,
+    @Inject(UptimeReadRepository) private readonly uptimeReads: UptimeReadRepository,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
@@ -175,15 +181,22 @@ export class MonitorsService {
       monitor: MonitorRecord;
       currentCheck: CurrentCheck | null;
       incidentState: CurrentIncidentState;
+      uptime: UptimeMetrics;
     }>
   > {
-    const [monitors, currentChecks, incidentStates] = await Promise.all([
+    const [monitors, currentChecks, incidentStates, uptimes] = await Promise.all([
       this.monitors.listForOrganization(context.organizationId),
       this.history.currentForOrganization(context.organizationId),
       this.incidentReads.currentForOrganization(context.organizationId),
+      this.uptimeReads.currentForOrganization(context.organizationId),
     ]);
     return monitors.map((monitor) => ({
       monitor,
+      uptime:
+        uptimes.get(monitor.id) ??
+        (() => {
+          throw new Error('Monitor uptime projection is missing.');
+        })(),
       currentCheck: currentChecks.get(monitor.id) ?? null,
       incidentState:
         incidentStates.get(monitor.id) ??
@@ -195,6 +208,38 @@ export class MonitorsService {
 
   currentCheck(context: RequestContext, monitorId: string): Promise<CurrentCheck | null> {
     return this.history.currentForMonitor(context.organizationId, monitorId);
+  }
+
+  async uptime(context: RequestContext, monitorId: string, query: Record<string, unknown>) {
+    try {
+      return await this.uptimeReads.currentForMonitor(
+        context.organizationId,
+        monitorId,
+        parseUptimeQuery(query),
+      );
+    } catch (error) {
+      this.throwUptimeError(error);
+    }
+  }
+
+  async dailyUptime(context: RequestContext, monitorId: string, query: Record<string, unknown>) {
+    try {
+      return await this.uptimeReads.dailyForMonitor(
+        context.organizationId,
+        monitorId,
+        parseUptimeQuery(query, 'LAST_30_DAYS'),
+      );
+    } catch (error) {
+      this.throwUptimeError(error);
+    }
+  }
+
+  private throwUptimeError(error: unknown): never {
+    if (error instanceof UptimeQueryError)
+      throw new BadRequestException({ code: 'INVALID_UPTIME_QUERY', message: error.message });
+    if (error instanceof UptimeMonitorNotFoundError)
+      throw new NotFoundException({ code: 'MONITOR_NOT_FOUND', message: error.message });
+    throw error;
   }
 
   currentIncidentState(context: RequestContext, monitorId: string): Promise<CurrentIncidentState> {

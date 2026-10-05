@@ -5,6 +5,7 @@ import {
   HttpCode,
   Inject,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -19,6 +20,7 @@ import type {
   IncidentDetail,
   IncidentHistoryItem,
   MonitorRecord,
+  UptimeMetrics,
 } from '@watchrail/db';
 import type { CreateMonitorCommand } from '@watchrail/domain';
 import {
@@ -60,6 +62,7 @@ interface MonitorResponse {
     trigger: CurrentCheck['trigger'];
   } | null;
   incidentState: ReturnType<typeof toIncidentStateResponse>;
+  uptime: UptimeMetrics;
 }
 
 interface CheckRoundResponse {
@@ -99,10 +102,28 @@ export class MonitorsController {
   async list(@Req() request: RequestWithContext): Promise<{ data: MonitorResponse[] }> {
     const monitors = await this.monitors.list(request.watchrailContext);
     return {
-      data: monitors.map(({ monitor, currentCheck, incidentState }) =>
-        toResponse(monitor, currentCheck, incidentState),
+      data: monitors.map(({ monitor, currentCheck, incidentState, uptime }) =>
+        toResponse(monitor, currentCheck, incidentState, uptime),
       ),
     };
+  }
+
+  @Get(':monitorId/uptime')
+  async getUptime(
+    @Req() request: RequestWithContext,
+    @Param('monitorId', new ParseUUIDPipe()) monitorId: string,
+    @Query() query: Record<string, unknown>,
+  ) {
+    return { data: await this.monitors.uptime(request.watchrailContext, monitorId, query) };
+  }
+
+  @Get(':monitorId/uptime/daily')
+  async getDailyUptime(
+    @Req() request: RequestWithContext,
+    @Param('monitorId', new ParseUUIDPipe()) monitorId: string,
+    @Query() query: Record<string, unknown>,
+  ) {
+    return { data: await this.monitors.dailyUptime(request.watchrailContext, monitorId, query) };
   }
 
   @Patch(':monitorId/status-policy')
@@ -255,11 +276,12 @@ export class MonitorsController {
     request: RequestWithContext,
     monitor: MonitorRecord,
   ): Promise<MonitorResponse> {
-    const [currentCheck, incidentState] = await Promise.all([
+    const [currentCheck, incidentState, uptime] = await Promise.all([
       this.monitors.currentCheck(request.watchrailContext, monitor.id),
       this.monitors.currentIncidentState(request.watchrailContext, monitor.id),
+      this.monitors.uptime(request.watchrailContext, monitor.id, {}),
     ]);
-    return toResponse(monitor, currentCheck, incidentState);
+    return toResponse(monitor, currentCheck, incidentState, uptime);
   }
 }
 
@@ -267,9 +289,11 @@ function toResponse(
   monitor: MonitorRecord,
   currentCheck: CurrentCheck | null = null,
   incidentState: CurrentIncidentState,
+  uptime: UptimeMetrics,
 ): MonitorResponse {
   return {
     id: monitor.id,
+    uptime,
     name: monitor.name,
     url: monitor.url,
     method: monitor.method,

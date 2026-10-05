@@ -28,8 +28,13 @@ test('creates a monitor and preserves it after reload', async ({ page }) => {
   await page.getByRole('button', { name: 'Create monitor' }).click();
 
   await expect(page.getByRole('heading', { name: monitorName })).toBeVisible();
-  await expect(page.getByText('Awaiting first check').last()).toBeVisible();
+  await expect(page.getByLabel('No completed check').last()).toBeVisible();
+  const metrics = page.getByLabel(`Uptime metrics for ${monitorName}`);
+  await expect(metrics.locator('dd').nth(0)).toHaveText('—');
+  await expect(metrics.locator('dd').nth(1)).toHaveText('0.00%');
 
   await page.reload();
   await expect(page.getByRole('heading', { name: monitorName })).toBeVisible();
+  await expect(metrics.locator('dd').nth(0)).toHaveText('—');
+  await expect(metrics.locator('dd').nth(1)).toHaveText('0.00%');
 });
