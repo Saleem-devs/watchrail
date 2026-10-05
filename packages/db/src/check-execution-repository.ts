@@ -14,6 +14,10 @@ import {
 import type { WatchrailDatabase } from './client.js';
 import { applyAvailabilityObservation } from './availability-repository.js';
 import {
+  stageIncidentNotification,
+  type IncidentTransition,
+} from './notification-event-repository.js';
+import {
   checkExecutionAssignments,
   checkExecutionResults,
   checkRounds,
@@ -210,13 +214,14 @@ export class CheckExecutionRepository {
 
       if (!round) throw new Error('Completed check round is missing.');
       if (round.trigger === 'SCHEDULED') {
-        await applyIncidentObservation(tx, round, result);
+        const incidentTransition = await applyIncidentObservation(tx, round, result);
         await applyAvailabilityObservation(tx, round, {
           trigger: round.trigger,
           outcome: result.outcome,
           reason: result.reason,
           assertionOutcome: assertionEvaluation.outcome,
         });
+        await stageIncidentNotification(tx, incidentTransition);
       }
 
       return true;
@@ -233,7 +238,7 @@ async function applyIncidentObservation(
     createdAt: Date;
   },
   result: AuthoritativeCheckResult,
-): Promise<void> {
+): Promise<IncidentTransition> {
   const [state] = await tx
     .select()
     .from(monitorIncidentState)
@@ -247,7 +252,8 @@ async function applyIncidentObservation(
     .for('update');
 
   if (!state) throw new Error('Monitor incident state is missing.');
-  if (round.createdAt < state.trackingStartedAt || isStaleRound(round, state)) return;
+  if (round.createdAt < state.trackingStartedAt || isStaleRound(round, state))
+    return { type: 'NONE' };
 
   const observation = classifyIncidentObservation({
     outcome: result.outcome,
@@ -265,7 +271,7 @@ async function applyIncidentObservation(
       .update(monitorIncidentState)
       .set(processed)
       .where(eq(monitorIncidentState.monitorId, round.monitorId));
-    return;
+    return { type: 'NONE' };
   }
 
   if (observation === 'HEALTHY') {
@@ -278,7 +284,7 @@ async function applyIncidentObservation(
         failureStreakStartedRoundId: null,
       })
       .where(eq(monitorIncidentState.monitorId, round.monitorId));
-    await tx
+    const [resolved] = await tx
       .update(incidents)
       .set({
         status: 'RESOLVED',
@@ -291,8 +297,23 @@ async function applyIncidentObservation(
           eq(incidents.monitorId, round.monitorId),
           eq(incidents.status, 'OPEN'),
         ),
-      );
-    return;
+      )
+      .returning({
+        id: incidents.id,
+        status: incidents.status,
+        startedAt: incidents.startedAt,
+        openedAt: incidents.openedAt,
+        resolvedAt: incidents.resolvedAt,
+      });
+    return resolved
+      ? {
+          type: 'RESOLVED',
+          incident: resolved,
+          organizationId: round.organizationId,
+          monitorId: round.monitorId,
+          triggeringRoundId: round.id,
+        }
+      : { type: 'NONE' };
   }
 
   const consecutiveFailures = state.consecutiveFailures + 1;
@@ -309,16 +330,34 @@ async function applyIncidentObservation(
     .where(eq(monitorIncidentState.monitorId, round.monitorId));
 
   if (consecutiveFailures === INCIDENT_FAILURE_THRESHOLD) {
-    await tx.insert(incidents).values({
+    const [opened] = await tx
+      .insert(incidents)
+      .values({
+        organizationId: round.organizationId,
+        monitorId: round.monitorId,
+        status: 'OPEN',
+        startedAt: failureStreakStartedAt,
+        openedAt: result.checkedAt,
+        startedByRoundId: failureStreakStartedRoundId,
+        openedByRoundId: round.id,
+      })
+      .returning({
+        id: incidents.id,
+        status: incidents.status,
+        startedAt: incidents.startedAt,
+        openedAt: incidents.openedAt,
+        resolvedAt: incidents.resolvedAt,
+      });
+    if (!opened) throw new Error('Incident creation returned no record.');
+    return {
+      type: 'OPENED',
+      incident: opened,
       organizationId: round.organizationId,
       monitorId: round.monitorId,
-      status: 'OPEN',
-      startedAt: failureStreakStartedAt,
-      openedAt: result.checkedAt,
-      startedByRoundId: failureStreakStartedRoundId,
-      openedByRoundId: round.id,
-    });
+      triggeringRoundId: round.id,
+    };
   }
+  return { type: 'NONE' };
 }
 
 function isStaleRound(

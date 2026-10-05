@@ -18,7 +18,7 @@ import {
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
-import type { ExecuteCheckRoundJobV1 } from '@watchrail/contracts';
+import type { ExecuteCheckRoundJobV1, WebhookNotificationV1 } from '@watchrail/contracts';
 import {
   CHECK_ROUND_STATUSES,
   AVAILABILITY_WINDOW_STATES,
@@ -79,6 +79,10 @@ export const checkResultReasonEnum = pgEnum('check_result_reason', [
 ]);
 
 export const incidentStatusEnum = pgEnum('incident_status', ['OPEN', 'RESOLVED']);
+export const notificationEventTypeEnum = pgEnum('notification_event_type', [
+  'INCIDENT_OPENED',
+  'INCIDENT_RESOLVED',
+]);
 export const availabilityStateEnum = pgEnum(
   'availability_window_state',
   AVAILABILITY_WINDOW_STATES,
@@ -598,6 +602,180 @@ export const incidents = pgTable(
     check(
       'incidents_resolution_consistent',
       sql`(${table.status} = 'RESOLVED') = (${table.resolvedAt} is not null and ${table.resolvedByRoundId} is not null)`,
+    ),
+  ],
+);
+
+export interface WebhookSigningSecretEnvelopeV1 {
+  version: 1;
+  algorithm: 'AES-256-GCM';
+  keyId: string;
+  iv: string;
+  ciphertext: string;
+  authTag: string;
+}
+
+export const webhookEndpoints = pgTable(
+  'webhook_endpoints',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull(),
+    name: varchar('name', { length: 120 }).notNull(),
+    enabled: boolean('enabled').notNull().default(true),
+    currentVersionNumber: integer('current_version_number').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('webhook_endpoints_identity_unique').on(table.organizationId, table.id),
+    check('webhook_endpoints_name_not_blank', sql`length(btrim(${table.name})) > 0`),
+    check('webhook_endpoints_version_positive', sql`${table.currentVersionNumber} > 0`),
+  ],
+);
+
+export const webhookEndpointVersions = pgTable(
+  'webhook_endpoint_versions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull(),
+    endpointId: uuid('endpoint_id').notNull(),
+    versionNumber: integer('version_number').notNull(),
+    url: text('url').notNull(),
+    signingSecretEnvelope: jsonb('signing_secret_envelope')
+      .$type<WebhookSigningSecretEnvelopeV1>()
+      .notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'webhook_endpoint_versions_endpoint_fk',
+      columns: [table.organizationId, table.endpointId],
+      foreignColumns: [webhookEndpoints.organizationId, webhookEndpoints.id],
+    }).onDelete('cascade'),
+    unique('webhook_endpoint_versions_identity_unique').on(
+      table.organizationId,
+      table.endpointId,
+      table.id,
+    ),
+    unique('webhook_endpoint_versions_number_unique').on(
+      table.organizationId,
+      table.endpointId,
+      table.versionNumber,
+    ),
+    check('webhook_endpoint_versions_version_positive', sql`${table.versionNumber} > 0`),
+    check('webhook_endpoint_versions_url_length', sql`length(${table.url}) between 1 and 2048`),
+    check(
+      'webhook_endpoint_versions_secret_object',
+      sql`jsonb_typeof(${table.signingSecretEnvelope}) = 'object'`,
+    ),
+  ],
+);
+
+export const notificationEvents = pgTable(
+  'notification_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull(),
+    monitorId: uuid('monitor_id').notNull(),
+    incidentId: uuid('incident_id').notNull(),
+    eventType: notificationEventTypeEnum('event_type').notNull(),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+    triggeringRoundId: uuid('triggering_round_id').notNull(),
+    payload: jsonb('payload').$type<WebhookNotificationV1>().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('notification_events_identity_unique').on(table.organizationId, table.id),
+    unique('notification_events_incident_type_unique').on(
+      table.organizationId,
+      table.incidentId,
+      table.eventType,
+    ),
+    foreignKey({
+      name: 'notification_events_monitor_fk',
+      columns: [table.monitorId, table.organizationId],
+      foreignColumns: [monitors.id, monitors.organizationId],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'notification_events_incident_fk',
+      columns: [table.organizationId, table.incidentId],
+      foreignColumns: [incidents.organizationId, incidents.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'notification_events_round_fk',
+      columns: [table.organizationId, table.triggeringRoundId],
+      foreignColumns: [checkRounds.organizationId, checkRounds.id],
+    }),
+    check(
+      'notification_events_payload_contract',
+      sql`jsonb_typeof(${table.payload}) = 'object' and ${table.payload}->>'contractVersion' = '1' and ${table.payload}->>'eventId' = ${table.id}::text and ${table.payload}->>'organizationId' = ${table.organizationId}::text and ${table.payload}->>'eventType' = ${table.eventType}::text and ${table.payload}->>'triggeringRoundId' = ${table.triggeringRoundId}::text`,
+    ),
+  ],
+);
+
+export const notificationDeliveries = pgTable(
+  'notification_deliveries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull(),
+    eventId: uuid('event_id').notNull(),
+    endpointId: uuid('endpoint_id').notNull(),
+    endpointVersionId: uuid('endpoint_version_id').notNull(),
+    availableAt: timestamp('available_at', { withTimezone: true }).notNull().defaultNow(),
+    claimToken: uuid('claim_token'),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
+    lastErrorCode: varchar('last_error_code', { length: 64 }),
+    lastHttpStatus: integer('last_http_status'),
+    deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+    deadAt: timestamp('dead_at', { withTimezone: true }),
+    deadReason: varchar('dead_reason', { length: 64 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('notification_deliveries_event_endpoint_unique').on(
+      table.organizationId,
+      table.eventId,
+      table.endpointId,
+    ),
+    foreignKey({
+      name: 'notification_deliveries_event_fk',
+      columns: [table.organizationId, table.eventId],
+      foreignColumns: [notificationEvents.organizationId, notificationEvents.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'notification_deliveries_endpoint_fk',
+      columns: [table.organizationId, table.endpointId],
+      foreignColumns: [webhookEndpoints.organizationId, webhookEndpoints.id],
+    }),
+    foreignKey({
+      name: 'notification_deliveries_endpoint_version_fk',
+      columns: [table.organizationId, table.endpointId, table.endpointVersionId],
+      foreignColumns: [
+        webhookEndpointVersions.organizationId,
+        webhookEndpointVersions.endpointId,
+        webhookEndpointVersions.id,
+      ],
+    }),
+    index('notification_deliveries_eligible_idx')
+      .on(table.availableAt, table.createdAt, table.id)
+      .where(sql`${table.deliveredAt} is null and ${table.deadAt} is null`),
+    check('notification_deliveries_attempt_count_non_negative', sql`${table.attemptCount} >= 0`),
+    check(
+      'notification_deliveries_http_status_range',
+      sql`${table.lastHttpStatus} is null or ${table.lastHttpStatus} between 100 and 599`,
+    ),
+    check(
+      'notification_deliveries_one_terminal_state',
+      sql`not (${table.deliveredAt} is not null and ${table.deadAt} is not null)`,
+    ),
+    check(
+      'notification_deliveries_dead_fields_consistent',
+      sql`(${table.deadAt} is null) = (${table.deadReason} is null)`,
+    ),
+    check(
+      'notification_deliveries_terminal_claim_cleared',
+      sql`(${table.deliveredAt} is null and ${table.deadAt} is null) or ${table.claimToken} is null`,
     ),
   ],
 );

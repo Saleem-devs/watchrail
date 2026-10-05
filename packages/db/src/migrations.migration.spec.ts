@@ -134,6 +134,10 @@ describe('database migrations', () => {
           'check_round_outbox'
           ,'incidents'
           ,'monitor_incident_state'
+          ,'notification_deliveries'
+          ,'notification_events'
+          ,'webhook_endpoint_versions'
+          ,'webhook_endpoints'
         )
       order by table_name
     `);
@@ -147,6 +151,10 @@ describe('database migrations', () => {
       'monitor_configuration_versions',
       'monitor_incident_state',
       'monitors',
+      'notification_deliveries',
+      'notification_events',
+      'webhook_endpoint_versions',
+      'webhook_endpoints',
     ]);
 
     const incidentStates = await connection.db.execute<{
@@ -178,6 +186,10 @@ describe('database migrations', () => {
     }
     const migratedIncidents = await connection.db.execute(sql`select id from incidents`);
     expect(migratedIncidents.rows).toEqual([]);
+    const migratedNotificationEvents = await connection.db.execute(
+      sql`select id from notification_events`,
+    );
+    expect(migratedNotificationEvents.rows).toEqual([]);
 
     const availability = await connection.pool.query<{
       monitor_id: string;
