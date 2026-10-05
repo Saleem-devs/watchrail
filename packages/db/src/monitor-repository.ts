@@ -16,6 +16,10 @@ import {
 } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
 import {
+  initializeAvailability,
+  transitionAvailabilityLifecycle,
+} from './availability-repository.js';
+import {
   monitorConfigurationVersions,
   monitorIncidentState,
   monitors,
@@ -85,6 +89,7 @@ export class MonitorRepository {
         monitorId: created.id,
         trackingStartedAt: sql`clock_timestamp()`,
       });
+      await initializeAvailability(tx, organizationId, created.id, created.lifecycleState);
 
       return created;
     });
@@ -403,12 +408,16 @@ export class MonitorRepository {
         .from(monitors)
         .where(and(eq(monitors.id, monitorId), eq(monitors.organizationId, organizationId)))
         .limit(1)
-        .for('update');
+        // Daily-row inserts acquire a foreign-key KEY SHARE lock on this monitor.
+        // Do not hold a conflicting UPDATE lock while waiting for availability state.
+        .for('no key update');
       if (!monitor) throw new MonitorUpdateNotFoundError();
       if (monitor.lifecycleState === 'ARCHIVED' && lifecycleState !== 'ARCHIVED') {
         throw new ArchivedMonitorLifecycleError();
       }
       if (monitor.lifecycleState === lifecycleState) return monitor;
+
+      await transitionAvailabilityLifecycle(tx, organizationId, monitorId, lifecycleState);
 
       const [updated] = await tx
         .update(monitors)

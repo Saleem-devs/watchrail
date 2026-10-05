@@ -12,6 +12,7 @@ import {
   type StoredRequestHeader,
 } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
+import { applyAvailabilityObservation } from './availability-repository.js';
 import {
   checkExecutionAssignments,
   checkExecutionResults,
@@ -210,6 +211,12 @@ export class CheckExecutionRepository {
       if (!round) throw new Error('Completed check round is missing.');
       if (round.trigger === 'SCHEDULED') {
         await applyIncidentObservation(tx, round, result);
+        await applyAvailabilityObservation(tx, round, {
+          trigger: round.trigger,
+          outcome: result.outcome,
+          reason: result.reason,
+          assertionOutcome: assertionEvaluation.outcome,
+        });
       }
 
       return true;

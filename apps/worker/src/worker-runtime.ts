@@ -6,7 +6,7 @@ import {
   type OnApplicationShutdown,
 } from '@nestjs/common';
 import type { BullMqCheckJobConsumer, BullMqCheckJobPublisher } from '@watchrail/queue';
-import type { ScheduledRoundRepository } from '@watchrail/db';
+import type { AvailabilityRepository, ScheduledRoundRepository } from '@watchrail/db';
 import type { CheckOutboxRelay } from './check-outbox-relay.js';
 import type { WorkerConfig } from './config.js';
 
@@ -18,23 +18,33 @@ export class WorkerRuntime
   private stopping = false;
   private outboxRunning: Promise<void> | undefined;
   private schedulerRunning: Promise<void> | undefined;
+  private availabilityRunning: Promise<void> | undefined;
+  private readonly wakeups = new Set<() => void>();
 
   constructor(
     private readonly relay: CheckOutboxRelay,
     private readonly consumer: BullMqCheckJobConsumer,
     private readonly publisher: BullMqCheckJobPublisher,
     private readonly scheduledRounds: ScheduledRoundRepository,
+    private readonly availability: AvailabilityRepository,
     private readonly config: WorkerConfig,
   ) {}
 
   onApplicationBootstrap(): void {
     this.outboxRunning = this.runOutboxRelay();
     this.schedulerRunning = this.runScheduledDispatch();
+    this.availabilityRunning = this.runAvailabilityFlush();
   }
 
   async beforeApplicationShutdown(): Promise<void> {
     this.stopping = true;
-    await Promise.all([this.outboxRunning, this.schedulerRunning, this.consumer.close()]);
+    for (const wakeup of this.wakeups) wakeup();
+    await Promise.all([
+      this.outboxRunning,
+      this.schedulerRunning,
+      this.availabilityRunning,
+      this.consumer.close(),
+    ]);
   }
 
   async onApplicationShutdown(): Promise<void> {
@@ -47,7 +57,7 @@ export class WorkerRuntime
         const result = await this.relay.processNext();
 
         if (result === 'IDLE') {
-          await delay(this.config.idlePollIntervalMs);
+          await this.wait(this.config.idlePollIntervalMs);
         } else if (result === 'BLOCKED_INVALID') {
           this.logger.error('Blocked an invalid check-round outbox event.');
         } else if (result === 'LOST_CLAIM') {
@@ -57,7 +67,7 @@ export class WorkerRuntime
         this.logger.error(
           error instanceof Error ? error.message : 'Unknown outbox relay dependency failure.',
         );
-        await delay(this.config.dependencyErrorDelayMs);
+        await this.wait(this.config.dependencyErrorDelayMs);
       }
     }
   }
@@ -66,17 +76,42 @@ export class WorkerRuntime
     while (!this.stopping) {
       try {
         await this.scheduledRounds.dispatchDue(this.config.scheduleDispatchBatchSize);
-        await delay(this.config.scheduleIdlePollIntervalMs);
+        await this.wait(this.config.scheduleIdlePollIntervalMs);
       } catch (error) {
         this.logger.error(
           error instanceof Error ? error.message : 'Unknown scheduled dispatch dependency failure.',
         );
-        await delay(this.config.dependencyErrorDelayMs);
+        await this.wait(this.config.dependencyErrorDelayMs);
       }
     }
   }
-}
+  private async runAvailabilityFlush(): Promise<void> {
+    while (!this.stopping) {
+      try {
+        const count = await this.availability.flushDue(
+          this.config.availabilityFlushBatchSize,
+          this.config.availabilityFlushIntervalMs,
+        );
+        if (count < this.config.availabilityFlushBatchSize) {
+          await this.wait(this.config.availabilityFlushIntervalMs);
+        }
+      } catch {
+        this.logger.error('Availability flush dependency failure.');
+        await this.wait(this.config.dependencyErrorDelayMs);
+      }
+    }
+  }
 
-function delay(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+  private wait(milliseconds: number): Promise<void> {
+    if (this.stopping) return Promise.resolve();
+    return new Promise((resolve) => {
+      const wakeup = () => {
+        clearTimeout(timer);
+        this.wakeups.delete(wakeup);
+        resolve();
+      };
+      const timer = setTimeout(wakeup, milliseconds);
+      this.wakeups.add(wakeup);
+    });
+  }
 }
