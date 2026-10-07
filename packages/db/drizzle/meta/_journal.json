@@ -141,6 +141,13 @@
       "when": 1791217890667,
       "tag": "0019_first_boom_boom",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1791369350073,
+      "tag": "0020_hot_norman_osborn",
+      "breakpoints": true
     }
   ]
 }
