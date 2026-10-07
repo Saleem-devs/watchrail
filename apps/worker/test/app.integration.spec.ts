@@ -37,6 +37,8 @@ describe('worker application lifecycle', () => {
     headerEncryptionKeys: process.env.HTTP_HEADER_ENCRYPTION_KEYS,
     assertionActiveKeyId: process.env.ASSERTION_ACTIVE_KEY_ID,
     assertionEncryptionKeys: process.env.ASSERTION_ENCRYPTION_KEYS,
+    webhookActiveKeyId: process.env.WEBHOOK_SIGNING_SECRET_ACTIVE_KEY_ID,
+    webhookEncryptionKeys: process.env.WEBHOOK_SIGNING_SECRET_ENCRYPTION_KEYS,
     scheduleIdlePollIntervalMs: process.env.SCHEDULE_IDLE_POLL_INTERVAL_MS,
   };
 
@@ -57,6 +59,10 @@ describe('worker application lifecycle', () => {
     });
     process.env.ASSERTION_ACTIVE_KEY_ID = 'test';
     process.env.ASSERTION_ENCRYPTION_KEYS = JSON.stringify({
+      test: Buffer.alloc(32).toString('base64'),
+    });
+    process.env.WEBHOOK_SIGNING_SECRET_ACTIVE_KEY_ID = 'test';
+    process.env.WEBHOOK_SIGNING_SECRET_ENCRYPTION_KEYS = JSON.stringify({
       test: Buffer.alloc(32).toString('base64'),
     });
 
@@ -82,6 +88,14 @@ describe('worker application lifecycle', () => {
     restoreEnvironment('HTTP_HEADER_ENCRYPTION_KEYS', originalEnvironment.headerEncryptionKeys);
     restoreEnvironment('ASSERTION_ACTIVE_KEY_ID', originalEnvironment.assertionActiveKeyId);
     restoreEnvironment('ASSERTION_ENCRYPTION_KEYS', originalEnvironment.assertionEncryptionKeys);
+    restoreEnvironment(
+      'WEBHOOK_SIGNING_SECRET_ACTIVE_KEY_ID',
+      originalEnvironment.webhookActiveKeyId,
+    );
+    restoreEnvironment(
+      'WEBHOOK_SIGNING_SECRET_ENCRYPTION_KEYS',
+      originalEnvironment.webhookEncryptionKeys,
+    );
     restoreEnvironment(
       'SCHEDULE_IDLE_POLL_INTERVAL_MS',
       originalEnvironment.scheduleIdlePollIntervalMs,

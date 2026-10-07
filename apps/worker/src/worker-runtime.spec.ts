@@ -13,6 +13,8 @@ const config = {
   scheduleIdlePollIntervalMs: 1_000,
   availabilityFlushBatchSize: 100,
   availabilityFlushIntervalMs: 60_000,
+  webhookDeliveryConcurrency: 2,
+  webhookDeliveryIdlePollIntervalMs: 500,
 } as WorkerConfig;
 
 describe('WorkerRuntime', () => {
@@ -129,5 +131,65 @@ describe('WorkerRuntime', () => {
 
     await runtime.onApplicationShutdown();
     expect(closePublisher).toHaveBeenCalledOnce();
+  });
+
+  it('runs concurrent webhook loops and waits for in-flight delivery without waiting out idle polls', async () => {
+    vi.useFakeTimers();
+    let finish!: () => void;
+    const processWebhook = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<'DELIVERED'>((resolve) => {
+            finish = () => resolve('DELIVERED');
+          }),
+      )
+      .mockResolvedValue('IDLE');
+    const runtime = new WorkerRuntime(
+      { processNext: vi.fn().mockResolvedValue('IDLE') } as unknown as CheckOutboxRelay,
+      { close: vi.fn().mockResolvedValue(undefined) } as unknown as BullMqCheckJobConsumer,
+      { close: vi.fn().mockResolvedValue(undefined) } as unknown as BullMqCheckJobPublisher,
+      { dispatchDue: vi.fn().mockResolvedValue([]) } as unknown as ScheduledRoundRepository,
+      { flushDue: vi.fn().mockResolvedValue(0) } as unknown as AvailabilityRepository,
+      config,
+      { processNext: processWebhook },
+    );
+    runtime.onApplicationBootstrap();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(processWebhook).toHaveBeenCalledTimes(2);
+    const stopped = vi.fn();
+    const shutdown = runtime.beforeApplicationShutdown().then(stopped);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(stopped).not.toHaveBeenCalled();
+    finish();
+    await shutdown;
+    expect(stopped).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('retries webhook dependency failures without logging sensitive error details', async () => {
+    vi.useFakeTimers();
+    const error = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const processWebhook = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('WATCHRAIL_SENTINEL_SIGNING_SECRET'))
+      .mockResolvedValue('IDLE');
+    const runtime = new WorkerRuntime(
+      { processNext: vi.fn().mockResolvedValue('IDLE') } as unknown as CheckOutboxRelay,
+      { close: vi.fn().mockResolvedValue(undefined) } as unknown as BullMqCheckJobConsumer,
+      { close: vi.fn().mockResolvedValue(undefined) } as unknown as BullMqCheckJobPublisher,
+      { dispatchDue: vi.fn().mockResolvedValue([]) } as unknown as ScheduledRoundRepository,
+      { flushDue: vi.fn().mockResolvedValue(0) } as unknown as AvailabilityRepository,
+      { ...config, webhookDeliveryConcurrency: 1 },
+      { processNext: processWebhook },
+    );
+
+    runtime.onApplicationBootstrap();
+    await vi.advanceTimersByTimeAsync(config.dependencyErrorDelayMs);
+
+    expect(processWebhook).toHaveBeenCalledTimes(2);
+    expect(error).toHaveBeenCalledWith('Webhook delivery dependency failure.');
+    expect(JSON.stringify(error.mock.calls)).not.toContain('WATCHRAIL_SENTINEL_SIGNING_SECRET');
+    await runtime.beforeApplicationShutdown();
   });
 });

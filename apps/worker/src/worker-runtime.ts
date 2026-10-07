@@ -9,6 +9,11 @@ import type { BullMqCheckJobConsumer, BullMqCheckJobPublisher } from '@watchrail
 import type { AvailabilityRepository, ScheduledRoundRepository } from '@watchrail/db';
 import type { CheckOutboxRelay } from './check-outbox-relay.js';
 import type { WorkerConfig } from './config.js';
+import type { WebhookDeliveryCycleResult } from './webhook-delivery-worker.js';
+
+interface WebhookDeliveryProcessor {
+  processNext(): Promise<WebhookDeliveryCycleResult>;
+}
 
 @Injectable()
 export class WorkerRuntime
@@ -19,6 +24,7 @@ export class WorkerRuntime
   private outboxRunning: Promise<void> | undefined;
   private schedulerRunning: Promise<void> | undefined;
   private availabilityRunning: Promise<void> | undefined;
+  private webhookRunning: Promise<void>[] = [];
   private readonly wakeups = new Set<() => void>();
 
   constructor(
@@ -28,12 +34,18 @@ export class WorkerRuntime
     private readonly scheduledRounds: ScheduledRoundRepository,
     private readonly availability: AvailabilityRepository,
     private readonly config: WorkerConfig,
+    private readonly webhookDelivery?: WebhookDeliveryProcessor,
   ) {}
 
   onApplicationBootstrap(): void {
     this.outboxRunning = this.runOutboxRelay();
     this.schedulerRunning = this.runScheduledDispatch();
     this.availabilityRunning = this.runAvailabilityFlush();
+    this.webhookRunning = this.webhookDelivery
+      ? Array.from({ length: this.config.webhookDeliveryConcurrency }, () =>
+          this.runWebhookDelivery(),
+        )
+      : [];
   }
 
   async beforeApplicationShutdown(): Promise<void> {
@@ -43,6 +55,7 @@ export class WorkerRuntime
       this.outboxRunning,
       this.schedulerRunning,
       this.availabilityRunning,
+      ...this.webhookRunning,
       this.consumer.close(),
     ]);
   }
@@ -97,6 +110,22 @@ export class WorkerRuntime
         }
       } catch {
         this.logger.error('Availability flush dependency failure.');
+        await this.wait(this.config.dependencyErrorDelayMs);
+      }
+    }
+  }
+
+  private async runWebhookDelivery(): Promise<void> {
+    while (!this.stopping) {
+      try {
+        const result = await this.webhookDelivery!.processNext();
+        if (result === 'IDLE') {
+          await this.wait(this.config.webhookDeliveryIdlePollIntervalMs);
+        } else if (result === 'LOST_CLAIM') {
+          this.logger.warn('A webhook delivery claim expired before its final update.');
+        }
+      } catch {
+        this.logger.error('Webhook delivery dependency failure.');
         await this.wait(this.config.dependencyErrorDelayMs);
       }
     }

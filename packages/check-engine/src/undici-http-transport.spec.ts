@@ -105,6 +105,35 @@ describe('createPinnedLookup', () => {
     await expect(response.discardBody()).resolves.toBeUndefined();
   });
 
+  it('sends the exact provided POST body through the pinned connection', async () => {
+    const body = Buffer.from('{"signed":"exact-bytes"}', 'utf8');
+    const chunks: Buffer[] = [];
+    const server = createServer((request, reply) => {
+      request.on('data', (chunk: Buffer) => chunks.push(chunk));
+      request.on('end', () => reply.writeHead(204).end());
+    });
+    servers.push(server);
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const address = server.address();
+    if (address === null || typeof address === 'string') throw new Error('Expected TCP address.');
+    const response = await new UndiciPinnedHttpTransport().request({
+      target: {
+        url: new URL(`http://original.example:${address.port}/webhook`),
+        hostname: 'original.example',
+        port: address.port,
+        addresses: [{ address: '127.0.0.1', family: 4 }],
+      },
+      method: 'POST',
+      signal: new AbortController().signal,
+      headers: [{ name: 'content-type', value: 'application/json' }],
+      body,
+    });
+    expect(response.statusCode).toBe(204);
+    expect(Buffer.concat(chunks)).toEqual(body);
+    await response.discardBody();
+  });
+
   it('captures an encoded response body at the exact limit', async () => {
     const server = createServer((_request, reply) => {
       reply.writeHead(200).end(Buffer.alloc(HTTP_BODY_CAPTURE_LIMIT_BYTES, 97));

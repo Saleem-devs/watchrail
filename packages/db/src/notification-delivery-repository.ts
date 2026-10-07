@@ -1,17 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
-import { parseWebhookNotification, type WebhookNotificationV1 } from '@watchrail/contracts';
-import type { EncryptedWebhookSigningSecretV1 } from '@watchrail/webhook-security';
 import type { WatchrailDatabase } from './client.js';
 
 export interface ClaimedNotificationDelivery {
   id: string;
+  organizationId: string;
   eventId: string;
   endpointId: string;
   endpointVersionId: string;
+  endpointVersionNumber: number;
   url: string;
-  signingSecretEnvelope: EncryptedWebhookSigningSecretV1;
-  payload: WebhookNotificationV1;
+  signingSecretEnvelope: unknown;
+  payload: unknown;
   claimToken: string;
   attemptCount: number;
   lastAttemptAt: Date;
@@ -26,11 +26,13 @@ export class NotificationDeliveryRepository {
     const result = await this.db.execute<
       Record<string, unknown> & {
         id: string;
+        organizationId: string;
         eventId: string;
         endpointId: string;
         endpointVersionId: string;
+        endpointVersionNumber: number;
         url: string;
-        signingSecretEnvelope: EncryptedWebhookSigningSecretV1;
+        signingSecretEnvelope: unknown;
         payload: unknown;
         claimToken: string;
         attemptCount: number;
@@ -50,8 +52,10 @@ export class NotificationDeliveryRepository {
         from candidate where delivery.id=candidate.id
         returning delivery.*
       )
-      select claimed.id, claimed.event_id as "eventId", claimed.endpoint_id as "endpointId",
-        claimed.endpoint_version_id as "endpointVersionId", version.url,
+      select claimed.id, claimed.organization_id as "organizationId",
+        claimed.event_id as "eventId", claimed.endpoint_id as "endpointId",
+        claimed.endpoint_version_id as "endpointVersionId",
+        version.version_number as "endpointVersionNumber", version.url,
         version.signing_secret_envelope as "signingSecretEnvelope", event.payload,
         claimed.claim_token as "claimToken", claimed.attempt_count as "attemptCount",
         claimed.last_attempt_at as "lastAttemptAt"
@@ -64,7 +68,6 @@ export class NotificationDeliveryRepository {
     if (!row) return null;
     return {
       ...row,
-      payload: parseWebhookNotification(row.payload),
       lastAttemptAt: new Date(row.lastAttemptAt),
     };
   }
@@ -89,11 +92,18 @@ export class NotificationDeliveryRepository {
       sql`update notification_deliveries set claim_token=null, available_at=clock_timestamp()+(${retryDelayMs}*interval '1 millisecond'), last_error_code=${errorCode}, last_http_status=${httpStatus ?? null} where id=${id}::uuid and claim_token=${token}::uuid and delivered_at is null and dead_at is null returning id`,
     );
   }
-  async markDead(id: string, token: string, reason: string, httpStatus?: number): Promise<boolean> {
+  async markDead(
+    id: string,
+    token: string,
+    reason: string,
+    errorCode: string,
+    httpStatus?: number,
+  ): Promise<boolean> {
     code(reason);
+    code(errorCode);
     if (httpStatus !== undefined) status(httpStatus);
     return this.finish(
-      sql`update notification_deliveries set claim_token=null, dead_at=clock_timestamp(), dead_reason=${reason}, last_http_status=${httpStatus ?? null} where id=${id}::uuid and claim_token=${token}::uuid and delivered_at is null and dead_at is null returning id`,
+      sql`update notification_deliveries set claim_token=null, dead_at=clock_timestamp(), dead_reason=${reason}, last_error_code=${errorCode}, last_http_status=${httpStatus ?? null} where id=${id}::uuid and claim_token=${token}::uuid and delivered_at is null and dead_at is null returning id`,
     );
   }
   private async finish(query: ReturnType<typeof sql>): Promise<boolean> {

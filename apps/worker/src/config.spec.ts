@@ -8,6 +8,10 @@ const requiredEnvironment = {
   HTTP_HEADER_ENCRYPTION_KEYS: JSON.stringify({ test: Buffer.alloc(32).toString('base64') }),
   ASSERTION_ACTIVE_KEY_ID: 'test',
   ASSERTION_ENCRYPTION_KEYS: JSON.stringify({ test: Buffer.alloc(32).toString('base64') }),
+  WEBHOOK_SIGNING_SECRET_ACTIVE_KEY_ID: 'test',
+  WEBHOOK_SIGNING_SECRET_ENCRYPTION_KEYS: JSON.stringify({
+    test: Buffer.alloc(32).toString('base64'),
+  }),
 };
 
 describe('loadWorkerConfig', () => {
@@ -28,10 +32,38 @@ describe('loadWorkerConfig', () => {
       availabilityFlushIntervalMs: 60_000,
       headerEncryptionKeyring: { activeKeyId: 'test' },
       assertionEncryptionKeyring: { activeKeyId: 'test' },
+      webhookSigningSecretKeyring: { activeKeyId: 'test' },
+      webhookDeliveryTimeoutMs: 10_000,
+      webhookDeliveryLeaseDurationMs: 30_000,
+      webhookDeliveryMaxAttempts: 8,
+      webhookDeliveryRetryBaseMs: 5_000,
+      webhookDeliveryRetryMaxMs: 300_000,
+      webhookDeliveryConcurrency: 5,
+      webhookDeliveryIdlePollIntervalMs: 500,
     });
   });
 
   it.each([
+    [
+      {
+        ...requiredEnvironment,
+        WEBHOOK_DELIVERY_TIMEOUT_MS: '30000',
+        WEBHOOK_DELIVERY_LEASE_DURATION_MS: '30000',
+      },
+      'WEBHOOK_DELIVERY_LEASE_DURATION_MS must exceed WEBHOOK_DELIVERY_TIMEOUT_MS by at least 5000.',
+    ],
+    [
+      {
+        ...requiredEnvironment,
+        WEBHOOK_DELIVERY_RETRY_BASE_MS: '6000',
+        WEBHOOK_DELIVERY_RETRY_MAX_MS: '5000',
+      },
+      'WEBHOOK_DELIVERY_RETRY_BASE_MS cannot exceed WEBHOOK_DELIVERY_RETRY_MAX_MS.',
+    ],
+    [
+      { ...requiredEnvironment, WEBHOOK_DELIVERY_CONCURRENCY: '101' },
+      'WEBHOOK_DELIVERY_CONCURRENCY must be an integer from 1 to 100.',
+    ],
     [
       { ...requiredEnvironment, AVAILABILITY_FLUSH_BATCH_SIZE: '1001' },
       'AVAILABILITY_FLUSH_BATCH_SIZE must be an integer from 1 to 1000.',
