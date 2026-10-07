@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import { parseWebhookNotification, type WebhookNotificationV1 } from '@watchrail/contracts';
+import type { EncryptedWebhookSigningSecretV1 } from '@watchrail/webhook-security';
 import type { WatchrailDatabase } from './client.js';
-import type { WebhookSigningSecretEnvelopeV1 } from './schema.js';
 
 export interface ClaimedNotificationDelivery {
   id: string;
@@ -10,7 +10,7 @@ export interface ClaimedNotificationDelivery {
   endpointId: string;
   endpointVersionId: string;
   url: string;
-  signingSecretEnvelope: WebhookSigningSecretEnvelopeV1;
+  signingSecretEnvelope: EncryptedWebhookSigningSecretV1;
   payload: WebhookNotificationV1;
   claimToken: string;
   attemptCount: number;
@@ -30,7 +30,7 @@ export class NotificationDeliveryRepository {
         endpointId: string;
         endpointVersionId: string;
         url: string;
-        signingSecretEnvelope: WebhookSigningSecretEnvelopeV1;
+        signingSecretEnvelope: EncryptedWebhookSigningSecretV1;
         payload: unknown;
         claimToken: string;
         attemptCount: number;

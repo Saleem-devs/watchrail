@@ -24,6 +24,7 @@ import {
   monitors,
   notificationDeliveries,
   notificationEvents,
+  webhookEndpointVersions,
 } from './schema.js';
 import { WebhookEndpointRepository } from './webhook-endpoint-repository.js';
 
@@ -32,9 +33,9 @@ const signingSecretEnvelope = {
   version: 1 as const,
   algorithm: 'AES-256-GCM' as const,
   keyId: 'test-v1',
-  iv: 'dGVzdC1pdg',
-  ciphertext: 'dGVzdC1jaXBoZXJ0ZXh0',
-  authTag: 'dGVzdC10YWc',
+  iv: Buffer.alloc(12, 1).toString('base64url'),
+  ciphertext: Buffer.alloc(32, 2).toString('base64url'),
+  authTag: Buffer.alloc(16, 3).toString('base64url'),
 };
 
 describe('notification domain outbox', () => {
@@ -64,17 +65,16 @@ describe('notification domain outbox', () => {
 
   it('stages one event per transition and snapshots enabled immutable endpoint versions', async () => {
     const endpoints = new WebhookEndpointRepository(connection.db);
-    const enabled = await endpoints.create(organizationId, {
-      name: 'Operations',
-      url: 'https://hooks.example.com/v1',
-      signingSecretEnvelope,
-    });
-    await endpoints.create(organizationId, {
-      name: 'Disabled',
-      url: 'https://disabled.example.com/v1',
-      signingSecretEnvelope,
-      enabled: false,
-    });
+    const enabled = await endpoints.create(
+      organizationId,
+      { name: 'Operations', url: 'https://hooks.example.com/v1' },
+      () => signingSecretEnvelope,
+    );
+    await endpoints.create(
+      organizationId,
+      { name: 'Disabled', url: 'https://disabled.example.com/v1', enabled: false },
+      () => signingSecretEnvelope,
+    );
 
     const first = await scheduledRound();
     await complete(first.id, unhealthy());
@@ -100,8 +100,7 @@ describe('notification domain outbox', () => {
     });
     expect(JSON.stringify(openedEvent!.payload)).not.toContain('hooks.example.com');
     expect(openedDelivery).toMatchObject({
-      endpointId: enabled.endpoint.id,
-      endpointVersionId: enabled.version.id,
+      endpointId: enabled.id,
       attemptCount: 0,
     });
 
@@ -109,27 +108,36 @@ describe('notification domain outbox', () => {
     expect(await connection.db.select().from(notificationEvents)).toHaveLength(1);
     expect(await connection.db.select().from(notificationDeliveries)).toHaveLength(1);
 
-    const secondVersion = await endpoints.update(organizationId, enabled.endpoint.id, {
-      url: 'https://hooks.example.com/v2',
-      signingSecretEnvelope: { ...signingSecretEnvelope, keyId: 'test-v2' },
-    });
+    const secondVersion = await endpoints.updateSettings(
+      organizationId,
+      enabled.id,
+      { name: enabled.name, url: 'https://hooks.example.com/v2', rotateSecret: true },
+      () => ({ ...signingSecretEnvelope, keyId: 'test-v2' }),
+    );
     const recoveryRound = await scheduledRound();
     await complete(recoveryRound.id, healthy());
 
     const events = await connection.db.select().from(notificationEvents);
     const deliveries = await connection.db.select().from(notificationDeliveries);
+    const versions = await connection.db
+      .select()
+      .from(webhookEndpointVersions)
+      .where(eq(webhookEndpointVersions.endpointId, enabled.id));
+    const firstVersion = versions.find((version) => version.versionNumber === 1)!;
+    const updatedVersion = versions.find((version) => version.versionNumber === 2)!;
     expect(events.map((event) => event.eventType).sort()).toEqual([
       'INCIDENT_OPENED',
       'INCIDENT_RESOLVED',
     ]);
     expect(deliveries).toHaveLength(2);
     expect(deliveries.find((value) => value.eventId === openedEvent!.id)?.endpointVersionId).toBe(
-      enabled.version.id,
+      firstVersion.id,
     );
     const resolvedEvent = events.find((event) => event.eventType === 'INCIDENT_RESOLVED')!;
     expect(deliveries.find((value) => value.eventId === resolvedEvent.id)?.endpointVersionId).toBe(
-      secondVersion.id,
+      updatedVersion.id,
     );
+    expect(secondVersion.versionNumber).toBe(2);
     expect(parseWebhookNotification(resolvedEvent.payload)).toMatchObject({
       eventType: 'INCIDENT_RESOLVED',
       incident: { status: 'RESOLVED', resolvedAt: expect.any(String) },
@@ -138,11 +146,7 @@ describe('notification domain outbox', () => {
   });
 
   it('ignores manual and indeterminate observations and deduplicates concurrent threshold work', async () => {
-    await new WebhookEndpointRepository(connection.db).create(organizationId, {
-      name: 'Operations',
-      url: 'https://hooks.example.com/events',
-      signingSecretEnvelope,
-    });
+    await createTestEndpoint(organizationId, 'Operations', 'https://hooks.example.com/events');
     const manual = await new ManualRoundRepository(connection.db).create(organizationId, monitorId);
     await complete(manual.id, unhealthy());
     await complete((await scheduledRound()).id, internalError());
@@ -160,11 +164,7 @@ describe('notification domain outbox', () => {
   });
 
   it('clamps non-monotonic observation clocks to chronological incident timestamps', async () => {
-    await new WebhookEndpointRepository(connection.db).create(organizationId, {
-      name: 'Operations',
-      url: 'https://hooks.example.com/events',
-      signingSecretEnvelope,
-    });
+    await createTestEndpoint(organizationId, 'Operations', 'https://hooks.example.com/events');
     const startedAt = new Date('2026-10-06T12:10:00.000Z');
     await complete((await scheduledRound()).id, unhealthy(startedAt));
     await complete((await scheduledRound()).id, unhealthy(new Date('2026-10-06T12:11:00.000Z')));
@@ -212,12 +212,27 @@ describe('notification domain outbox', () => {
     });
   });
 
+  it('disabling affects future fan-out without cancelling an already-staged delivery', async () => {
+    const repository = new WebhookEndpointRepository(connection.db);
+    const endpoint = await repository.create(
+      organizationId,
+      { name: 'Operations', url: 'https://hooks.example.com/events' },
+      () => signingSecretEnvelope,
+    );
+    await openIncident();
+    const [openedDelivery] = await connection.db.select().from(notificationDeliveries);
+    expect(openedDelivery?.endpointId).toBe(endpoint.id);
+
+    await repository.setEnabled(organizationId, endpoint.id, false);
+    await complete((await scheduledRound()).id, healthy());
+
+    expect(await connection.db.select().from(notificationEvents)).toHaveLength(2);
+    const deliveries = await connection.db.select().from(notificationDeliveries);
+    expect(deliveries).toEqual([openedDelivery]);
+  });
+
   it('claims with skip-locked leases and guards every terminal mutation by token', async () => {
-    await new WebhookEndpointRepository(connection.db).create(organizationId, {
-      name: 'Operations',
-      url: 'https://hooks.example.com/events',
-      signingSecretEnvelope,
-    });
+    await createTestEndpoint(organizationId, 'Operations', 'https://hooks.example.com/events');
     await openIncident();
     const repository = new NotificationDeliveryRepository(connection.db);
 
@@ -268,11 +283,7 @@ describe('notification domain outbox', () => {
   it.each(['notification_events', 'notification_deliveries'])(
     'rolls back completion, incident state, and durable notification staging when %s fails',
     async (table) => {
-      await new WebhookEndpointRepository(connection.db).create(organizationId, {
-        name: 'Operations',
-        url: 'https://hooks.example.com/events',
-        signingSecretEnvelope,
-      });
+      await createTestEndpoint(organizationId, 'Operations', 'https://hooks.example.com/events');
       await complete((await scheduledRound()).id, unhealthy());
       await complete((await scheduledRound()).id, unhealthy());
       const third = await scheduledRound();
@@ -341,32 +352,41 @@ describe('notification domain outbox', () => {
 
   it('enforces tenant-safe endpoint-version delivery references', async () => {
     const foreignOrganizationId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
-    const local = await new WebhookEndpointRepository(connection.db).create(organizationId, {
-      name: 'Local',
-      url: 'https://local.example.com/events',
-      signingSecretEnvelope,
-    });
-    const foreign = await new WebhookEndpointRepository(connection.db).create(
+    const local = await createTestEndpoint(
+      organizationId,
+      'Local',
+      'https://local.example.com/events',
+    );
+    const foreign = await createTestEndpoint(
       foreignOrganizationId,
-      {
-        name: 'Foreign',
-        url: 'https://foreign.example.com/events',
-        signingSecretEnvelope,
-      },
+      'Foreign',
+      'https://foreign.example.com/events',
     );
     await openIncident();
     const [event] = await connection.db.select().from(notificationEvents);
+    const [foreignVersion] = await connection.db
+      .select()
+      .from(webhookEndpointVersions)
+      .where(eq(webhookEndpointVersions.endpointId, foreign.id));
 
     await expect(
       connection.db.insert(notificationDeliveries).values({
         organizationId,
         eventId: event!.id,
-        endpointId: foreign.endpoint.id,
-        endpointVersionId: foreign.version.id,
+        endpointId: foreign.id,
+        endpointVersionId: foreignVersion!.id,
       }),
     ).rejects.toThrow();
-    expect(local.endpoint.organizationId).toBe(organizationId);
+    expect(local.organizationId).toBe(organizationId);
   });
+
+  function createTestEndpoint(tenantId: string, name: string, url: string) {
+    return new WebhookEndpointRepository(connection.db).create(
+      tenantId,
+      { name, url },
+      () => signingSecretEnvelope,
+    );
+  }
 
   async function openIncident() {
     await complete((await scheduledRound()).id, unhealthy());

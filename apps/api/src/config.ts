@@ -7,6 +7,7 @@ export interface AppConfig {
   developmentIdentityEnabled: boolean;
   headerEncryptionKeyring: HeaderEncryptionKeyring;
   assertionEncryptionKeyring: AssertionEncryptionKeyring;
+  webhookSigningSecretKeyring: WebhookSigningSecretKeyring;
 }
 
 export function loadAppConfig(environment: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -35,6 +36,7 @@ export function loadAppConfig(environment: NodeJS.ProcessEnv = process.env): App
     developmentIdentityEnabled,
     headerEncryptionKeyring: loadHeaderEncryptionKeyring(environment),
     assertionEncryptionKeyring: loadAssertionEncryptionKeyring(environment),
+    webhookSigningSecretKeyring: loadWebhookSigningSecretKeyring(environment),
   };
 }
 
@@ -57,3 +59,7 @@ import {
   loadAssertionEncryptionKeyring,
   type AssertionEncryptionKeyring,
 } from '@watchrail/assertion-security';
+import {
+  loadWebhookSigningSecretKeyring,
+  type WebhookSigningSecretKeyring,
+} from '@watchrail/webhook-security';

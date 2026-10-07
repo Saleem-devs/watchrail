@@ -6,6 +6,10 @@ const encryptionEnvironment = {
   HTTP_HEADER_ENCRYPTION_KEYS: JSON.stringify({ test: Buffer.alloc(32).toString('base64') }),
   ASSERTION_ACTIVE_KEY_ID: 'test',
   ASSERTION_ENCRYPTION_KEYS: JSON.stringify({ test: Buffer.alloc(32).toString('base64') }),
+  WEBHOOK_SIGNING_SECRET_ACTIVE_KEY_ID: 'test',
+  WEBHOOK_SIGNING_SECRET_ENCRYPTION_KEYS: JSON.stringify({
+    test: Buffer.alloc(32).toString('base64'),
+  }),
 };
 
 describe('loadAppConfig', () => {

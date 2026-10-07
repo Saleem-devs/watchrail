@@ -35,6 +35,10 @@ describe('monitor API', () => {
     process.env.ASSERTION_ENCRYPTION_KEYS = JSON.stringify({
       test: Buffer.alloc(32).toString('base64'),
     });
+    process.env.WEBHOOK_SIGNING_SECRET_ACTIVE_KEY_ID = 'test';
+    process.env.WEBHOOK_SIGNING_SECRET_ENCRYPTION_KEYS = JSON.stringify({
+      test: Buffer.alloc(32).toString('base64'),
+    });
 
     const migrationConnection = createDatabaseConnection(container.getConnectionUri());
     await migrateDatabase(migrationConnection, resolve(process.cwd(), '../../packages/db/drizzle'));
