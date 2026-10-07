@@ -19,6 +19,7 @@ import {
   varchar,
 } from 'drizzle-orm/pg-core';
 import type { ExecuteCheckRoundJobV1, WebhookNotificationV1 } from '@watchrail/contracts';
+import type { EncryptedWebhookSigningSecretV1 } from '@watchrail/webhook-security';
 import {
   CHECK_ROUND_STATUSES,
   AVAILABILITY_WINDOW_STATES,
@@ -606,15 +607,6 @@ export const incidents = pgTable(
   ],
 );
 
-export interface WebhookSigningSecretEnvelopeV1 {
-  version: 1;
-  algorithm: 'AES-256-GCM';
-  keyId: string;
-  iv: string;
-  ciphertext: string;
-  authTag: string;
-}
-
 export const webhookEndpoints = pgTable(
   'webhook_endpoints',
   {
@@ -642,7 +634,7 @@ export const webhookEndpointVersions = pgTable(
     versionNumber: integer('version_number').notNull(),
     url: text('url').notNull(),
     signingSecretEnvelope: jsonb('signing_secret_envelope')
-      .$type<WebhookSigningSecretEnvelopeV1>()
+      .$type<EncryptedWebhookSigningSecretV1>()
       .notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
