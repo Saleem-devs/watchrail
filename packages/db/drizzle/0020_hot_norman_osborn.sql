@@ -1,0 +1,1 @@
+CREATE INDEX "notification_deliveries_endpoint_history_idx" ON "notification_deliveries" USING btree ("organization_id","endpoint_id","created_at" DESC NULLS LAST,"id" DESC NULLS LAST);

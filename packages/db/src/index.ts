@@ -12,3 +12,4 @@ export * from './schema.js';
 export * from './scheduled-round-repository.js';
 export * from './uptime-read-repository.js';
 export * from './webhook-endpoint-repository.js';
+export * from './webhook-delivery-read-repository.js';

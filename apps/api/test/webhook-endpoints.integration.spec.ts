@@ -5,17 +5,26 @@ import { getDrizzleToken } from '@nestjs/drizzle';
 import { Test } from '@nestjs/testing';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import {
+  CheckExecutionRepository,
   createDatabaseConnection,
   migrateDatabase,
+  MonitorRepository,
+  notificationDeliveries,
+  notificationEvents,
+  ScheduledRoundRepository,
   WebhookEndpointRepository,
+  monitors,
+  type AuthoritativeCheckResult,
 } from '@watchrail/db';
 import type { WatchrailDatabase } from '@watchrail/db';
+import { createMonitor, EMPTY_ASSERTION_EVALUATION } from '@watchrail/domain';
 import {
   decryptWebhookSigningSecret,
   encryptWebhookSigningSecret,
   type EncryptedWebhookSigningSecretV1,
 } from '@watchrail/webhook-security';
 import request from 'supertest';
+import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { APP_CONFIG, type AppConfig } from '../src/config.js';
@@ -59,7 +68,7 @@ describe('webhook endpoint API', () => {
   }, 60_000);
 
   beforeEach(async () => {
-    await database.$client.query('truncate webhook_endpoints cascade');
+    await database.$client.query('truncate webhook_endpoints, monitors cascade');
   });
 
   afterAll(async () => {
@@ -276,6 +285,12 @@ describe('webhook endpoint API', () => {
     );
     await request(app.getHttpServer()).get(`/api/webhook-endpoints/${foreign.id}`).expect(404);
     await request(app.getHttpServer())
+      .get(`/api/webhook-endpoints/${foreign.id}/deliveries`)
+      .expect(404);
+    await request(app.getHttpServer())
+      .get('/api/webhook-endpoints/cccccccc-cccc-4ccc-8ccc-cccccccccccc/deliveries')
+      .expect(404);
+    await request(app.getHttpServer())
       .patch(`/api/webhook-endpoints/${foreign.id}/enabled`)
       .send({ enabled: false })
       .expect(404);
@@ -303,6 +318,133 @@ describe('webhook endpoint API', () => {
         .send({ name: created.name, url: created.url, signingSecret })
         .expect(400);
     expect(JSON.stringify(await versions(created.id))).not.toContain(sentinel);
+  });
+
+  it('reads paginated delivery history with immutable target context and no durable secrets', async () => {
+    const endpoint = await createEndpoint();
+    const monitor = await new MonitorRepository(database).create(
+      DEVELOPMENT_REQUEST_CONTEXT.organizationId,
+      createMonitor({ name: 'Payments API', url: 'https://example.com/health' }),
+    );
+    await completeScheduled(monitor.id, unhealthy());
+    await completeScheduled(monitor.id, unhealthy());
+    await completeScheduled(monitor.id, unhealthy());
+    const [openedDelivery] = await database
+      .select()
+      .from(notificationDeliveries)
+      .where(eq(notificationDeliveries.endpointId, endpoint.id));
+    const [openedEvent] = await database
+      .select()
+      .from(notificationEvents)
+      .where(eq(notificationEvents.id, openedDelivery!.eventId));
+    await database.execute(sql`
+      update notification_events
+      set payload=${JSON.stringify({ ...(openedEvent!.payload as object), poison: true })}::jsonb
+      where id=${openedEvent!.id}::uuid
+    `);
+    await database.execute(sql`
+      update notification_deliveries set
+        attempt_count=8,
+        last_attempt_at=clock_timestamp(),
+        last_error_code='HTTP_503',
+        last_http_status=503,
+        dead_at=clock_timestamp(),
+        dead_reason='MAX_ATTEMPTS'
+      where id=${openedDelivery!.id}::uuid
+    `);
+    await patchSettings(endpoint.id, {
+      name: endpoint.name,
+      url: 'https://hooks.example.com/watchrail/v2',
+      signingSecret: { retain: true },
+    });
+    await completeScheduled(monitor.id, healthy());
+    await request(app.getHttpServer())
+      .patch(`/api/webhook-endpoints/${endpoint.id}/enabled`)
+      .send({ enabled: false })
+      .expect(200);
+    const identicalTime = new Date('2026-10-07T09:12:00.000Z');
+    await database
+      .update(notificationDeliveries)
+      .set({ createdAt: identicalTime })
+      .where(eq(notificationDeliveries.endpointId, endpoint.id));
+    const before = await database
+      .select()
+      .from(notificationDeliveries)
+      .where(eq(notificationDeliveries.endpointId, endpoint.id));
+
+    const first = await request(app.getHttpServer())
+      .get(`/api/webhook-endpoints/${endpoint.id}/deliveries?limit=1`)
+      .expect(200);
+    expect(first.body.page.nextCursor).toEqual(expect.any(String));
+    const second = await request(app.getHttpServer())
+      .get(
+        `/api/webhook-endpoints/${endpoint.id}/deliveries?limit=1&cursor=${first.body.page.nextCursor as string}`,
+      )
+      .expect(200);
+    const items = [...first.body.data, ...second.body.data] as Array<{
+      id: string;
+      status: string;
+      event: { type: string };
+      deadReason: string | null;
+      lastErrorCode: string | null;
+      lastHttpStatus: number | null;
+    }>;
+    expect(new Set(items.map((item) => item.id)).size).toBe(2);
+    expect(items.map((item) => item.event.type).sort()).toEqual([
+      'INCIDENT_OPENED',
+      'INCIDENT_RESOLVED',
+    ]);
+    expect(items.find((item) => item.id === openedDelivery!.id)).toMatchObject({
+      status: 'DEAD',
+      deadReason: 'MAX_ATTEMPTS',
+      lastErrorCode: 'HTTP_503',
+      lastHttpStatus: 503,
+    });
+
+    const detail = await request(app.getHttpServer())
+      .get(`/api/webhook-endpoints/${endpoint.id}/deliveries/${openedDelivery!.id}`)
+      .expect(200);
+    expect(detail.body.data).toMatchObject({
+      id: openedDelivery!.id,
+      endpointId: endpoint.id,
+      endpointVersion: {
+        id: openedDelivery!.endpointVersionId,
+        versionNumber: 1,
+        url: endpoint.url,
+      },
+      triggeringRoundId: openedEvent!.triggeringRoundId,
+    });
+    const serialized = JSON.stringify({ items, detail: detail.body.data });
+    for (const forbidden of [
+      sentinel,
+      'claimToken',
+      'signingSecretEnvelope',
+      'ciphertext',
+      'authTag',
+      'signature',
+      'poison',
+      'payload',
+    ])
+      expect(serialized).not.toContain(forbidden);
+    expect(
+      await database
+        .select()
+        .from(notificationDeliveries)
+        .where(eq(notificationDeliveries.endpointId, endpoint.id)),
+    ).toEqual(before);
+
+    const empty = await createEndpoint();
+    const emptyPage = await request(app.getHttpServer())
+      .get(`/api/webhook-endpoints/${empty.id}/deliveries`)
+      .expect(200);
+    expect(emptyPage.body).toEqual({ data: [], page: { nextCursor: null } });
+    await request(app.getHttpServer())
+      .get(`/api/webhook-endpoints/${empty.id}/deliveries/${openedDelivery!.id}`)
+      .expect(404);
+    for (const query of ['limit=0', 'limit=101', 'limit=1.5', 'cursor=invalid', 'extra=true'])
+      await request(app.getHttpServer())
+        .get(`/api/webhook-endpoints/${endpoint.id}/deliveries?${query}`)
+        .expect(400);
   });
 
   async function createEndpoint() {
@@ -345,4 +487,54 @@ describe('webhook endpoint API', () => {
     );
     return result.rows;
   }
+
+  async function completeScheduled(monitorId: string, result: AuthoritativeCheckResult) {
+    await database
+      .update(monitors)
+      .set({ nextCheckAt: sql`clock_timestamp() - interval '1 second'` })
+      .where(eq(monitors.id, monitorId));
+    const [round] = await new ScheduledRoundRepository(database).dispatchDue(1);
+    if (!round) throw new Error('Expected scheduled round.');
+    const executions = new CheckExecutionRepository(database);
+    const claim = await executions.claim(round.id, 45_000);
+    if (claim.state !== 'CLAIMED') throw new Error('Expected execution claim.');
+    expect(
+      await executions.complete(claim.execution.assignmentId, claim.execution.claimToken, result),
+    ).toBe(true);
+  }
 });
+
+function checkResult(
+  values: Partial<AuthoritativeCheckResult> &
+    Pick<AuthoritativeCheckResult, 'outcome' | 'stage' | 'reason'>,
+): AuthoritativeCheckResult {
+  return {
+    statusCode: null,
+    responseTimeMs: null,
+    attemptDurationMs: 10,
+    redirects: [],
+    assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
+    checkedAt: new Date(),
+    ...values,
+  };
+}
+
+function healthy(): AuthoritativeCheckResult {
+  return checkResult({
+    outcome: 'PASS',
+    stage: 'HTTP',
+    reason: 'COMPLETED',
+    statusCode: 200,
+    responseTimeMs: 5,
+  });
+}
+
+function unhealthy(): AuthoritativeCheckResult {
+  return checkResult({
+    outcome: 'FAIL',
+    stage: 'HTTP',
+    reason: 'UNEXPECTED_STATUS',
+    statusCode: 503,
+    responseTimeMs: 5,
+  });
+}

@@ -9,6 +9,12 @@ import {
   WebhookEndpointInputError,
   WebhookEndpointNotFoundError,
   WebhookEndpointRepository,
+  WebhookDeliveryEndpointNotFoundError,
+  WebhookDeliveryHistoryQueryError,
+  WebhookDeliveryReadRepository,
+  parseWebhookDeliveryHistoryQuery,
+  type WebhookDeliveryDetail,
+  type WebhookDeliveryPage,
   type WebhookEndpointRecord,
 } from '@watchrail/db';
 import {
@@ -27,6 +33,8 @@ export class WebhookEndpointsService {
   constructor(
     @Inject(WebhookEndpointRepository)
     private readonly endpoints: WebhookEndpointRepository,
+    @Inject(WebhookDeliveryReadRepository)
+    private readonly deliveries: WebhookDeliveryReadRepository,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
@@ -54,6 +62,40 @@ export class WebhookEndpointsService {
 
   list(context: RequestContext): Promise<WebhookEndpointRecord[]> {
     return this.endpoints.listForOrganization(context.organizationId);
+  }
+
+  async listDeliveries(
+    context: RequestContext,
+    endpointId: string,
+    value: Record<string, unknown>,
+  ): Promise<WebhookDeliveryPage> {
+    try {
+      return await this.deliveries.listForEndpoint(
+        context.organizationId,
+        endpointId,
+        parseWebhookDeliveryHistoryQuery(value),
+      );
+    } catch (error) {
+      this.translateReadError(error);
+    }
+  }
+
+  async findDelivery(
+    context: RequestContext,
+    endpointId: string,
+    deliveryId: string,
+  ): Promise<WebhookDeliveryDetail> {
+    try {
+      const delivery = await this.deliveries.findForEndpoint(
+        context.organizationId,
+        endpointId,
+        deliveryId,
+      );
+      if (!delivery) this.deliveryNotFound();
+      return delivery;
+    } catch (error) {
+      this.translateReadError(error);
+    }
   }
 
   async find(context: RequestContext, endpointId: string): Promise<WebhookEndpointRecord> {
@@ -136,6 +178,23 @@ export class WebhookEndpointsService {
         message: 'Webhook endpoint configuration could not be updated.',
       });
     throw error;
+  }
+
+  private translateReadError(error: unknown): never {
+    if (error instanceof WebhookDeliveryEndpointNotFoundError) this.notFound();
+    if (error instanceof WebhookDeliveryHistoryQueryError)
+      throw new BadRequestException({
+        code: 'VALIDATION_FAILED',
+        message: error.message,
+      });
+    throw error;
+  }
+
+  private deliveryNotFound(): never {
+    throw new NotFoundException({
+      code: 'WEBHOOK_DELIVERY_NOT_FOUND',
+      message: 'Webhook delivery not found.',
+    });
   }
 
   private notFound(): never {

@@ -752,6 +752,12 @@ export const notificationDeliveries = pgTable(
     index('notification_deliveries_eligible_idx')
       .on(table.availableAt, table.createdAt, table.id)
       .where(sql`${table.deliveredAt} is null and ${table.deadAt} is null`),
+    index('notification_deliveries_endpoint_history_idx').on(
+      table.organizationId,
+      table.endpointId,
+      table.createdAt.desc(),
+      table.id.desc(),
+    ),
     check('notification_deliveries_attempt_count_non_negative', sql`${table.attemptCount} >= 0`),
     check(
       'notification_deliveries_http_status_range',
