@@ -23,6 +23,8 @@
     "@watchrail/http-header-security": "workspace:*",
     "@watchrail/domain": "workspace:*",
     "@watchrail/queue": "workspace:*",
+    "@watchrail/webhook-delivery": "workspace:*",
+    "@watchrail/webhook-security": "workspace:*",
     "dotenv": "18.0.1",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2"

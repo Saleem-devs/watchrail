@@ -258,7 +258,9 @@ describe('notification domain outbox', () => {
     await expect(
       repository.releaseForRetry(first.id, first.claimToken, 1000, 'STALE'),
     ).resolves.toBe(false);
-    await expect(repository.markDead(first.id, first.claimToken, 'STALE')).resolves.toBe(false);
+    await expect(repository.markDead(first.id, first.claimToken, 'STALE', 'STALE')).resolves.toBe(
+      false,
+    );
     await expect(
       repository.releaseForRetry(first.id, second!.claimToken, 1000, 'HTTP_503', 503),
     ).resolves.toBe(true);
@@ -267,17 +269,63 @@ describe('notification domain outbox', () => {
     );
     const third = await repository.claimNext();
     await expect(
-      repository.markDead(first.id, third!.claimToken, 'MAX_ATTEMPTS', 503),
+      repository.markDead(first.id, third!.claimToken, 'MAX_ATTEMPTS', 'HTTP_503', 503),
     ).resolves.toBe(true);
+    const [dead] = await connection.db
+      .select()
+      .from(notificationDeliveries)
+      .where(eq(notificationDeliveries.id, first.id));
+    expect(dead).toMatchObject({
+      deadReason: 'MAX_ATTEMPTS',
+      lastErrorCode: 'HTTP_503',
+      lastHttpStatus: 503,
+    });
     await expect(repository.claimNext()).resolves.toBeNull();
 
     await complete((await scheduledRound()).id, healthy());
     const resolved = await repository.claimNext();
-    expect(resolved?.payload.eventType).toBe('INCIDENT_RESOLVED');
+    expect(parseWebhookNotification(resolved!.payload).eventType).toBe('INCIDENT_RESOLVED');
     await expect(
       repository.acknowledgeDelivered(resolved!.id, resolved!.claimToken, 204),
     ).resolves.toBe(true);
     await expect(repository.claimNext()).resolves.toBeNull();
+  });
+
+  it('lets concurrent claimers take distinct due deliveries without blocking', async () => {
+    await createTestEndpoint(
+      organizationId,
+      'Primary operations',
+      'https://primary.example.com/events',
+    );
+    await createTestEndpoint(
+      organizationId,
+      'Secondary operations',
+      'https://secondary.example.com/events',
+    );
+    await openIncident();
+
+    const repository = new NotificationDeliveryRepository(connection.db);
+    const claims = await Promise.all([repository.claimNext(), repository.claimNext()]);
+
+    expect(claims.every((claim) => claim !== null)).toBe(true);
+    expect(new Set(claims.map((claim) => claim!.id)).size).toBe(2);
+  });
+
+  it('claims malformed durable payloads raw so the worker can dead-letter them', async () => {
+    await createTestEndpoint(organizationId, 'Operations', 'https://hooks.example.com/events');
+    await openIncident();
+    const [event] = await connection.db.select().from(notificationEvents);
+    const malformed = { ...(event!.payload as object), poison: true };
+    await connection.db.execute(
+      sql`update notification_events set payload=${JSON.stringify(malformed)}::jsonb where id=${event!.id}::uuid`,
+    );
+    const claimed = await new NotificationDeliveryRepository(connection.db).claimNext();
+    expect(claimed).toMatchObject({
+      eventId: event!.id,
+      organizationId,
+      endpointVersionNumber: 1,
+      payload: { contractVersion: 1, poison: true },
+    });
   });
 
   it.each(['notification_events', 'notification_deliveries'])(

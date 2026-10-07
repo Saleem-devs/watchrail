@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { DrizzleModule, getDrizzleToken } from '@nestjs/drizzle';
 import { NodeHttpExecutor } from '@watchrail/check-engine';
+import { WebhookDeliveryEngine } from '@watchrail/webhook-delivery';
 import { BullMqCheckJobConsumer, BullMqCheckJobPublisher } from '@watchrail/queue';
 import {
   CheckExecutionRepository,
@@ -8,6 +9,7 @@ import {
   ScheduledRoundRepository,
   AvailabilityRepository,
   createWatchrailDatabase,
+  NotificationDeliveryRepository,
 } from '@watchrail/db';
 import type { WatchrailDatabase } from '@watchrail/db';
 import { CheckOutboxRelay, createExponentialBackoff } from './check-outbox-relay.js';
@@ -15,6 +17,7 @@ import { CheckRoundJobHandler } from './check-round-job-handler.js';
 import { WorkerConfigModule } from './config.module.js';
 import { WORKER_CONFIG, type WorkerConfig } from './config.js';
 import { WorkerRuntime } from './worker-runtime.js';
+import { WebhookDeliveryWorker } from './webhook-delivery-worker.js';
 
 @Module({
   imports: [
@@ -28,6 +31,33 @@ import { WorkerRuntime } from './worker-runtime.js';
     }),
   ],
   providers: [
+    {
+      provide: NotificationDeliveryRepository,
+      inject: [getDrizzleToken()],
+      useFactory: (db: WatchrailDatabase) => new NotificationDeliveryRepository(db),
+    },
+    {
+      provide: WebhookDeliveryEngine,
+      useFactory: () => new WebhookDeliveryEngine(),
+    },
+    {
+      provide: WebhookDeliveryWorker,
+      inject: [NotificationDeliveryRepository, WebhookDeliveryEngine, WORKER_CONFIG],
+      useFactory: (
+        deliveries: NotificationDeliveryRepository,
+        engine: WebhookDeliveryEngine,
+        config: WorkerConfig,
+      ) =>
+        new WebhookDeliveryWorker(deliveries, engine, config.webhookSigningSecretKeyring, {
+          leaseDurationMs: config.webhookDeliveryLeaseDurationMs,
+          timeoutMs: config.webhookDeliveryTimeoutMs,
+          maxAttempts: config.webhookDeliveryMaxAttempts,
+          retryDelayMs: createExponentialBackoff(
+            config.webhookDeliveryRetryBaseMs,
+            config.webhookDeliveryRetryMaxMs,
+          ),
+        }),
+    },
     {
       provide: BullMqCheckJobPublisher,
       inject: [WORKER_CONFIG],
@@ -110,6 +140,7 @@ import { WorkerRuntime } from './worker-runtime.js';
         ScheduledRoundRepository,
         AvailabilityRepository,
         WORKER_CONFIG,
+        WebhookDeliveryWorker,
       ],
       useFactory: (
         relay: CheckOutboxRelay,
@@ -118,7 +149,17 @@ import { WorkerRuntime } from './worker-runtime.js';
         scheduledRounds: ScheduledRoundRepository,
         availability: AvailabilityRepository,
         config: WorkerConfig,
-      ) => new WorkerRuntime(relay, consumer, publisher, scheduledRounds, availability, config),
+        webhookDelivery: WebhookDeliveryWorker,
+      ) =>
+        new WorkerRuntime(
+          relay,
+          consumer,
+          publisher,
+          scheduledRounds,
+          availability,
+          config,
+          webhookDelivery,
+        ),
     },
   ],
 })

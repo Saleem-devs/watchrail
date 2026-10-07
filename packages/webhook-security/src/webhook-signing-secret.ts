@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHmac, randomBytes } from 'node:crypto';
 
 export const WEBHOOK_SIGNING_SECRET_LIMITS = { minBytes: 32, maxBytes: 512 } as const;
 
@@ -42,6 +42,13 @@ export class StoredWebhookSigningSecretResolutionError extends Error {
   constructor(options?: ErrorOptions) {
     super('Stored webhook signing secret could not be resolved.', options);
     this.name = 'StoredWebhookSigningSecretResolutionError';
+  }
+}
+
+export class StoredWebhookSigningSecretKeyUnavailableError extends StoredWebhookSigningSecretResolutionError {
+  constructor() {
+    super();
+    this.name = 'StoredWebhookSigningSecretKeyUnavailableError';
   }
 }
 
@@ -115,7 +122,7 @@ export function decryptWebhookSigningSecret(
   assertContext(context);
   try {
     const key = keyring.keys.get(envelope.keyId);
-    if (!key) throw new Error('Encryption key is unavailable.');
+    if (!key) throw new StoredWebhookSigningSecretKeyUnavailableError();
     const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(envelope.iv, 'base64url'));
     decipher.setAAD(aad(context));
     decipher.setAuthTag(Buffer.from(envelope.authTag, 'base64url'));
@@ -130,8 +137,22 @@ export function decryptWebhookSigningSecret(
       throw new Error('Decrypted signing secret has an invalid size.');
     return plaintext.toString('utf8');
   } catch (error) {
+    if (error instanceof StoredWebhookSigningSecretKeyUnavailableError) throw error;
     throw new StoredWebhookSigningSecretResolutionError({ cause: error });
   }
+}
+
+export function signWebhookBody(
+  signingSecret: string,
+  unixTimestampSeconds: number,
+  body: Uint8Array,
+): string {
+  if (!Number.isSafeInteger(unixTimestampSeconds) || unixTimestampSeconds < 0)
+    throw new RangeError('Webhook signature timestamp must be a non-negative safe integer.');
+  const hmac = createHmac('sha256', signingSecret);
+  hmac.update(`${unixTimestampSeconds}.`, 'utf8');
+  hmac.update(body);
+  return `v1=${hmac.digest('hex')}`;
 }
 
 export function parseStoredWebhookSigningSecret(value: unknown): EncryptedWebhookSigningSecretV1 {

@@ -4,6 +4,7 @@ import {
   encryptWebhookSigningSecret,
   loadWebhookSigningSecretKeyring,
   parseStoredWebhookSigningSecret,
+  signWebhookBody,
   StoredWebhookSigningSecretInvariantError,
   StoredWebhookSigningSecretResolutionError,
   WebhookSigningSecretInputError,
@@ -99,5 +100,17 @@ describe('webhook signing-secret security', () => {
         WEBHOOK_SIGNING_SECRET_ENCRYPTION_KEYS: JSON.stringify({ active: 'not-base64!' }),
       }),
     ).toThrow('exactly 32 bytes');
+  });
+
+  it('signs the exact supplied bytes with a stable timestamped V1 signature', () => {
+    const timestamp = 1_800_000_000;
+    const body = Buffer.from('{"event":"opened"}', 'utf8');
+    const signature = signWebhookBody(secret, timestamp, body);
+    expect(signature).toMatch(/^v1=[0-9a-f]{64}$/u);
+    expect(signWebhookBody(secret, timestamp, body)).toBe(signature);
+    const changed = Buffer.from(body);
+    changed[changed.length - 2] = 'X'.charCodeAt(0);
+    expect(signWebhookBody(secret, timestamp, changed)).not.toBe(signature);
+    expect(signWebhookBody(secret, timestamp + 1, body)).not.toBe(signature);
   });
 });

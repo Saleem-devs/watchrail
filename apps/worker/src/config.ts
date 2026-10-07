@@ -16,6 +16,14 @@ export interface WorkerConfig {
   availabilityFlushIntervalMs: number;
   headerEncryptionKeyring: HeaderEncryptionKeyring;
   assertionEncryptionKeyring: AssertionEncryptionKeyring;
+  webhookSigningSecretKeyring: WebhookSigningSecretKeyring;
+  webhookDeliveryTimeoutMs: number;
+  webhookDeliveryLeaseDurationMs: number;
+  webhookDeliveryMaxAttempts: number;
+  webhookDeliveryRetryBaseMs: number;
+  webhookDeliveryRetryMaxMs: number;
+  webhookDeliveryConcurrency: number;
+  webhookDeliveryIdlePollIntervalMs: number;
 }
 
 export function loadWorkerConfig(environment: NodeJS.ProcessEnv = process.env): WorkerConfig {
@@ -24,6 +32,32 @@ export function loadWorkerConfig(environment: NodeJS.ProcessEnv = process.env): 
     'postgresql:',
   ]);
   const redisUrl = requireUrl(environment.REDIS_URL, 'REDIS_URL', ['redis:', 'rediss:']);
+  const webhookDeliveryTimeoutMs = parsePositiveInteger(
+    environment.WEBHOOK_DELIVERY_TIMEOUT_MS,
+    'WEBHOOK_DELIVERY_TIMEOUT_MS',
+    10_000,
+  );
+  const webhookDeliveryLeaseDurationMs = parsePositiveInteger(
+    environment.WEBHOOK_DELIVERY_LEASE_DURATION_MS,
+    'WEBHOOK_DELIVERY_LEASE_DURATION_MS',
+    30_000,
+  );
+  if (webhookDeliveryLeaseDurationMs < webhookDeliveryTimeoutMs + 5_000)
+    throw new Error(
+      'WEBHOOK_DELIVERY_LEASE_DURATION_MS must exceed WEBHOOK_DELIVERY_TIMEOUT_MS by at least 5000.',
+    );
+  const webhookDeliveryRetryBaseMs = parsePositiveInteger(
+    environment.WEBHOOK_DELIVERY_RETRY_BASE_MS,
+    'WEBHOOK_DELIVERY_RETRY_BASE_MS',
+    5_000,
+  );
+  const webhookDeliveryRetryMaxMs = parsePositiveInteger(
+    environment.WEBHOOK_DELIVERY_RETRY_MAX_MS,
+    'WEBHOOK_DELIVERY_RETRY_MAX_MS',
+    300_000,
+  );
+  if (webhookDeliveryRetryBaseMs > webhookDeliveryRetryMaxMs)
+    throw new Error('WEBHOOK_DELIVERY_RETRY_BASE_MS cannot exceed WEBHOOK_DELIVERY_RETRY_MAX_MS.');
 
   return {
     databaseUrl,
@@ -89,6 +123,30 @@ export function loadWorkerConfig(environment: NodeJS.ProcessEnv = process.env): 
     ),
     headerEncryptionKeyring: loadHeaderEncryptionKeyring(environment),
     assertionEncryptionKeyring: loadAssertionEncryptionKeyring(environment),
+    webhookSigningSecretKeyring: loadWebhookSigningSecretKeyring(environment),
+    webhookDeliveryTimeoutMs,
+    webhookDeliveryLeaseDurationMs,
+    webhookDeliveryMaxAttempts: parseIntegerRange(
+      environment.WEBHOOK_DELIVERY_MAX_ATTEMPTS,
+      'WEBHOOK_DELIVERY_MAX_ATTEMPTS',
+      8,
+      1,
+      100,
+    ),
+    webhookDeliveryRetryBaseMs,
+    webhookDeliveryRetryMaxMs,
+    webhookDeliveryConcurrency: parseIntegerRange(
+      environment.WEBHOOK_DELIVERY_CONCURRENCY,
+      'WEBHOOK_DELIVERY_CONCURRENCY',
+      5,
+      1,
+      100,
+    ),
+    webhookDeliveryIdlePollIntervalMs: parsePositiveInteger(
+      environment.WEBHOOK_DELIVERY_IDLE_POLL_INTERVAL_MS,
+      'WEBHOOK_DELIVERY_IDLE_POLL_INTERVAL_MS',
+      500,
+    ),
   };
 }
 
@@ -141,3 +199,7 @@ import {
   loadAssertionEncryptionKeyring,
   type AssertionEncryptionKeyring,
 } from '@watchrail/assertion-security';
+import {
+  loadWebhookSigningSecretKeyring,
+  type WebhookSigningSecretKeyring,
+} from '@watchrail/webhook-security';

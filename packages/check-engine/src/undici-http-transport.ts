@@ -2,7 +2,7 @@ import { isIP, type LookupFunction } from 'node:net';
 import type { SecureContextOptions } from 'node:tls';
 import { Client } from 'undici';
 import type { ResolvedHttpTarget, ValidatedAddress } from './safe-http-target.js';
-import type { HttpMethod, HttpResponseHeader } from './types.js';
+import type { HttpResponseHeader } from './types.js';
 import type { HttpRequestHeader } from './types.js';
 
 export interface HttpTransportResponse {
@@ -32,9 +32,10 @@ export interface PinnedHttpTransport {
     this: void,
     input: {
       target: ResolvedHttpTarget;
-      method: HttpMethod;
+      method: 'GET' | 'HEAD' | 'POST';
       signal: AbortSignal;
       headers?: readonly HttpRequestHeader[];
+      body?: Uint8Array;
     },
   ): Promise<HttpTransportResponse>;
 }
@@ -53,9 +54,10 @@ export class UndiciPinnedHttpTransport implements PinnedHttpTransport {
 
   async request(input: {
     target: ResolvedHttpTarget;
-    method: HttpMethod;
+    method: 'GET' | 'HEAD' | 'POST';
     signal: AbortSignal;
     headers?: readonly HttpRequestHeader[];
+    body?: Uint8Array;
   }): Promise<HttpTransportResponse> {
     const { target } = input;
     if (target.addresses.length === 0) {
@@ -80,6 +82,7 @@ export class UndiciPinnedHttpTransport implements PinnedHttpTransport {
           ...Object.fromEntries((input.headers ?? []).map((header) => [header.name, header.value])),
           host: target.url.host,
         },
+        ...(input.body === undefined ? {} : { body: input.body }),
         signal: input.signal,
       });
 
