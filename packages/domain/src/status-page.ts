@@ -1,4 +1,3 @@
-import type { AvailabilityWindowState } from './availability.js';
 import type { MonitorLifecycleState } from './monitor.js';
 
 export const PUBLIC_STATUS_STATES = [
@@ -8,6 +7,13 @@ export const PUBLIC_STATUS_STATES = [
   'MONITORING_IMPAIRED',
 ] as const;
 export type PublicStatusState = (typeof PUBLIC_STATUS_STATES)[number];
+
+/**
+ * Stable boundary between internal confirmation/aggregation and public health.
+ * Multi-location evaluation can derive this without changing the public model.
+ */
+export const AGGREGATE_HEALTH_STATES = ['UP', 'DEGRADED', 'DOWN', 'UNKNOWN'] as const;
+export type AggregateHealthState = (typeof AGGREGATE_HEALTH_STATES)[number];
 
 export const STATUS_PAGE_LIMITS = {
   minimumSlugLength: 3,
@@ -48,8 +54,7 @@ export interface StatusPage {
 
 export interface StatusPageComponentHealth {
   lifecycleState: MonitorLifecycleState;
-  availabilityState: AvailabilityWindowState;
-  hasActiveIncident: boolean;
+  aggregateState: AggregateHealthState;
 }
 
 export interface PublicStatusPageComponentV1 {
@@ -153,24 +158,29 @@ export function parseStatusPage(value: unknown): StatusPage {
 
 export function derivePublicComponentStatus(health: StatusPageComponentHealth): PublicStatusState {
   if (health.lifecycleState !== 'ENABLED') return 'MONITORING_IMPAIRED';
-  if (health.hasActiveIncident || health.availabilityState === 'UNAVAILABLE') {
-    return 'MAJOR_OUTAGE';
+  switch (health.aggregateState) {
+    case 'UP':
+      return 'OPERATIONAL';
+    case 'DEGRADED':
+      return 'PARTIAL_OUTAGE';
+    case 'DOWN':
+      return 'MAJOR_OUTAGE';
+    case 'UNKNOWN':
+      return 'MONITORING_IMPAIRED';
   }
-  if (health.availabilityState === 'UNKNOWN' || health.availabilityState === 'EXCLUDED') {
-    return 'MONITORING_IMPAIRED';
-  }
-  return 'OPERATIONAL';
 }
 
 export function derivePublicPageStatus(
   componentStatuses: readonly PublicStatusState[],
 ): PublicStatusState {
   if (componentStatuses.length === 0) return 'MONITORING_IMPAIRED';
-  const outages = componentStatuses.filter((status) => status === 'MAJOR_OUTAGE').length;
-  if (outages === componentStatuses.length) return 'MAJOR_OUTAGE';
-  if (outages > 0) return 'PARTIAL_OUTAGE';
   if (componentStatuses.some((status) => status === 'MONITORING_IMPAIRED')) {
     return 'MONITORING_IMPAIRED';
+  }
+  const outages = componentStatuses.filter((status) => status === 'MAJOR_OUTAGE').length;
+  if (outages === componentStatuses.length) return 'MAJOR_OUTAGE';
+  if (outages > 0 || componentStatuses.some((status) => status === 'PARTIAL_OUTAGE')) {
+    return 'PARTIAL_OUTAGE';
   }
   return 'OPERATIONAL';
 }

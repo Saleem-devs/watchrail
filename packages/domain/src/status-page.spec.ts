@@ -11,30 +11,28 @@ import {
 
 describe('status-page domain contract', () => {
   it.each([
-    ['ENABLED', 'AVAILABLE', false, 'OPERATIONAL'],
-    ['ENABLED', 'UNAVAILABLE', false, 'MAJOR_OUTAGE'],
-    ['ENABLED', 'AVAILABLE', true, 'MAJOR_OUTAGE'],
-    ['ENABLED', 'UNKNOWN', false, 'MONITORING_IMPAIRED'],
-    ['ENABLED', 'EXCLUDED', false, 'MONITORING_IMPAIRED'],
-    ['PAUSED', 'AVAILABLE', false, 'MONITORING_IMPAIRED'],
-    ['ARCHIVED', 'UNAVAILABLE', true, 'MONITORING_IMPAIRED'],
-  ] as const)(
-    '%s / %s / incident=%s becomes %s',
-    (lifecycleState, availabilityState, hasActiveIncident, expected) => {
-      expect(
-        derivePublicComponentStatus({ lifecycleState, availabilityState, hasActiveIncident }),
-      ).toBe(expected);
-    },
-  );
+    ['ENABLED', 'UP', 'OPERATIONAL'],
+    ['ENABLED', 'DEGRADED', 'PARTIAL_OUTAGE'],
+    ['ENABLED', 'DOWN', 'MAJOR_OUTAGE'],
+    ['ENABLED', 'UNKNOWN', 'MONITORING_IMPAIRED'],
+    ['PAUSED', 'UP', 'MONITORING_IMPAIRED'],
+    ['ARCHIVED', 'DOWN', 'MONITORING_IMPAIRED'],
+  ] as const)('%s / %s becomes %s', (lifecycleState, aggregateState, expected) => {
+    expect(derivePublicComponentStatus({ lifecycleState, aggregateState })).toBe(expected);
+  });
 
   it.each([
     [[], 'MONITORING_IMPAIRED'],
     [['OPERATIONAL'], 'OPERATIONAL'],
+    [['PARTIAL_OUTAGE'], 'PARTIAL_OUTAGE'],
     [['MAJOR_OUTAGE'], 'MAJOR_OUTAGE'],
     [['MAJOR_OUTAGE', 'MAJOR_OUTAGE'], 'MAJOR_OUTAGE'],
     [['OPERATIONAL', 'MAJOR_OUTAGE'], 'PARTIAL_OUTAGE'],
-    [['MONITORING_IMPAIRED', 'MAJOR_OUTAGE'], 'PARTIAL_OUTAGE'],
+    [['OPERATIONAL', 'PARTIAL_OUTAGE'], 'PARTIAL_OUTAGE'],
+    [['PARTIAL_OUTAGE', 'MAJOR_OUTAGE'], 'PARTIAL_OUTAGE'],
+    [['MONITORING_IMPAIRED', 'MAJOR_OUTAGE'], 'MONITORING_IMPAIRED'],
     [['OPERATIONAL', 'MONITORING_IMPAIRED'], 'MONITORING_IMPAIRED'],
+    [['PARTIAL_OUTAGE', 'MONITORING_IMPAIRED'], 'MONITORING_IMPAIRED'],
   ] as const)('aggregates %j as %s', (states, expected) => {
     expect(derivePublicPageStatus(states)).toBe(expected);
   });
