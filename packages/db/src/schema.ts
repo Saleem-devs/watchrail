@@ -238,6 +238,65 @@ export const monitors = pgTable(
   ],
 );
 
+export const statusPages = pgTable(
+  'status_pages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull(),
+    name: varchar('name', { length: 100 }).notNull(),
+    slug: varchar('slug', { length: 63 }).notNull(),
+    published: boolean('published').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('status_pages_identity_unique').on(table.id, table.organizationId),
+    unique('status_pages_slug_unique').on(table.slug),
+    index('status_pages_organization_created_idx').on(
+      table.organizationId,
+      table.createdAt,
+      table.id,
+    ),
+    check('status_pages_name_not_blank', sql`length(btrim(${table.name})) > 0`),
+    check(
+      'status_pages_slug_format',
+      sql`${table.slug} ~ '^[a-z0-9]+(-[a-z0-9]+)*$' and length(${table.slug}) between 3 and 63`,
+    ),
+  ],
+);
+
+export const statusPageComponents = pgTable(
+  'status_page_components',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull(),
+    statusPageId: uuid('status_page_id').notNull(),
+    monitorId: uuid('monitor_id').notNull(),
+    displayName: varchar('display_name', { length: 100 }).notNull(),
+    position: integer('position').notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'status_page_components_page_fk',
+      columns: [table.statusPageId, table.organizationId],
+      foreignColumns: [statusPages.id, statusPages.organizationId],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'status_page_components_monitor_fk',
+      columns: [table.monitorId, table.organizationId],
+      foreignColumns: [monitors.id, monitors.organizationId],
+    }),
+    unique('status_page_components_page_monitor_unique').on(table.statusPageId, table.monitorId),
+    unique('status_page_components_page_position_unique').on(table.statusPageId, table.position),
+    index('status_page_components_page_order_idx').on(table.statusPageId, table.position),
+    check(
+      'status_page_components_display_name_not_blank',
+      sql`length(btrim(${table.displayName})) > 0`,
+    ),
+    check('status_page_components_position_non_negative', sql`${table.position} >= 0`),
+  ],
+);
+
 export const monitorConfigurationVersions = pgTable(
   'monitor_configuration_versions',
   {
