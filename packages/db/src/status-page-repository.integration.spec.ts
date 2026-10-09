@@ -93,6 +93,45 @@ describe('StatusPageRepository', () => {
     ).resolves.toMatchObject({ slug: 'acme-old' });
   });
 
+  it('preserves component identity and makes identical replacement retry-safe', async () => {
+    const api = await createMonitorFor(organizationA, 'API');
+    const web = await createMonitorFor(organizationA, 'Web');
+    const replacement = await createMonitorFor(organizationA, 'Replacement');
+    const page = await pages.create(organizationA, {
+      name: 'Acme',
+      slug: 'acme',
+      components: [
+        { displayName: 'API', monitorId: api.id, position: 0 },
+        { displayName: 'Web', monitorId: web.id, position: 1 },
+      ],
+    });
+    const apiId = page.components[0]!.id;
+    const webId = page.components[1]!.id;
+
+    const identical = await pages.replaceComponents(organizationA, page.id, [
+      { displayName: 'API', monitorId: api.id, position: 0 },
+      { displayName: 'Web', monitorId: web.id, position: 1 },
+    ]);
+    expect(identical.components.map(({ id }) => id)).toEqual([apiId, webId]);
+    expect(identical.updatedAt).toEqual(page.updatedAt);
+
+    const renamedAndReordered = await pages.replaceComponents(organizationA, page.id, [
+      { displayName: 'Website', monitorId: web.id, position: 0 },
+      { displayName: 'Public API', monitorId: api.id, position: 1 },
+    ]);
+    expect(renamedAndReordered.components).toMatchObject([
+      { id: webId, displayName: 'Website', monitorId: web.id, position: 0 },
+      { id: apiId, displayName: 'Public API', monitorId: api.id, position: 1 },
+    ]);
+
+    const changedMembership = await pages.replaceComponents(organizationA, page.id, [
+      { displayName: 'Public API', monitorId: api.id, position: 0 },
+      { displayName: 'Replacement', monitorId: replacement.id, position: 1 },
+    ]);
+    expect(changedMembership.components[0]!.id).toBe(apiId);
+    expect(changedMembership.components[1]!.id).not.toBe(webId);
+  });
+
   it('rejects foreign and newly archived monitors before replacing existing components', async () => {
     const original = await createMonitorFor(organizationA, 'Original');
     const foreign = await createMonitorFor(organizationB, 'Foreign');

@@ -151,12 +151,23 @@ export class StatusPageRepository {
   ): Promise<StatusPageRecord> {
     return this.db.transaction(async (tx) => {
       const current = await this.lockCurrent(tx, organizationId, statusPageId);
-      const candidate = this.parseCandidate(organizationId, statusPageId, {
-        name: current.page.name,
-        slug: current.page.slug,
-        published: current.page.published,
-        components: input,
-      });
+      const existingByMonitorId = new Map(
+        current.components.map((component) => [component.monitorId, component]),
+      );
+      const candidate = this.parseCandidate(
+        organizationId,
+        statusPageId,
+        {
+          name: current.page.name,
+          slug: current.page.slug,
+          published: current.page.published,
+          components: input,
+        },
+        existingByMonitorId,
+      );
+      if (componentsEqual(candidate.components, current.components)) {
+        return toRecord(current.page, current.components);
+      }
       await this.assertSelectableMonitors(
         tx,
         organizationId,
@@ -213,6 +224,7 @@ export class StatusPageRepository {
       published: boolean;
       components: StatusPageComponentInput[];
     },
+    existingByMonitorId: ReadonlyMap<string, StatusPage['components'][number]> = new Map(),
   ): StatusPage & { id: string } {
     const parsed = parseStatusPage({
       organizationId,
@@ -220,7 +232,7 @@ export class StatusPageRepository {
       slug: input.slug,
       published: input.published,
       components: input.components.map((component) => ({
-        id: randomUUID(),
+        id: existingByMonitorId.get(component.monitorId)?.id ?? randomUUID(),
         ...component,
       })),
     });
@@ -347,6 +359,25 @@ function toRecord(
     createdAt: page.createdAt,
     updatedAt: page.updatedAt,
   };
+}
+
+function componentsEqual(
+  left: readonly StatusPage['components'][number][],
+  right: readonly StatusPage['components'][number][],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((component, index) => {
+      const other = right[index];
+      return (
+        other !== undefined &&
+        component.id === other.id &&
+        component.monitorId === other.monitorId &&
+        component.displayName === other.displayName &&
+        component.position === other.position
+      );
+    })
+  );
 }
 
 function isPostgresError(error: unknown, code: string, constraint: string): boolean {
