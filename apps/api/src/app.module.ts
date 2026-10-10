@@ -3,6 +3,8 @@ import { ConfigModule } from './config.module.js';
 import { DatabaseModule } from './database.module.js';
 import { MonitorsController } from './monitors.controller.js';
 import { MonitorsService } from './monitors.service.js';
+import { PublicStatusPagesController } from './public-status-pages.controller.js';
+import { PublicStatusPagesService } from './public-status-pages.service.js';
 import { DevelopmentIdentityMiddleware } from './request-context.js';
 import { StatusPagesController } from './status-pages.controller.js';
 import { StatusPagesService } from './status-pages.service.js';
@@ -11,10 +13,16 @@ import { WebhookEndpointsService } from './webhook-endpoints.service.js';
 
 @Module({
   imports: [ConfigModule, DatabaseModule],
-  controllers: [MonitorsController, StatusPagesController, WebhookEndpointsController],
+  controllers: [
+    MonitorsController,
+    PublicStatusPagesController,
+    StatusPagesController,
+    WebhookEndpointsController,
+  ],
   providers: [
     DevelopmentIdentityMiddleware,
     MonitorsService,
+    PublicStatusPagesService,
     StatusPagesService,
     WebhookEndpointsService,
   ],

@@ -6,6 +6,7 @@ import {
   IncidentReadRepository,
   ManualRoundRepository,
   MonitorRepository,
+  PublicStatusPageRepository,
   StatusPageRepository,
   UptimeReadRepository,
   WebhookDeliveryReadRepository,
@@ -26,6 +27,11 @@ import { APP_CONFIG, type AppConfig } from './config.js';
     }),
   ],
   providers: [
+    {
+      provide: PublicStatusPageRepository,
+      inject: [getDrizzleToken()],
+      useFactory: (db: WatchrailDatabase) => new PublicStatusPageRepository(db),
+    },
     {
       provide: StatusPageRepository,
       inject: [getDrizzleToken()],
@@ -73,6 +79,7 @@ import { APP_CONFIG, type AppConfig } from './config.js';
     IncidentReadRepository,
     ManualRoundRepository,
     MonitorRepository,
+    PublicStatusPageRepository,
     StatusPageRepository,
     WebhookEndpointRepository,
     WebhookDeliveryReadRepository,
