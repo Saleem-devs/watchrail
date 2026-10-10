@@ -4,6 +4,7 @@ import { DatabaseModule } from './database.module.js';
 import { MonitorsController } from './monitors.controller.js';
 import { MonitorsService } from './monitors.service.js';
 import { PublicStatusPagesController } from './public-status-pages.controller.js';
+import { PublicStatusPageRateLimiter } from './public-status-page-rate-limiter.js';
 import { PublicStatusPagesService } from './public-status-pages.service.js';
 import { DevelopmentIdentityMiddleware } from './request-context.js';
 import { StatusPagesController } from './status-pages.controller.js';
@@ -22,6 +23,10 @@ import { WebhookEndpointsService } from './webhook-endpoints.service.js';
   providers: [
     DevelopmentIdentityMiddleware,
     MonitorsService,
+    {
+      provide: PublicStatusPageRateLimiter,
+      useFactory: () => new PublicStatusPageRateLimiter(),
+    },
     PublicStatusPagesService,
     StatusPagesService,
     WebhookEndpointsService,

@@ -8,12 +8,13 @@ import {
   createDatabaseConnection,
   migrateDatabase,
   MonitorRepository,
+  PublicStatusPageRepository,
   StatusPageRepository,
   type WatchrailDatabase,
 } from '@watchrail/db';
 import { createMonitor } from '@watchrail/domain';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 
 const organizationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -69,6 +70,8 @@ describe('public status page API', () => {
     const response = await request(app.getHttpServer())
       .get('/api/public/status-pages/acme-status')
       .expect(200);
+    expect(response.headers['cache-control']).toBe('public, max-age=30, stale-while-revalidate=30');
+    expect(response.headers.etag).toMatch(/^W\/"[A-Za-z0-9_-]+"$/u);
     expect(response.body.data).toEqual({
       contractVersion: 1,
       name: 'Acme Status',
@@ -90,6 +93,15 @@ describe('public status page API', () => {
     for (const forbidden of [organizationId, monitor.id, 'secret.example.com', 'monitorId']) {
       expect(serialized).not.toContain(forbidden);
     }
+    const notModified = await request(app.getHttpServer())
+      .get('/api/public/status-pages/acme-status')
+      .set('If-None-Match', response.headers.etag as string)
+      .expect(304);
+    expect(notModified.text).toBe('');
+    expect(notModified.headers['cache-control']).toBe(
+      'public, max-age=30, stale-while-revalidate=30',
+    );
+    expect(notModified.headers.etag).toBe(response.headers.etag);
     await request(app.getHttpServer()).get('/api/status-pages').expect(401);
   });
 
@@ -111,5 +123,41 @@ describe('public status page API', () => {
     expect(hidden.body).toEqual(missing.body);
     expect(invalid.body).toEqual(missing.body);
     expect(missing.body).toMatchObject({ code: 'STATUS_PAGE_NOT_FOUND' });
+    for (const response of [hidden, missing, invalid]) {
+      expect(response.headers['cache-control']).toBe('no-store');
+    }
+  });
+
+  it('marks projection failures no-store', async () => {
+    const repository = app.get(PublicStatusPageRepository);
+    const failure = vi
+      .spyOn(repository, 'findPublishedBySlug')
+      .mockRejectedValueOnce(new Error('synthetic projection failure'));
+    const response = await request(app.getHttpServer())
+      .get('/api/public/status-pages/failing-page')
+      .expect(500);
+    expect(response.headers['cache-control']).toBe('no-store');
+    failure.mockRestore();
+  });
+
+  it('throttles before lookup with a bounded Retry-After and no-store response', async () => {
+    let throttled = false;
+    for (let index = 0; index < 31; index += 1) {
+      const response = await request(app.getHttpServer()).get(
+        `/api/public/status-pages/missing-${index}`,
+      );
+      if (response.status === 429) {
+        throttled = true;
+        expect(response.body).toEqual({
+          code: 'PUBLIC_RATE_LIMIT_EXCEEDED',
+          message: 'Too many requests.',
+        });
+        expect(response.headers['cache-control']).toBe('no-store');
+        expect(Number(response.headers['retry-after'])).toBeGreaterThanOrEqual(1);
+        expect(Number(response.headers['retry-after'])).toBeLessThanOrEqual(60);
+        break;
+      }
+    }
+    expect(throttled).toBe(true);
   });
 });
