@@ -54,31 +54,39 @@ export class PublicStatusPageRateLimiter {
   consume(clientId: string): PublicStatusPageRateLimitResult {
     const now = this.now();
     this.evictExpired(now);
-    const globalResult = take(
-      this.global,
-      this.options.globalCapacity,
-      this.options.globalRefillPerSecond,
-      now,
-      this.options.maximumRetryAfterSeconds,
-    );
-    if (!globalResult.allowed) return globalResult;
+    refill(this.global, this.options.globalCapacity, this.options.globalRefillPerSecond, now);
 
     let client = this.clients.get(clientId);
+    let trackClient = false;
     if (!client) {
       if (this.clients.size < this.options.maximumTrackedClients) {
         client = fullBucket(this.options.clientCapacity, now);
-        this.clients.set(clientId, client);
+        trackClient = true;
       } else {
         client = this.overflow;
       }
     }
-    return take(
-      client,
-      this.options.clientCapacity,
-      this.options.clientRefillPerSecond,
-      now,
-      this.options.maximumRetryAfterSeconds,
-    );
+    refill(client, this.options.clientCapacity, this.options.clientRefillPerSecond, now);
+
+    if (client.tokens < 1) {
+      return retryAfter(
+        client,
+        this.options.clientRefillPerSecond,
+        this.options.maximumRetryAfterSeconds,
+      );
+    }
+    if (this.global.tokens < 1) {
+      return retryAfter(
+        this.global,
+        this.options.globalRefillPerSecond,
+        this.options.maximumRetryAfterSeconds,
+      );
+    }
+
+    client.tokens -= 1;
+    this.global.tokens -= 1;
+    if (trackClient) this.clients.set(clientId, client);
+    return { allowed: true };
   }
 
   get trackedClientCount(): number {
@@ -104,21 +112,18 @@ function fullBucket(capacity: number, now: number): Bucket {
   return { tokens: capacity, lastRefillMs: now, lastSeenMs: now };
 }
 
-function take(
-  bucket: Bucket,
-  capacity: number,
-  refillPerSecond: number,
-  now: number,
-  maximumRetryAfterSeconds: number,
-): PublicStatusPageRateLimitResult {
+function refill(bucket: Bucket, capacity: number, refillPerSecond: number, now: number): void {
   const elapsedMs = Math.max(0, now - bucket.lastRefillMs);
   bucket.tokens = Math.min(capacity, bucket.tokens + (elapsedMs / 1_000) * refillPerSecond);
   bucket.lastRefillMs = now;
   bucket.lastSeenMs = now;
-  if (bucket.tokens >= 1) {
-    bucket.tokens -= 1;
-    return { allowed: true };
-  }
+}
+
+function retryAfter(
+  bucket: Bucket,
+  refillPerSecond: number,
+  maximumRetryAfterSeconds: number,
+): PublicStatusPageRateLimitResult {
   return {
     allowed: false,
     retryAfterSeconds: Math.max(

@@ -23,6 +23,40 @@ describe('PublicStatusPageRateLimiter', () => {
     expect(limiter.consume('a').allowed).toBe(true);
     expect(limiter.consume('b').allowed).toBe(true);
     expect(limiter.consume('c')).toEqual({ allowed: false, retryAfterSeconds: 1 });
+    expect(limiter.trackedClientCount).toBe(2);
+  });
+
+  it('does not consume global capacity for client-throttled requests', () => {
+    const limiter = new PublicStatusPageRateLimiter(
+      options({ clientCapacity: 1, globalCapacity: 2 }),
+      () => 0,
+    );
+
+    expect(limiter.consume('noisy').allowed).toBe(true);
+    for (let index = 0; index < 100; index += 1) {
+      expect(limiter.consume('noisy').allowed).toBe(false);
+    }
+    expect(limiter.consume('healthy').allowed).toBe(true);
+  });
+
+  it('does not consume client capacity for globally throttled requests', () => {
+    let now = 0;
+    const limiter = new PublicStatusPageRateLimiter(
+      options({
+        clientCapacity: 2,
+        clientRefillPerSecond: 0.001,
+        globalCapacity: 2,
+        globalRefillPerSecond: 1,
+      }),
+      () => now,
+    );
+
+    expect(limiter.consume('healthy').allowed).toBe(true);
+    expect(limiter.consume('other').allowed).toBe(true);
+    expect(limiter.consume('healthy').allowed).toBe(false);
+
+    now = 1_000;
+    expect(limiter.consume('healthy').allowed).toBe(true);
   });
 
   it('bounds tracked identities and shares one overflow bucket', () => {
