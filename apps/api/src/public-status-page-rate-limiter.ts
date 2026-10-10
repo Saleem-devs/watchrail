@@ -122,6 +122,22 @@ export class PublicStatusPageRateLimiter {
   }
 }
 
+/** Dedicated global-only budget for authenticated Next.js SSR projection reads. */
+export class InternalStatusPageRateLimiter {
+  private readonly limiter: PublicStatusPageRateLimiter;
+
+  constructor(
+    options: PublicStatusPageRateLimitOptions = PUBLIC_STATUS_PAGE_RATE_LIMIT_DEFAULTS,
+    now: () => number = () => performance.now(),
+  ) {
+    this.limiter = new PublicStatusPageRateLimiter(options, now);
+  }
+
+  consume(): PublicStatusPageRateLimitResult {
+    return this.limiter.consumeGlobal();
+  }
+}
+
 function fullBucket(capacity: number, now: number): Bucket {
   return { tokens: capacity, lastRefillMs: now, lastSeenMs: now };
 }

@@ -13,14 +13,14 @@ import {
 import type { Response } from 'express';
 import { APP_CONFIG, type AppConfig } from './config.js';
 import { PUBLIC_STATUS_PAGE_NO_STORE } from './public-status-page-http.js';
-import { PublicStatusPageRateLimiter } from './public-status-page-rate-limiter.js';
+import { InternalStatusPageRateLimiter } from './public-status-page-rate-limiter.js';
 import { PublicStatusPagesService } from './public-status-pages.service.js';
 
 @Controller('internal/status-pages')
 export class InternalStatusPagesController {
   constructor(
     private readonly pages: PublicStatusPagesService,
-    private readonly limiter: PublicStatusPageRateLimiter,
+    private readonly limiter: InternalStatusPageRateLimiter,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
@@ -34,7 +34,7 @@ export class InternalStatusPagesController {
     if (!tokenMatches(token, this.config.publicStatusPageInternalToken)) {
       throw new UnauthorizedException({ code: 'UNAUTHORIZED', message: 'Unauthorized.' });
     }
-    const limit = this.limiter.consumeGlobal();
+    const limit = this.limiter.consume();
     if (!limit.allowed) {
       response.setHeader('Retry-After', String(limit.retryAfterSeconds));
       throw new HttpException(
