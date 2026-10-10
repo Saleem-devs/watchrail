@@ -13,7 +13,9 @@ describe('public status page HTTP policy', () => {
 
   it('produces a stable ETag when only generatedAt changes', () => {
     const first = projection();
-    expect(createPublicStatusPageEtag(first)).toBe(
+    const etag = createPublicStatusPageEtag(first);
+    expect(etag).toMatch(/^W\/"[A-Za-z0-9_-]+"$/u);
+    expect(etag).toBe(
       createPublicStatusPageEtag({ ...first, generatedAt: '2026-10-10T12:01:00.000Z' }),
     );
   });
@@ -30,8 +32,9 @@ describe('public status page HTTP policy', () => {
 
   it('matches strong, weak, wildcard, and list validators', () => {
     const etag = createPublicStatusPageEtag(projection());
+    const strongEtag = etag.slice(2);
     expect(ifNoneMatchMatches(etag, etag)).toBe(true);
-    expect(ifNoneMatchMatches(`W/${etag}`, etag)).toBe(true);
+    expect(ifNoneMatchMatches(strongEtag, etag)).toBe(true);
     expect(ifNoneMatchMatches('*', etag)).toBe(true);
     expect(ifNoneMatchMatches(`"other", ${etag}`, etag)).toBe(true);
     expect(ifNoneMatchMatches('"other"', etag)).toBe(false);

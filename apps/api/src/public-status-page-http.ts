@@ -19,13 +19,17 @@ export function createPublicStatusPageEtag(page: PublicStatusPageProjectionV1): 
     resolvedIncidents: page.resolvedIncidents,
   };
   const digest = createHash('sha256').update(JSON.stringify(stableProjection)).digest('base64url');
-  return `"${digest}"`;
+  return `W/"${digest}"`;
 }
 
 export function ifNoneMatchMatches(value: string | undefined, etag: string): boolean {
   if (!value) return false;
   return value.split(',').some((candidate) => {
     const normalized = candidate.trim();
-    return normalized === '*' || normalized === etag || normalized === `W/${etag}`;
+    return normalized === '*' || withoutWeakPrefix(normalized) === withoutWeakPrefix(etag);
   });
+}
+
+function withoutWeakPrefix(value: string): string {
+  return value.startsWith('W/') ? value.slice(2) : value;
 }

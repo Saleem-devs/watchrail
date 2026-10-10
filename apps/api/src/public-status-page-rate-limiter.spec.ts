@@ -51,6 +51,30 @@ describe('PublicStatusPageRateLimiter', () => {
     expect(limiter.consume('old').allowed).toBe(true);
     expect(limiter.trackedClientCount).toBe(1);
   });
+
+  it('does not sweep the full client map on every request at capacity', () => {
+    let now = 0;
+    const limiter = new PublicStatusPageRateLimiter(
+      options({
+        clientCapacity: 100,
+        globalCapacity: 1_000,
+        clientTtlMs: 10_000,
+        sweepIntervalMs: 500,
+        maximumTrackedClients: 2,
+      }),
+      () => now,
+    );
+
+    limiter.consume('a');
+    limiter.consume('b');
+    now = 100;
+    for (let index = 0; index < 100; index += 1) limiter.consume(`overflow-${index}`);
+    expect(limiter.completedSweepCount).toBe(0);
+
+    now = 500;
+    limiter.consume('overflow-after-cadence');
+    expect(limiter.completedSweepCount).toBe(1);
+  });
 });
 
 function options(
@@ -62,6 +86,7 @@ function options(
     globalCapacity: 100,
     globalRefillPerSecond: 1,
     clientTtlMs: 10_000,
+    sweepIntervalMs: 1_000,
     maximumTrackedClients: 10,
     maximumRetryAfterSeconds: 10,
     ...overrides,

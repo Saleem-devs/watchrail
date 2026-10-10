@@ -4,6 +4,7 @@ export interface PublicStatusPageRateLimitOptions {
   globalCapacity: number;
   globalRefillPerSecond: number;
   clientTtlMs: number;
+  sweepIntervalMs: number;
   maximumTrackedClients: number;
   maximumRetryAfterSeconds: number;
 }
@@ -14,6 +15,7 @@ export const PUBLIC_STATUS_PAGE_RATE_LIMIT_DEFAULTS = {
   globalCapacity: 600,
   globalRefillPerSecond: 10,
   clientTtlMs: 5 * 60 * 1_000,
+  sweepIntervalMs: 30 * 1_000,
   maximumTrackedClients: 10_000,
   maximumRetryAfterSeconds: 60,
 } as const satisfies PublicStatusPageRateLimitOptions;
@@ -36,6 +38,7 @@ export class PublicStatusPageRateLimiter {
   private readonly global: Bucket;
   private readonly overflow: Bucket;
   private lastSweepMs: number;
+  private sweepCount = 0;
 
   constructor(
     private readonly options: PublicStatusPageRateLimitOptions = PUBLIC_STATUS_PAGE_RATE_LIMIT_DEFAULTS,
@@ -82,17 +85,18 @@ export class PublicStatusPageRateLimiter {
     return this.clients.size;
   }
 
+  /** Identity-free diagnostic used to verify bounded cleanup cadence. */
+  get completedSweepCount(): number {
+    return this.sweepCount;
+  }
+
   private evictExpired(now: number): void {
-    if (
-      this.clients.size < this.options.maximumTrackedClients &&
-      now - this.lastSweepMs < this.options.clientTtlMs
-    ) {
-      return;
-    }
+    if (now - this.lastSweepMs < this.options.sweepIntervalMs) return;
     for (const [clientId, bucket] of this.clients) {
       if (now - bucket.lastSeenMs >= this.options.clientTtlMs) this.clients.delete(clientId);
     }
     this.lastSweepMs = now;
+    this.sweepCount += 1;
   }
 }
 
@@ -138,4 +142,10 @@ function validateOptions(options: PublicStatusPageRateLimitOptions): void {
     throw new RangeError('maximumTrackedClients must be an integer.');
   if (!Number.isSafeInteger(options.maximumRetryAfterSeconds))
     throw new RangeError('maximumRetryAfterSeconds must be an integer.');
+  if (!Number.isSafeInteger(options.clientTtlMs))
+    throw new RangeError('clientTtlMs must be an integer.');
+  if (!Number.isSafeInteger(options.sweepIntervalMs))
+    throw new RangeError('sweepIntervalMs must be an integer.');
+  if (options.sweepIntervalMs > options.clientTtlMs)
+    throw new RangeError('sweepIntervalMs must not exceed clientTtlMs.');
 }

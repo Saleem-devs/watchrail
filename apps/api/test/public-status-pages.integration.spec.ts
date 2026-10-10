@@ -71,7 +71,7 @@ describe('public status page API', () => {
       .get('/api/public/status-pages/acme-status')
       .expect(200);
     expect(response.headers['cache-control']).toBe('public, max-age=30, stale-while-revalidate=30');
-    expect(response.headers.etag).toMatch(/^"[A-Za-z0-9_-]+"$/u);
+    expect(response.headers.etag).toMatch(/^W\/"[A-Za-z0-9_-]+"$/u);
     expect(response.body.data).toEqual({
       contractVersion: 1,
       name: 'Acme Status',
