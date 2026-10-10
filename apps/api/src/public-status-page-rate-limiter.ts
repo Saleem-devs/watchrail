@@ -89,6 +89,20 @@ export class PublicStatusPageRateLimiter {
     return { allowed: true };
   }
 
+  consumeGlobal(): PublicStatusPageRateLimitResult {
+    const now = this.now();
+    refill(this.global, this.options.globalCapacity, this.options.globalRefillPerSecond, now);
+    if (this.global.tokens < 1) {
+      return retryAfter(
+        this.global,
+        this.options.globalRefillPerSecond,
+        this.options.maximumRetryAfterSeconds,
+      );
+    }
+    this.global.tokens -= 1;
+    return { allowed: true };
+  }
+
   get trackedClientCount(): number {
     return this.clients.size;
   }

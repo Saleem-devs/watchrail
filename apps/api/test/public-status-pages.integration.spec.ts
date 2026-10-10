@@ -29,6 +29,7 @@ describe('public status page API', () => {
     process.env.NODE_ENV = 'test';
     process.env.DATABASE_URL = container.getConnectionUri();
     process.env.DEV_IDENTITY_ENABLED = 'false';
+    process.env.PUBLIC_STATUS_PAGE_INTERNAL_TOKEN = 'test-internal-status-page-token-0001';
     process.env.HTTP_HEADER_ACTIVE_KEY_ID = 'test';
     process.env.HTTP_HEADER_ENCRYPTION_KEYS = JSON.stringify({
       test: Buffer.alloc(32).toString('base64'),
@@ -126,6 +127,20 @@ describe('public status page API', () => {
     for (const response of [hidden, missing, invalid]) {
       expect(response.headers['cache-control']).toBe('no-store');
     }
+  });
+
+  it('serves SSR through a server-authenticated global-only limiter path', async () => {
+    for (let index = 0; index < 31; index += 1) {
+      await request(app.getHttpServer())
+        .get('/api/internal/status-pages/acme-status')
+        .set('x-watchrail-internal-token', 'test-internal-status-page-token-0001')
+        .expect(200)
+        .expect('Cache-Control', 'no-store');
+    }
+    await request(app.getHttpServer())
+      .get('/api/internal/status-pages/acme-status')
+      .expect(401)
+      .expect('Cache-Control', 'no-store');
   });
 
   it('marks projection failures no-store', async () => {

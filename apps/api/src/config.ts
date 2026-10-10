@@ -8,6 +8,7 @@ export interface AppConfig {
   headerEncryptionKeyring: HeaderEncryptionKeyring;
   assertionEncryptionKeyring: AssertionEncryptionKeyring;
   webhookSigningSecretKeyring: WebhookSigningSecretKeyring;
+  publicStatusPageInternalToken: string;
 }
 
 export function loadAppConfig(environment: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -29,6 +30,13 @@ export function loadAppConfig(environment: NodeJS.ProcessEnv = process.env): App
     throw new Error('PORT must be an integer from 1 through 65535.');
   }
 
+  const publicStatusPageInternalToken =
+    environment.PUBLIC_STATUS_PAGE_INTERNAL_TOKEN ??
+    (nodeEnv === 'production' ? undefined : 'watchrail-development-status-page-token');
+  if (!publicStatusPageInternalToken || publicStatusPageInternalToken.length < 32) {
+    throw new Error('PUBLIC_STATUS_PAGE_INTERNAL_TOKEN must contain at least 32 characters.');
+  }
+
   return {
     nodeEnv,
     port,
@@ -37,6 +45,7 @@ export function loadAppConfig(environment: NodeJS.ProcessEnv = process.env): App
     headerEncryptionKeyring: loadHeaderEncryptionKeyring(environment),
     assertionEncryptionKeyring: loadAssertionEncryptionKeyring(environment),
     webhookSigningSecretKeyring: loadWebhookSigningSecretKeyring(environment),
+    publicStatusPageInternalToken,
   };
 }
 

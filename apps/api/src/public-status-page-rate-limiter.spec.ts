@@ -59,6 +59,15 @@ describe('PublicStatusPageRateLimiter', () => {
     expect(limiter.consume('healthy').allowed).toBe(true);
   });
 
+  it('applies the global limit without creating or consuming client buckets', () => {
+    const limiter = new PublicStatusPageRateLimiter(options({ globalCapacity: 2 }), () => 0);
+
+    expect(limiter.consumeGlobal()).toEqual({ allowed: true });
+    expect(limiter.consumeGlobal()).toEqual({ allowed: true });
+    expect(limiter.consumeGlobal()).toEqual({ allowed: false, retryAfterSeconds: 1 });
+    expect(limiter.trackedClientCount).toBe(0);
+  });
+
   it('bounds tracked identities and shares one overflow bucket', () => {
     const limiter = new PublicStatusPageRateLimiter(
       options({ clientCapacity: 1, globalCapacity: 100, maximumTrackedClients: 2 }),

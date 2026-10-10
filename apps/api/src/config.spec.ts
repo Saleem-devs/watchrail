@@ -39,4 +39,15 @@ describe('loadAppConfig', () => {
       port: 4000,
     });
   });
+
+  it('requires an explicit internal status-page token in production', () => {
+    expect(() =>
+      loadAppConfig({
+        NODE_ENV: 'production',
+        DATABASE_URL: 'postgresql://example.invalid/watchrail',
+        DEV_IDENTITY_ENABLED: 'false',
+        ...encryptionEnvironment,
+      }),
+    ).toThrow('PUBLIC_STATUS_PAGE_INTERNAL_TOKEN must contain at least 32 characters.');
+  });
 });
