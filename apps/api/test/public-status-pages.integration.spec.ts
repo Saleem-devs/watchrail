@@ -16,6 +16,10 @@ import { createMonitor } from '@watchrail/domain';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AppModule } from '../src/app.module.js';
+import {
+  InternalStatusPageRateLimiter,
+  PUBLIC_STATUS_PAGE_RATE_LIMIT_DEFAULTS,
+} from '../src/public-status-page-rate-limiter.js';
 
 const organizationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
@@ -29,6 +33,7 @@ describe('public status page API', () => {
     process.env.NODE_ENV = 'test';
     process.env.DATABASE_URL = container.getConnectionUri();
     process.env.DEV_IDENTITY_ENABLED = 'false';
+    process.env.PUBLIC_STATUS_PAGE_INTERNAL_TOKEN = 'test-internal-status-page-token-0001';
     process.env.HTTP_HEADER_ACTIVE_KEY_ID = 'test';
     process.env.HTTP_HEADER_ENCRYPTION_KEYS = JSON.stringify({
       test: Buffer.alloc(32).toString('base64'),
@@ -44,7 +49,15 @@ describe('public status page API', () => {
     const migration = createDatabaseConnection(container.getConnectionUri());
     await migrateDatabase(migration, resolve(process.cwd(), '../../packages/db/drizzle'));
     await migration.pool.end();
-    const module = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    const module = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(InternalStatusPageRateLimiter)
+      .useValue(
+        new InternalStatusPageRateLimiter({
+          ...PUBLIC_STATUS_PAGE_RATE_LIMIT_DEFAULTS,
+          globalCapacity: 2,
+        }),
+      )
+      .compile();
     database = module.get<WatchrailDatabase>(getDrizzleToken());
     app = module.createNestApplication();
     app.setGlobalPrefix('api');
@@ -126,6 +139,26 @@ describe('public status page API', () => {
     for (const response of [hidden, missing, invalid]) {
       expect(response.headers['cache-control']).toBe('no-store');
     }
+  });
+
+  it('serves SSR through a server-authenticated global-only limiter path', async () => {
+    for (let index = 0; index < 2; index += 1) {
+      await request(app.getHttpServer())
+        .get('/api/internal/status-pages/acme-status')
+        .set('x-watchrail-internal-token', 'test-internal-status-page-token-0001')
+        .expect(200)
+        .expect('Cache-Control', 'no-store');
+    }
+    await request(app.getHttpServer())
+      .get('/api/internal/status-pages/acme-status')
+      .set('x-watchrail-internal-token', 'test-internal-status-page-token-0001')
+      .expect(429)
+      .expect('Cache-Control', 'no-store');
+    await request(app.getHttpServer()).get('/api/public/status-pages/acme-status').expect(200);
+    await request(app.getHttpServer())
+      .get('/api/internal/status-pages/acme-status')
+      .expect(401)
+      .expect('Cache-Control', 'no-store');
   });
 
   it('marks projection failures no-store', async () => {

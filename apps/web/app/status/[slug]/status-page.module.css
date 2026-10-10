@@ -1,0 +1,223 @@
+.page {
+  width: min(760px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 0 0 100px;
+}
+.header {
+  min-height: 86px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  border-bottom: 1px solid var(--border);
+}
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  font-weight: 750;
+  text-decoration: none;
+}
+.brandMark {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  color: #06100b;
+  background: var(--accent);
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 900;
+}
+.serviceName {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  margin: 56px 0 28px;
+  padding: 32px;
+  border: 1px solid currentColor;
+  background: rgba(13, 19, 21, 0.92);
+}
+.banner h1 {
+  margin: 0;
+  font-size: clamp(30px, 6vw, 48px);
+  letter-spacing: -0.045em;
+}
+.statusDot {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border: 4px solid currentColor;
+  border-radius: 50%;
+  box-shadow: 0 0 24px currentColor;
+}
+.eyebrow {
+  margin: 0 0 7px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.section {
+  margin-top: 20px;
+  border: 1px solid var(--border);
+  background: rgba(13, 19, 21, 0.92);
+}
+.sectionHeading {
+  min-height: 92px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 22px 26px;
+  border-bottom: 1px solid var(--border);
+}
+.sectionHeading h2 {
+  margin: 0;
+  font-size: 20px;
+}
+.sectionHeading > span {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.componentList,
+.incidentList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.componentList li,
+.incidentList li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 21px 26px;
+  border-bottom: 1px solid var(--border);
+}
+.componentList li:last-child,
+.incidentList li:last-child {
+  border-bottom: 0;
+}
+.componentList strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+}
+.smallDot {
+  width: 8px;
+  height: 8px;
+  background: currentColor;
+  border-radius: 50%;
+}
+.incidentList h3 {
+  margin: 0 0 5px;
+  font-size: 16px;
+}
+.incidentList strong {
+  color: var(--text);
+  font-size: 12px;
+}
+.incidentList p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: right;
+}
+.empty {
+  margin: 0;
+  padding: 26px;
+  color: var(--muted);
+}
+.footer {
+  padding: 28px 0;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+.footer time {
+  color: var(--text);
+}
+.operational {
+  color: var(--accent);
+}
+.partial {
+  color: var(--warning);
+}
+.major {
+  color: var(--danger);
+}
+.impaired {
+  color: #b8a7ff;
+}
+.refresh {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 2;
+  padding: 12px 16px;
+  border: 1px solid #365348;
+  border-radius: 8px;
+  color: var(--accent);
+  background: #0b2118;
+  cursor: pointer;
+  font-weight: 700;
+}
+.refresh:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+.message {
+  width: min(640px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 18vh 0;
+}
+.message h1 {
+  font-size: clamp(36px, 7vw, 64px);
+}
+.message p {
+  color: var(--muted);
+  line-height: 1.7;
+}
+.message button {
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  color: var(--text);
+  background: var(--surface-raised);
+  cursor: pointer;
+}
+@media (max-width: 560px) {
+  .header {
+    align-items: flex-start;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .banner {
+    align-items: flex-start;
+    padding: 24px;
+  }
+  .componentList li,
+  .incidentList li {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .incidentList p {
+    text-align: left;
+  }
+  .refresh {
+    right: 16px;
+    bottom: 16px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .statusDot {
+    box-shadow: none;
+  }
+}

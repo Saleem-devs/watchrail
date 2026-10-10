@@ -89,6 +89,20 @@ export class PublicStatusPageRateLimiter {
     return { allowed: true };
   }
 
+  consumeGlobal(): PublicStatusPageRateLimitResult {
+    const now = this.now();
+    refill(this.global, this.options.globalCapacity, this.options.globalRefillPerSecond, now);
+    if (this.global.tokens < 1) {
+      return retryAfter(
+        this.global,
+        this.options.globalRefillPerSecond,
+        this.options.maximumRetryAfterSeconds,
+      );
+    }
+    this.global.tokens -= 1;
+    return { allowed: true };
+  }
+
   get trackedClientCount(): number {
     return this.clients.size;
   }
@@ -105,6 +119,22 @@ export class PublicStatusPageRateLimiter {
     }
     this.lastSweepMs = now;
     this.sweepCount += 1;
+  }
+}
+
+/** Dedicated global-only budget for authenticated Next.js SSR projection reads. */
+export class InternalStatusPageRateLimiter {
+  private readonly limiter: PublicStatusPageRateLimiter;
+
+  constructor(
+    options: PublicStatusPageRateLimitOptions = PUBLIC_STATUS_PAGE_RATE_LIMIT_DEFAULTS,
+    now: () => number = () => performance.now(),
+  ) {
+    this.limiter = new PublicStatusPageRateLimiter(options, now);
+  }
+
+  consume(): PublicStatusPageRateLimitResult {
+    return this.limiter.consumeGlobal();
   }
 }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  InternalStatusPageRateLimiter,
   PublicStatusPageRateLimiter,
   type PublicStatusPageRateLimitOptions,
 } from './public-status-page-rate-limiter.js';
@@ -57,6 +58,45 @@ describe('PublicStatusPageRateLimiter', () => {
 
     now = 1_000;
     expect(limiter.consume('healthy').allowed).toBe(true);
+  });
+
+  it('applies the global limit without creating or consuming client buckets', () => {
+    const limiter = new PublicStatusPageRateLimiter(options({ globalCapacity: 2 }), () => 0);
+
+    expect(limiter.consumeGlobal()).toEqual({ allowed: true });
+    expect(limiter.consumeGlobal()).toEqual({ allowed: true });
+    expect(limiter.consumeGlobal()).toEqual({ allowed: false, retryAfterSeconds: 1 });
+    expect(limiter.trackedClientCount).toBe(0);
+  });
+
+  it('isolates the public API and internal SSR global budgets', () => {
+    const publicLimiter = new PublicStatusPageRateLimiter(
+      options({ clientCapacity: 10, globalCapacity: 1 }),
+      () => 0,
+    );
+    const internalLimiter = new InternalStatusPageRateLimiter(
+      options({ globalCapacity: 1 }),
+      () => 0,
+    );
+
+    expect(internalLimiter.consume()).toEqual({ allowed: true });
+    expect(internalLimiter.consume()).toEqual({ allowed: false, retryAfterSeconds: 1 });
+    expect(publicLimiter.consume('fresh-public-client')).toEqual({ allowed: true });
+
+    const otherPublicLimiter = new PublicStatusPageRateLimiter(
+      options({ clientCapacity: 10, globalCapacity: 1 }),
+      () => 0,
+    );
+    const otherInternalLimiter = new InternalStatusPageRateLimiter(
+      options({ globalCapacity: 1 }),
+      () => 0,
+    );
+    expect(otherPublicLimiter.consume('public-client')).toEqual({ allowed: true });
+    expect(otherPublicLimiter.consume('another-client')).toEqual({
+      allowed: false,
+      retryAfterSeconds: 1,
+    });
+    expect(otherInternalLimiter.consume()).toEqual({ allowed: true });
   });
 
   it('bounds tracked identities and shares one overflow bucket', () => {

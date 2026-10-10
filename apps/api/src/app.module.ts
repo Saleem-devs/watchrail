@@ -4,9 +4,13 @@ import { DatabaseModule } from './database.module.js';
 import { MonitorsController } from './monitors.controller.js';
 import { MonitorsService } from './monitors.service.js';
 import { PublicStatusPagesController } from './public-status-pages.controller.js';
-import { PublicStatusPageRateLimiter } from './public-status-page-rate-limiter.js';
+import {
+  InternalStatusPageRateLimiter,
+  PublicStatusPageRateLimiter,
+} from './public-status-page-rate-limiter.js';
 import { PublicStatusPagesService } from './public-status-pages.service.js';
 import { DevelopmentIdentityMiddleware } from './request-context.js';
+import { InternalStatusPagesController } from './internal-status-pages.controller.js';
 import { StatusPagesController } from './status-pages.controller.js';
 import { StatusPagesService } from './status-pages.service.js';
 import { WebhookEndpointsController } from './webhook-endpoints.controller.js';
@@ -15,6 +19,7 @@ import { WebhookEndpointsService } from './webhook-endpoints.service.js';
 @Module({
   imports: [ConfigModule, DatabaseModule],
   controllers: [
+    InternalStatusPagesController,
     MonitorsController,
     PublicStatusPagesController,
     StatusPagesController,
@@ -26,6 +31,10 @@ import { WebhookEndpointsService } from './webhook-endpoints.service.js';
     {
       provide: PublicStatusPageRateLimiter,
       useFactory: () => new PublicStatusPageRateLimiter(),
+    },
+    {
+      provide: InternalStatusPageRateLimiter,
+      useFactory: () => new InternalStatusPageRateLimiter(),
     },
     PublicStatusPagesService,
     StatusPagesService,
