@@ -22,6 +22,8 @@
     "db:generate": "pnpm --filter @watchrail/contracts build && pnpm --filter @watchrail/domain build && pnpm --filter @watchrail/db db:generate",
     "db:migrate": "pnpm --filter @watchrail/contracts build && pnpm --filter @watchrail/domain build && pnpm --filter @watchrail/db db:migrate",
     "db:migrate:check": "pnpm --filter @watchrail/db test:migrations",
+    "acceptance:seed:status-pages": "pnpm build:packages && node --env-file=.env tooling/seed-status-page-acceptance.mjs",
+    "acceptance:clean:status-pages": "pnpm build:packages && node --env-file=.env tooling/seed-status-page-acceptance.mjs --clean",
     "docs:check": "node tooling/check-doc-links.mjs",
     "verify:fast": "pnpm format && pnpm lint && pnpm typecheck && pnpm test",
     "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:integration && pnpm test:e2e && pnpm build && pnpm db:migrate:check && pnpm docs:check"
