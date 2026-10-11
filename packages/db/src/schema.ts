@@ -27,6 +27,12 @@ import {
   EXECUTION_ASSIGNMENT_STATUSES,
   HTTP_METHODS,
   MONITOR_LIFECYCLE_STATES,
+  PROBE_AGENT_STATUSES,
+  PROBE_ATTEMPT_STATUSES,
+  PROBE_CREDENTIAL_STATUSES,
+  PROBE_LOCATION_STATUSES,
+  HTTP_ENGINE_VERSION,
+  HTTP_EXECUTION_POLICY_VERSION,
   type HttpStatusPolicy,
   type AssertionEvaluationV1,
   type HttpRedirectHop,
@@ -87,6 +93,164 @@ export const notificationEventTypeEnum = pgEnum('notification_event_type', [
 export const availabilityStateEnum = pgEnum(
   'availability_window_state',
   AVAILABILITY_WINDOW_STATES,
+);
+
+export const probeLocationStatusEnum = pgEnum('probe_location_status', PROBE_LOCATION_STATUSES);
+export const probeAgentStatusEnum = pgEnum('probe_agent_status', PROBE_AGENT_STATUSES);
+export const probeCredentialStatusEnum = pgEnum(
+  'probe_credential_status',
+  PROBE_CREDENTIAL_STATUSES,
+);
+export const probeAttemptStatusEnum = pgEnum('probe_attempt_status', PROBE_ATTEMPT_STATUSES);
+
+export const probeLocations = pgTable(
+  'probe_locations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull(),
+    name: varchar('name', { length: 120 }).notNull(),
+    slug: varchar('slug', { length: 64 }).notNull(),
+    status: probeLocationStatusEnum('status').notNull().default('ACTIVE'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('probe_locations_identity_unique').on(table.organizationId, table.id),
+    unique('probe_locations_slug_unique').on(table.organizationId, table.slug),
+    check('probe_locations_name_not_blank', sql`length(btrim(${table.name})) > 0`),
+    check(
+      'probe_locations_slug_format',
+      sql`${table.slug} ~ '^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$' and ${table.slug} <> 'local'`,
+    ),
+    index('probe_locations_organization_idx').on(table.organizationId, table.createdAt, table.id),
+  ],
+);
+
+export const probeAgents = pgTable(
+  'probe_agents',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull(),
+    locationId: uuid('location_id').notNull(),
+    name: varchar('name', { length: 120 }).notNull(),
+    status: probeAgentStatusEnum('status').notNull().default('PENDING'),
+    lastHeartbeatAt: timestamp('last_heartbeat_at', { withTimezone: true }),
+    engineVersion: varchar('engine_version', { length: 64 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (table) => [
+    unique('probe_agents_identity_unique').on(table.organizationId, table.id),
+    foreignKey({
+      name: 'probe_agents_location_fk',
+      columns: [table.organizationId, table.locationId],
+      foreignColumns: [probeLocations.organizationId, probeLocations.id],
+    }),
+    check('probe_agents_name_not_blank', sql`length(btrim(${table.name})) > 0`),
+    check(
+      'probe_agents_revocation_consistent',
+      sql`(${table.status} = 'REVOKED') = (${table.revokedAt} is not null)`,
+    ),
+    index('probe_agents_location_idx').on(
+      table.organizationId,
+      table.locationId,
+      table.createdAt,
+      table.id,
+    ),
+  ],
+);
+
+export const probeAgentEnrollments = pgTable(
+  'probe_agent_enrollments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull(),
+    locationId: uuid('location_id').notNull(),
+    agentName: varchar('agent_name', { length: 120 }).notNull(),
+    tokenVerifier: varchar('token_verifier', { length: 43 }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    consumedAt: timestamp('consumed_at', { withTimezone: true }),
+    consumedByAgentId: uuid('consumed_by_agent_id'),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('probe_agent_enrollments_identity_unique').on(table.organizationId, table.id),
+    unique('probe_agent_enrollments_verifier_unique').on(table.tokenVerifier),
+    foreignKey({
+      name: 'probe_agent_enrollments_location_fk',
+      columns: [table.organizationId, table.locationId],
+      foreignColumns: [probeLocations.organizationId, probeLocations.id],
+    }),
+    foreignKey({
+      name: 'probe_agent_enrollments_agent_fk',
+      columns: [table.organizationId, table.consumedByAgentId],
+      foreignColumns: [probeAgents.organizationId, probeAgents.id],
+    }),
+    check('probe_agent_enrollments_name_not_blank', sql`length(btrim(${table.agentName})) > 0`),
+    check(
+      'probe_agent_enrollments_verifier_format',
+      sql`${table.tokenVerifier} ~ '^[A-Za-z0-9_-]{43}$'`,
+    ),
+    check(
+      'probe_agent_enrollments_consumption_consistent',
+      sql`(${table.consumedAt} is null) = (${table.consumedByAgentId} is null)`,
+    ),
+    check(
+      'probe_agent_enrollments_terminal_exclusive',
+      sql`not (${table.consumedAt} is not null and ${table.revokedAt} is not null)`,
+    ),
+    check(
+      'probe_agent_enrollments_expiry_after_creation',
+      sql`${table.expiresAt} > ${table.createdAt}`,
+    ),
+    index('probe_agent_enrollments_location_idx').on(
+      table.organizationId,
+      table.locationId,
+      table.createdAt,
+    ),
+  ],
+);
+
+export const probeAgentCredentials = pgTable(
+  'probe_agent_credentials',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull(),
+    agentId: uuid('agent_id').notNull(),
+    versionNumber: integer('version_number').notNull(),
+    verifier: varchar('verifier', { length: 43 }).notNull(),
+    status: probeCredentialStatusEnum('status').notNull().default('ACTIVE'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (table) => [
+    unique('probe_agent_credentials_identity_unique').on(table.organizationId, table.id),
+    unique('probe_agent_credentials_version_unique').on(
+      table.organizationId,
+      table.agentId,
+      table.versionNumber,
+    ),
+    unique('probe_agent_credentials_verifier_unique').on(table.verifier),
+    foreignKey({
+      name: 'probe_agent_credentials_agent_fk',
+      columns: [table.organizationId, table.agentId],
+      foreignColumns: [probeAgents.organizationId, probeAgents.id],
+    }).onDelete('cascade'),
+    check('probe_agent_credentials_version_positive', sql`${table.versionNumber} > 0`),
+    check(
+      'probe_agent_credentials_verifier_format',
+      sql`${table.verifier} ~ '^[A-Za-z0-9_-]{43}$'`,
+    ),
+    check(
+      'probe_agent_credentials_revocation_consistent',
+      sql`(${table.status} = 'REVOKED') = (${table.revokedAt} is not null)`,
+    ),
+    uniqueIndex('probe_agent_credentials_one_active_unique')
+      .on(table.organizationId, table.agentId)
+      .where(sql`${table.status} = 'ACTIVE'`),
+  ],
 );
 
 export const monitorAvailabilityState = pgTable(
@@ -455,6 +619,13 @@ export const checkExecutionAssignments = pgTable(
     roundId: uuid('round_id').notNull(),
 
     location: varchar('location', { length: 64 }).notNull().default('local'),
+    probeLocationId: uuid('probe_location_id'),
+    executionPolicyVersion: varchar('execution_policy_version', { length: 64 })
+      .notNull()
+      .default(HTTP_EXECUTION_POLICY_VERSION),
+    requiredEngineVersion: varchar('required_engine_version', { length: 64 })
+      .notNull()
+      .default(HTTP_ENGINE_VERSION),
 
     status: executionAssignmentStatusEnum('status').notNull().default('PENDING'),
 
@@ -473,6 +644,12 @@ export const checkExecutionAssignments = pgTable(
       foreignColumns: [checkRounds.organizationId, checkRounds.id],
     }).onDelete('cascade'),
 
+    foreignKey({
+      name: 'check_execution_assignments_probe_location_fk',
+      columns: [table.organizationId, table.probeLocationId],
+      foreignColumns: [probeLocations.organizationId, probeLocations.id],
+    }),
+
     unique('check_execution_assignments_round_location_unique').on(table.roundId, table.location),
 
     unique('check_execution_assignments_identity_unique').on(
@@ -480,8 +657,24 @@ export const checkExecutionAssignments = pgTable(
       table.roundId,
       table.id,
     ),
+    unique('check_execution_assignments_organization_id_unique').on(table.organizationId, table.id),
 
-    check('check_execution_assignments_location_local', sql`${table.location} = 'local'`),
+    check(
+      'check_execution_assignments_location_consistent',
+      sql`(
+        (${table.location} = 'local' and ${table.probeLocationId} is null)
+        or
+        (${table.probeLocationId} is not null and ${table.location} = ${table.probeLocationId}::text)
+      )`,
+    ),
+    check(
+      'check_execution_assignments_policy_version_format',
+      sql`${table.executionPolicyVersion} ~ '^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$'`,
+    ),
+    check(
+      'check_execution_assignments_engine_version_format',
+      sql`${table.requiredEngineVersion} ~ '^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$'`,
+    ),
 
     check(
       'check_execution_assignments_attempt_count_non_negative',
@@ -500,6 +693,65 @@ export const checkExecutionAssignments = pgTable(
       'check_execution_assignments_completion_consistent',
       sql`(${table.status} = 'COMPLETED') = (${table.completedAt} is not null)`,
     ),
+  ],
+);
+
+export const probeExecutionAttempts = pgTable(
+  'probe_execution_attempts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull(),
+    assignmentId: uuid('assignment_id').notNull(),
+    agentId: uuid('agent_id').notNull(),
+    attemptNumber: integer('attempt_number').notNull(),
+    claimTokenVerifier: varchar('claim_token_verifier', { length: 43 }).notNull(),
+    status: probeAttemptStatusEnum('status').notNull().default('LEASED'),
+    leasedAt: timestamp('leased_at', { withTimezone: true }).notNull().defaultNow(),
+    leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }).notNull(),
+    submittedAt: timestamp('submitted_at', { withTimezone: true }),
+    terminalReason: varchar('terminal_reason', { length: 64 }),
+    submittedEngineVersion: varchar('submitted_engine_version', { length: 64 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('probe_execution_attempts_identity_unique').on(table.organizationId, table.id),
+    unique('probe_execution_attempts_number_unique').on(
+      table.organizationId,
+      table.assignmentId,
+      table.attemptNumber,
+    ),
+    unique('probe_execution_attempts_claim_verifier_unique').on(table.claimTokenVerifier),
+    foreignKey({
+      name: 'probe_execution_attempts_assignment_fk',
+      columns: [table.organizationId, table.assignmentId],
+      foreignColumns: [checkExecutionAssignments.organizationId, checkExecutionAssignments.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'probe_execution_attempts_agent_fk',
+      columns: [table.organizationId, table.agentId],
+      foreignColumns: [probeAgents.organizationId, probeAgents.id],
+    }),
+    check('probe_execution_attempts_number_positive', sql`${table.attemptNumber} > 0`),
+    check(
+      'probe_execution_attempts_claim_verifier_format',
+      sql`${table.claimTokenVerifier} ~ '^[A-Za-z0-9_-]{43}$'`,
+    ),
+    check('probe_execution_attempts_lease_order', sql`${table.leaseExpiresAt} > ${table.leasedAt}`),
+    check(
+      'probe_execution_attempts_submission_consistent',
+      sql`(${table.status} = 'SUBMITTED') = (${table.submittedAt} is not null and ${table.submittedEngineVersion} is not null)`,
+    ),
+    check(
+      'probe_execution_attempts_terminal_reason_consistent',
+      sql`(${table.status} in ('EXPIRED', 'REJECTED')) = (${table.terminalReason} is not null)`,
+    ),
+    index('probe_execution_attempts_assignment_idx').on(
+      table.organizationId,
+      table.assignmentId,
+      table.attemptNumber,
+    ),
+    index('probe_execution_attempts_lease_idx').on(table.status, table.leaseExpiresAt, table.id),
   ],
 );
 
@@ -934,3 +1186,9 @@ export type CheckExecutionAssignmentRecord = typeof checkExecutionAssignments.$i
 export type CheckExecutionResultRecord = typeof checkExecutionResults.$inferSelect;
 
 export type CheckRoundOutboxRecord = typeof checkRoundOutbox.$inferSelect;
+
+export type ProbeLocationRecord = typeof probeLocations.$inferSelect;
+export type ProbeAgentRecord = typeof probeAgents.$inferSelect;
+export type ProbeAgentEnrollmentRecord = typeof probeAgentEnrollments.$inferSelect;
+export type ProbeAgentCredentialRecord = typeof probeAgentCredentials.$inferSelect;
+export type ProbeExecutionAttemptRecord = typeof probeExecutionAttempts.$inferSelect;

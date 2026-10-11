@@ -138,6 +138,11 @@ describe('database migrations', () => {
           ,'notification_events'
           ,'webhook_endpoint_versions'
           ,'webhook_endpoints'
+          ,'probe_locations'
+          ,'probe_agents'
+          ,'probe_agent_enrollments'
+          ,'probe_agent_credentials'
+          ,'probe_execution_attempts'
         )
       order by table_name
     `);
@@ -153,6 +158,11 @@ describe('database migrations', () => {
       'monitors',
       'notification_deliveries',
       'notification_events',
+      'probe_agent_credentials',
+      'probe_agent_enrollments',
+      'probe_agents',
+      'probe_execution_attempts',
+      'probe_locations',
       'webhook_endpoint_versions',
       'webhook_endpoints',
     ]);
@@ -250,6 +260,26 @@ describe('database migrations', () => {
         timeout_ms: 10_000,
         interval_seconds: 60,
         locations: ['local'],
+      },
+    ]);
+
+    const migratedAssignment = await connection.pool.query<{
+      location: string;
+      probe_location_id: string | null;
+      execution_policy_version: string;
+      required_engine_version: string;
+    }>(
+      `select location, probe_location_id, execution_policy_version, required_engine_version
+         from check_execution_assignments
+        where id = $1`,
+      [existingRound.assignmentId],
+    );
+    expect(migratedAssignment.rows).toEqual([
+      {
+        location: 'local',
+        probe_location_id: null,
+        execution_policy_version: 'http-v1',
+        required_engine_version: 'watchrail-http-v1',
       },
     ]);
 
