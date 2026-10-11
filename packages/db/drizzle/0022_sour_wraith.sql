@@ -51,6 +51,7 @@ CREATE TABLE "probe_agents" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"revoked_at" timestamp with time zone,
 	CONSTRAINT "probe_agents_identity_unique" UNIQUE("organization_id","id"),
+	CONSTRAINT "probe_agents_location_identity_unique" UNIQUE("organization_id","id","location_id"),
 	CONSTRAINT "probe_agents_name_not_blank" CHECK (length(btrim("probe_agents"."name")) > 0),
 	CONSTRAINT "probe_agents_revocation_consistent" CHECK (("probe_agents"."status" = 'REVOKED') = ("probe_agents"."revoked_at" is not null))
 );
@@ -59,6 +60,7 @@ CREATE TABLE "probe_execution_attempts" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"organization_id" uuid NOT NULL,
 	"assignment_id" uuid NOT NULL,
+	"location_id" uuid NOT NULL,
 	"agent_id" uuid NOT NULL,
 	"attempt_number" integer NOT NULL,
 	"claim_token_verifier" varchar(43) NOT NULL,
@@ -100,16 +102,18 @@ ALTER TABLE "check_execution_assignments" ADD COLUMN "execution_policy_version" 
 ALTER TABLE "check_execution_assignments" ADD COLUMN "required_engine_version" varchar(64) DEFAULT 'watchrail-http-v1' NOT NULL;--> statement-breakpoint
 ALTER TABLE "probe_agent_credentials" ADD CONSTRAINT "probe_agent_credentials_agent_fk" FOREIGN KEY ("organization_id","agent_id") REFERENCES "public"."probe_agents"("organization_id","id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "probe_agent_enrollments" ADD CONSTRAINT "probe_agent_enrollments_location_fk" FOREIGN KEY ("organization_id","location_id") REFERENCES "public"."probe_locations"("organization_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "probe_agent_enrollments" ADD CONSTRAINT "probe_agent_enrollments_agent_fk" FOREIGN KEY ("organization_id","consumed_by_agent_id") REFERENCES "public"."probe_agents"("organization_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "probe_agent_enrollments" ADD CONSTRAINT "probe_agent_enrollments_agent_fk" FOREIGN KEY ("organization_id","consumed_by_agent_id","location_id") REFERENCES "public"."probe_agents"("organization_id","id","location_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "probe_agents" ADD CONSTRAINT "probe_agents_location_fk" FOREIGN KEY ("organization_id","location_id") REFERENCES "public"."probe_locations"("organization_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "check_execution_assignments" ADD CONSTRAINT "check_execution_assignments_organization_id_unique" UNIQUE("organization_id","id");--> statement-breakpoint
-ALTER TABLE "probe_execution_attempts" ADD CONSTRAINT "probe_execution_attempts_assignment_fk" FOREIGN KEY ("organization_id","assignment_id") REFERENCES "public"."check_execution_assignments"("organization_id","id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "probe_execution_attempts" ADD CONSTRAINT "probe_execution_attempts_agent_fk" FOREIGN KEY ("organization_id","agent_id") REFERENCES "public"."probe_agents"("organization_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "check_execution_assignments" ADD CONSTRAINT "check_execution_assignments_location_identity_unique" UNIQUE("organization_id","id","probe_location_id");--> statement-breakpoint
+ALTER TABLE "probe_execution_attempts" ADD CONSTRAINT "probe_execution_attempts_assignment_fk" FOREIGN KEY ("organization_id","assignment_id","location_id") REFERENCES "public"."check_execution_assignments"("organization_id","id","probe_location_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "probe_execution_attempts" ADD CONSTRAINT "probe_execution_attempts_agent_fk" FOREIGN KEY ("organization_id","agent_id","location_id") REFERENCES "public"."probe_agents"("organization_id","id","location_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "probe_agent_credentials_one_active_unique" ON "probe_agent_credentials" USING btree ("organization_id","agent_id") WHERE "probe_agent_credentials"."status" = 'ACTIVE';--> statement-breakpoint
 CREATE INDEX "probe_agent_enrollments_location_idx" ON "probe_agent_enrollments" USING btree ("organization_id","location_id","created_at");--> statement-breakpoint
 CREATE INDEX "probe_agents_location_idx" ON "probe_agents" USING btree ("organization_id","location_id","created_at","id");--> statement-breakpoint
 CREATE INDEX "probe_execution_attempts_assignment_idx" ON "probe_execution_attempts" USING btree ("organization_id","assignment_id","attempt_number");--> statement-breakpoint
 CREATE INDEX "probe_execution_attempts_lease_idx" ON "probe_execution_attempts" USING btree ("status","lease_expires_at","id");--> statement-breakpoint
+CREATE UNIQUE INDEX "probe_execution_attempts_one_leased_unique" ON "probe_execution_attempts" USING btree ("organization_id","assignment_id") WHERE "probe_execution_attempts"."status" = 'LEASED';--> statement-breakpoint
 CREATE INDEX "probe_locations_organization_idx" ON "probe_locations" USING btree ("organization_id","created_at","id");--> statement-breakpoint
 ALTER TABLE "check_execution_assignments" ADD CONSTRAINT "check_execution_assignments_probe_location_fk" FOREIGN KEY ("organization_id","probe_location_id") REFERENCES "public"."probe_locations"("organization_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "check_execution_assignments" ADD CONSTRAINT "check_execution_assignments_location_consistent" CHECK ((

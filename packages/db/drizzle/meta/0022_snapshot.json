@@ -1,5 +1,5 @@
 {
-  "id": "bb461605-611c-418b-9ed6-02d91c6b1631",
+  "id": "eefc0a6d-912b-457a-a1ba-a6b52ca2e43d",
   "prevId": "ef2a7269-64e8-4992-a745-483e737e2717",
   "version": "7",
   "dialect": "postgresql",
@@ -138,6 +138,11 @@
           "name": "check_execution_assignments_organization_id_unique",
           "nullsNotDistinct": false,
           "columns": ["organization_id", "id"]
+        },
+        "check_execution_assignments_location_identity_unique": {
+          "name": "check_execution_assignments_location_identity_unique",
+          "nullsNotDistinct": false,
+          "columns": ["organization_id", "id", "probe_location_id"]
         }
       },
       "policies": {},
@@ -2083,8 +2088,8 @@
           "name": "probe_agent_enrollments_agent_fk",
           "tableFrom": "probe_agent_enrollments",
           "tableTo": "probe_agents",
-          "columnsFrom": ["organization_id", "consumed_by_agent_id"],
-          "columnsTo": ["organization_id", "id"],
+          "columnsFrom": ["organization_id", "consumed_by_agent_id", "location_id"],
+          "columnsTo": ["organization_id", "id", "location_id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -2249,6 +2254,11 @@
           "name": "probe_agents_identity_unique",
           "nullsNotDistinct": false,
           "columns": ["organization_id", "id"]
+        },
+        "probe_agents_location_identity_unique": {
+          "name": "probe_agents_location_identity_unique",
+          "nullsNotDistinct": false,
+          "columns": ["organization_id", "id", "location_id"]
         }
       },
       "policies": {},
@@ -2283,6 +2293,12 @@
         },
         "assignment_id": {
           "name": "assignment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "location_id": {
+          "name": "location_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
@@ -2413,6 +2429,28 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "probe_execution_attempts_one_leased_unique": {
+          "name": "probe_execution_attempts_one_leased_unique",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "assignment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"probe_execution_attempts\".\"status\" = 'LEASED'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -2420,8 +2458,8 @@
           "name": "probe_execution_attempts_assignment_fk",
           "tableFrom": "probe_execution_attempts",
           "tableTo": "check_execution_assignments",
-          "columnsFrom": ["organization_id", "assignment_id"],
-          "columnsTo": ["organization_id", "id"],
+          "columnsFrom": ["organization_id", "assignment_id", "location_id"],
+          "columnsTo": ["organization_id", "id", "probe_location_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2429,8 +2467,8 @@
           "name": "probe_execution_attempts_agent_fk",
           "tableFrom": "probe_execution_attempts",
           "tableTo": "probe_agents",
-          "columnsFrom": ["organization_id", "agent_id"],
-          "columnsTo": ["organization_id", "id"],
+          "columnsFrom": ["organization_id", "agent_id", "location_id"],
+          "columnsTo": ["organization_id", "id", "location_id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }

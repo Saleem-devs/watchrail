@@ -38,20 +38,7 @@ describe('probe persistence invariants', () => {
   it('binds agents, credentials, enrollments, and assignments to one organization and location', async () => {
     const locationId = await createLocation(organizationA, 'frankfurt');
     const agentId = await createAgent(organizationA, locationId);
-    const monitor = await monitors.create(
-      organizationA,
-      createMonitor({ name: 'API', url: 'https://example.com/health' }),
-    );
-    const round = await rounds.create(organizationA, monitor.id);
-
-    await expect(
-      connection.pool.query(
-        `update check_execution_assignments
-            set location = $1::text, probe_location_id = $1::uuid
-          where organization_id = $2 and round_id = $3`,
-        [locationId, organizationA, round.id],
-      ),
-    ).resolves.toBeDefined();
+    const assignmentId = await createAssignment(organizationA, locationId);
 
     await expect(
       connection.pool.query(
@@ -75,8 +62,36 @@ describe('probe persistence invariants', () => {
       connection.pool.query(
         `update check_execution_assignments
             set location = $1::text, probe_location_id = $1::uuid
-          where organization_id = $2 and round_id = $3`,
-        [await createLocation(organizationB, 'lagos'), organizationA, round.id],
+          where organization_id = $2 and id = $3`,
+        [await createLocation(organizationB, 'lagos'), organizationA, assignmentId],
+      ),
+    ).rejects.toMatchObject({ code: '23503' });
+
+    const otherLocationId = await createLocation(organizationA, 'lagos');
+    const otherAgentId = await createAgent(organizationA, otherLocationId);
+    await expect(
+      connection.pool.query(
+        `insert into probe_execution_attempts
+           (organization_id, assignment_id, location_id, agent_id, attempt_number,
+            claim_token_verifier, lease_expires_at)
+         values ($1, $2, $3, $4, 1, $5, clock_timestamp() + interval '30 seconds')`,
+        [organizationA, assignmentId, locationId, otherAgentId, verifierA],
+      ),
+    ).rejects.toMatchObject({ code: '23503' });
+
+    const enrollment = await connection.pool.query<{ id: string }>(
+      `insert into probe_agent_enrollments
+         (organization_id, location_id, agent_name, token_verifier, expires_at)
+       values ($1, $2, 'Frankfurt agent', $3, clock_timestamp() + interval '10 minutes')
+       returning id`,
+      [organizationA, locationId, verifierA],
+    );
+    await expect(
+      connection.pool.query(
+        `update probe_agent_enrollments
+            set consumed_at = clock_timestamp(), consumed_by_agent_id = $1
+          where id = $2`,
+        [otherAgentId, enrollment.rows[0]!.id],
       ),
     ).rejects.toMatchObject({ code: '23503' });
   });
@@ -99,33 +114,40 @@ describe('probe persistence invariants', () => {
       ),
     ).rejects.toMatchObject({ code: '23505' });
 
-    const monitor = await monitors.create(
-      organizationA,
-      createMonitor({ name: 'API', url: 'https://example.com/health' }),
-    );
-    const round = await rounds.create(organizationA, monitor.id);
-    const assignment = await connection.pool.query<{ id: string }>(
-      'select id from check_execution_assignments where round_id = $1',
-      [round.id],
-    );
-    const assignmentId = assignment.rows[0]!.id;
+    const assignmentId = await createAssignment(organizationA, locationId);
 
     await connection.pool.query(
       `insert into probe_execution_attempts
-         (organization_id, assignment_id, agent_id, attempt_number, claim_token_verifier,
-          lease_expires_at)
-       values ($1, $2, $3, 1, $4, clock_timestamp() + interval '30 seconds')`,
-      [organizationA, assignmentId, agentId, verifierB],
+         (organization_id, assignment_id, location_id, agent_id, attempt_number,
+          claim_token_verifier, lease_expires_at)
+       values ($1, $2, $3, $4, 1, $5, clock_timestamp() + interval '30 seconds')`,
+      [organizationA, assignmentId, locationId, agentId, verifierB],
     );
     await expect(
       connection.pool.query(
         `insert into probe_execution_attempts
-           (organization_id, assignment_id, agent_id, attempt_number, claim_token_verifier,
-            lease_expires_at)
-         values ($1, $2, $3, 1, $4, clock_timestamp() + interval '30 seconds')`,
-        [organizationA, assignmentId, agentId, 'C'.repeat(43)],
+           (organization_id, assignment_id, location_id, agent_id, attempt_number,
+            claim_token_verifier, lease_expires_at)
+         values ($1, $2, $3, $4, 2, $5, clock_timestamp() + interval '30 seconds')`,
+        [organizationA, assignmentId, locationId, agentId, 'C'.repeat(43)],
       ),
     ).rejects.toMatchObject({ code: '23505' });
+
+    await connection.pool.query(
+      `update probe_execution_attempts
+          set status = 'EXPIRED', terminal_reason = 'LEASE_EXPIRED'
+        where organization_id = $1 and assignment_id = $2 and attempt_number = 1`,
+      [organizationA, assignmentId],
+    );
+    await expect(
+      connection.pool.query(
+        `insert into probe_execution_attempts
+           (organization_id, assignment_id, location_id, agent_id, attempt_number,
+            claim_token_verifier, lease_expires_at)
+         values ($1, $2, $3, $4, 2, $5, clock_timestamp() + interval '30 seconds')`,
+        [organizationA, assignmentId, locationId, agentId, 'C'.repeat(43)],
+      ),
+    ).resolves.toBeDefined();
   });
 
   it('keeps local assignments valid while rejecting ambiguous remote identity', async () => {
@@ -140,6 +162,20 @@ describe('probe persistence invariants', () => {
       [round.id],
     );
     expect(local.rows).toEqual([{ location: 'local', probe_location_id: null }]);
+    const agentId = await createAgent(organizationA, locationId);
+    const assignment = await connection.pool.query<{ id: string }>(
+      'select id from check_execution_assignments where round_id = $1',
+      [round.id],
+    );
+    await expect(
+      connection.pool.query(
+        `insert into probe_execution_attempts
+           (organization_id, assignment_id, location_id, agent_id, attempt_number,
+            claim_token_verifier, lease_expires_at)
+         values ($1, $2, $3, $4, 1, $5, clock_timestamp() + interval '30 seconds')`,
+        [organizationA, assignment.rows[0]!.id, locationId, agentId, verifierA],
+      ),
+    ).rejects.toMatchObject({ code: '23503' });
     await expect(
       connection.pool.query(
         `update check_execution_assignments
@@ -166,6 +202,30 @@ describe('probe persistence invariants', () => {
        values ($1, $2, 'agent-1')
        returning id`,
       [organizationId, locationId],
+    );
+    return result.rows[0]!.id;
+  }
+
+  async function createAssignment(
+    organizationId: string,
+    locationId: string | null,
+  ): Promise<string> {
+    const monitor = await monitors.create(
+      organizationId,
+      createMonitor({ name: 'API', url: 'https://example.com/health' }),
+    );
+    const round = await rounds.create(organizationId, monitor.id);
+    if (locationId !== null) {
+      await connection.pool.query(
+        `update check_execution_assignments
+            set location = $1::text, probe_location_id = $1::uuid
+          where organization_id = $2 and round_id = $3`,
+        [locationId, organizationId, round.id],
+      );
+    }
+    const result = await connection.pool.query<{ id: string }>(
+      'select id from check_execution_assignments where round_id = $1',
+      [round.id],
     );
     return result.rows[0]!.id;
   }

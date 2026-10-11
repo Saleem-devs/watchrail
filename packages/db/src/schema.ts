@@ -142,6 +142,11 @@ export const probeAgents = pgTable(
   },
   (table) => [
     unique('probe_agents_identity_unique').on(table.organizationId, table.id),
+    unique('probe_agents_location_identity_unique').on(
+      table.organizationId,
+      table.id,
+      table.locationId,
+    ),
     foreignKey({
       name: 'probe_agents_location_fk',
       columns: [table.organizationId, table.locationId],
@@ -185,8 +190,8 @@ export const probeAgentEnrollments = pgTable(
     }),
     foreignKey({
       name: 'probe_agent_enrollments_agent_fk',
-      columns: [table.organizationId, table.consumedByAgentId],
-      foreignColumns: [probeAgents.organizationId, probeAgents.id],
+      columns: [table.organizationId, table.consumedByAgentId, table.locationId],
+      foreignColumns: [probeAgents.organizationId, probeAgents.id, probeAgents.locationId],
     }),
     check('probe_agent_enrollments_name_not_blank', sql`length(btrim(${table.agentName})) > 0`),
     check(
@@ -658,6 +663,11 @@ export const checkExecutionAssignments = pgTable(
       table.id,
     ),
     unique('check_execution_assignments_organization_id_unique').on(table.organizationId, table.id),
+    unique('check_execution_assignments_location_identity_unique').on(
+      table.organizationId,
+      table.id,
+      table.probeLocationId,
+    ),
 
     check(
       'check_execution_assignments_location_consistent',
@@ -702,6 +712,7 @@ export const probeExecutionAttempts = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     organizationId: uuid('organization_id').notNull(),
     assignmentId: uuid('assignment_id').notNull(),
+    locationId: uuid('location_id').notNull(),
     agentId: uuid('agent_id').notNull(),
     attemptNumber: integer('attempt_number').notNull(),
     claimTokenVerifier: varchar('claim_token_verifier', { length: 43 }).notNull(),
@@ -724,13 +735,17 @@ export const probeExecutionAttempts = pgTable(
     unique('probe_execution_attempts_claim_verifier_unique').on(table.claimTokenVerifier),
     foreignKey({
       name: 'probe_execution_attempts_assignment_fk',
-      columns: [table.organizationId, table.assignmentId],
-      foreignColumns: [checkExecutionAssignments.organizationId, checkExecutionAssignments.id],
+      columns: [table.organizationId, table.assignmentId, table.locationId],
+      foreignColumns: [
+        checkExecutionAssignments.organizationId,
+        checkExecutionAssignments.id,
+        checkExecutionAssignments.probeLocationId,
+      ],
     }).onDelete('cascade'),
     foreignKey({
       name: 'probe_execution_attempts_agent_fk',
-      columns: [table.organizationId, table.agentId],
-      foreignColumns: [probeAgents.organizationId, probeAgents.id],
+      columns: [table.organizationId, table.agentId, table.locationId],
+      foreignColumns: [probeAgents.organizationId, probeAgents.id, probeAgents.locationId],
     }),
     check('probe_execution_attempts_number_positive', sql`${table.attemptNumber} > 0`),
     check(
@@ -752,6 +767,9 @@ export const probeExecutionAttempts = pgTable(
       table.attemptNumber,
     ),
     index('probe_execution_attempts_lease_idx').on(table.status, table.leaseExpiresAt, table.id),
+    uniqueIndex('probe_execution_attempts_one_leased_unique')
+      .on(table.organizationId, table.assignmentId)
+      .where(sql`${table.status} = 'LEASED'`),
   ],
 );
 
