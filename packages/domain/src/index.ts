@@ -5,5 +5,6 @@ export * from './check-round.js';
 export * from './http-redirect.js';
 export * from './incident.js';
 export * from './monitor.js';
+export * from './probe.js';
 export * from './request-header.js';
 export * from './status-page.js';
