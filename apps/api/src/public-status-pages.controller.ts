@@ -4,6 +4,7 @@ import {
   Headers,
   HttpException,
   HttpStatus,
+  Inject,
   Param,
   Req,
   Res,
@@ -21,7 +22,9 @@ import { PublicStatusPagesService } from './public-status-pages.service.js';
 @Controller('public/status-pages')
 export class PublicStatusPagesController {
   constructor(
+    @Inject(PublicStatusPagesService)
     private readonly pages: PublicStatusPagesService,
+    @Inject(PublicStatusPageRateLimiter)
     private readonly limiter: PublicStatusPageRateLimiter,
   ) {}
 
