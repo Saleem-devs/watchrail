@@ -19,7 +19,9 @@ import { PublicStatusPagesService } from './public-status-pages.service.js';
 @Controller('internal/status-pages')
 export class InternalStatusPagesController {
   constructor(
+    @Inject(PublicStatusPagesService)
     private readonly pages: PublicStatusPagesService,
+    @Inject(InternalStatusPageRateLimiter)
     private readonly limiter: InternalStatusPageRateLimiter,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
