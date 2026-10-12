@@ -1,15 +1,23 @@
 import 'reflect-metadata';
+import { createHash, randomBytes } from 'node:crypto';
 import { resolve } from 'node:path';
 import type { INestApplication } from '@nestjs/common';
 import { getDrizzleToken } from '@nestjs/drizzle';
 import { Test } from '@nestjs/testing';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { createDatabaseConnection, migrateDatabase, type WatchrailDatabase } from '@watchrail/db';
+import {
+  createDatabaseConnection,
+  migrateDatabase,
+  ProbeIdentityRepository,
+  type DatabaseConnection,
+  type WatchrailDatabase,
+} from '@watchrail/db';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 
 const organizationB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const developmentOrganizationId = '00000000-0000-4000-8000-000000000002';
 interface LocationResponse {
   id: string;
 }
@@ -146,6 +154,72 @@ describe('probe enrollment and machine credentials API', () => {
     ).toHaveLength(1);
   });
 
+  it('serializes credential rotation before agent revocation without leaving an active credential', async () => {
+    const location = await createLocation('rotation-revocation-race');
+    const issued = await issueEnrollment(location.id, 'racing-agent');
+    const enrolled = (
+      await request(app.getHttpServer())
+        .post('/api/probe-machine/enroll')
+        .send({ enrollmentId: issued.id, token: issued.token })
+        .expect(201)
+    ).body.data as {
+      agentId: string;
+      credential: string;
+      credentialVersion: number;
+      locationId: string;
+    };
+    const credential = await database.$client.query<{ id: string }>(
+      `select id from probe_agent_credentials where agent_id = $1 and status = 'ACTIVE'`,
+      [enrolled.agentId],
+    );
+    const blocker = createNamedConnection('probe-agent-lock-blocker');
+    const rotation = createNamedConnection('probe-agent-rotation');
+    const revocation = createNamedConnection('probe-agent-revocation');
+
+    try {
+      await blocker.pool.query('begin');
+      await blocker.pool.query('select id from probe_agents where id = $1 for update', [
+        enrolled.agentId,
+      ]);
+
+      const rotationPromise = new ProbeIdentityRepository(rotation.db).rotateCredential(
+        {
+          agentId: enrolled.agentId,
+          organizationId: developmentOrganizationId,
+          locationId: enrolled.locationId,
+          credentialId: credential.rows[0]!.id,
+          credentialVersion: enrolled.credentialVersion,
+        },
+        createHash('sha256').update(randomBytes(32)).digest('base64url'),
+      );
+      await waitForApplicationLock('probe-agent-rotation');
+
+      const revocationPromise = new ProbeIdentityRepository(revocation.db).revokeAgent(
+        developmentOrganizationId,
+        enrolled.agentId,
+      );
+      await waitForApplicationLock('probe-agent-revocation');
+      await blocker.pool.query('commit');
+
+      await rotationPromise;
+      await revocationPromise;
+    } finally {
+      await blocker.pool.query('rollback').catch(() => undefined);
+      await Promise.all([blocker.pool.end(), rotation.pool.end(), revocation.pool.end()]);
+    }
+
+    const agent = await database.$client.query<{ status: string }>(
+      'select status from probe_agents where id = $1',
+      [enrolled.agentId],
+    );
+    const credentials = await database.$client.query<{ status: string }>(
+      'select status from probe_agent_credentials where agent_id = $1 order by version_number',
+      [enrolled.agentId],
+    );
+    expect(agent.rows[0]?.status).toBe('REVOKED');
+    expect(credentials.rows.map(({ status }) => status)).toEqual(['REVOKED', 'REVOKED']);
+  }, 15_000);
+
   it('rejects expired, revoked, disabled, and cross-organization enrollment operations', async () => {
     const location = await createLocation('virginia');
     const expired = await issueEnrollment(location.id, 'expired-agent');
@@ -227,5 +301,29 @@ describe('probe enrollment and machine credentials API', () => {
       code: 'PROBE_AUTHENTICATION_FAILED',
       message: 'Probe authentication failed.',
     });
+  }
+
+  function createNamedConnection(applicationName: string): DatabaseConnection {
+    const uri = new URL(container.getConnectionUri());
+    uri.searchParams.set('application_name', applicationName);
+    return createDatabaseConnection(uri.toString());
+  }
+
+  async function waitForApplicationLock(applicationName: string): Promise<void> {
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      const result = await database.$client.query<{ waiting: boolean }>(
+        `select exists (
+           select 1
+           from pg_stat_activity
+           where application_name = $1
+             and wait_event_type = 'Lock'
+         ) as waiting`,
+        [applicationName],
+      );
+      if (result.rows[0]?.waiting === true) return;
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
+    }
+    throw new Error(`Timed out waiting for ${applicationName} to block on the agent lock.`);
   }
 });

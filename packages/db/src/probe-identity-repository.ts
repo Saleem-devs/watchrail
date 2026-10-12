@@ -233,20 +233,12 @@ export class ProbeIdentityRepository {
     replacementVerifier: string,
   ): Promise<ProbeMachineIdentity> {
     return this.db.transaction(async (tx) => {
-      const [current] = await tx
+      const [agent] = await tx
         .select({
-          status: probeAgentCredentials.status,
-          agentStatus: probeAgents.status,
+          status: probeAgents.status,
           locationStatus: probeLocations.status,
         })
-        .from(probeAgentCredentials)
-        .innerJoin(
-          probeAgents,
-          and(
-            eq(probeAgents.organizationId, probeAgentCredentials.organizationId),
-            eq(probeAgents.id, probeAgentCredentials.agentId),
-          ),
-        )
+        .from(probeAgents)
         .innerJoin(
           probeLocations,
           and(
@@ -256,6 +248,24 @@ export class ProbeIdentityRepository {
         )
         .where(
           and(
+            eq(probeAgents.organizationId, machine.organizationId),
+            eq(probeAgents.id, machine.agentId),
+            eq(probeAgents.locationId, machine.locationId),
+          ),
+        )
+        .limit(1)
+        .for('update', { of: probeAgents });
+      if (!agent || agent.status !== 'ACTIVE' || agent.locationStatus !== 'ACTIVE') {
+        throw new ProbeAuthenticationError();
+      }
+
+      const [current] = await tx
+        .select({
+          status: probeAgentCredentials.status,
+        })
+        .from(probeAgentCredentials)
+        .where(
+          and(
             eq(probeAgentCredentials.organizationId, machine.organizationId),
             eq(probeAgentCredentials.id, machine.credentialId),
             eq(probeAgentCredentials.agentId, machine.agentId),
@@ -263,12 +273,7 @@ export class ProbeIdentityRepository {
         )
         .limit(1)
         .for('update', { of: probeAgentCredentials });
-      if (
-        !current ||
-        current.status !== 'ACTIVE' ||
-        current.agentStatus !== 'ACTIVE' ||
-        current.locationStatus !== 'ACTIVE'
-      ) {
+      if (!current || current.status !== 'ACTIVE') {
         throw new ProbeAuthenticationError();
       }
       await tx
@@ -304,6 +309,14 @@ export class ProbeIdentityRepository {
   async revokeAgent(organizationId: string, agentId: string): Promise<void> {
     await this.db.transaction(async (tx) => {
       const [agent] = await tx
+        .select({ id: probeAgents.id })
+        .from(probeAgents)
+        .where(and(eq(probeAgents.organizationId, organizationId), eq(probeAgents.id, agentId)))
+        .limit(1)
+        .for('update', { of: probeAgents });
+      if (!agent) throw new ProbeIdentityNotFoundError();
+
+      await tx
         .update(probeAgents)
         .set({
           status: 'REVOKED',
@@ -312,7 +325,6 @@ export class ProbeIdentityRepository {
         })
         .where(and(eq(probeAgents.organizationId, organizationId), eq(probeAgents.id, agentId)))
         .returning({ id: probeAgents.id });
-      if (!agent) throw new ProbeIdentityNotFoundError();
       await tx
         .update(probeAgentCredentials)
         .set({ status: 'REVOKED', revokedAt: sql`clock_timestamp()` })
