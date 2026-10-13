@@ -15,18 +15,41 @@ import { StatusPagesController } from './status-pages.controller.js';
 import { StatusPagesService } from './status-pages.service.js';
 import { WebhookEndpointsController } from './webhook-endpoints.controller.js';
 import { WebhookEndpointsService } from './webhook-endpoints.service.js';
+import {
+  ProbeAgentsController,
+  ProbeEnrollmentsController,
+  ProbeLocationsController,
+  ProbeMachineController,
+} from './probe-identity.controller.js';
+import { ProbeIdentityService } from './probe-identity.service.js';
+import {
+  ProbeMachineAuthGuard,
+  ProbeMachineNoStoreMiddleware,
+  ProbeMachineRateLimiter,
+} from './probe-machine-auth.js';
 
 @Module({
   imports: [ConfigModule, DatabaseModule],
   controllers: [
     InternalStatusPagesController,
     MonitorsController,
+    ProbeAgentsController,
+    ProbeEnrollmentsController,
+    ProbeLocationsController,
+    ProbeMachineController,
     PublicStatusPagesController,
     StatusPagesController,
     WebhookEndpointsController,
   ],
   providers: [
     DevelopmentIdentityMiddleware,
+    ProbeIdentityService,
+    ProbeMachineAuthGuard,
+    ProbeMachineNoStoreMiddleware,
+    {
+      provide: ProbeMachineRateLimiter,
+      useFactory: () => new ProbeMachineRateLimiter(),
+    },
     MonitorsService,
     {
       provide: PublicStatusPageRateLimiter,
@@ -45,6 +68,14 @@ export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
     consumer
       .apply(DevelopmentIdentityMiddleware)
-      .forRoutes(MonitorsController, StatusPagesController, WebhookEndpointsController);
+      .forRoutes(
+        MonitorsController,
+        ProbeAgentsController,
+        ProbeEnrollmentsController,
+        ProbeLocationsController,
+        StatusPagesController,
+        WebhookEndpointsController,
+      );
+    consumer.apply(ProbeMachineNoStoreMiddleware).forRoutes(ProbeMachineController);
   }
 }
