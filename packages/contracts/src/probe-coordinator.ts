@@ -26,6 +26,16 @@ export interface ProbeResultSubmissionReferenceV1 {
   engineVersion: string;
 }
 
+export interface ProbeClaimRequestV1 {
+  contractVersion: 1;
+  engineVersion: string;
+}
+
+export interface ProbeHeartbeatV1 {
+  contractVersion: 1;
+  engineVersion: string;
+}
+
 export class InvalidProbeCoordinatorContractError extends Error {
   constructor() {
     super('Probe coordinator contract is invalid.');
@@ -87,6 +97,21 @@ export function parseProbeResultSubmissionReference(
     throw new InvalidProbeCoordinatorContractError();
   }
   return value as unknown as ProbeResultSubmissionReferenceV1;
+}
+
+export function parseProbeClaimRequest(value: unknown): ProbeClaimRequestV1 {
+  if (
+    !hasExactKeys(value, ['contractVersion', 'engineVersion']) ||
+    value.contractVersion !== PROBE_COORDINATOR_CONTRACT_VERSION ||
+    !isVersion(value.engineVersion)
+  ) {
+    throw new InvalidProbeCoordinatorContractError();
+  }
+  return value as unknown as ProbeClaimRequestV1;
+}
+
+export function parseProbeHeartbeat(value: unknown): ProbeHeartbeatV1 {
+  return parseProbeClaimRequest(value);
 }
 
 function isUuid(value: unknown): value is string {

@@ -6,7 +6,11 @@ import {
   type OnApplicationShutdown,
 } from '@nestjs/common';
 import type { BullMqCheckJobConsumer, BullMqCheckJobPublisher } from '@watchrail/queue';
-import type { AvailabilityRepository, ScheduledRoundRepository } from '@watchrail/db';
+import type {
+  AvailabilityRepository,
+  ProbeCoordinatorRepository,
+  ScheduledRoundRepository,
+} from '@watchrail/db';
 import type { CheckOutboxRelay } from './check-outbox-relay.js';
 import type { WorkerConfig } from './config.js';
 import type { WebhookDeliveryCycleResult } from './webhook-delivery-worker.js';
@@ -24,6 +28,7 @@ export class WorkerRuntime
   private outboxRunning: Promise<void> | undefined;
   private schedulerRunning: Promise<void> | undefined;
   private availabilityRunning: Promise<void> | undefined;
+  private probeReconciliationRunning: Promise<void> | undefined;
   private webhookRunning: Promise<void>[] = [];
   private readonly wakeups = new Set<() => void>();
 
@@ -35,12 +40,16 @@ export class WorkerRuntime
     private readonly availability: AvailabilityRepository,
     private readonly config: WorkerConfig,
     private readonly webhookDelivery?: WebhookDeliveryProcessor,
+    private readonly probeCoordinator?: ProbeCoordinatorRepository,
   ) {}
 
   onApplicationBootstrap(): void {
     this.outboxRunning = this.runOutboxRelay();
     this.schedulerRunning = this.runScheduledDispatch();
     this.availabilityRunning = this.runAvailabilityFlush();
+    this.probeReconciliationRunning = this.probeCoordinator
+      ? this.runProbeReconciliation()
+      : undefined;
     this.webhookRunning = this.webhookDelivery
       ? Array.from({ length: this.config.webhookDeliveryConcurrency }, () =>
           this.runWebhookDelivery(),
@@ -55,6 +64,7 @@ export class WorkerRuntime
       this.outboxRunning,
       this.schedulerRunning,
       this.availabilityRunning,
+      this.probeReconciliationRunning,
       ...this.webhookRunning,
       this.consumer.close(),
     ]);
@@ -126,6 +136,22 @@ export class WorkerRuntime
         }
       } catch {
         this.logger.error('Webhook delivery dependency failure.');
+        await this.wait(this.config.dependencyErrorDelayMs);
+      }
+    }
+  }
+
+  private async runProbeReconciliation(): Promise<void> {
+    while (!this.stopping) {
+      try {
+        const count = await this.probeCoordinator!.reconcileExpired(
+          this.config.probeReconciliationBatchSize,
+        );
+        if (count < this.config.probeReconciliationBatchSize) {
+          await this.wait(this.config.probeReconciliationIntervalMs);
+        }
+      } catch {
+        this.logger.error('Probe lease reconciliation dependency failure.');
         await this.wait(this.config.dependencyErrorDelayMs);
       }
     }

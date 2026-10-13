@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Header,
+  Headers,
   HttpCode,
   Inject,
   Param,
@@ -10,9 +11,12 @@ import {
   Patch,
   Post,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
 import type { ProbeAgentRecord, ProbeLocationRecord } from '@watchrail/db';
+import type { Response } from 'express';
+import { ProbeCoordinatorService } from './probe-coordinator.service.js';
 import type { ProbeMachineRequest } from './probe-machine-auth.js';
 import { ProbeMachineAuthGuard } from './probe-machine-auth.js';
 import { ProbeIdentityService } from './probe-identity.service.js';
@@ -104,7 +108,10 @@ export class ProbeAgentsController {
 
 @Controller('probe-machine')
 export class ProbeMachineController {
-  constructor(@Inject(ProbeIdentityService) private readonly probes: ProbeIdentityService) {}
+  constructor(
+    @Inject(ProbeIdentityService) private readonly probes: ProbeIdentityService,
+    @Inject(ProbeCoordinatorService) private readonly coordinator: ProbeCoordinatorService,
+  ) {}
 
   @Post('enroll')
   async enroll(@Body() body: unknown) {
@@ -123,6 +130,63 @@ export class ProbeMachineController {
   async rotate(@Req() request: ProbeMachineRequest) {
     const rotated = await this.probes.rotate(request.probeMachineIdentity);
     return { data: { ...machineResponse(rotated.identity), credential: rotated.credential } };
+  }
+
+  @Post('leases/claim')
+  @UseGuards(ProbeMachineAuthGuard)
+  async claim(
+    @Req() request: ProbeMachineRequest,
+    @Body() body: unknown,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const claim = await this.coordinator.claim(request.probeMachineIdentity, body);
+    if (claim.state === 'NO_WORK') {
+      response.status(204);
+      return;
+    }
+    return { data: claim.lease };
+  }
+
+  @Post('leases/:attemptId/renew')
+  @UseGuards(ProbeMachineAuthGuard)
+  async renew(
+    @Req() request: ProbeMachineRequest,
+    @Param('attemptId', ParseUUIDPipe) attemptId: string,
+    @Headers('x-watchrail-claim-token') claimToken: string | undefined,
+    @Body() body: unknown,
+  ) {
+    const leaseExpiresAt = await this.coordinator.renew(
+      request.probeMachineIdentity,
+      attemptId,
+      claimToken,
+      body,
+    );
+    return { data: { leaseExpiresAt: leaseExpiresAt.toISOString() } };
+  }
+
+  @Post('leases/:attemptId/results')
+  @UseGuards(ProbeMachineAuthGuard)
+  async submit(
+    @Req() request: ProbeMachineRequest,
+    @Param('attemptId', ParseUUIDPipe) attemptId: string,
+    @Headers('x-watchrail-claim-token') claimToken: string | undefined,
+    @Body() body: unknown,
+  ) {
+    return {
+      data: await this.coordinator.submit(
+        request.probeMachineIdentity,
+        attemptId,
+        claimToken,
+        body,
+      ),
+    };
+  }
+
+  @Post('heartbeat')
+  @UseGuards(ProbeMachineAuthGuard)
+  async heartbeat(@Req() request: ProbeMachineRequest, @Body() body: unknown) {
+    const receivedAt = await this.coordinator.heartbeat(request.probeMachineIdentity, body);
+    return { data: { receivedAt: receivedAt.toISOString() } };
   }
 }
 

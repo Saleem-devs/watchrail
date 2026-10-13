@@ -261,6 +261,84 @@ describe('probe enrollment and machine credentials API', () => {
       .expect(404);
   });
 
+  it('claims, renews, heartbeats, and submits fenced remote work through the machine API', async () => {
+    const location = await createLocation('coordinator-api');
+    const issued = await issueEnrollment(location.id, 'coordinator-agent');
+    const enrolled = (
+      await request(app.getHttpServer())
+        .post('/api/probe-machine/enroll')
+        .send({ enrollmentId: issued.id, token: issued.token })
+        .expect(201)
+    ).body.data as { credential: string };
+    const monitor = (
+      await request(app.getHttpServer())
+        .post('/api/monitors')
+        .send({ name: 'Remote API', url: 'https://example.com/health' })
+        .expect(201)
+    ).body.data as { id: string };
+    const round = (
+      await request(app.getHttpServer())
+        .post(`/api/monitors/${monitor.id}/check-rounds`)
+        .expect(202)
+    ).body.data as { id: string };
+    await database.$client.query(
+      `update check_execution_assignments
+          set location=$1::text, probe_location_id=$1::uuid
+        where round_id=$2`,
+      [location.id, round.id],
+    );
+
+    const heartbeat = await machinePost(enrolled.credential, '/api/probe-machine/heartbeat')
+      .send({ contractVersion: 1, engineVersion: 'watchrail-http-v1' })
+      .expect(201);
+    expect(new Date(heartbeat.body.data.receivedAt).toISOString()).toBe(
+      heartbeat.body.data.receivedAt,
+    );
+
+    const claimed = await machinePost(enrolled.credential, '/api/probe-machine/leases/claim')
+      .send({ contractVersion: 1, engineVersion: 'watchrail-http-v1' })
+      .expect(201);
+    const lease = claimed.body.data as {
+      assignmentId: string;
+      attemptId: string;
+      attemptNumber: number;
+      claimToken: string;
+    };
+    const reference = {
+      contractVersion: 1,
+      assignmentId: lease.assignmentId,
+      attemptId: lease.attemptId,
+      attemptNumber: lease.attemptNumber,
+      engineVersion: 'watchrail-http-v1',
+    };
+    await machinePost(enrolled.credential, `/api/probe-machine/leases/${lease.attemptId}/renew`)
+      .set('X-Watchrail-Claim-Token', lease.claimToken)
+      .send(reference)
+      .expect(201);
+
+    const result = {
+      outcome: 'PASS',
+      stage: 'HTTP',
+      reason: 'COMPLETED',
+      statusCode: 200,
+      responseTimeMs: 20,
+      attemptDurationMs: 25,
+      redirects: [],
+      assertionEvaluation: { contractVersion: 1, outcome: 'PASS', diagnostics: [] },
+      checkedAt: '2026-10-13T08:00:00.000Z',
+    };
+    await machinePost(enrolled.credential, `/api/probe-machine/leases/${lease.attemptId}/results`)
+      .set('X-Watchrail-Claim-Token', lease.claimToken)
+      .send({ reference, result })
+      .expect(201)
+      .expect(({ body }) => expect(body.data).toEqual({ state: 'ACCEPTED', duplicate: false }));
+    await machinePost(enrolled.credential, `/api/probe-machine/leases/${lease.attemptId}/results`)
+      .set('X-Watchrail-Claim-Token', lease.claimToken)
+      .send({ reference, result })
+      .expect(201)
+      .expect(({ body }) => expect(body.data).toEqual({ state: 'ACCEPTED', duplicate: true }));
+  });
+
   async function createLocation(slug: string): Promise<LocationResponse> {
     return (
       await request(app.getHttpServer())
@@ -289,6 +367,10 @@ describe('probe enrollment and machine credentials API', () => {
       .set('Authorization', `Bearer ${credential}`)
       .expect('Cache-Control', 'no-store')
       .expect(status);
+  }
+
+  function machinePost(credential: string, path: string) {
+    return request(app.getHttpServer()).post(path).set('Authorization', `Bearer ${credential}`);
   }
 
   async function enrollFails(input: { id: string; token: string }): Promise<void> {

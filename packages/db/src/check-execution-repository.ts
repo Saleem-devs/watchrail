@@ -180,52 +180,72 @@ export class CheckExecutionRepository {
 
       if (!completed) return false;
 
-      await tx.insert(checkExecutionResults).values({
+      await finalizeCheckExecution(tx, {
+        assignmentId,
         organizationId: completed.organizationId,
         roundId: completed.roundId,
-        assignmentId,
-        outcome: result.outcome,
-        stage: result.stage,
-        reason: result.reason,
-        statusCode: result.statusCode,
-        responseTimeMs: result.responseTimeMs,
-        attemptDurationMs: result.attemptDurationMs,
-        redirects,
-        assertionEvaluation,
-        checkedAt: result.checkedAt,
+        result: { ...result, redirects, assertionEvaluation },
       });
-
-      await tx
-        .update(checkRounds)
-        .set({ status: 'COMPLETED' })
-        .where(eq(checkRounds.id, completed.roundId));
-
-      const [round] = await tx
-        .select({
-          id: checkRounds.id,
-          organizationId: checkRounds.organizationId,
-          monitorId: checkRounds.monitorId,
-          trigger: checkRounds.trigger,
-          createdAt: checkRounds.createdAt,
-        })
-        .from(checkRounds)
-        .where(eq(checkRounds.id, completed.roundId))
-        .limit(1);
-
-      if (!round) throw new Error('Completed check round is missing.');
-      if (round.trigger === 'SCHEDULED') {
-        const incidentTransition = await applyIncidentObservation(tx, round, result);
-        await applyAvailabilityObservation(tx, round, {
-          trigger: round.trigger,
-          outcome: result.outcome,
-          reason: result.reason,
-          assertionOutcome: assertionEvaluation.outcome,
-        });
-        await stageIncidentNotification(tx, incidentTransition);
-      }
 
       return true;
     });
+  }
+}
+
+export async function finalizeCheckExecution(
+  tx: Parameters<Parameters<WatchrailDatabase['transaction']>[0]>[0],
+  input: {
+    assignmentId: string;
+    organizationId: string;
+    roundId: string;
+    result: AuthoritativeCheckResult;
+  },
+): Promise<void> {
+  const redirects = parseHttpRedirectHops(input.result.redirects);
+  const assertionEvaluation = parseStoredAssertionEvaluation(input.result.assertionEvaluation);
+
+  await tx.insert(checkExecutionResults).values({
+    organizationId: input.organizationId,
+    roundId: input.roundId,
+    assignmentId: input.assignmentId,
+    outcome: input.result.outcome,
+    stage: input.result.stage,
+    reason: input.result.reason,
+    statusCode: input.result.statusCode,
+    responseTimeMs: input.result.responseTimeMs,
+    attemptDurationMs: input.result.attemptDurationMs,
+    redirects,
+    assertionEvaluation,
+    checkedAt: input.result.checkedAt,
+  });
+
+  await tx
+    .update(checkRounds)
+    .set({ status: 'COMPLETED' })
+    .where(eq(checkRounds.id, input.roundId));
+
+  const [round] = await tx
+    .select({
+      id: checkRounds.id,
+      organizationId: checkRounds.organizationId,
+      monitorId: checkRounds.monitorId,
+      trigger: checkRounds.trigger,
+      createdAt: checkRounds.createdAt,
+    })
+    .from(checkRounds)
+    .where(eq(checkRounds.id, input.roundId))
+    .limit(1);
+
+  if (!round) throw new Error('Completed check round is missing.');
+  if (round.trigger === 'SCHEDULED') {
+    const incidentTransition = await applyIncidentObservation(tx, round, input.result);
+    await applyAvailabilityObservation(tx, round, {
+      trigger: round.trigger,
+      outcome: input.result.outcome,
+      reason: input.result.reason,
+      assertionOutcome: assertionEvaluation.outcome,
+    });
+    await stageIncidentNotification(tx, incidentTransition);
   }
 }
 

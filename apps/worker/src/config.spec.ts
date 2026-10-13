@@ -30,6 +30,8 @@ describe('loadWorkerConfig', () => {
       scheduleIdlePollIntervalMs: 1_000,
       availabilityFlushBatchSize: 100,
       availabilityFlushIntervalMs: 60_000,
+      probeReconciliationBatchSize: 100,
+      probeReconciliationIntervalMs: 1_000,
       headerEncryptionKeyring: { activeKeyId: 'test' },
       assertionEncryptionKeyring: { activeKeyId: 'test' },
       webhookSigningSecretKeyring: { activeKeyId: 'test' },

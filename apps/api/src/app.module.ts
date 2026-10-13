@@ -22,6 +22,7 @@ import {
   ProbeMachineController,
 } from './probe-identity.controller.js';
 import { ProbeIdentityService } from './probe-identity.service.js';
+import { ProbeCoordinatorService } from './probe-coordinator.service.js';
 import {
   ProbeMachineAuthGuard,
   ProbeMachineNoStoreMiddleware,
@@ -44,6 +45,7 @@ import {
   providers: [
     DevelopmentIdentityMiddleware,
     ProbeIdentityService,
+    ProbeCoordinatorService,
     ProbeMachineAuthGuard,
     ProbeMachineNoStoreMiddleware,
     {

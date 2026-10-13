@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   InvalidProbeCoordinatorContractError,
+  parseProbeClaimRequest,
+  parseProbeHeartbeat,
   parseProbeLeaseReference,
   parseProbeResultSubmissionReference,
 } from './probe-coordinator.js';
@@ -67,5 +69,14 @@ describe('probe coordinator contracts', () => {
       attemptNumber: 2,
       engineVersion: 'watchrail-http-v1',
     });
+  });
+
+  it('parses exact claim and heartbeat compatibility contracts', () => {
+    const input = { contractVersion: 1, engineVersion: 'watchrail-http-v1' };
+    expect(parseProbeClaimRequest(input)).toEqual(input);
+    expect(parseProbeHeartbeat(input)).toEqual(input);
+    expect(() => parseProbeClaimRequest({ ...input, locationId })).toThrow(
+      InvalidProbeCoordinatorContractError,
+    );
   });
 });

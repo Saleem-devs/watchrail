@@ -14,6 +14,8 @@ export interface WorkerConfig {
   scheduleIdlePollIntervalMs: number;
   availabilityFlushBatchSize: number;
   availabilityFlushIntervalMs: number;
+  probeReconciliationBatchSize: number;
+  probeReconciliationIntervalMs: number;
   headerEncryptionKeyring: HeaderEncryptionKeyring;
   assertionEncryptionKeyring: AssertionEncryptionKeyring;
   webhookSigningSecretKeyring: WebhookSigningSecretKeyring;
@@ -120,6 +122,18 @@ export function loadWorkerConfig(environment: NodeJS.ProcessEnv = process.env): 
       environment.AVAILABILITY_FLUSH_INTERVAL_MS,
       'AVAILABILITY_FLUSH_INTERVAL_MS',
       60_000,
+    ),
+    probeReconciliationBatchSize: parseIntegerRange(
+      environment.PROBE_RECONCILIATION_BATCH_SIZE,
+      'PROBE_RECONCILIATION_BATCH_SIZE',
+      100,
+      1,
+      1_000,
+    ),
+    probeReconciliationIntervalMs: parsePositiveInteger(
+      environment.PROBE_RECONCILIATION_INTERVAL_MS,
+      'PROBE_RECONCILIATION_INTERVAL_MS',
+      1_000,
     ),
     headerEncryptionKeyring: loadHeaderEncryptionKeyring(environment),
     assertionEncryptionKeyring: loadAssertionEncryptionKeyring(environment),
