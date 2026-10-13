@@ -10,6 +10,9 @@ export const PROBE_LEASE_DURATION_MS = 30_000;
 export const PROBE_MAX_EXECUTION_MS = 120_000;
 export const PROBE_MAX_ATTEMPTS = 3;
 export const PROBE_RECONCILIATION_BATCH_SIZE = 100;
+// Remote clocks may drift slightly, but agent timestamps must remain tied to
+// the authoritative execution window so they cannot rewrite incident history.
+export const PROBE_RESULT_CLOCK_SKEW_MS = 60_000;
 
 export type ProbeLocationStatus = (typeof PROBE_LOCATION_STATUSES)[number];
 export type ProbeAgentStatus = (typeof PROBE_AGENT_STATUSES)[number];

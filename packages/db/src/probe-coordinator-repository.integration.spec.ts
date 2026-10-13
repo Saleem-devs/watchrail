@@ -106,6 +106,19 @@ describe('probe coordinator repository', () => {
     );
     expect(renewed?.getTime()).toBeGreaterThanOrEqual(new Date(lease.leaseExpiresAt).getTime());
 
+    expect(
+      await coordinator.submit(fixture.machine, resultReference(lease), lease.claimToken, {
+        ...passingResult(),
+        checkedAt: new Date('2000-01-01T00:00:00.000Z'),
+      }),
+    ).toEqual({ state: 'REJECTED' });
+    expect(
+      await coordinator.submit(fixture.machine, resultReference(lease), lease.claimToken, {
+        ...passingResult(),
+        checkedAt: new Date(Date.now() + 10 * 60_000),
+      }),
+    ).toEqual({ state: 'REJECTED' });
+
     const result = passingResult();
     expect(
       await coordinator.submit(fixture.machine, resultReference(lease), lease.claimToken, result),
@@ -163,6 +176,79 @@ describe('probe coordinator repository', () => {
       'PROBE_AUTH',
     );
   });
+
+  it('does not issue a lease when a concurrent location disablement wins the lock', async () => {
+    const fixture = await createFixture('disable-claim-race');
+    const blocker = createNamedConnection('location-claim-blocker');
+    const operator = createNamedConnection('location-claim-operator');
+    const claimant = createNamedConnection('location-claim-coordinator');
+    try {
+      await blocker.pool.query('begin');
+      await blocker.pool.query('select id from probe_locations where id=$1 for update', [
+        fixture.machine.locationId,
+      ]);
+      const disable = operator.pool.query(
+        `update probe_locations set status='DISABLED', updated_at=clock_timestamp() where id=$1`,
+        [fixture.machine.locationId],
+      );
+      await waitForApplicationLock('location-claim-operator');
+      const claim = new ProbeCoordinatorRepository(claimant.db)
+        .claim(fixture.machine, HTTP_ENGINE_VERSION)
+        .then(
+          (value) => ({ value }),
+          (error: unknown) => ({ error }),
+        );
+      await waitForApplicationLock('location-claim-coordinator');
+      await blocker.pool.query('commit');
+      await disable;
+      const outcome = await claim;
+      expect(outcome).toHaveProperty('error');
+      expect('error' in outcome && outcome.error).toMatchObject({ message: 'PROBE_AUTH' });
+    } finally {
+      await blocker.pool.query('rollback').catch(() => undefined);
+      await Promise.all([blocker.pool.end(), operator.pool.end(), claimant.pool.end()]);
+    }
+    expect(
+      (await connection.pool.query('select id from probe_execution_attempts')).rows,
+    ).toHaveLength(0);
+  }, 15_000);
+
+  it('does not accept a result when a concurrent location disablement wins the lock', async () => {
+    const fixture = await createFixture('disable-submit-race');
+    const lease = await claimLease(fixture.machine);
+    const blocker = createNamedConnection('location-submit-blocker');
+    const operator = createNamedConnection('location-submit-operator');
+    const submitter = createNamedConnection('location-submit-coordinator');
+    try {
+      await blocker.pool.query('begin');
+      await blocker.pool.query('select id from probe_locations where id=$1 for update', [
+        fixture.machine.locationId,
+      ]);
+      const disable = operator.pool.query(
+        `update probe_locations set status='DISABLED', updated_at=clock_timestamp() where id=$1`,
+        [fixture.machine.locationId],
+      );
+      await waitForApplicationLock('location-submit-operator');
+      const submission = new ProbeCoordinatorRepository(submitter.db)
+        .submit(fixture.machine, resultReference(lease), lease.claimToken, passingResult())
+        .then(
+          (value) => ({ value }),
+          (error: unknown) => ({ error }),
+        );
+      await waitForApplicationLock('location-submit-coordinator');
+      await blocker.pool.query('commit');
+      await disable;
+      const outcome = await submission;
+      expect(outcome).toHaveProperty('error');
+      expect('error' in outcome && outcome.error).toMatchObject({ message: 'PROBE_AUTH' });
+    } finally {
+      await blocker.pool.query('rollback').catch(() => undefined);
+      await Promise.all([blocker.pool.end(), operator.pool.end(), submitter.pool.end()]);
+    }
+    expect(
+      (await connection.pool.query('select id from check_execution_results')).rows,
+    ).toHaveLength(0);
+  }, 15_000);
 
   it('finalizes exhausted missing observations as monitoring UNKNOWN without incident failure', async () => {
     const fixture = await createFixture('exhausted', true);
@@ -253,6 +339,28 @@ describe('probe coordinator repository', () => {
       [attemptId],
     );
   }
+
+  function createNamedConnection(applicationName: string): DatabaseConnection {
+    const uri = new URL(container.getConnectionUri());
+    uri.searchParams.set('application_name', applicationName);
+    return createDatabaseConnection(uri.toString());
+  }
+
+  async function waitForApplicationLock(applicationName: string): Promise<void> {
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      const result = await connection.pool.query<{ waiting: boolean }>(
+        `select exists (
+           select 1 from pg_stat_activity
+           where application_name=$1 and wait_event_type='Lock'
+         ) as waiting`,
+        [applicationName],
+      );
+      if (result.rows[0]?.waiting === true) return;
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
+    }
+    throw new Error(`Timed out waiting for ${applicationName} to block on the location lock.`);
+  }
 });
 
 function verifierFor(value: string): string {
@@ -283,6 +391,6 @@ function passingResult(): AuthoritativeCheckResult {
     attemptDurationMs: 25,
     redirects: [],
     assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
-    checkedAt: new Date('2026-10-13T08:00:00.000Z'),
+    checkedAt: new Date(),
   };
 }

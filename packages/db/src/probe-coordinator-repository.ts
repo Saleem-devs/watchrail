@@ -7,6 +7,7 @@ import {
   PROBE_LEASE_DURATION_MS,
   PROBE_MAX_ATTEMPTS,
   PROBE_MAX_EXECUTION_MS,
+  PROBE_RESULT_CLOCK_SKEW_MS,
 } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
 import {
@@ -220,6 +221,13 @@ export class ProbeCoordinatorRepository {
       if (!isAuthoritativeAttempt(attempt, reference, claimToken, assignment)) {
         return { state: 'REJECTED' };
       }
+      const acceptedAt = await databaseClock(tx);
+      if (
+        result.checkedAt.getTime() < attempt.leasedAt.getTime() - PROBE_RESULT_CLOCK_SKEW_MS ||
+        result.checkedAt.getTime() > acceptedAt.getTime() + PROBE_RESULT_CLOCK_SKEW_MS
+      ) {
+        return { state: 'REJECTED' };
+      }
 
       await tx
         .update(probeExecutionAttempts)
@@ -302,11 +310,7 @@ export class ProbeCoordinatorRepository {
             .where(eq(checkExecutionAssignments.id, assignment.id));
           continue;
         }
-        const databaseClock = await tx.execute<{ checkedAt: string }>(
-          sql`select date_trunc('milliseconds', clock_timestamp()) as "checkedAt"`,
-        );
-        const checkedAt = databaseClock.rows[0]?.checkedAt;
-        if (!checkedAt) throw new Error('Database clock query returned no value.');
+        const checkedAt = await databaseClock(tx);
         await tx
           .update(checkExecutionAssignments)
           .set({
@@ -329,7 +333,7 @@ export class ProbeCoordinatorRepository {
             attemptDurationMs: 0,
             redirects: [],
             assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
-            checkedAt: new Date(checkedAt),
+            checkedAt,
           },
         });
       }
@@ -340,15 +344,8 @@ export class ProbeCoordinatorRepository {
 
 async function lockActiveMachine(tx: Transaction, machine: ProbeMachineIdentity): Promise<void> {
   const [agent] = await tx
-    .select({ status: probeAgents.status, locationStatus: probeLocations.status })
+    .select({ status: probeAgents.status })
     .from(probeAgents)
-    .innerJoin(
-      probeLocations,
-      and(
-        eq(probeLocations.organizationId, probeAgents.organizationId),
-        eq(probeLocations.id, probeAgents.locationId),
-      ),
-    )
     .where(
       and(
         eq(probeAgents.organizationId, machine.organizationId),
@@ -358,8 +355,7 @@ async function lockActiveMachine(tx: Transaction, machine: ProbeMachineIdentity)
     )
     .limit(1)
     .for('update', { of: probeAgents });
-  if (!agent || agent.status !== 'ACTIVE' || agent.locationStatus !== 'ACTIVE')
-    throw new Error('PROBE_AUTH');
+  if (!agent || agent.status !== 'ACTIVE') throw new Error('PROBE_AUTH');
   const [credential] = await tx
     .select({ status: probeAgentCredentials.status, version: probeAgentCredentials.versionNumber })
     .from(probeAgentCredentials)
@@ -379,6 +375,18 @@ async function lockActiveMachine(tx: Transaction, machine: ProbeMachineIdentity)
   ) {
     throw new Error('PROBE_AUTH');
   }
+  const [location] = await tx
+    .select({ status: probeLocations.status })
+    .from(probeLocations)
+    .where(
+      and(
+        eq(probeLocations.organizationId, machine.organizationId),
+        eq(probeLocations.id, machine.locationId),
+      ),
+    )
+    .limit(1)
+    .for('update', { of: probeLocations });
+  if (!location || location.status !== 'ACTIVE') throw new Error('PROBE_AUTH');
 }
 
 async function lockAssignment(
@@ -465,6 +473,15 @@ async function expireLeasedAttempt(tx: Transaction, organizationId: string, assi
 
 function verifier(secret: string): string {
   return createHash('sha256').update(secret).digest('base64url');
+}
+
+async function databaseClock(tx: Transaction): Promise<Date> {
+  const result = await tx.execute<{ checkedAt: string }>(
+    sql`select date_trunc('milliseconds', clock_timestamp()) as "checkedAt"`,
+  );
+  const checkedAt = result.rows[0]?.checkedAt;
+  if (!checkedAt) throw new Error('Database clock query returned no value.');
+  return new Date(checkedAt);
 }
 
 function sameResult(

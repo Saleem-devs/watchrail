@@ -325,7 +325,7 @@ describe('probe enrollment and machine credentials API', () => {
       attemptDurationMs: 25,
       redirects: [],
       assertionEvaluation: { contractVersion: 1, outcome: 'PASS', diagnostics: [] },
-      checkedAt: '2026-10-13T08:00:00.000Z',
+      checkedAt: new Date().toISOString(),
     };
     await machinePost(enrolled.credential, `/api/probe-machine/leases/${lease.attemptId}/results`)
       .set('X-Watchrail-Claim-Token', lease.claimToken)
