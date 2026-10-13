@@ -1,0 +1,396 @@
+import { resolve } from 'node:path';
+import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
+import { createMonitor, EMPTY_ASSERTION_EVALUATION, HTTP_ENGINE_VERSION } from '@watchrail/domain';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { createDatabaseConnection, type DatabaseConnection } from './client.js';
+import type { AuthoritativeCheckResult } from './check-execution-repository.js';
+import { ManualRoundRepository } from './manual-round-repository.js';
+import { migrateDatabase } from './migration.js';
+import { MonitorRepository } from './monitor-repository.js';
+import { ProbeCoordinatorRepository } from './probe-coordinator-repository.js';
+import type { ProbeMachineIdentity } from './probe-identity-repository.js';
+
+const organizationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+
+describe('probe coordinator repository', () => {
+  let container: StartedPostgreSqlContainer;
+  let connection: DatabaseConnection;
+  let coordinator: ProbeCoordinatorRepository;
+  let monitors: MonitorRepository;
+  let rounds: ManualRoundRepository;
+
+  beforeAll(async () => {
+    container = await new PostgreSqlContainer('postgres:18.0-alpine').start();
+    connection = createDatabaseConnection(container.getConnectionUri());
+    await migrateDatabase(connection, resolve(process.cwd(), 'drizzle'));
+    coordinator = new ProbeCoordinatorRepository(connection.db);
+    monitors = new MonitorRepository(connection.db);
+    rounds = new ManualRoundRepository(connection.db);
+  }, 60_000);
+
+  beforeEach(async () => {
+    await connection.pool.query('truncate probe_locations, monitors cascade');
+  });
+
+  afterAll(async () => {
+    await connection?.pool.end();
+    await container?.stop();
+  });
+
+  it('claims one assignment once across concurrent coordinators and records heartbeat independently', async () => {
+    const fixture = await createFixture();
+    const claims = await Promise.all([
+      coordinator.claim(fixture.machine, HTTP_ENGINE_VERSION),
+      coordinator.claim(fixture.machine, HTTP_ENGINE_VERSION),
+    ]);
+    expect(claims.map(({ state }) => state).sort()).toEqual(['CLAIMED', 'NO_WORK']);
+    const claimed = claims.find((claim) => claim.state === 'CLAIMED');
+    expect(claimed).toMatchObject({
+      lease: {
+        assignmentId: fixture.assignmentId,
+        attemptNumber: 1,
+        requiredEngineVersion: HTTP_ENGINE_VERSION,
+      },
+    });
+    expect(claimed?.state === 'CLAIMED' && claimed.lease.claimToken).toMatch(
+      /^[A-Za-z0-9_-]{43}$/u,
+    );
+    const persisted = await connection.pool.query(
+      'select claim_token_verifier from probe_execution_attempts',
+    );
+    expect(JSON.stringify(persisted.rows)).not.toContain(
+      claimed?.state === 'CLAIMED' ? claimed.lease.claimToken : 'impossible',
+    );
+
+    const heartbeatAt = await coordinator.heartbeat(fixture.machine, HTTP_ENGINE_VERSION);
+    expect(heartbeatAt).toBeInstanceOf(Date);
+    const beforeRenewal = claimed?.state === 'CLAIMED' ? claimed.lease.leaseExpiresAt : '';
+    const attempt = await connection.pool.query<{ lease_expires_at: Date }>(
+      'select lease_expires_at from probe_execution_attempts where assignment_id = $1',
+      [fixture.assignmentId],
+    );
+    expect(attempt.rows[0]!.lease_expires_at.toISOString()).toBe(beforeRenewal);
+  });
+
+  it('expires an old lease and fences stale results after replacement', async () => {
+    const fixture = await createFixture();
+    const first = await claimLease(fixture.machine);
+    await expire(first.assignmentId, first.attemptId);
+    const second = await claimLease(fixture.machine);
+    expect(second.attemptNumber).toBe(2);
+    expect(
+      await coordinator.submit(
+        fixture.machine,
+        resultReference(first),
+        first.claimToken,
+        passingResult(),
+      ),
+    ).toEqual({ state: 'REJECTED' });
+    expect(
+      await coordinator.submit(
+        fixture.machine,
+        resultReference(second),
+        'x'.repeat(43),
+        passingResult(),
+      ),
+    ).toEqual({ state: 'REJECTED' });
+  });
+
+  it('renews only the authoritative lease and accepts identical submission replay once', async () => {
+    const fixture = await createFixture();
+    const lease = await claimLease(fixture.machine);
+    const renewed = await coordinator.renew(
+      fixture.machine,
+      resultReference(lease),
+      lease.claimToken,
+    );
+    expect(renewed?.getTime()).toBeGreaterThanOrEqual(new Date(lease.leaseExpiresAt).getTime());
+
+    expect(
+      await coordinator.submit(fixture.machine, resultReference(lease), lease.claimToken, {
+        ...passingResult(),
+        checkedAt: new Date('2000-01-01T00:00:00.000Z'),
+      }),
+    ).toEqual({ state: 'REJECTED' });
+    expect(
+      await coordinator.submit(fixture.machine, resultReference(lease), lease.claimToken, {
+        ...passingResult(),
+        checkedAt: new Date(Date.now() + 10 * 60_000),
+      }),
+    ).toEqual({ state: 'REJECTED' });
+
+    const result = passingResult();
+    expect(
+      await coordinator.submit(fixture.machine, resultReference(lease), lease.claimToken, result),
+    ).toEqual({
+      state: 'ACCEPTED',
+      duplicate: false,
+    });
+    expect(
+      await coordinator.submit(fixture.machine, resultReference(lease), lease.claimToken, result),
+    ).toEqual({
+      state: 'ACCEPTED',
+      duplicate: true,
+    });
+    expect(
+      await coordinator.submit(fixture.machine, resultReference(lease), lease.claimToken, {
+        ...result,
+        attemptDurationMs: 99,
+      }),
+    ).toEqual({ state: 'REJECTED' });
+    expect(
+      (await connection.pool.query('select id from check_execution_results')).rows,
+    ).toHaveLength(1);
+  });
+
+  it('rejects incompatible engines, revoked agents, and disabled locations', async () => {
+    const incompatible = await createFixture();
+    expect(await coordinator.claim(incompatible.machine, 'other-engine')).toEqual({
+      state: 'NO_WORK',
+    });
+
+    const revoked = await createFixture('revoked');
+    const revokedLease = await claimLease(revoked.machine);
+    await connection.pool.query(
+      `update probe_agents set status='REVOKED', revoked_at=clock_timestamp() where id=$1`,
+      [revoked.machine.agentId],
+    );
+    await connection.pool.query(
+      `update probe_agent_credentials set status='REVOKED', revoked_at=clock_timestamp() where id=$1`,
+      [revoked.machine.credentialId],
+    );
+    await expect(
+      coordinator.submit(
+        revoked.machine,
+        resultReference(revokedLease),
+        revokedLease.claimToken,
+        passingResult(),
+      ),
+    ).rejects.toThrow('PROBE_AUTH');
+
+    const disabled = await createFixture('disabled');
+    await connection.pool.query(`update probe_locations set status='DISABLED' where id=$1`, [
+      disabled.machine.locationId,
+    ]);
+    await expect(coordinator.claim(disabled.machine, HTTP_ENGINE_VERSION)).rejects.toThrow(
+      'PROBE_AUTH',
+    );
+  });
+
+  it('does not issue a lease when a concurrent location disablement wins the lock', async () => {
+    const fixture = await createFixture('disable-claim-race');
+    const blocker = createNamedConnection('location-claim-blocker');
+    const operator = createNamedConnection('location-claim-operator');
+    const claimant = createNamedConnection('location-claim-coordinator');
+    try {
+      await blocker.pool.query('begin');
+      await blocker.pool.query('select id from probe_locations where id=$1 for update', [
+        fixture.machine.locationId,
+      ]);
+      const disable = operator.pool.query(
+        `update probe_locations set status='DISABLED', updated_at=clock_timestamp() where id=$1`,
+        [fixture.machine.locationId],
+      );
+      await waitForApplicationLock('location-claim-operator');
+      const claim = new ProbeCoordinatorRepository(claimant.db)
+        .claim(fixture.machine, HTTP_ENGINE_VERSION)
+        .then(
+          (value) => ({ value }),
+          (error: unknown) => ({ error }),
+        );
+      await waitForApplicationLock('location-claim-coordinator');
+      await blocker.pool.query('commit');
+      await disable;
+      const outcome = await claim;
+      expect(outcome).toHaveProperty('error');
+      expect('error' in outcome && outcome.error).toMatchObject({ message: 'PROBE_AUTH' });
+    } finally {
+      await blocker.pool.query('rollback').catch(() => undefined);
+      await Promise.all([blocker.pool.end(), operator.pool.end(), claimant.pool.end()]);
+    }
+    expect(
+      (await connection.pool.query('select id from probe_execution_attempts')).rows,
+    ).toHaveLength(0);
+  }, 15_000);
+
+  it('does not accept a result when a concurrent location disablement wins the lock', async () => {
+    const fixture = await createFixture('disable-submit-race');
+    const lease = await claimLease(fixture.machine);
+    const blocker = createNamedConnection('location-submit-blocker');
+    const operator = createNamedConnection('location-submit-operator');
+    const submitter = createNamedConnection('location-submit-coordinator');
+    try {
+      await blocker.pool.query('begin');
+      await blocker.pool.query('select id from probe_locations where id=$1 for update', [
+        fixture.machine.locationId,
+      ]);
+      const disable = operator.pool.query(
+        `update probe_locations set status='DISABLED', updated_at=clock_timestamp() where id=$1`,
+        [fixture.machine.locationId],
+      );
+      await waitForApplicationLock('location-submit-operator');
+      const submission = new ProbeCoordinatorRepository(submitter.db)
+        .submit(fixture.machine, resultReference(lease), lease.claimToken, passingResult())
+        .then(
+          (value) => ({ value }),
+          (error: unknown) => ({ error }),
+        );
+      await waitForApplicationLock('location-submit-coordinator');
+      await blocker.pool.query('commit');
+      await disable;
+      const outcome = await submission;
+      expect(outcome).toHaveProperty('error');
+      expect('error' in outcome && outcome.error).toMatchObject({ message: 'PROBE_AUTH' });
+    } finally {
+      await blocker.pool.query('rollback').catch(() => undefined);
+      await Promise.all([blocker.pool.end(), operator.pool.end(), submitter.pool.end()]);
+    }
+    expect(
+      (await connection.pool.query('select id from check_execution_results')).rows,
+    ).toHaveLength(0);
+  }, 15_000);
+
+  it('finalizes exhausted missing observations as monitoring UNKNOWN without incident failure', async () => {
+    const fixture = await createFixture('exhausted', true);
+    const lease = await claimLease(fixture.machine);
+    await connection.pool.query(
+      `update check_execution_assignments
+          set attempt_count=3, claim_expires_at=clock_timestamp()-interval '1 second'
+        where id=$1`,
+      [fixture.assignmentId],
+    );
+    await connection.pool.query(
+      `update probe_execution_attempts
+          set attempt_number=3,
+              leased_at=clock_timestamp()-interval '2 seconds',
+              lease_expires_at=clock_timestamp()-interval '1 second'
+        where id=$1`,
+      [lease.attemptId],
+    );
+    expect(await coordinator.reconcileExpired(100)).toBe(1);
+    const result = await connection.pool.query<{ outcome: string; stage: string; reason: string }>(
+      'select outcome, stage, reason from check_execution_results where assignment_id=$1',
+      [fixture.assignmentId],
+    );
+    expect(result.rows).toEqual([{ outcome: 'UNKNOWN', stage: 'PROBE', reason: 'INTERNAL_ERROR' }]);
+    const incidents = await connection.pool.query('select id from incidents');
+    expect(incidents.rows).toHaveLength(0);
+  });
+
+  async function createFixture(suffix = 'default', scheduled = false) {
+    const location = await connection.pool.query<{ id: string }>(
+      `insert into probe_locations (organization_id,name,slug) values ($1,$2,$3) returning id`,
+      [organizationId, `Location ${suffix}`, `location-${suffix}`],
+    );
+    const agent = await connection.pool.query<{ id: string }>(
+      `insert into probe_agents (organization_id,location_id,name,status)
+       values ($1,$2,$3,'ACTIVE') returning id`,
+      [organizationId, location.rows[0]!.id, `Agent ${suffix}`],
+    );
+    const credential = await connection.pool.query<{ id: string }>(
+      `insert into probe_agent_credentials (organization_id,agent_id,version_number,verifier)
+       values ($1,$2,1,$3) returning id`,
+      [organizationId, agent.rows[0]!.id, verifierFor(suffix)],
+    );
+    const monitor = await monitors.create(
+      organizationId,
+      createMonitor({ name: `Monitor ${suffix}`, url: 'https://example.com/health' }),
+    );
+    const round = await rounds.create(organizationId, monitor.id);
+    const assignment = await connection.pool.query<{ id: string }>(
+      `update check_execution_assignments
+          set location=$1::text, probe_location_id=$1::uuid
+        where round_id=$2 returning id`,
+      [location.rows[0]!.id, round.id],
+    );
+    if (scheduled) {
+      await connection.pool.query(`update check_rounds set trigger='SCHEDULED' where id=$1`, [
+        round.id,
+      ]);
+    }
+    return {
+      assignmentId: assignment.rows[0]!.id,
+      machine: {
+        agentId: agent.rows[0]!.id,
+        organizationId,
+        locationId: location.rows[0]!.id,
+        credentialId: credential.rows[0]!.id,
+        credentialVersion: 1,
+      } satisfies ProbeMachineIdentity,
+    };
+  }
+
+  async function claimLease(machine: ProbeMachineIdentity) {
+    const claim = await coordinator.claim(machine, HTTP_ENGINE_VERSION);
+    if (claim.state !== 'CLAIMED') throw new Error('Expected a probe lease.');
+    return claim.lease;
+  }
+
+  async function expire(assignmentId: string, attemptId: string): Promise<void> {
+    await connection.pool.query(
+      `update check_execution_assignments set claim_expires_at=clock_timestamp()-interval '1 second' where id=$1`,
+      [assignmentId],
+    );
+    await connection.pool.query(
+      `update probe_execution_attempts
+          set leased_at=clock_timestamp()-interval '2 seconds',
+              lease_expires_at=clock_timestamp()-interval '1 second'
+        where id=$1`,
+      [attemptId],
+    );
+  }
+
+  function createNamedConnection(applicationName: string): DatabaseConnection {
+    const uri = new URL(container.getConnectionUri());
+    uri.searchParams.set('application_name', applicationName);
+    return createDatabaseConnection(uri.toString());
+  }
+
+  async function waitForApplicationLock(applicationName: string): Promise<void> {
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      const result = await connection.pool.query<{ waiting: boolean }>(
+        `select exists (
+           select 1 from pg_stat_activity
+           where application_name=$1 and wait_event_type='Lock'
+         ) as waiting`,
+        [applicationName],
+      );
+      if (result.rows[0]?.waiting === true) return;
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
+    }
+    throw new Error(`Timed out waiting for ${applicationName} to block on the location lock.`);
+  }
+});
+
+function verifierFor(value: string): string {
+  return Buffer.from(value.padEnd(32, 'x').slice(0, 32)).toString('base64url');
+}
+
+function resultReference(lease: {
+  assignmentId: string;
+  attemptId: string;
+  attemptNumber: number;
+}) {
+  return {
+    contractVersion: 1 as const,
+    assignmentId: lease.assignmentId,
+    attemptId: lease.attemptId,
+    attemptNumber: lease.attemptNumber,
+    engineVersion: HTTP_ENGINE_VERSION,
+  };
+}
+
+function passingResult(): AuthoritativeCheckResult {
+  return {
+    outcome: 'PASS',
+    stage: 'HTTP',
+    reason: 'COMPLETED',
+    statusCode: 200,
+    responseTimeMs: 20,
+    attemptDurationMs: 25,
+    redirects: [],
+    assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
+    checkedAt: new Date(),
+  };
+}

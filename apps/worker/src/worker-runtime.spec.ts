@@ -1,6 +1,10 @@
 import { Logger } from '@nestjs/common';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { AvailabilityRepository, ScheduledRoundRepository } from '@watchrail/db';
+import type {
+  AvailabilityRepository,
+  ProbeCoordinatorRepository,
+  ScheduledRoundRepository,
+} from '@watchrail/db';
 import type { BullMqCheckJobConsumer, BullMqCheckJobPublisher } from '@watchrail/queue';
 import type { CheckOutboxRelay } from './check-outbox-relay.js';
 import type { WorkerConfig } from './config.js';
@@ -13,6 +17,8 @@ const config = {
   scheduleIdlePollIntervalMs: 1_000,
   availabilityFlushBatchSize: 100,
   availabilityFlushIntervalMs: 60_000,
+  probeReconciliationBatchSize: 100,
+  probeReconciliationIntervalMs: 1_000,
   webhookDeliveryConcurrency: 2,
   webhookDeliveryIdlePollIntervalMs: 500,
 } as WorkerConfig;
@@ -131,6 +137,28 @@ describe('WorkerRuntime', () => {
 
     await runtime.onApplicationShutdown();
     expect(closePublisher).toHaveBeenCalledOnce();
+  });
+
+  it('reconciles expired probe leases independently and drains full batches immediately', async () => {
+    vi.useFakeTimers();
+    const reconcileExpired = vi.fn().mockResolvedValueOnce(100).mockResolvedValue(0);
+    const runtime = new WorkerRuntime(
+      { processNext: vi.fn().mockResolvedValue('IDLE') } as unknown as CheckOutboxRelay,
+      { close: vi.fn().mockResolvedValue(undefined) } as unknown as BullMqCheckJobConsumer,
+      { close: vi.fn().mockResolvedValue(undefined) } as unknown as BullMqCheckJobPublisher,
+      { dispatchDue: vi.fn().mockResolvedValue([]) } as unknown as ScheduledRoundRepository,
+      { flushDue: vi.fn().mockResolvedValue(0) } as unknown as AvailabilityRepository,
+      config,
+      undefined,
+      { reconcileExpired } as unknown as ProbeCoordinatorRepository,
+    );
+
+    runtime.onApplicationBootstrap();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reconcileExpired).toHaveBeenCalledTimes(2);
+    expect(reconcileExpired).toHaveBeenCalledWith(100);
+    await runtime.beforeApplicationShutdown();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('runs concurrent webhook loops and waits for in-flight delivery without waiting out idle polls', async () => {
