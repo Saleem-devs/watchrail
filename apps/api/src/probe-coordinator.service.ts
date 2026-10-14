@@ -7,22 +7,76 @@ import {
 } from '@nestjs/common';
 import {
   parseProbeClaimRequest,
+  parseProbeExecutionConfiguration,
   parseProbeHeartbeat,
   parseProbeResultSubmissionReference,
   type ProbeResultSubmissionReferenceV1,
 } from '@watchrail/contracts';
-import { parseHttpRedirectHops, parseStoredAssertionEvaluation } from '@watchrail/domain';
+import {
+  parseHttpRedirectHops,
+  parseHttpStatusPolicy,
+  parseStoredAssertionEvaluation,
+} from '@watchrail/domain';
+import { resolveRequestHeaders } from '@watchrail/http-header-security';
+import { resolveResponseAssertions } from '@watchrail/assertion-security';
 import {
   ProbeCoordinatorRepository,
   type AuthoritativeCheckResult,
   type ProbeMachineIdentity,
 } from '@watchrail/db';
+import { APP_CONFIG, type AppConfig } from './config.js';
 
 @Injectable()
 export class ProbeCoordinatorService {
   constructor(
     @Inject(ProbeCoordinatorRepository) private readonly coordinator: ProbeCoordinatorRepository,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
+
+  async configuration(
+    machine: ProbeMachineIdentity,
+    attemptId: string,
+    claimToken: string | undefined,
+  ) {
+    const token = parseClaimToken(claimToken);
+    const stored = await this.authorized(() =>
+      this.coordinator.configuration(machine, attemptId, token),
+    );
+    if (!stored) throw staleLease();
+    if (stored.method !== 'GET' && stored.method !== 'HEAD') {
+      throw new Error('Stored remote execution method is unsupported.');
+    }
+    const context = {
+      organizationId: stored.organizationId,
+      monitorId: stored.monitorId,
+    };
+    const resolved = parseProbeExecutionConfiguration({
+      contractVersion: 1,
+      assignmentId: stored.assignmentId,
+      attemptId: stored.attemptId,
+      configurationVersionId: stored.configurationVersionId,
+      configurationVersionNumber: stored.configurationVersionNumber,
+      executionPolicyVersion: stored.executionPolicyVersion,
+      requiredEngineVersion: stored.requiredEngineVersion,
+      url: stored.url,
+      method: stored.method,
+      timeoutMs: stored.timeoutMs,
+      followRedirects: stored.followRedirects,
+      statusPolicy: parseHttpStatusPolicy(stored.statusPolicy),
+      requestHeaders: resolveRequestHeaders(
+        stored.requestHeaders,
+        context,
+        this.config.headerEncryptionKeyring,
+      ),
+      assertions: resolveResponseAssertions(
+        stored.assertions,
+        stored.method,
+        context,
+        this.config.assertionEncryptionKeyring,
+      ),
+    });
+    return resolved;
+  }
 
   async claim(machine: ProbeMachineIdentity, body: unknown) {
     const input = parseOrBadRequest(() => parseProbeClaimRequest(body));

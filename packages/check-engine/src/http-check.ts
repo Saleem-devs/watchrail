@@ -59,6 +59,12 @@ export async function executeHttpCheck(
   const startedAt = clock.monotonicNow();
 
   const controller = new AbortController();
+  const cancelFromCaller = () => controller.abort(dependencies.signal?.reason);
+  if (dependencies.signal?.aborted) {
+    cancelFromCaller();
+  } else {
+    dependencies.signal?.addEventListener('abort', cancelFromCaller, { once: true });
+  }
   let redirects: HttpCheckResult['redirects'] = [];
   let finalResponse: HttpFinalResponseEvidence | undefined;
 
@@ -142,6 +148,7 @@ export async function executeHttpCheck(
       assertionEvaluation: unavailableAssertions,
     };
   } finally {
+    dependencies.signal?.removeEventListener('abort', cancelFromCaller);
     if (timeoutHandle !== undefined) {
       clearTimeout(timeoutHandle);
     }

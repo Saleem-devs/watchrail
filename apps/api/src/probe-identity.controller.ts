@@ -164,6 +164,22 @@ export class ProbeMachineController {
     return { data: { leaseExpiresAt: leaseExpiresAt.toISOString() } };
   }
 
+  @Get('leases/:attemptId/configuration')
+  @UseGuards(ProbeMachineAuthGuard)
+  async configuration(
+    @Req() request: ProbeMachineRequest,
+    @Param('attemptId', ParseUUIDPipe) attemptId: string,
+    @Headers('x-watchrail-claim-token') claimToken: string | undefined,
+  ) {
+    return {
+      data: await this.coordinator.configuration(
+        request.probeMachineIdentity,
+        attemptId,
+        claimToken,
+      ),
+    };
+  }
+
   @Post('leases/:attemptId/results')
   @UseGuards(ProbeMachineAuthGuard)
   async submit(
