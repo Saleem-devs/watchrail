@@ -1,5 +1,9 @@
 import { executeHttpCheck, NodeHttpExecutor, type HttpExecutor } from '@watchrail/check-engine';
-import { HTTP_ENGINE_VERSION, parseResponseAssertions } from '@watchrail/domain';
+import {
+  HTTP_ENGINE_VERSION,
+  PROBE_MAX_EXECUTION_MS,
+  parseResponseAssertions,
+} from '@watchrail/domain';
 import type { ProbeLeaseReferenceV1 } from '@watchrail/contracts';
 import { ProbeCoordinatorError } from './coordinator-client.js';
 import type { ProbeCoordinatorClient } from './coordinator-client.js';
@@ -22,7 +26,7 @@ export class ProbeAgentRuntime {
       let failures = 0;
       while (!this.stopping) {
         try {
-          const lease = await this.client.claim(HTTP_ENGINE_VERSION);
+          const lease = await this.client.claim(HTTP_ENGINE_VERSION, this.lifecycleAbort.signal);
           if (!lease) {
             failures = 0;
             await this.wait(this.config.pollIntervalMs, this.lifecycleAbort.signal);
@@ -59,8 +63,10 @@ export class ProbeAgentRuntime {
 
   private async executeLease(lease: ProbeLeaseReferenceV1): Promise<void> {
     const abort = new AbortController();
+    const executionDeadline = setTimeout(() => abort.abort(), PROBE_MAX_EXECUTION_MS);
+    const authority = { expiresAt: Date.parse(lease.leaseExpiresAt) };
     this.activeAbort = abort;
-    const renewal = this.renewalLoop(lease, abort);
+    const renewal = this.renewalLoop(lease, abort, authority);
     try {
       const configuration = await this.client.configuration(lease, abort.signal);
       if (
@@ -88,7 +94,7 @@ export class ProbeAgentRuntime {
         { executor: this.executor },
       );
       const serialized = this.client.serializeSubmission(lease, HTTP_ENGINE_VERSION, result);
-      await this.submitWithRetry(lease, serialized, abort.signal);
+      await this.submitWithRetry(lease, serialized, abort, authority);
     } catch (error) {
       if (
         error instanceof ProbeCoordinatorError &&
@@ -101,6 +107,7 @@ export class ProbeAgentRuntime {
       throw error;
     } finally {
       abort.abort();
+      clearTimeout(executionDeadline);
       await renewal;
       this.activeAbort = null;
     }
@@ -109,27 +116,37 @@ export class ProbeAgentRuntime {
   private async submitWithRetry(
     lease: ProbeLeaseReferenceV1,
     serialized: string,
-    signal: AbortSignal,
+    abort: AbortController,
+    authority: { expiresAt: number },
   ): Promise<void> {
     let delay = 250;
-    while (!signal.aborted) {
+    while (!abort.signal.aborted) {
+      if (Date.now() >= authority.expiresAt) {
+        abort.abort();
+        return;
+      }
       try {
-        await this.client.submitSerialized(lease, serialized);
+        await this.client.submitSerialized(lease, serialized, abort.signal);
         return;
       } catch (error) {
         if (!(error instanceof ProbeCoordinatorError) || error.kind !== 'TRANSIENT') throw error;
-        await this.wait(delay, signal);
+        await this.wait(delay, abort.signal);
         delay = Math.min(delay * 2, 2_000);
       }
     }
   }
 
-  private async renewalLoop(lease: ProbeLeaseReferenceV1, abort: AbortController): Promise<void> {
+  private async renewalLoop(
+    lease: ProbeLeaseReferenceV1,
+    abort: AbortController,
+    authority: { expiresAt: number },
+  ): Promise<void> {
     while (!abort.signal.aborted) {
       await this.wait(this.config.renewalIntervalMs, abort.signal);
       if (abort.signal.aborted) return;
       try {
-        await this.client.renew(lease, HTTP_ENGINE_VERSION);
+        const renewed = await this.client.renew(lease, HTTP_ENGINE_VERSION, abort.signal);
+        authority.expiresAt = Date.parse(renewed);
       } catch (error) {
         if (
           error instanceof ProbeCoordinatorError &&
@@ -146,7 +163,7 @@ export class ProbeAgentRuntime {
   private async heartbeatLoop(): Promise<void> {
     while (!this.stopping) {
       try {
-        await this.client.heartbeat(HTTP_ENGINE_VERSION);
+        await this.client.heartbeat(HTTP_ENGINE_VERSION, this.lifecycleAbort.signal);
       } catch (error) {
         if (error instanceof ProbeCoordinatorError && error.kind === 'AUTH') {
           this.stopping = true;

@@ -22,6 +22,7 @@ export class ProbeCoordinatorClient {
     private readonly baseUrl: string,
     private readonly credential: string,
     private readonly fetcher: typeof fetch = fetch,
+    private readonly requestTimeoutMs = 10_000,
   ) {}
 
   async heartbeat(engineVersion: string, signal?: AbortSignal): Promise<void> {
@@ -53,19 +54,40 @@ export class ProbeCoordinatorClient {
     return parseProbeExecutionConfiguration(await responseData(response));
   }
 
-  async renew(lease: ProbeLeaseReferenceV1, engineVersion: string): Promise<void> {
-    await this.request(`/api/probe-machine/leases/${lease.attemptId}/renew`, {
+  async renew(
+    lease: ProbeLeaseReferenceV1,
+    engineVersion: string,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const response = await this.request(`/api/probe-machine/leases/${lease.attemptId}/renew`, {
       method: 'POST',
       headers: claimHeader(lease.claimToken),
       body: JSON.stringify(reference(lease, engineVersion)),
+      signal: signal ?? null,
     });
+    const data = await responseData(response);
+    if (
+      typeof data !== 'object' ||
+      data === null ||
+      Array.isArray(data) ||
+      !('leaseExpiresAt' in data) ||
+      !isCanonicalTimestamp(data.leaseExpiresAt)
+    ) {
+      throw new ProbeCoordinatorError('INVALID');
+    }
+    return data.leaseExpiresAt;
   }
 
-  async submitSerialized(lease: ProbeLeaseReferenceV1, serializedBody: string): Promise<void> {
+  async submitSerialized(
+    lease: ProbeLeaseReferenceV1,
+    serializedBody: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
     await this.request(`/api/probe-machine/leases/${lease.attemptId}/results`, {
       method: 'POST',
       headers: claimHeader(lease.claimToken),
       body: serializedBody,
+      signal: signal ?? null,
     });
   }
 
@@ -85,6 +107,8 @@ export class ProbeCoordinatorClient {
     try {
       response = await this.fetcher(`${this.baseUrl}${path}`, {
         ...init,
+        redirect: 'error',
+        signal: requestSignal(init.signal, this.requestTimeoutMs),
         headers: {
           authorization: `Bearer ${this.credential}`,
           'content-type': 'application/json',
@@ -108,11 +132,15 @@ export async function enrollProbeAgent(
   baseUrl: string,
   enrollment: { id: string; token: string },
   fetcher: typeof fetch = fetch,
+  requestTimeoutMs = 10_000,
+  signal?: AbortSignal,
 ): Promise<string> {
   let response: Response;
   try {
     response = await fetcher(`${baseUrl}/api/probe-machine/enroll`, {
       method: 'POST',
+      redirect: 'error',
+      signal: requestSignal(signal, requestTimeoutMs),
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ enrollmentId: enrollment.id, token: enrollment.token }),
     });
@@ -136,6 +164,11 @@ export async function enrollProbeAgent(
   return data.credential;
 }
 
+function requestSignal(external: AbortSignal | null | undefined, timeoutMs: number): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  return external ? AbortSignal.any([external, timeout]) : timeout;
+}
+
 function reference(
   lease: ProbeLeaseReferenceV1,
   engineVersion: string,
@@ -151,6 +184,12 @@ function reference(
 
 function claimHeader(token: string): Record<string, string> {
   return { 'x-watchrail-claim-token': token };
+}
+
+function isCanonicalTimestamp(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const parsed = new Date(value);
+  return !Number.isNaN(parsed.valueOf()) && parsed.toISOString() === value;
 }
 
 async function responseData(response: Response): Promise<unknown> {

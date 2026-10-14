@@ -17,7 +17,7 @@ const lease: ProbeLeaseReferenceV1 = {
   configurationVersionNumber: 1,
   executionPolicyVersion: 'probe-execution-v1',
   requiredEngineVersion: 'watchrail-http-v1',
-  leaseExpiresAt: '2026-10-14T08:00:30.000Z',
+  leaseExpiresAt: '2099-10-14T08:00:30.000Z',
 };
 
 const configuration: ProbeExecutionConfigurationV1 = {
@@ -45,6 +45,7 @@ const config: ProbeAgentConfig = {
   pollIntervalMs: 1,
   heartbeatIntervalMs: 1_000,
   renewalIntervalMs: 5,
+  requestTimeoutMs: 10_000,
 };
 
 describe('ProbeAgentRuntime', () => {
@@ -64,14 +65,54 @@ describe('ProbeAgentRuntime', () => {
     await runtime.run();
     expect(submit).not.toHaveBeenCalled();
   });
+
+  it('cancels hanging coordinator requests during shutdown', async () => {
+    const fetcher = vi.fn(
+      (_url: string | URL | Request, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('Aborted.', 'AbortError')),
+            { once: true },
+          );
+        }),
+    );
+    const client = new ProbeCoordinatorClient(
+      'https://coordinator.example',
+      'm'.repeat(43),
+      fetcher,
+      30_000,
+    );
+    const runtime = new ProbeAgentRuntime(client, config, {
+      execute: vi.fn(),
+    });
+    const running = runtime.run();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    runtime.stop();
+    await expect(
+      Promise.race([
+        running.then(() => 'stopped'),
+        new Promise<string>((resolve) => setTimeout(() => resolve('timeout'), 250)),
+      ]),
+    ).resolves.toBe('stopped');
+  });
+
+  it('does not submit after the authoritative lease has expired', async () => {
+    const expiredLease = { ...lease, leaseExpiresAt: '2000-01-01T00:00:00.000Z' };
+    const { client, runtime, submit } = runtimeFixture(expiredLease);
+    vi.spyOn(client, 'renew').mockRejectedValue(new ProbeCoordinatorError('TRANSIENT'));
+    vi.spyOn(client, 'submitSerialized').mockImplementation(submit);
+    await runtime.run();
+    expect(submit).not.toHaveBeenCalled();
+  });
 });
 
-function runtimeFixture() {
+function runtimeFixture(runtimeLease: ProbeLeaseReferenceV1 = lease) {
   const client = new ProbeCoordinatorClient('https://coordinator.example', 'm'.repeat(43));
   const state: { runtime?: ProbeAgentRuntime } = {};
   const claim = vi
     .fn()
-    .mockResolvedValueOnce(lease)
+    .mockResolvedValueOnce(runtimeLease)
     .mockImplementation(() => {
       state.runtime?.stop();
       return Promise.resolve(null);
@@ -80,7 +121,7 @@ function runtimeFixture() {
   vi.spyOn(client, 'heartbeat').mockResolvedValue();
   vi.spyOn(client, 'configuration').mockResolvedValue(configuration);
   vi.spyOn(client, 'serializeSubmission').mockReturnValue('{"stable":true}');
-  const renew = vi.fn().mockResolvedValue(undefined);
+  const renew = vi.fn().mockResolvedValue('2099-10-14T08:00:30.000Z');
   const submit = vi.fn().mockResolvedValue(undefined);
   const executor: HttpExecutor = {
     async execute() {

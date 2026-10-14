@@ -1,6 +1,12 @@
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { describe, expect, it, vi } from 'vitest';
 import type { ProbeLeaseReferenceV1 } from '@watchrail/contracts';
-import { ProbeCoordinatorClient } from './coordinator-client.js';
+import {
+  enrollProbeAgent,
+  ProbeCoordinatorClient,
+  ProbeCoordinatorError,
+} from './coordinator-client.js';
 
 const lease: ProbeLeaseReferenceV1 = {
   contractVersion: 1,
@@ -51,4 +57,68 @@ describe('ProbeCoordinatorClient', () => {
     expect(bodies).toEqual([serialized, serialized]);
     expect(serialized).not.toContain(lease.claimToken);
   });
+
+  it('rejects redirects without forwarding claim or enrollment secrets', async () => {
+    let targetRequests = 0;
+    const target = createServer((_request, response) => {
+      targetRequests += 1;
+      response.writeHead(200).end('{}');
+    });
+    await listen(target);
+    const targetUrl = serverUrl(target);
+    const redirector = createServer((_request, response) => {
+      response.writeHead(307, { location: targetUrl }).end();
+    });
+    await listen(redirector);
+    try {
+      const client = new ProbeCoordinatorClient(serverUrl(redirector), 'm'.repeat(43));
+      await expect(client.configuration(lease)).rejects.toMatchObject({
+        kind: 'TRANSIENT',
+      });
+      await expect(
+        enrollProbeAgent(serverUrl(redirector), {
+          id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          token: 'e'.repeat(43),
+        }),
+      ).rejects.toMatchObject({ kind: 'TRANSIENT' });
+      expect(targetRequests).toBe(0);
+    } finally {
+      await Promise.all([close(redirector), close(target)]);
+    }
+  });
+
+  it('bounds a coordinator request that never resolves', async () => {
+    const fetcher = vi.fn(
+      (_url: string | URL | Request, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('Timed out.', 'TimeoutError')),
+            { once: true },
+          );
+        }),
+    );
+    const client = new ProbeCoordinatorClient(
+      'https://coordinator.example',
+      'm'.repeat(43),
+      fetcher,
+      10,
+    );
+    await expect(client.claim('watchrail-http-v1')).rejects.toBeInstanceOf(ProbeCoordinatorError);
+  });
 });
+
+function listen(server: Server): Promise<void> {
+  return new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+}
+
+function close(server: Server): Promise<void> {
+  return new Promise((resolve, reject) =>
+    server.close((error) => (error ? reject(error) : resolve())),
+  );
+}
+
+function serverUrl(server: Server): string {
+  const address = server.address() as AddressInfo;
+  return `http://127.0.0.1:${address.port}`;
+}

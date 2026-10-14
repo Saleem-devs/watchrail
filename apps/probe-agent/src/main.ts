@@ -7,7 +7,7 @@ import { ProbeAgentRuntime } from './runtime.js';
 const config = loadProbeAgentConfig();
 const credential = config.credential ?? (await credentialFromEnrollment(config));
 const runtime = new ProbeAgentRuntime(
-  new ProbeCoordinatorClient(config.coordinatorUrl, credential),
+  new ProbeCoordinatorClient(config.coordinatorUrl, credential, fetch, config.requestTimeoutMs),
   config,
 );
 
@@ -27,7 +27,12 @@ async function credentialFromEnrollment(agentConfig: typeof config): Promise<str
   } catch (error) {
     if (!isMissingFile(error)) throw error;
   }
-  const enrolled = await enrollProbeAgent(agentConfig.coordinatorUrl, agentConfig.enrollment);
+  const enrolled = await enrollProbeAgent(
+    agentConfig.coordinatorUrl,
+    agentConfig.enrollment,
+    fetch,
+    agentConfig.requestTimeoutMs,
+  );
   await writeFile(agentConfig.credentialFile, `${enrolled}\n`, {
     encoding: 'utf8',
     flag: 'wx',

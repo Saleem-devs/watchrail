@@ -6,6 +6,7 @@ export interface ProbeAgentConfig {
   pollIntervalMs: number;
   heartbeatIntervalMs: number;
   renewalIntervalMs: number;
+  requestTimeoutMs: number;
 }
 
 export function loadProbeAgentConfig(
@@ -49,6 +50,12 @@ export function loadProbeAgentConfig(
       15_000,
     ),
     renewalIntervalMs: boundedInteger(environment.PROBE_RENEWAL_INTERVAL_MS, 5_000, 20_000, 10_000),
+    requestTimeoutMs: boundedInteger(
+      environment.PROBE_COORDINATOR_REQUEST_TIMEOUT_MS,
+      1_000,
+      30_000,
+      10_000,
+    ),
   };
 }
 

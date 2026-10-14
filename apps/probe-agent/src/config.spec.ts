@@ -14,6 +14,7 @@ describe('loadProbeAgentConfig', () => {
       credential: 'x'.repeat(43),
       enrollment: null,
       credentialFile: null,
+      requestTimeoutMs: 10_000,
     });
   });
 
