@@ -59,10 +59,23 @@ describe('ProbeAgentRuntime', () => {
   });
 
   it('discards a result when renewal reports a stale claim', async () => {
-    const { client, runtime, submit } = runtimeFixture();
+    const { client, runtime, submit, executorAbort } = runtimeFixture();
     vi.spyOn(client, 'renew').mockRejectedValue(new ProbeCoordinatorError('STALE'));
     vi.spyOn(client, 'submitSerialized').mockImplementation(submit);
     await runtime.run();
+    expect(executorAbort).toHaveBeenCalledOnce();
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it('aborts an in-flight target request during shutdown', async () => {
+    const { client, runtime, submit, executorAbort } = runtimeFixture(lease, 30_000);
+    vi.spyOn(client, 'renew').mockResolvedValue('2099-10-14T08:00:30.000Z');
+    vi.spyOn(client, 'submitSerialized').mockImplementation(submit);
+    const running = runtime.run();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    runtime.stop();
+    await running;
+    expect(executorAbort).toHaveBeenCalledOnce();
     expect(submit).not.toHaveBeenCalled();
   });
 
@@ -97,6 +110,26 @@ describe('ProbeAgentRuntime', () => {
     ).resolves.toBe('stopped');
   });
 
+  it('cancels an outstanding claim when heartbeat authentication is revoked', async () => {
+    const client = new ProbeCoordinatorClient('https://coordinator.example', 'm'.repeat(43));
+    const claimAbort = vi.fn();
+    vi.spyOn(client, 'claim').mockImplementation(
+      (_engineVersion, signal) =>
+        new Promise((_resolve, reject) => {
+          const cancel = () => {
+            claimAbort();
+            reject(new DOMException('Aborted.', 'AbortError'));
+          };
+          if (signal?.aborted) cancel();
+          else signal?.addEventListener('abort', cancel, { once: true });
+        }),
+    );
+    vi.spyOn(client, 'heartbeat').mockRejectedValue(new ProbeCoordinatorError('AUTH'));
+    const runtime = new ProbeAgentRuntime(client, config, { execute: vi.fn() });
+    await runtime.run();
+    expect(claimAbort).toHaveBeenCalledOnce();
+  });
+
   it('does not submit after the authoritative lease has expired', async () => {
     const expiredLease = { ...lease, leaseExpiresAt: '2000-01-01T00:00:00.000Z' };
     const { client, runtime, submit } = runtimeFixture(expiredLease);
@@ -107,7 +140,7 @@ describe('ProbeAgentRuntime', () => {
   });
 });
 
-function runtimeFixture(runtimeLease: ProbeLeaseReferenceV1 = lease) {
+function runtimeFixture(runtimeLease: ProbeLeaseReferenceV1 = lease, executionDelayMs = 25) {
   const client = new ProbeCoordinatorClient('https://coordinator.example', 'm'.repeat(43));
   const state: { runtime?: ProbeAgentRuntime } = {};
   const claim = vi
@@ -123,20 +156,32 @@ function runtimeFixture(runtimeLease: ProbeLeaseReferenceV1 = lease) {
   vi.spyOn(client, 'serializeSubmission').mockReturnValue('{"stable":true}');
   const renew = vi.fn().mockResolvedValue('2099-10-14T08:00:30.000Z');
   const submit = vi.fn().mockResolvedValue(undefined);
+  const executorAbort = vi.fn();
   const executor: HttpExecutor = {
-    async execute() {
-      await new Promise((resolve) => setTimeout(resolve, 25));
-      return {
-        type: 'RESPONSE',
-        statusCode: 200,
-        responseTimeMs: 5,
-        headers: [],
-        body: { state: 'NOT_REQUESTED' },
-        redirects: [],
-      };
+    execute(input) {
+      return new Promise((resolve, reject) => {
+        const complete = () => {
+          input.signal.removeEventListener('abort', cancel);
+          resolve({
+            type: 'RESPONSE',
+            statusCode: 200,
+            responseTimeMs: 5,
+            headers: [],
+            body: { state: 'NOT_REQUESTED' },
+            redirects: [],
+          });
+        };
+        const timer = setTimeout(complete, executionDelayMs);
+        const cancel = () => {
+          clearTimeout(timer);
+          executorAbort();
+          reject(new DOMException('Aborted.', 'AbortError'));
+        };
+        input.signal.addEventListener('abort', cancel, { once: true });
+      });
     },
   };
   const runtime = new ProbeAgentRuntime(client, config, executor);
   state.runtime = runtime;
-  return { client, runtime, renew, submit };
+  return { client, runtime, renew, submit, executorAbort };
 }

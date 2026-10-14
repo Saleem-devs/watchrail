@@ -216,6 +216,8 @@ export interface CheckClock {
 export interface HttpCheckDependencies {
   executor: HttpExecutor;
   clock?: CheckClock;
+  /** Optional caller-owned cancellation authority composed with the check deadline. */
+  signal?: AbortSignal;
 }
 import type {
   AssertionEvaluationV1,

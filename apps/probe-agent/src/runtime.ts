@@ -91,7 +91,7 @@ export class ProbeAgentRuntime {
           textBodyAssertions: assertions.textBody,
           jsonBodyAssertions: assertions.jsonBody,
         },
-        { executor: this.executor },
+        { executor: this.executor, signal: abort.signal },
       );
       const serialized = this.client.serializeSubmission(lease, HTTP_ENGINE_VERSION, result);
       await this.submitWithRetry(lease, serialized, abort, authority);
@@ -167,6 +167,7 @@ export class ProbeAgentRuntime {
       } catch (error) {
         if (error instanceof ProbeCoordinatorError && error.kind === 'AUTH') {
           this.stopping = true;
+          this.lifecycleAbort.abort();
           this.activeAbort?.abort();
           return;
         }
