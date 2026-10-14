@@ -36,6 +36,27 @@ export interface ProbeHeartbeatV1 {
   engineVersion: string;
 }
 
+export interface ProbeExecutionConfigurationV1 {
+  contractVersion: 1;
+  assignmentId: string;
+  attemptId: string;
+  configurationVersionId: string;
+  configurationVersionNumber: number;
+  executionPolicyVersion: string;
+  requiredEngineVersion: string;
+  url: string;
+  method: 'GET' | 'HEAD';
+  timeoutMs: number;
+  followRedirects: boolean;
+  statusPolicy: { type: 'ANY_2XX' } | { type: 'EXACT'; statusCodes: number[] };
+  requestHeaders: Array<{ name: string; value: string }>;
+  assertions: {
+    headers: unknown[];
+    textBody: unknown[];
+    jsonBody: unknown[];
+  };
+}
+
 export class InvalidProbeCoordinatorContractError extends Error {
   constructor() {
     super('Probe coordinator contract is invalid.');
@@ -112,6 +133,90 @@ export function parseProbeClaimRequest(value: unknown): ProbeClaimRequestV1 {
 
 export function parseProbeHeartbeat(value: unknown): ProbeHeartbeatV1 {
   return parseProbeClaimRequest(value);
+}
+
+export function parseProbeExecutionConfiguration(value: unknown): ProbeExecutionConfigurationV1 {
+  if (
+    !hasExactKeys(value, [
+      'assertions',
+      'assignmentId',
+      'attemptId',
+      'configurationVersionId',
+      'configurationVersionNumber',
+      'contractVersion',
+      'executionPolicyVersion',
+      'followRedirects',
+      'method',
+      'requestHeaders',
+      'requiredEngineVersion',
+      'statusPolicy',
+      'timeoutMs',
+      'url',
+    ]) ||
+    value.contractVersion !== PROBE_COORDINATOR_CONTRACT_VERSION ||
+    !isUuid(value.assignmentId) ||
+    !isUuid(value.attemptId) ||
+    !isUuid(value.configurationVersionId) ||
+    !isPositiveInteger(value.configurationVersionNumber) ||
+    !isVersion(value.executionPolicyVersion) ||
+    !isVersion(value.requiredEngineVersion) ||
+    typeof value.url !== 'string' ||
+    value.url.length === 0 ||
+    value.url.length > 2048 ||
+    (value.method !== 'GET' && value.method !== 'HEAD') ||
+    !Number.isInteger(value.timeoutMs) ||
+    Number(value.timeoutMs) < 1_000 ||
+    Number(value.timeoutMs) > 30_000 ||
+    typeof value.followRedirects !== 'boolean' ||
+    !isStatusPolicy(value.statusPolicy) ||
+    !isRuntimeHeaders(value.requestHeaders) ||
+    !isRuntimeAssertions(value.assertions)
+  ) {
+    throw new InvalidProbeCoordinatorContractError();
+  }
+  return value as unknown as ProbeExecutionConfigurationV1;
+}
+
+function isStatusPolicy(value: unknown): boolean {
+  if (
+    !hasExactKeys(
+      value,
+      value && typeof value === 'object' && 'type' in value && value.type === 'EXACT'
+        ? ['statusCodes', 'type']
+        : ['type'],
+    )
+  )
+    return false;
+  if (value.type === 'ANY_2XX') return true;
+  return (
+    value.type === 'EXACT' &&
+    Array.isArray(value.statusCodes) &&
+    value.statusCodes.length > 0 &&
+    value.statusCodes.every(
+      (code) => Number.isInteger(code) && Number(code) >= 100 && Number(code) <= 599,
+    )
+  );
+}
+
+function isRuntimeHeaders(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (header) =>
+        hasExactKeys(header, ['name', 'value']) &&
+        typeof header.name === 'string' &&
+        typeof header.value === 'string',
+    )
+  );
+}
+
+function isRuntimeAssertions(value: unknown): boolean {
+  return (
+    hasExactKeys(value, ['headers', 'jsonBody', 'textBody']) &&
+    Array.isArray(value.headers) &&
+    Array.isArray(value.textBody) &&
+    Array.isArray(value.jsonBody)
+  );
 }
 
 function isUuid(value: unknown): value is string {

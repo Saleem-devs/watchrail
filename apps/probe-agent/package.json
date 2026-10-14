@@ -1,0 +1,25 @@
+{
+  "name": "@watchrail/probe-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx watch src/main.ts",
+    "lint": "eslint src --max-warnings 0",
+    "start": "node dist/main.js",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@watchrail/check-engine": "workspace:*",
+    "@watchrail/contracts": "workspace:*",
+    "@watchrail/domain": "workspace:*",
+    "dotenv": "18.0.1"
+  },
+  "devDependencies": {
+    "tsx": "4.23.13",
+    "typescript": "6.0.3",
+    "vitest": "5.0.1"
+  }
+}

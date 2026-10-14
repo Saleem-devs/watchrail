@@ -34,6 +34,24 @@ export type ProbeLeaseClaimResult =
 export type ProbeSubmissionResult =
   { state: 'ACCEPTED'; duplicate: boolean } | { state: 'REJECTED' };
 
+export interface ProbeExecutionConfigurationRecord {
+  assignmentId: string;
+  attemptId: string;
+  configurationVersionId: string;
+  configurationVersionNumber: number;
+  executionPolicyVersion: string;
+  requiredEngineVersion: string;
+  organizationId: string;
+  monitorId: string;
+  url: string;
+  method: string;
+  timeoutMs: number;
+  followRedirects: boolean;
+  statusPolicy: unknown;
+  requestHeaders: unknown;
+  assertions: unknown;
+}
+
 export class ProbeCoordinatorRepository {
   constructor(private readonly db: WatchrailDatabase) {}
 
@@ -51,6 +69,98 @@ export class ProbeCoordinatorRepository {
         .returning({ lastHeartbeatAt: probeAgents.lastHeartbeatAt });
       if (!updated?.lastHeartbeatAt) throw new Error('Probe heartbeat update returned no time.');
       return updated.lastHeartbeatAt;
+    });
+  }
+
+  async configuration(
+    machine: ProbeMachineIdentity,
+    attemptId: string,
+    claimToken: string,
+  ): Promise<ProbeExecutionConfigurationRecord | null> {
+    return this.db.transaction(async (tx) => {
+      await lockActiveMachine(tx, machine);
+      const [row] = await tx
+        .select({
+          assignmentId: checkExecutionAssignments.id,
+          attemptId: probeExecutionAttempts.id,
+          attemptNumber: probeExecutionAttempts.attemptNumber,
+          attemptStatus: probeExecutionAttempts.status,
+          attemptUnexpired: sql<boolean>`${probeExecutionAttempts.leaseExpiresAt} > clock_timestamp()`,
+          claimTokenVerifier: probeExecutionAttempts.claimTokenVerifier,
+          assignmentStatus: checkExecutionAssignments.status,
+          assignmentAttemptCount: checkExecutionAssignments.attemptCount,
+          assignmentUnexpired: sql<boolean>`${checkExecutionAssignments.claimExpiresAt} > clock_timestamp()`,
+          configurationVersionId: monitorConfigurationVersions.id,
+          configurationVersionNumber: monitorConfigurationVersions.versionNumber,
+          executionPolicyVersion: checkExecutionAssignments.executionPolicyVersion,
+          requiredEngineVersion: checkExecutionAssignments.requiredEngineVersion,
+          organizationId: monitorConfigurationVersions.organizationId,
+          monitorId: monitorConfigurationVersions.monitorId,
+          url: monitorConfigurationVersions.url,
+          method: monitorConfigurationVersions.method,
+          timeoutMs: monitorConfigurationVersions.timeoutMs,
+          followRedirects: monitorConfigurationVersions.followRedirects,
+          statusPolicy: monitorConfigurationVersions.statusPolicy,
+          requestHeaders: monitorConfigurationVersions.requestHeaders,
+          assertions: monitorConfigurationVersions.assertions,
+        })
+        .from(probeExecutionAttempts)
+        .innerJoin(
+          checkExecutionAssignments,
+          and(
+            eq(checkExecutionAssignments.organizationId, probeExecutionAttempts.organizationId),
+            eq(checkExecutionAssignments.id, probeExecutionAttempts.assignmentId),
+          ),
+        )
+        .innerJoin(
+          checkRounds,
+          and(
+            eq(checkRounds.organizationId, checkExecutionAssignments.organizationId),
+            eq(checkRounds.id, checkExecutionAssignments.roundId),
+          ),
+        )
+        .innerJoin(
+          monitorConfigurationVersions,
+          eq(monitorConfigurationVersions.id, checkRounds.monitorConfigurationVersionId),
+        )
+        .where(
+          and(
+            eq(probeExecutionAttempts.organizationId, machine.organizationId),
+            eq(probeExecutionAttempts.id, attemptId),
+            eq(probeExecutionAttempts.agentId, machine.agentId),
+            eq(probeExecutionAttempts.locationId, machine.locationId),
+          ),
+        )
+        .limit(1)
+        .for('update', { of: checkExecutionAssignments });
+      if (
+        !row ||
+        row.attemptStatus !== 'LEASED' ||
+        !row.attemptUnexpired ||
+        row.claimTokenVerifier !== verifier(claimToken) ||
+        row.assignmentStatus !== 'RUNNING' ||
+        !row.assignmentUnexpired ||
+        row.assignmentAttemptCount !== row.attemptNumber
+      ) {
+        return null;
+      }
+      return {
+        assignmentId: row.assignmentId,
+        attemptId: row.attemptId,
+        configurationVersionId: row.configurationVersionId,
+        configurationVersionNumber: row.configurationVersionNumber,
+        executionPolicyVersion: row.executionPolicyVersion,
+        requiredEngineVersion: row.requiredEngineVersion,
+        organizationId: row.organizationId,
+        monitorId: row.monitorId,
+        url: row.url,
+        method: row.method,
+        timeoutMs: row.timeoutMs,
+        followRedirects: row.followRedirects,
+        statusPolicy: row.statusPolicy,
+        requestHeaders: row.requestHeaders,
+        assertions: row.assertions,
+      };
     });
   }
 

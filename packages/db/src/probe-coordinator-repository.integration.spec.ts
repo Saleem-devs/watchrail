@@ -72,6 +72,35 @@ describe('probe coordinator repository', () => {
     expect(attempt.rows[0]!.lease_expires_at.toISOString()).toBe(beforeRenewal);
   });
 
+  it('returns immutable configuration only for the authoritative agent and claim token', async () => {
+    const fixture = await createFixture('configuration');
+    const lease = await claimLease(fixture.machine);
+    await expect(
+      coordinator.configuration(fixture.machine, lease.attemptId, lease.claimToken),
+    ).resolves.toMatchObject({
+      assignmentId: fixture.assignmentId,
+      attemptId: lease.attemptId,
+      configurationVersionId: lease.configurationVersionId,
+      configurationVersionNumber: lease.configurationVersionNumber,
+      url: 'https://example.com/health',
+      method: 'GET',
+      requestHeaders: [],
+    });
+    await expect(
+      coordinator.configuration(fixture.machine, lease.attemptId, 'x'.repeat(43)),
+    ).resolves.toBeNull();
+
+    const other = await createFixture('configuration-other-agent');
+    await expect(
+      coordinator.configuration(other.machine, lease.attemptId, lease.claimToken),
+    ).resolves.toBeNull();
+
+    await expire(lease.assignmentId, lease.attemptId);
+    await expect(
+      coordinator.configuration(fixture.machine, lease.attemptId, lease.claimToken),
+    ).resolves.toBeNull();
+  });
+
   it('expires an old lease and fences stale results after replacement', async () => {
     const fixture = await createFixture();
     const first = await claimLease(fixture.machine);
