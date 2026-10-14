@@ -29,7 +29,7 @@ export class ProbeAgentRuntime {
           const lease = await this.client.claim(HTTP_ENGINE_VERSION, this.lifecycleAbort.signal);
           if (!lease) {
             failures = 0;
-            await this.wait(this.config.pollIntervalMs, this.lifecycleAbort.signal);
+            await waitForDelay(this.config.pollIntervalMs, this.lifecycleAbort.signal);
             continue;
           }
           await this.executeLease(lease);
@@ -41,7 +41,7 @@ export class ProbeAgentRuntime {
             break;
           }
           failures += 1;
-          await this.wait(
+          await waitForDelay(
             Math.min(30_000, this.config.pollIntervalMs * 2 ** Math.min(failures, 3)),
             this.lifecycleAbort.signal,
           );
@@ -130,7 +130,7 @@ export class ProbeAgentRuntime {
         return;
       } catch (error) {
         if (!(error instanceof ProbeCoordinatorError) || error.kind !== 'TRANSIENT') throw error;
-        await this.wait(delay, abort.signal);
+        await waitForDelay(delay, abort.signal);
         delay = Math.min(delay * 2, 2_000);
       }
     }
@@ -142,7 +142,7 @@ export class ProbeAgentRuntime {
     authority: { expiresAt: number },
   ): Promise<void> {
     while (!abort.signal.aborted) {
-      await this.wait(this.config.renewalIntervalMs, abort.signal);
+      await waitForDelay(this.config.renewalIntervalMs, abort.signal);
       if (abort.signal.aborted) return;
       try {
         const renewed = await this.client.renew(lease, HTTP_ENGINE_VERSION, abort.signal);
@@ -172,22 +172,20 @@ export class ProbeAgentRuntime {
           return;
         }
       }
-      await this.wait(this.config.heartbeatIntervalMs, this.lifecycleAbort.signal);
+      await waitForDelay(this.config.heartbeatIntervalMs, this.lifecycleAbort.signal);
     }
   }
+}
 
-  private wait(milliseconds: number, signal?: AbortSignal): Promise<void> {
-    if (milliseconds <= 0 || signal?.aborted) return Promise.resolve();
-    return new Promise((resolve) => {
-      const timer = setTimeout(resolve, milliseconds);
-      signal?.addEventListener(
-        'abort',
-        () => {
-          clearTimeout(timer);
-          resolve();
-        },
-        { once: true },
-      );
-    });
-  }
+export function waitForDelay(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  if (milliseconds <= 0 || signal?.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, milliseconds);
+    signal?.addEventListener('abort', finish, { once: true });
+  });
 }

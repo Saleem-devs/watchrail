@@ -431,6 +431,42 @@ describe('executeHttpCheck', () => {
     }
   });
 
+  it('propagates caller cancellation to the active executor', async () => {
+    const caller = new AbortController();
+    const executorAborted = vi.fn();
+    const executor: HttpExecutor = {
+      execute: ({ signal }) =>
+        new Promise<HttpExecutionResult>((_resolve, reject) => {
+          signal.addEventListener(
+            'abort',
+            () => {
+              executorAborted();
+              reject(new DOMException('Aborted.', 'AbortError'));
+            },
+            { once: true },
+          );
+        }),
+    };
+
+    const promise = executeHttpCheck(
+      {
+        url: 'https://example.com',
+        method: 'GET',
+        followRedirects: true,
+        timeoutMs: 5_000,
+      },
+      { executor, signal: caller.signal },
+    );
+    caller.abort();
+
+    await expect(promise).resolves.toMatchObject({
+      outcome: 'UNKNOWN',
+      stage: 'PROBE',
+      reason: 'INTERNAL_ERROR',
+    });
+    expect(executorAborted).toHaveBeenCalledOnce();
+  });
+
   it.each([
     { stage: 'DNS', reason: 'NAME_NOT_FOUND' },
     { stage: 'CONNECT', reason: 'CONNECTION_REFUSED' },

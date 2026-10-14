@@ -3,7 +3,7 @@ import type { ProbeExecutionConfigurationV1, ProbeLeaseReferenceV1 } from '@watc
 import { describe, expect, it, vi } from 'vitest';
 import { ProbeCoordinatorClient, ProbeCoordinatorError } from './coordinator-client.js';
 import type { ProbeAgentConfig } from './config.js';
-import { ProbeAgentRuntime } from './runtime.js';
+import { ProbeAgentRuntime, waitForDelay } from './runtime.js';
 
 const lease: ProbeLeaseReferenceV1 = {
   contractVersion: 1,
@@ -49,6 +49,14 @@ const config: ProbeAgentConfig = {
 };
 
 describe('ProbeAgentRuntime', () => {
+  it('removes abort listeners after normally completed waits', async () => {
+    const controller = new AbortController();
+    for (let index = 0; index < 20; index += 1) {
+      await waitForDelay(1, controller.signal);
+    }
+    expect(getEventListeners(controller.signal, 'abort')).toHaveLength(0);
+  });
+
   it('renews a slow check and submits its result', async () => {
     const { client, runtime, submit, renew } = runtimeFixture();
     vi.spyOn(client, 'renew').mockImplementation(renew);
@@ -185,3 +193,4 @@ function runtimeFixture(runtimeLease: ProbeLeaseReferenceV1 = lease, executionDe
   state.runtime = runtime;
   return { client, runtime, renew, submit, executorAbort };
 }
+import { getEventListeners } from 'node:events';
