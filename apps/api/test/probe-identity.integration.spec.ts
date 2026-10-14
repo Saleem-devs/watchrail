@@ -261,7 +261,7 @@ describe('probe enrollment and machine credentials API', () => {
       .expect(404);
   });
 
-  it('claims, renews, heartbeats, and submits fenced remote work through the machine API', async () => {
+  it('claims, resolves configuration, heartbeats, and submits fenced remote work through the machine API', async () => {
     const location = await createLocation('coordinator-api');
     const issued = await issueEnrollment(location.id, 'coordinator-agent');
     const enrolled = (
@@ -276,6 +276,13 @@ describe('probe enrollment and machine credentials API', () => {
         .send({ name: 'Remote API', url: 'https://example.com/health' })
         .expect(201)
     ).body.data as { id: string };
+    const sentinel = 'WATCHRAIL_REMOTE_CONFIGURATION_SECRET';
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitor.id}/request-headers`)
+      .send({
+        requestHeaders: [{ name: 'authorization', sensitive: true, value: `Bearer ${sentinel}` }],
+      })
+      .expect(200);
     const round = (
       await request(app.getHttpServer())
         .post(`/api/monitors/${monitor.id}/check-rounds`)
@@ -311,11 +318,24 @@ describe('probe enrollment and machine credentials API', () => {
       attemptNumber: lease.attemptNumber,
       engineVersion: 'watchrail-http-v1',
     };
-    await machinePost(enrolled.credential, `/api/probe-machine/leases/${lease.attemptId}/renew`)
+    const executionConfiguration = await request(app.getHttpServer())
+      .get(`/api/probe-machine/leases/${lease.attemptId}/configuration`)
+      .set('Authorization', `Bearer ${enrolled.credential}`)
       .set('X-Watchrail-Claim-Token', lease.claimToken)
-      .send(reference)
-      .expect(201);
-
+      .expect('Cache-Control', 'no-store')
+      .expect(200);
+    expect(executionConfiguration.body.data).toMatchObject({
+      contractVersion: 1,
+      assignmentId: lease.assignmentId,
+      attemptId: lease.attemptId,
+      url: 'https://example.com/health',
+      method: 'GET',
+      requestHeaders: [{ name: 'authorization', value: `Bearer ${sentinel}` }],
+      assertions: { headers: [], textBody: [], jsonBody: [] },
+    });
+    expect(JSON.stringify(executionConfiguration.body)).not.toMatch(
+      /encryptedValue|ciphertext|authTag|keyId/u,
+    );
     const result = {
       outcome: 'PASS',
       stage: 'HTTP',
