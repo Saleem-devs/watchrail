@@ -114,7 +114,7 @@ describe('probe coordinator repository', () => {
         first.claimToken,
         passingResult(),
       ),
-    ).toEqual({ state: 'REJECTED' });
+    ).toEqual({ state: 'REJECTED', reason: 'NON_AUTHORITATIVE_LEASE' });
     expect(
       await coordinator.submit(
         fixture.machine,
@@ -122,7 +122,7 @@ describe('probe coordinator repository', () => {
         'x'.repeat(43),
         passingResult(),
       ),
-    ).toEqual({ state: 'REJECTED' });
+    ).toEqual({ state: 'REJECTED', reason: 'CLAIM_TOKEN_MISMATCH' });
   });
 
   it('renews only the authoritative lease and accepts identical submission replay once', async () => {
@@ -140,13 +140,13 @@ describe('probe coordinator repository', () => {
         ...passingResult(),
         checkedAt: new Date('2000-01-01T00:00:00.000Z'),
       }),
-    ).toEqual({ state: 'REJECTED' });
+    ).toEqual({ state: 'REJECTED', reason: 'RESULT_TIMESTAMP_OUT_OF_RANGE' });
     expect(
       await coordinator.submit(fixture.machine, resultReference(lease), lease.claimToken, {
         ...passingResult(),
         checkedAt: new Date(Date.now() + 10 * 60_000),
       }),
-    ).toEqual({ state: 'REJECTED' });
+    ).toEqual({ state: 'REJECTED', reason: 'RESULT_TIMESTAMP_OUT_OF_RANGE' });
 
     const result = passingResult();
     expect(
@@ -166,7 +166,7 @@ describe('probe coordinator repository', () => {
         ...result,
         attemptDurationMs: 99,
       }),
-    ).toEqual({ state: 'REJECTED' });
+    ).toEqual({ state: 'REJECTED', reason: 'REPLAY_MISMATCH' });
     expect(
       (await connection.pool.query('select id from check_execution_results')).rows,
     ).toHaveLength(1);

@@ -3,6 +3,7 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import {
@@ -28,6 +29,8 @@ import { APP_CONFIG, type AppConfig } from './config.js';
 
 @Injectable()
 export class ProbeCoordinatorService {
+  private readonly logger = new Logger(ProbeCoordinatorService.name);
+
   constructor(
     @Inject(ProbeCoordinatorRepository) private readonly coordinator: ProbeCoordinatorRepository,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
@@ -115,7 +118,18 @@ export class ProbeCoordinatorService {
     const accepted = await this.authorized(() =>
       this.coordinator.submit(machine, reference, token, result),
     );
-    if (accepted.state === 'REJECTED') throw staleLease();
+    if (accepted.state === 'REJECTED') {
+      this.logger.warn({
+        event: 'probe_result_submission_rejected',
+        organizationId: machine.organizationId,
+        locationId: machine.locationId,
+        agentId: machine.agentId,
+        assignmentId: reference.assignmentId,
+        attemptId: reference.attemptId,
+        reason: accepted.reason,
+      });
+      throw staleLease();
+    }
     return accepted;
   }
 

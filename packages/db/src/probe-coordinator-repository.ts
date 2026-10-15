@@ -32,7 +32,17 @@ export type ProbeLeaseClaimResult =
   { state: 'CLAIMED'; lease: ProbeLeaseReferenceV1 } | { state: 'NO_WORK' };
 
 export type ProbeSubmissionResult =
-  { state: 'ACCEPTED'; duplicate: boolean } | { state: 'REJECTED' };
+  | { state: 'ACCEPTED'; duplicate: boolean }
+  | {
+      state: 'REJECTED';
+      reason:
+        | 'ASSIGNMENT_NOT_FOUND'
+        | 'ATTEMPT_NOT_FOUND'
+        | 'CLAIM_TOKEN_MISMATCH'
+        | 'NON_AUTHORITATIVE_LEASE'
+        | 'REPLAY_MISMATCH'
+        | 'RESULT_TIMESTAMP_OUT_OF_RANGE';
+    };
 
 export interface ProbeExecutionConfigurationRecord {
   assignmentId: string;
@@ -321,10 +331,11 @@ export class ProbeCoordinatorRepository {
     return this.db.transaction(async (tx) => {
       await lockActiveMachine(tx, machine);
       const assignment = await lockAssignment(tx, machine, reference.assignmentId);
-      if (!assignment) return { state: 'REJECTED' };
+      if (!assignment) return { state: 'REJECTED', reason: 'ASSIGNMENT_NOT_FOUND' };
       const attempt = await lockAttempt(tx, machine, reference);
-      if (!attempt || attempt.claimTokenVerifier !== verifier(claimToken)) {
-        return { state: 'REJECTED' };
+      if (!attempt) return { state: 'REJECTED', reason: 'ATTEMPT_NOT_FOUND' };
+      if (attempt.claimTokenVerifier !== verifier(claimToken)) {
+        return { state: 'REJECTED', reason: 'CLAIM_TOKEN_MISMATCH' };
       }
 
       if (attempt.status === 'SUBMITTED' && assignment.status === 'COMPLETED') {
@@ -335,18 +346,18 @@ export class ProbeCoordinatorRepository {
           .limit(1);
         return stored && sameResult(stored, result)
           ? { state: 'ACCEPTED', duplicate: true }
-          : { state: 'REJECTED' };
+          : { state: 'REJECTED', reason: 'REPLAY_MISMATCH' };
       }
 
       if (!isAuthoritativeAttempt(attempt, reference, claimToken, assignment)) {
-        return { state: 'REJECTED' };
+        return { state: 'REJECTED', reason: 'NON_AUTHORITATIVE_LEASE' };
       }
       const acceptedAt = await databaseClock(tx);
       if (
         result.checkedAt.getTime() < attempt.leasedAt.getTime() - PROBE_RESULT_CLOCK_SKEW_MS ||
         result.checkedAt.getTime() > acceptedAt.getTime() + PROBE_RESULT_CLOCK_SKEW_MS
       ) {
-        return { state: 'REJECTED' };
+        return { state: 'REJECTED', reason: 'RESULT_TIMESTAMP_OUT_OF_RANGE' };
       }
 
       await tx

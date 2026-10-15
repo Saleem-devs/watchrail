@@ -1,22 +1,43 @@
 import 'dotenv/config';
 import { readFile, writeFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
+import type { HttpExecutor } from '@watchrail/check-engine';
 import { enrollProbeAgent, ProbeCoordinatorClient } from './coordinator-client.js';
 import { loadProbeAgentConfig } from './config.js';
 import { ProbeAgentRuntime } from './runtime.js';
 
-const config = loadProbeAgentConfig();
-const credential = config.credential ?? (await credentialFromEnrollment(config));
-const runtime = new ProbeAgentRuntime(
-  new ProbeCoordinatorClient(config.coordinatorUrl, credential, fetch, config.requestTimeoutMs),
-  config,
-);
+export async function runProbeAgent(
+  environment: NodeJS.ProcessEnv = process.env,
+  dependencies: { fetcher?: typeof fetch; executor?: HttpExecutor } = {},
+): Promise<void> {
+  const config = loadProbeAgentConfig(environment);
+  const fetcher = dependencies.fetcher ?? fetch;
+  const credential = config.credential ?? (await credentialFromEnrollment(config, fetcher));
+  const runtime = new ProbeAgentRuntime(
+    new ProbeCoordinatorClient(config.coordinatorUrl, credential, fetcher, config.requestTimeoutMs),
+    config,
+    dependencies.executor,
+  );
+  const stop = () => runtime.stop();
 
-process.once('SIGINT', () => runtime.stop());
-process.once('SIGTERM', () => runtime.stop());
+  process.once('SIGINT', stop);
+  process.once('SIGTERM', stop);
+  try {
+    await runtime.run();
+  } finally {
+    process.removeListener('SIGINT', stop);
+    process.removeListener('SIGTERM', stop);
+  }
+}
 
-await runtime.run();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await runProbeAgent();
+}
 
-async function credentialFromEnrollment(agentConfig: typeof config): Promise<string> {
+async function credentialFromEnrollment(
+  agentConfig: ReturnType<typeof loadProbeAgentConfig>,
+  fetcher: typeof fetch,
+): Promise<string> {
   if (!agentConfig.enrollment || !agentConfig.credentialFile) {
     throw new Error('Probe credential source is unavailable.');
   }
@@ -30,7 +51,7 @@ async function credentialFromEnrollment(agentConfig: typeof config): Promise<str
   const enrolled = await enrollProbeAgent(
     agentConfig.coordinatorUrl,
     agentConfig.enrollment,
-    fetch,
+    fetcher,
     agentConfig.requestTimeoutMs,
   );
   await writeFile(agentConfig.credentialFile, `${enrolled}\n`, {
