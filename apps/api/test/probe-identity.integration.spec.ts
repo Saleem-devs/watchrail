@@ -292,11 +292,7 @@ describe('probe enrollment and machine credentials API', () => {
       .patch(`/api/monitors/${monitor.id}/locations`)
       .send({ locations: [location.id] })
       .expect(200);
-    const round = (
-      await request(app.getHttpServer())
-        .post(`/api/monitors/${monitor.id}/check-rounds`)
-        .expect(202)
-    ).body.data as { id: string };
+    await request(app.getHttpServer()).post(`/api/monitors/${monitor.id}/check-rounds`).expect(202);
 
     const heartbeat = await machinePost(enrolled.credential, '/api/probe-machine/heartbeat')
       .send({ contractVersion: 1, engineVersion: 'watchrail-http-v1', heartbeatIntervalMs: 15_000 })

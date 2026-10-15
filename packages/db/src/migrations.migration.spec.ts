@@ -13,6 +13,8 @@ const existingMonitor = {
 
 const existingPausedMonitorId = '55555555-5555-4555-8555-555555555555';
 const existingArchivedMonitorId = '66666666-6666-4666-8666-666666666666';
+const legacyRemoteLocationId = 'abcdefab-cdef-4abc-8def-abcdefabcdef';
+const legacyUppercaseRemoteLocationId = legacyRemoteLocationId.toUpperCase();
 
 const existingRound = {
   id: '22222222-2222-4222-8222-222222222222',
@@ -115,9 +117,38 @@ describe('database migrations', () => {
     `);
 
     await applyMigration(migrations, 3);
-    for (let index = 4; index < migrations.length; index += 1) {
+    for (let index = 4; index < migrations.length - 1; index += 1) {
       await applyMigration(migrations, index);
     }
+
+    await connection.db.execute(sql`
+      insert into probe_locations (id, organization_id, name, slug)
+      values (
+        ${legacyRemoteLocationId},
+        ${existingMonitor.organizationId},
+        'Legacy remote',
+        'legacy-remote'
+      )
+    `);
+    await connection.db.execute(sql`
+      update monitors
+      set locations = jsonb_build_array(${legacyUppercaseRemoteLocationId}::text)
+      where id = ${existingMonitor.id}
+    `);
+    await connection.db.execute(sql`
+      update monitor_configuration_versions
+      set locations = jsonb_build_array(${legacyUppercaseRemoteLocationId}::text)
+      where monitor_id = ${existingMonitor.id}
+    `);
+    await connection.db.execute(sql`
+      update check_execution_assignments
+      set
+        location = ${legacyRemoteLocationId},
+        probe_location_id = ${legacyRemoteLocationId}
+      where id = ${existingRound.assignmentId}
+    `);
+
+    await applyMigration(migrations, migrations.length - 1);
 
     const result = await connection.db.execute<{
       table_name: string;
@@ -261,7 +292,7 @@ describe('database migrations', () => {
         method: 'GET',
         timeout_ms: 10_000,
         interval_seconds: 60,
-        locations: ['local'],
+        locations: [legacyRemoteLocationId],
       },
     ]);
 
@@ -281,8 +312,8 @@ describe('database migrations', () => {
     );
     expect(migratedAssignment.rows).toHaveLength(1);
     expect(migratedAssignment.rows[0]).toMatchObject({
-      location: 'local',
-      probe_location_id: null,
+      location: legacyRemoteLocationId,
+      probe_location_id: legacyRemoteLocationId,
       execution_policy_version: 'http-v1',
       required_engine_version: 'watchrail-http-v1',
     });
@@ -324,8 +355,8 @@ describe('database migrations', () => {
         {
           organization_id: existingMonitor.organizationId,
           round_id: existingRound.id,
-          location: 'local',
-          probe_location_id: null,
+          location: legacyRemoteLocationId,
+          probe_location_id: legacyRemoteLocationId,
           position: 0,
         },
       ],

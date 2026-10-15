@@ -40,6 +40,23 @@ CREATE TABLE "check_round_locations" (
 --> statement-breakpoint
 ALTER TABLE "monitor_configuration_versions" DROP CONSTRAINT "monitor_configuration_versions_locations_non_empty";--> statement-breakpoint
 ALTER TABLE "monitors" DROP CONSTRAINT "monitors_locations_non_empty";--> statement-breakpoint
+UPDATE "monitors"
+SET "locations" = jsonb_build_array(
+  CASE
+    WHEN "locations" ->> 0 = 'local' THEN 'local'
+    ELSE lower("locations" ->> 0)
+  END
+);--> statement-breakpoint
+UPDATE "monitor_configuration_versions"
+SET "locations" = jsonb_build_array(
+  CASE
+    WHEN "locations" ->> 0 = 'local' THEN 'local'
+    ELSE lower("locations" ->> 0)
+  END
+);--> statement-breakpoint
+UPDATE "check_execution_assignments"
+SET "location" = lower("location")
+WHERE "location" <> 'local';--> statement-breakpoint
 ALTER TABLE "check_rounds" ADD COLUMN "contract_version" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
 ALTER TABLE "check_rounds" ADD COLUMN "aggregation_policy_version" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
 ALTER TABLE "check_rounds" ADD COLUMN "confirmation_policy_version" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
