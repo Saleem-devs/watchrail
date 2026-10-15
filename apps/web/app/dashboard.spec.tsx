@@ -84,6 +84,46 @@ describe('Dashboard', () => {
     );
   });
 
+  it('refreshes time-sensitive probe health whenever the location selector is reopened', async () => {
+    const monitor = {
+      id: 'location-monitor',
+      name: 'Location monitor',
+      url: 'https://example.com',
+      method: 'GET',
+      lifecycleState: 'ENABLED',
+      timeoutMs: 10_000,
+      followRedirects: true,
+      statusPolicy: { type: 'ANY_2XX' },
+      locations: ['local'],
+      createdAt: new Date().toISOString(),
+      currentCheck: null,
+      incidentState: { failureStreak: null, currentIncident: null },
+      uptime: { uptimePercent: null, coveragePercent: null },
+    };
+    const online = {
+      id: 'location-1',
+      name: 'Lagos',
+      status: 'ACTIVE',
+      health: 'ONLINE',
+      activeAgentCount: 1,
+    };
+    const offline = { ...online, health: 'OFFLINE' };
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [monitor] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [online] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [offline] }), { status: 200 }));
+
+    render(<Dashboard />);
+    const selector = await screen.findByRole('combobox', { name: 'Execution location' });
+    await userEvent.click(selector);
+    expect(await screen.findByRole('option', { name: 'Lagos — online' })).toBeInTheDocument();
+    await userEvent.tab();
+    await userEvent.click(selector);
+    expect(await screen.findByRole('option', { name: 'Lagos — offline' })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/probe-locations')).toHaveLength(2);
+  });
+
   it('renders field-level validation errors from the API', async () => {
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200 }))

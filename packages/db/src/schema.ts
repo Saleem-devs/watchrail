@@ -641,6 +641,7 @@ export const checkExecutionAssignments = pgTable(
 
     claimToken: uuid('claim_token'),
     claimExpiresAt: timestamp('claim_expires_at', { withTimezone: true }),
+    pendingSince: timestamp('pending_since', { withTimezone: true }).notNull().defaultNow(),
     attemptCount: integer('attempt_count').notNull().default(0),
     lastStartedAt: timestamp('last_started_at', { withTimezone: true }),
     completedAt: timestamp('completed_at', { withTimezone: true }),

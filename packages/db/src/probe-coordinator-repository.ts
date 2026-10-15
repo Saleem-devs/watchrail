@@ -172,7 +172,9 @@ export class ProbeCoordinatorRepository {
   async claim(
     machine: ProbeMachineIdentity,
     engineVersion: string,
+    pendingTimeoutMs = 120_000,
   ): Promise<ProbeLeaseClaimResult> {
+    validatePendingTimeout(pendingTimeoutMs);
     return this.db.transaction(async (tx) => {
       await lockActiveMachine(tx, machine);
 
@@ -203,7 +205,10 @@ export class ProbeCoordinatorRepository {
             eq(checkExecutionAssignments.organizationId, machine.organizationId),
             eq(checkExecutionAssignments.probeLocationId, machine.locationId),
             or(
-              eq(checkExecutionAssignments.status, 'PENDING'),
+              and(
+                eq(checkExecutionAssignments.status, 'PENDING'),
+                sql`${checkExecutionAssignments.pendingSince} > clock_timestamp() - (${pendingTimeoutMs} * interval '1 millisecond')`,
+              ),
               and(
                 eq(checkExecutionAssignments.status, 'RUNNING'),
                 lte(checkExecutionAssignments.claimExpiresAt, sql`clock_timestamp()`),
@@ -376,12 +381,7 @@ export class ProbeCoordinatorRepository {
   async reconcileExpired(limit: number, pendingTimeoutMs = 120_000): Promise<number> {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1_000)
       throw new RangeError('Invalid limit.');
-    if (
-      !Number.isSafeInteger(pendingTimeoutMs) ||
-      pendingTimeoutMs < 10_000 ||
-      pendingTimeoutMs > 900_000
-    )
-      throw new RangeError('Invalid pending assignment timeout.');
+    validatePendingTimeout(pendingTimeoutMs);
     return this.db.transaction(async (tx) => {
       const abandoned = await tx
         .select({ id: checkExecutionAssignments.id })
@@ -390,10 +390,10 @@ export class ProbeCoordinatorRepository {
           and(
             eq(checkExecutionAssignments.status, 'PENDING'),
             sql`${checkExecutionAssignments.probeLocationId} is not null`,
-            sql`${checkExecutionAssignments.createdAt} <= clock_timestamp() - (${pendingTimeoutMs} * interval '1 millisecond')`,
+            sql`${checkExecutionAssignments.pendingSince} <= clock_timestamp() - (${pendingTimeoutMs} * interval '1 millisecond')`,
           ),
         )
-        .orderBy(asc(checkExecutionAssignments.createdAt), asc(checkExecutionAssignments.id))
+        .orderBy(asc(checkExecutionAssignments.pendingSince), asc(checkExecutionAssignments.id))
         .limit(limit)
         .for('update', { of: checkExecutionAssignments, skipLocked: true });
 
@@ -427,8 +427,6 @@ export class ProbeCoordinatorRepository {
         });
       }
 
-      const remaining = limit - abandoned.length;
-      if (remaining === 0) return abandoned.length;
       const expired = await tx
         .select({ id: checkExecutionAssignments.id })
         .from(checkExecutionAssignments)
@@ -440,7 +438,7 @@ export class ProbeCoordinatorRepository {
           ),
         )
         .orderBy(asc(checkExecutionAssignments.claimExpiresAt), asc(checkExecutionAssignments.id))
-        .limit(remaining)
+        .limit(limit)
         .for('update', { of: checkExecutionAssignments, skipLocked: true });
 
       for (const row of expired) {
@@ -473,7 +471,12 @@ export class ProbeCoordinatorRepository {
         if (assignment.attemptCount < PROBE_MAX_ATTEMPTS) {
           await tx
             .update(checkExecutionAssignments)
-            .set({ status: 'PENDING', claimToken: null, claimExpiresAt: null })
+            .set({
+              status: 'PENDING',
+              claimToken: null,
+              claimExpiresAt: null,
+              pendingSince: sql`clock_timestamp()`,
+            })
             .where(eq(checkExecutionAssignments.id, assignment.id));
           continue;
         }
@@ -506,6 +509,16 @@ export class ProbeCoordinatorRepository {
       }
       return abandoned.length + expired.length;
     });
+  }
+}
+
+function validatePendingTimeout(pendingTimeoutMs: number): void {
+  if (
+    !Number.isSafeInteger(pendingTimeoutMs) ||
+    pendingTimeoutMs < 10_000 ||
+    pendingTimeoutMs > 900_000
+  ) {
+    throw new RangeError('Invalid pending assignment timeout.');
   }
 }
 

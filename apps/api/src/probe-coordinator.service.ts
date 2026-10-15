@@ -80,7 +80,13 @@ export class ProbeCoordinatorService {
 
   async claim(machine: ProbeMachineIdentity, body: unknown) {
     const input = parseOrBadRequest(() => parseProbeClaimRequest(body));
-    return this.authorized(() => this.coordinator.claim(machine, input.engineVersion));
+    return this.authorized(() =>
+      this.coordinator.claim(
+        machine,
+        input.engineVersion,
+        this.config.probePendingAssignmentTimeoutMs,
+      ),
+    );
   }
 
   async renew(

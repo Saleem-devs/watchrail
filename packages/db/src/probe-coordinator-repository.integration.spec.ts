@@ -310,7 +310,7 @@ describe('probe coordinator repository', () => {
     const fixture = await createFixture('unclaimed', true);
     await connection.pool.query(
       `update check_execution_assignments
-          set created_at=clock_timestamp()-interval '11 seconds'
+          set pending_since=clock_timestamp()-interval '11 seconds'
         where id=$1`,
       [fixture.assignmentId],
     );
@@ -322,6 +322,99 @@ describe('probe coordinator repository', () => {
     );
     expect(result.rows).toEqual([{ outcome: 'UNKNOWN', stage: 'PROBE', reason: 'INTERNAL_ERROR' }]);
     expect((await connection.pool.query('select id from incidents')).rows).toHaveLength(0);
+  });
+
+  it('does not lease an assignment after its pending deadline, even before reconciliation', async () => {
+    const fixture = await createFixture('late-first-claim');
+    await connection.pool.query(
+      `update check_execution_assignments
+          set pending_since=clock_timestamp()-interval '11 seconds'
+        where id=$1`,
+      [fixture.assignmentId],
+    );
+
+    await expect(coordinator.claim(fixture.machine, HTTP_ENGINE_VERSION, 10_000)).resolves.toEqual({
+      state: 'NO_WORK',
+    });
+    expect(await coordinator.reconcileExpired(1, 10_000)).toBe(1);
+    expect(
+      (await connection.pool.query('select id from probe_execution_attempts')).rows,
+    ).toHaveLength(0);
+  });
+
+  it('starts a fresh pending deadline when an expired lease is requeued', async () => {
+    const fixture = await createFixture('retry-pending-deadline');
+    const first = await claimLease(fixture.machine);
+    await expire(first.assignmentId, first.attemptId);
+
+    expect(await coordinator.reconcileExpired(1, 10_000)).toBe(1);
+    expect(await coordinator.reconcileExpired(1, 10_000)).toBe(0);
+    const second = await coordinator.claim(fixture.machine, HTTP_ENGINE_VERSION, 10_000);
+    expect(second).toMatchObject({ state: 'CLAIMED', lease: { attemptNumber: 2 } });
+    expect(
+      (await connection.pool.query('select id from check_execution_results')).rows,
+    ).toHaveLength(0);
+  });
+
+  it('reconciles pending and running work with independent bounded budgets', async () => {
+    const pending = await createFixture('fair-pending');
+    await connection.pool.query(
+      `update check_execution_assignments
+          set pending_since=clock_timestamp()-interval '11 seconds'
+        where id=$1`,
+      [pending.assignmentId],
+    );
+    const running = await createFixture('fair-running');
+    const lease = await claimLease(running.machine);
+    await connection.pool.query(
+      `update check_execution_assignments
+          set attempt_count=3, claim_expires_at=clock_timestamp()-interval '1 second'
+        where id=$1`,
+      [running.assignmentId],
+    );
+    await connection.pool.query(
+      `update probe_execution_attempts
+          set attempt_number=3,
+              leased_at=clock_timestamp()-interval '2 seconds',
+              lease_expires_at=clock_timestamp()-interval '1 second'
+        where id=$1`,
+      [lease.attemptId],
+    );
+
+    expect(await coordinator.reconcileExpired(1, 10_000)).toBe(2);
+    const results = await connection.pool.query<{ assignment_id: string }>(
+      `select assignment_id from check_execution_results
+       where assignment_id in ($1, $2)
+       order by assignment_id`,
+      [pending.assignmentId, running.assignmentId],
+    );
+    expect(results.rows.map((row) => row.assignment_id).sort()).toEqual(
+      [pending.assignmentId, running.assignmentId].sort(),
+    );
+  });
+
+  it('uses one expiration boundary for concurrent late claims and reconciliation', async () => {
+    const fixture = await createFixture('expiration-boundary');
+    await connection.pool.query(
+      `update check_execution_assignments
+          set pending_since=clock_timestamp()-interval '11 seconds'
+        where id=$1`,
+      [fixture.assignmentId],
+    );
+
+    const [claim, reconciled] = await Promise.all([
+      coordinator.claim(fixture.machine, HTTP_ENGINE_VERSION, 10_000),
+      coordinator.reconcileExpired(1, 10_000),
+    ]);
+    expect(claim).toEqual({ state: 'NO_WORK' });
+    expect(reconciled).toBe(1);
+    expect(
+      (
+        await connection.pool.query('select status from check_execution_assignments where id=$1', [
+          fixture.assignmentId,
+        ])
+      ).rows,
+    ).toEqual([{ status: 'COMPLETED' }]);
   });
 
   async function createFixture(suffix = 'default', scheduled = false) {
