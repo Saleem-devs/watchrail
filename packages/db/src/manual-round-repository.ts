@@ -1,15 +1,13 @@
 import { and, desc, eq } from 'drizzle-orm';
-import { createExecuteCheckRoundJob } from '@watchrail/contracts';
 import { type MonitorLifecycleState } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
 import {
-  checkExecutionAssignments,
-  checkRoundOutbox,
   checkRounds,
   monitorConfigurationVersions,
   monitors,
   type CheckRoundRecord,
 } from './schema.js';
+import { createRoutedAssignment } from './round-routing.js';
 
 export class MonitorNotFoundError extends Error {
   constructor() {
@@ -73,6 +71,7 @@ export class ManualRoundRepository {
       const [configuration] = await tx
         .select({
           id: monitorConfigurationVersions.id,
+          locations: monitorConfigurationVersions.locations,
         })
         .from(monitorConfigurationVersions)
         .where(
@@ -105,19 +104,10 @@ export class ManualRoundRepository {
         throw new Error('The check round insert returned no record.');
       }
 
-      await tx.insert(checkExecutionAssignments).values({
+      await createRoutedAssignment(tx, {
         organizationId,
         roundId: round.id,
-
-        location: 'local',
-        status: 'PENDING',
-      });
-
-      const payload = createExecuteCheckRoundJob(round.id);
-
-      await tx.insert(checkRoundOutbox).values({
-        roundId: round.id,
-        payload,
+        locations: configuration.locations,
       });
 
       return round;

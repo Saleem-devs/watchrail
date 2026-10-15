@@ -11,6 +11,7 @@ export * from './probe-identity-repository.js';
 export * from './probe-coordinator-repository.js';
 export * from './migration.js';
 export * from './monitor-repository.js';
+export * from './round-routing.js';
 export * from './schema.js';
 export * from './scheduled-round-repository.js';
 export * from './status-page-repository.js';

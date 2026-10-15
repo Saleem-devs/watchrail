@@ -135,6 +135,7 @@ export const probeAgents = pgTable(
     name: varchar('name', { length: 120 }).notNull(),
     status: probeAgentStatusEnum('status').notNull().default('PENDING'),
     lastHeartbeatAt: timestamp('last_heartbeat_at', { withTimezone: true }),
+    heartbeatIntervalMs: integer('heartbeat_interval_ms').notNull().default(15_000),
     engineVersion: varchar('engine_version', { length: 64 }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -153,6 +154,10 @@ export const probeAgents = pgTable(
       foreignColumns: [probeLocations.organizationId, probeLocations.id],
     }),
     check('probe_agents_name_not_blank', sql`length(btrim(${table.name})) > 0`),
+    check(
+      'probe_agents_heartbeat_interval_range',
+      sql`${table.heartbeatIntervalMs} between 5000 and 60000`,
+    ),
     check(
       'probe_agents_revocation_consistent',
       sql`(${table.status} = 'REVOKED') = (${table.revokedAt} is not null)`,
@@ -400,7 +405,7 @@ export const monitors = pgTable(
 
     check(
       'monitors_locations_non_empty',
-      sql`jsonb_typeof(${table.locations}) = 'array' and jsonb_array_length(${table.locations}) > 0`,
+      sql`jsonb_typeof(${table.locations}) = 'array' and jsonb_array_length(${table.locations}) = 1`,
     ),
     check('monitors_request_headers_array', sql`jsonb_typeof(${table.requestHeaders}) = 'array'`),
     check('monitors_assertions_object', sql`jsonb_typeof(${table.assertions}) = 'object'`),
@@ -557,7 +562,7 @@ export const monitorConfigurationVersions = pgTable(
       'monitor_configuration_versions_locations_non_empty',
       sql`
         jsonb_typeof(${table.locations}) = 'array'
-        and jsonb_array_length(${table.locations}) > 0
+        and jsonb_array_length(${table.locations}) = 1
       `,
     ),
     check(

@@ -18,6 +18,7 @@ import {
   MonitorRepository,
   ArchivedMonitorLifecycleError,
   MonitorUpdateNotFoundError,
+  MonitorLocationUnavailableError,
   type CheckRoundRecord,
   type CheckHistoryDetail,
   type CheckHistoryPage,
@@ -43,6 +44,7 @@ import {
   parseHttpMonitorSettings,
   parseHttpStatusPolicy,
   parseMonitorLifecycleSettings,
+  parseMonitorLocationSettings,
   parseMonitorScheduleSettings,
   RequestHeaderInputError,
 } from '@watchrail/domain';
@@ -382,6 +384,32 @@ export class MonitorsService {
       }
       if (error instanceof ArchivedMonitorLifecycleError) {
         throw new ConflictException({ code: 'MONITOR_ARCHIVED', message: error.message });
+      }
+      throw error;
+    }
+  }
+
+  async updateLocations(
+    context: RequestContext,
+    monitorId: string,
+    value: unknown,
+  ): Promise<MonitorRecord> {
+    try {
+      const { locations } = parseMonitorLocationSettings(value);
+      return await this.monitors.updateLocations(context.organizationId, monitorId, locations);
+    } catch (error) {
+      if (error instanceof MonitorInputError) {
+        throw new BadRequestException({
+          code: 'VALIDATION_FAILED',
+          message: error.message,
+          fields: error.fields,
+        });
+      }
+      if (error instanceof MonitorUpdateNotFoundError) {
+        throw new NotFoundException({ code: 'MONITOR_NOT_FOUND', message: error.message });
+      }
+      if (error instanceof MonitorLocationUnavailableError) {
+        throw new ConflictException({ code: 'PROBE_LOCATION_UNAVAILABLE', message: error.message });
       }
       throw error;
     }

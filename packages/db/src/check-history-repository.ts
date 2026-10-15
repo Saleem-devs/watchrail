@@ -26,6 +26,7 @@ export interface CurrentCheck {
   checkedAt: Date;
   roundId: string;
   trigger: CheckRoundTrigger;
+  location: string;
 }
 
 export interface CheckHistoryListItem {
@@ -34,6 +35,7 @@ export interface CheckHistoryListItem {
   trigger: CheckRoundTrigger;
   status: CheckRoundRecord['status'];
   assignmentStatus: CheckExecutionAssignmentRecord['status'];
+  location: string;
   createdAt: Date;
   result: {
     outcome: CheckExecutionResultRecord['outcome'];
@@ -84,6 +86,7 @@ interface HistoryRow {
   trigger: CheckRoundTrigger;
   status: CheckRoundRecord['status'];
   assignmentStatus: CheckExecutionAssignmentRecord['status'];
+  location: string;
   createdAt: Date;
   resultId: string | null;
   outcome: CheckExecutionResultRecord['outcome'] | null;
@@ -109,6 +112,7 @@ export class CheckHistoryRepository {
         outcome: checkExecutionResults.outcome,
         responseTimeMs: checkExecutionResults.responseTimeMs,
         checkedAt: checkExecutionResults.checkedAt,
+        location: checkExecutionAssignments.location,
       })
       .from(checkRounds)
       .innerJoin(
@@ -116,7 +120,6 @@ export class CheckHistoryRepository {
         and(
           eq(checkExecutionAssignments.organizationId, checkRounds.organizationId),
           eq(checkExecutionAssignments.roundId, checkRounds.id),
-          eq(checkExecutionAssignments.location, 'local'),
         ),
       )
       .innerJoin(
@@ -139,6 +142,7 @@ export class CheckHistoryRepository {
           checkedAt: row.checkedAt,
           roundId: row.roundId,
           trigger: row.trigger,
+          location: row.location,
         },
       ]),
     );
@@ -152,6 +156,7 @@ export class CheckHistoryRepository {
         outcome: checkExecutionResults.outcome,
         responseTimeMs: checkExecutionResults.responseTimeMs,
         checkedAt: checkExecutionResults.checkedAt,
+        location: checkExecutionAssignments.location,
       })
       .from(checkRounds)
       .innerJoin(
@@ -159,7 +164,6 @@ export class CheckHistoryRepository {
         and(
           eq(checkExecutionAssignments.organizationId, checkRounds.organizationId),
           eq(checkExecutionAssignments.roundId, checkRounds.id),
-          eq(checkExecutionAssignments.location, 'local'),
         ),
       )
       .innerJoin(
@@ -183,6 +187,7 @@ export class CheckHistoryRepository {
           checkedAt: row.checkedAt,
           roundId: row.roundId,
           trigger: row.trigger,
+          location: row.location,
         }
       : null;
   }
@@ -204,7 +209,6 @@ export class CheckHistoryRepository {
         and(
           eq(checkExecutionAssignments.organizationId, checkRounds.organizationId),
           eq(checkExecutionAssignments.roundId, checkRounds.id),
-          eq(checkExecutionAssignments.location, 'local'),
         ),
       )
       .leftJoin(
@@ -261,7 +265,6 @@ export class CheckHistoryRepository {
         and(
           eq(checkExecutionAssignments.organizationId, checkRounds.organizationId),
           eq(checkExecutionAssignments.roundId, checkRounds.id),
-          eq(checkExecutionAssignments.location, 'local'),
         ),
       )
       .leftJoin(
@@ -291,6 +294,7 @@ export class CheckHistoryRepository {
       trigger: row.trigger,
       status: row.status,
       assignmentStatus: row.assignmentStatus,
+      location: row.location,
       createdAt: row.createdAt,
       result: row.resultId
         ? {
@@ -324,6 +328,7 @@ const historySelection = {
   trigger: checkRounds.trigger,
   status: checkRounds.status,
   assignmentStatus: checkExecutionAssignments.status,
+  location: checkExecutionAssignments.location,
   createdAt: checkRounds.createdAt,
   resultId: checkExecutionResults.id,
   outcome: checkExecutionResults.outcome,
@@ -347,6 +352,7 @@ function toListItem(row: HistoryRow): CheckHistoryListItem {
     trigger: row.trigger,
     status: row.status,
     assignmentStatus: row.assignmentStatus,
+    location: row.location,
     createdAt: row.createdAt,
     result: row.resultId
       ? {

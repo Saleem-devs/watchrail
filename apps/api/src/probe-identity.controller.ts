@@ -14,7 +14,11 @@ import {
   Res,
   UseGuards,
 } from '@nestjs/common';
-import type { ProbeAgentRecord, ProbeLocationRecord } from '@watchrail/db';
+import type {
+  ProbeAgentHealthRecord,
+  ProbeLocationHealthRecord,
+  ProbeLocationRecord,
+} from '@watchrail/db';
 import type { Response } from 'express';
 import { ProbeCoordinatorService } from './probe-coordinator.service.js';
 import type { ProbeMachineRequest } from './probe-machine-auth.js';
@@ -206,18 +210,21 @@ export class ProbeMachineController {
   }
 }
 
-function locationResponse(location: ProbeLocationRecord) {
+function locationResponse(location: ProbeLocationRecord | ProbeLocationHealthRecord) {
   return {
     id: location.id,
     name: location.name,
     slug: location.slug,
     status: location.status,
+    ...('health' in location
+      ? { health: location.health, activeAgentCount: location.activeAgentCount }
+      : {}),
     createdAt: location.createdAt.toISOString(),
     updatedAt: location.updatedAt.toISOString(),
   };
 }
 
-function agentResponse(agent: ProbeAgentRecord) {
+function agentResponse(agent: ProbeAgentHealthRecord) {
   return {
     id: agent.id,
     locationId: agent.locationId,
@@ -225,6 +232,9 @@ function agentResponse(agent: ProbeAgentRecord) {
     status: agent.status,
     lastHeartbeatAt: agent.lastHeartbeatAt?.toISOString() ?? null,
     engineVersion: agent.engineVersion,
+    heartbeatIntervalMs: agent.heartbeatIntervalMs,
+    health: agent.health,
+    engineCompatible: agent.engineCompatible,
     createdAt: agent.createdAt.toISOString(),
     updatedAt: agent.updatedAt.toISOString(),
   };

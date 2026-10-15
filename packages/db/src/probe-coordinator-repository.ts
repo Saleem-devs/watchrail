@@ -55,13 +55,18 @@ export interface ProbeExecutionConfigurationRecord {
 export class ProbeCoordinatorRepository {
   constructor(private readonly db: WatchrailDatabase) {}
 
-  async heartbeat(machine: ProbeMachineIdentity, engineVersion: string): Promise<Date> {
+  async heartbeat(
+    machine: ProbeMachineIdentity,
+    engineVersion: string,
+    heartbeatIntervalMs = 15_000,
+  ): Promise<Date> {
     return this.db.transaction(async (tx) => {
       await lockActiveMachine(tx, machine);
       const [updated] = await tx
         .update(probeAgents)
         .set({
           engineVersion,
+          heartbeatIntervalMs,
           lastHeartbeatAt: sql`clock_timestamp()`,
           updatedAt: sql`clock_timestamp()`,
         })
@@ -368,10 +373,62 @@ export class ProbeCoordinatorRepository {
     });
   }
 
-  async reconcileExpired(limit: number): Promise<number> {
+  async reconcileExpired(limit: number, pendingTimeoutMs = 120_000): Promise<number> {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1_000)
       throw new RangeError('Invalid limit.');
+    if (
+      !Number.isSafeInteger(pendingTimeoutMs) ||
+      pendingTimeoutMs < 10_000 ||
+      pendingTimeoutMs > 900_000
+    )
+      throw new RangeError('Invalid pending assignment timeout.');
     return this.db.transaction(async (tx) => {
+      const abandoned = await tx
+        .select({ id: checkExecutionAssignments.id })
+        .from(checkExecutionAssignments)
+        .where(
+          and(
+            eq(checkExecutionAssignments.status, 'PENDING'),
+            sql`${checkExecutionAssignments.probeLocationId} is not null`,
+            sql`${checkExecutionAssignments.createdAt} <= clock_timestamp() - (${pendingTimeoutMs} * interval '1 millisecond')`,
+          ),
+        )
+        .orderBy(asc(checkExecutionAssignments.createdAt), asc(checkExecutionAssignments.id))
+        .limit(limit)
+        .for('update', { of: checkExecutionAssignments, skipLocked: true });
+
+      for (const row of abandoned) {
+        const [assignment] = await tx
+          .update(checkExecutionAssignments)
+          .set({ status: 'COMPLETED', completedAt: sql`clock_timestamp()` })
+          .where(
+            and(
+              eq(checkExecutionAssignments.id, row.id),
+              eq(checkExecutionAssignments.status, 'PENDING'),
+            ),
+          )
+          .returning();
+        if (!assignment) continue;
+        await finalizeCheckExecution(tx, {
+          assignmentId: assignment.id,
+          organizationId: assignment.organizationId,
+          roundId: assignment.roundId,
+          result: {
+            outcome: 'UNKNOWN',
+            stage: 'PROBE',
+            reason: 'INTERNAL_ERROR',
+            statusCode: null,
+            responseTimeMs: null,
+            attemptDurationMs: 0,
+            redirects: [],
+            assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
+            checkedAt: await databaseClock(tx),
+          },
+        });
+      }
+
+      const remaining = limit - abandoned.length;
+      if (remaining === 0) return abandoned.length;
       const expired = await tx
         .select({ id: checkExecutionAssignments.id })
         .from(checkExecutionAssignments)
@@ -383,7 +440,7 @@ export class ProbeCoordinatorRepository {
           ),
         )
         .orderBy(asc(checkExecutionAssignments.claimExpiresAt), asc(checkExecutionAssignments.id))
-        .limit(limit)
+        .limit(remaining)
         .for('update', { of: checkExecutionAssignments, skipLocked: true });
 
       for (const row of expired) {
@@ -447,7 +504,7 @@ export class ProbeCoordinatorRepository {
           },
         });
       }
-      return expired.length;
+      return abandoned.length + expired.length;
     });
   }
 }

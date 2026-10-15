@@ -19,6 +19,7 @@ const config = {
   availabilityFlushIntervalMs: 60_000,
   probeReconciliationBatchSize: 100,
   probeReconciliationIntervalMs: 1_000,
+  probePendingAssignmentTimeoutMs: 120_000,
   webhookDeliveryConcurrency: 2,
   webhookDeliveryIdlePollIntervalMs: 500,
 } as WorkerConfig;
@@ -156,7 +157,7 @@ describe('WorkerRuntime', () => {
     runtime.onApplicationBootstrap();
     await vi.advanceTimersByTimeAsync(0);
     expect(reconcileExpired).toHaveBeenCalledTimes(2);
-    expect(reconcileExpired).toHaveBeenCalledWith(100);
+    expect(reconcileExpired).toHaveBeenCalledWith(100, 120_000);
     await runtime.beforeApplicationShutdown();
     expect(vi.getTimerCount()).toBe(0);
   });

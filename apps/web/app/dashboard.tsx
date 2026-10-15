@@ -18,6 +18,14 @@ interface Monitor {
   uptime: { uptimePercent: number | null; coveragePercent: number | null };
 }
 
+interface ProbeLocation {
+  id: string;
+  name: string;
+  status: 'ACTIVE' | 'DISABLED';
+  health: 'NOT_CONNECTED' | 'ONLINE' | 'STALE' | 'OFFLINE' | 'DISABLED';
+  activeAgentCount: number;
+}
+
 interface IncidentState {
   failureStreak: {
     count: number;
@@ -102,6 +110,7 @@ function formatPercent(value: number | null | undefined): string {
 
 export function Dashboard() {
   const [monitors, setMonitors] = useState<Monitor[]>([]);
+  const [probeLocations, setProbeLocations] = useState<ProbeLocation[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [updatingPolicyIds, setUpdatingPolicyIds] = useState<Set<string>>(() => new Set());
@@ -286,6 +295,51 @@ export function Dashboard() {
         next.delete(monitorId);
         return next;
       });
+    }
+  }
+
+  async function updateLocation(
+    monitorId: string,
+    event: FormEvent<HTMLFormElement>,
+  ): Promise<void> {
+    event.preventDefault();
+    const rawLocation = new FormData(event.currentTarget).get('location');
+    if (typeof rawLocation !== 'string') return;
+    const location = rawLocation;
+    setUpdatingSettingsIds((current) => new Set(current).add(monitorId));
+    try {
+      const response = await fetch(`/api/monitors/${monitorId}/locations`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ locations: [location] }),
+      });
+      const body = (await response.json()) as { data?: Monitor } & ApiError;
+      if (!response.ok || !body.data) throw new Error('Could not update execution location.');
+      setMonitors((current) =>
+        current.map((monitor) => (monitor.id === monitorId ? (body.data as Monitor) : monitor)),
+      );
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : 'Could not update execution location.');
+    } finally {
+      setUpdatingSettingsIds((current) => {
+        const next = new Set(current);
+        next.delete(monitorId);
+        return next;
+      });
+    }
+  }
+
+  async function loadProbeLocations(): Promise<void> {
+    if (probeLocations.length > 0) return;
+    try {
+      const response = await fetch('/api/probe-locations', {
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) return;
+      const body = (await response.json()) as { data?: ProbeLocation[] };
+      if (Array.isArray(body.data)) setProbeLocations(body.data);
+    } catch {
+      // Local execution remains available when probe discovery is temporarily unavailable.
     }
   }
 
@@ -620,6 +674,33 @@ export function Dashboard() {
                       <span>{monitor.locations.join(', ')}</span>
                       <span>{monitor.lifecycleState.toLowerCase()}</span>
                     </div>
+                    <form
+                      className="status-policy-form"
+                      onSubmit={(event) => void updateLocation(monitor.id, event)}
+                    >
+                      <label>
+                        Execution location
+                        <select
+                          name="location"
+                          defaultValue={monitor.locations[0] ?? 'local'}
+                          onFocus={() => void loadProbeLocations()}
+                        >
+                          <option value="local">Local</option>
+                          {probeLocations.map((location) => (
+                            <option
+                              key={location.id}
+                              value={location.id}
+                              disabled={location.status !== 'ACTIVE'}
+                            >
+                              {location.name} — {location.health.toLowerCase()}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <button type="submit" disabled={updatingSettingsIds.has(monitor.id)}>
+                        Save location
+                      </button>
+                    </form>
                     <form
                       className="status-policy-form"
                       onSubmit={(event) => void updateHttpSettings(monitor.id, event)}

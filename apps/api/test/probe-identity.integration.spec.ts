@@ -114,6 +114,11 @@ describe('probe enrollment and machine credentials API', () => {
     const agents = (await request(app.getHttpServer()).get('/api/probe-agents').expect(200)).body
       .data;
     expect(agents).toHaveLength(1);
+    expect(agents[0]).toMatchObject({
+      health: 'OFFLINE',
+      engineCompatible: false,
+      heartbeatIntervalMs: 15_000,
+    });
     expect(JSON.stringify(agents)).not.toContain(issued.token);
     expect(JSON.stringify(agents)).not.toContain(enrolled.credential);
     expect(JSON.stringify(agents)).not.toContain(rotated.credential);
@@ -296,7 +301,7 @@ describe('probe enrollment and machine credentials API', () => {
     );
 
     const heartbeat = await machinePost(enrolled.credential, '/api/probe-machine/heartbeat')
-      .send({ contractVersion: 1, engineVersion: 'watchrail-http-v1' })
+      .send({ contractVersion: 1, engineVersion: 'watchrail-http-v1', heartbeatIntervalMs: 15_000 })
       .expect(201);
     expect(new Date(heartbeat.body.data.receivedAt).toISOString()).toBe(
       heartbeat.body.data.receivedAt,

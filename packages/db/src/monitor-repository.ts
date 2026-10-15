@@ -23,6 +23,7 @@ import {
   monitorConfigurationVersions,
   monitorIncidentState,
   monitors,
+  probeLocations,
   type MonitorRecord,
 } from './schema.js';
 
@@ -397,6 +398,78 @@ export class MonitorRepository {
     });
   }
 
+  async updateLocations(
+    organizationId: string,
+    monitorId: string,
+    locations: [string],
+  ): Promise<MonitorRecord> {
+    return this.db.transaction(async (tx) => {
+      const [monitor] = await tx
+        .select()
+        .from(monitors)
+        .where(and(eq(monitors.id, monitorId), eq(monitors.organizationId, organizationId)))
+        .limit(1)
+        .for('update');
+      if (!monitor) throw new MonitorUpdateNotFoundError();
+
+      const location = locations[0];
+      if (location !== 'local') {
+        const [remote] = await tx
+          .select({ id: probeLocations.id })
+          .from(probeLocations)
+          .where(
+            and(
+              eq(probeLocations.organizationId, organizationId),
+              eq(probeLocations.id, location),
+              eq(probeLocations.status, 'ACTIVE'),
+            ),
+          )
+          .limit(1)
+          .for('key share');
+        if (!remote) throw new MonitorLocationUnavailableError();
+      }
+
+      const [configuration] = await tx
+        .select()
+        .from(monitorConfigurationVersions)
+        .where(
+          and(
+            eq(monitorConfigurationVersions.monitorId, monitorId),
+            eq(monitorConfigurationVersions.organizationId, organizationId),
+          ),
+        )
+        .orderBy(desc(monitorConfigurationVersions.versionNumber))
+        .limit(1);
+      if (!configuration) throw new Error('Monitor has no configuration version.');
+      if (configuration.locations.length === 1 && configuration.locations[0] === location) {
+        return monitor;
+      }
+
+      const [updated] = await tx
+        .update(monitors)
+        .set({ locations, updatedAt: sql`clock_timestamp()` })
+        .where(and(eq(monitors.id, monitorId), eq(monitors.organizationId, organizationId)))
+        .returning();
+      if (!updated) throw new Error('The monitor update returned no record.');
+
+      await tx.insert(monitorConfigurationVersions).values({
+        organizationId,
+        monitorId,
+        versionNumber: configuration.versionNumber + 1,
+        url: configuration.url,
+        method: configuration.method,
+        timeoutMs: configuration.timeoutMs,
+        intervalSeconds: configuration.intervalSeconds,
+        followRedirects: configuration.followRedirects,
+        statusPolicy: configuration.statusPolicy,
+        requestHeaders: configuration.requestHeaders,
+        assertions: configuration.assertions,
+        locations,
+      });
+      return updated;
+    });
+  }
+
   async updateLifecycle(
     organizationId: string,
     monitorId: string,
@@ -448,5 +521,12 @@ export class ArchivedMonitorLifecycleError extends Error {
   constructor() {
     super('Archived monitors cannot change lifecycle state.');
     this.name = 'ArchivedMonitorLifecycleError';
+  }
+}
+
+export class MonitorLocationUnavailableError extends Error {
+  constructor() {
+    super('Remote probe location is unavailable.');
+    this.name = 'MonitorLocationUnavailableError';
   }
 }

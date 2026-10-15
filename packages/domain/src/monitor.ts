@@ -71,6 +71,27 @@ export interface MonitorFieldErrors {
   httpSettings?: string[];
   intervalSeconds?: string[];
   lifecycleState?: string[];
+  locations?: string[];
+}
+
+export interface MonitorLocationSettings {
+  locations: [string];
+}
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+
+export function parseMonitorLocationSettings(value: unknown): MonitorLocationSettings {
+  if (!hasExactKeys(value, ['locations']) || !Array.isArray(value.locations)) {
+    throw new MonitorInputError({ locations: ['Provide exactly one execution location.'] });
+  }
+  if (value.locations.length !== 1) {
+    throw new MonitorInputError({ locations: ['Choose exactly one execution location.'] });
+  }
+  const location: unknown = (value.locations as unknown[])[0];
+  if (typeof location !== 'string' || (location !== 'local' && !UUID_PATTERN.test(location))) {
+    throw new MonitorInputError({ locations: ['Choose local or a remote location ID.'] });
+  }
+  return { locations: [location] };
 }
 
 export interface HttpMonitorSettings {
