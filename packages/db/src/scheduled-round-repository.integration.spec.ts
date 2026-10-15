@@ -11,6 +11,7 @@ import { MonitorRepository } from './monitor-repository.js';
 import { ScheduledRoundRepository } from './scheduled-round-repository.js';
 import {
   checkExecutionAssignments,
+  checkRoundLocations,
   checkRoundOutbox,
   checkRounds,
   monitorConfigurationVersions,
@@ -62,7 +63,23 @@ describe('ScheduledRoundRepository', () => {
       monitorId: monitor.id,
       trigger: 'SCHEDULED',
       status: 'PENDING',
+      contractVersion: 1,
+      aggregationPolicyVersion: 1,
+      confirmationPolicyVersion: 1,
     });
+    expect(
+      rounds[0]!.finalizationDeadlineAt.getTime() - rounds[0]!.createdAt.getTime(),
+    ).toBeGreaterThanOrEqual(119_000);
+
+    expect(await connection.db.select().from(checkRoundLocations)).toEqual([
+      {
+        organizationId,
+        roundId: rounds[0]!.id,
+        location: 'local',
+        probeLocationId: null,
+        position: 0,
+      },
+    ]);
 
     const [configuration] = await connection.db
       .select()

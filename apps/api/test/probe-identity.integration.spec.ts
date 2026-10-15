@@ -288,17 +288,15 @@ describe('probe enrollment and machine credentials API', () => {
         requestHeaders: [{ name: 'authorization', sensitive: true, value: `Bearer ${sentinel}` }],
       })
       .expect(200);
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitor.id}/locations`)
+      .send({ locations: [location.id] })
+      .expect(200);
     const round = (
       await request(app.getHttpServer())
         .post(`/api/monitors/${monitor.id}/check-rounds`)
         .expect(202)
     ).body.data as { id: string };
-    await database.$client.query(
-      `update check_execution_assignments
-          set location=$1::text, probe_location_id=$1::uuid
-        where round_id=$2`,
-      [location.id, round.id],
-    );
 
     const heartbeat = await machinePost(enrolled.credential, '/api/probe-machine/heartbeat')
       .send({ contractVersion: 1, engineVersion: 'watchrail-http-v1', heartbeatIntervalMs: 15_000 })

@@ -1,5 +1,11 @@
-import { and, desc, eq } from 'drizzle-orm';
-import { type MonitorLifecycleState } from '@watchrail/domain';
+import { and, desc, eq, sql } from 'drizzle-orm';
+import {
+  MULTI_LOCATION_AGGREGATION_POLICY_VERSION,
+  MULTI_LOCATION_CONFIRMATION_POLICY_VERSION,
+  MULTI_LOCATION_CONTRACT_VERSION,
+  MULTI_LOCATION_ROUND_FINALIZATION_WINDOW_MS,
+  type MonitorLifecycleState,
+} from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
 import {
   checkRounds,
@@ -7,7 +13,7 @@ import {
   monitors,
   type CheckRoundRecord,
 } from './schema.js';
-import { createRoutedAssignment } from './round-routing.js';
+import { createRoundLocationSnapshot, createRoutedAssignment } from './round-routing.js';
 
 export class MonitorNotFoundError extends Error {
   constructor() {
@@ -97,6 +103,10 @@ export class ManualRoundRepository {
 
           trigger: 'MANUAL',
           status: 'PENDING',
+          contractVersion: MULTI_LOCATION_CONTRACT_VERSION,
+          aggregationPolicyVersion: MULTI_LOCATION_AGGREGATION_POLICY_VERSION,
+          confirmationPolicyVersion: MULTI_LOCATION_CONFIRMATION_POLICY_VERSION,
+          finalizationDeadlineAt: sql`clock_timestamp() + (${MULTI_LOCATION_ROUND_FINALIZATION_WINDOW_MS} * interval '1 millisecond')`,
         })
         .returning();
 
@@ -104,11 +114,12 @@ export class ManualRoundRepository {
         throw new Error('The check round insert returned no record.');
       }
 
-      await createRoutedAssignment(tx, {
+      const locations = await createRoundLocationSnapshot(tx, {
         organizationId,
         roundId: round.id,
         locations: configuration.locations,
       });
+      await createRoutedAssignment(tx, { organizationId, roundId: round.id, locations });
 
       return round;
     });

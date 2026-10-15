@@ -132,6 +132,7 @@ describe('database migrations', () => {
           'check_execution_assignments',
           'check_execution_results',
           'check_round_outbox'
+          ,'check_round_locations'
           ,'incidents'
           ,'monitor_incident_state'
           ,'notification_deliveries'
@@ -150,6 +151,7 @@ describe('database migrations', () => {
     expect(result.rows.map((row) => row.table_name)).toEqual([
       'check_execution_assignments',
       'check_execution_results',
+      'check_round_locations',
       'check_round_outbox',
       'check_rounds',
       'incidents',
@@ -287,6 +289,47 @@ describe('database migrations', () => {
     expect(migratedAssignment.rows[0]!.pending_since).toEqual(
       migratedAssignment.rows[0]!.created_at,
     );
+
+    const migratedRound = await connection.pool.query<{
+      contract_version: number;
+      aggregation_policy_version: number;
+      confirmation_policy_version: number;
+      created_at: Date;
+      finalization_deadline_at: Date;
+    }>(
+      `select contract_version, aggregation_policy_version, confirmation_policy_version,
+              created_at, finalization_deadline_at
+         from check_rounds
+        where id = $1`,
+      [existingRound.id],
+    );
+    expect(migratedRound.rows[0]).toMatchObject({
+      contract_version: 1,
+      aggregation_policy_version: 1,
+      confirmation_policy_version: 1,
+    });
+    expect(
+      migratedRound.rows[0]!.finalization_deadline_at.getTime() -
+        migratedRound.rows[0]!.created_at.getTime(),
+    ).toBe(120_000);
+    expect(
+      await connection.pool.query(
+        `select organization_id, round_id, location, probe_location_id, position
+           from check_round_locations
+          where round_id = $1`,
+        [existingRound.id],
+      ),
+    ).toMatchObject({
+      rows: [
+        {
+          organization_id: existingMonitor.organizationId,
+          round_id: existingRound.id,
+          location: 'local',
+          probe_location_id: null,
+          position: 0,
+        },
+      ],
+    });
 
     const scheduling = await connection.db.execute<{
       lifecycle_state: string;
