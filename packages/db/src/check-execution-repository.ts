@@ -20,6 +20,7 @@ import {
 import {
   checkExecutionAssignments,
   checkExecutionResults,
+  checkRoundLocations,
   checkRounds,
   incidents,
   monitorIncidentState,
@@ -70,6 +71,7 @@ export class CheckExecutionRepository {
       const [candidate] = await tx
         .select({
           assignmentId: checkExecutionAssignments.id,
+          roundStatus: checkRounds.status,
           status: checkExecutionAssignments.status,
           claimAvailable: sql<boolean>`
             ${checkExecutionAssignments.status} <> 'RUNNING'
@@ -98,11 +100,17 @@ export class CheckExecutionRepository {
           monitorConfigurationVersions,
           eq(monitorConfigurationVersions.id, checkRounds.monitorConfigurationVersionId),
         )
-        .where(and(eq(checkRounds.id, roundId), eq(checkExecutionAssignments.location, 'local')))
+        .where(
+          and(
+            eq(checkRounds.id, roundId),
+            eq(checkExecutionAssignments.location, 'local'),
+          ),
+        )
         .limit(1)
         .for('update', { of: checkExecutionAssignments });
 
       if (!candidate) return { state: 'MISSING' };
+      if (candidate.roundStatus === 'COMPLETED') return { state: 'COMPLETED' };
       if (candidate.status === 'COMPLETED') return { state: 'COMPLETED' };
 
       if (candidate.status === 'RUNNING' && !candidate.claimAvailable) {
@@ -201,6 +209,13 @@ export async function finalizeCheckExecution(
     result: AuthoritativeCheckResult;
   },
 ): Promise<void> {
+  const [locationSummary] = await tx
+    .select({ locationCount: sql<number>`count(*)::integer` })
+    .from(checkRoundLocations)
+    .where(eq(checkRoundLocations.roundId, input.roundId));
+  if ((locationSummary?.locationCount ?? 0) !== 1) {
+    throw new Error('Legacy execution finalization requires exactly one round location.');
+  }
   const redirects = parseHttpRedirectHops(input.result.redirects);
   const assertionEvaluation = parseStoredAssertionEvaluation(input.result.assertionEvaluation);
 

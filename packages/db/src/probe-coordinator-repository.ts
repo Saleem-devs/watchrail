@@ -214,6 +214,7 @@ export class ProbeCoordinatorRepository {
           and(
             eq(checkExecutionAssignments.organizationId, machine.organizationId),
             eq(checkExecutionAssignments.probeLocationId, machine.locationId),
+            eq(checkRounds.status, 'PENDING'),
             or(
               and(
                 eq(checkExecutionAssignments.status, 'PENDING'),

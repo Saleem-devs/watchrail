@@ -117,7 +117,7 @@ describe('database migrations', () => {
     `);
 
     await applyMigration(migrations, 3);
-    for (let index = 4; index < migrations.length - 1; index += 1) {
+    for (let index = 4; index < migrations.length - 2; index += 1) {
       await applyMigration(migrations, index);
     }
 
@@ -148,7 +148,9 @@ describe('database migrations', () => {
       where id = ${existingRound.assignmentId}
     `);
 
-    await applyMigration(migrations, migrations.length - 1);
+    for (let index = migrations.length - 2; index < migrations.length; index += 1) {
+      await applyMigration(migrations, index);
+    }
 
     const result = await connection.db.execute<{
       table_name: string;
@@ -162,6 +164,9 @@ describe('database migrations', () => {
           'check_rounds',
           'check_execution_assignments',
           'check_execution_results',
+          'check_regional_executions',
+          'check_regional_evaluations',
+          'check_round_aggregates',
           'check_round_outbox'
           ,'check_round_locations'
           ,'incidents'
@@ -182,6 +187,9 @@ describe('database migrations', () => {
     expect(result.rows.map((row) => row.table_name)).toEqual([
       'check_execution_assignments',
       'check_execution_results',
+      'check_regional_evaluations',
+      'check_regional_executions',
+      'check_round_aggregates',
       'check_round_locations',
       'check_round_outbox',
       'check_rounds',
