@@ -34,6 +34,7 @@ export interface ProbeClaimRequestV1 {
 export interface ProbeHeartbeatV1 {
   contractVersion: 1;
   engineVersion: string;
+  heartbeatIntervalMs: number;
 }
 
 export interface ProbeExecutionConfigurationV1 {
@@ -132,7 +133,17 @@ export function parseProbeClaimRequest(value: unknown): ProbeClaimRequestV1 {
 }
 
 export function parseProbeHeartbeat(value: unknown): ProbeHeartbeatV1 {
-  return parseProbeClaimRequest(value);
+  if (
+    !hasExactKeys(value, ['contractVersion', 'engineVersion', 'heartbeatIntervalMs']) ||
+    value.contractVersion !== PROBE_COORDINATOR_CONTRACT_VERSION ||
+    !isVersion(value.engineVersion) ||
+    !Number.isInteger(value.heartbeatIntervalMs) ||
+    Number(value.heartbeatIntervalMs) < 5_000 ||
+    Number(value.heartbeatIntervalMs) > 60_000
+  ) {
+    throw new InvalidProbeCoordinatorContractError();
+  }
+  return value as unknown as ProbeHeartbeatV1;
 }
 
 export function parseProbeExecutionConfiguration(value: unknown): ProbeExecutionConfigurationV1 {

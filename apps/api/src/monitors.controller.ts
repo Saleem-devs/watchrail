@@ -60,6 +60,7 @@ interface MonitorResponse {
     checkedAt: string;
     roundId: string;
     trigger: CurrentCheck['trigger'];
+    location: string;
   } | null;
   incidentState: ReturnType<typeof toIncidentStateResponse>;
   uptime: UptimeMetrics;
@@ -71,6 +72,7 @@ interface CheckRoundResponse {
   trigger: 'MANUAL' | 'SCHEDULED';
   status: string;
   assignmentStatus: string;
+  location: string | null;
   createdAt: string;
   result: {
     outcome: string;
@@ -189,6 +191,16 @@ export class MonitorsController {
     @Body() body: unknown,
   ): Promise<{ data: MonitorResponse }> {
     const monitor = await this.monitors.updateLifecycle(request.watchrailContext, monitorId, body);
+    return { data: await this.toMonitorResponse(request, monitor) };
+  }
+
+  @Patch(':monitorId/locations')
+  async updateLocations(
+    @Req() request: RequestWithContext,
+    @Param('monitorId') monitorId: string,
+    @Body() body: unknown,
+  ): Promise<{ data: MonitorResponse }> {
+    const monitor = await this.monitors.updateLocations(request.watchrailContext, monitorId, body);
     return { data: await this.toMonitorResponse(request, monitor) };
   }
 
@@ -400,6 +412,7 @@ function toPendingRoundResponse(round: CheckRoundRecord): CheckRoundResponse {
     trigger: round.trigger,
     status: round.status,
     assignmentStatus: 'PENDING',
+    location: null,
     createdAt: round.createdAt.toISOString(),
     result: null,
   };
@@ -412,6 +425,7 @@ function toCheckRoundResponse(round: CheckHistoryDetail): CheckRoundResponse {
     trigger: round.trigger,
     status: round.status,
     assignmentStatus: round.assignmentStatus,
+    location: round.location,
     createdAt: round.createdAt.toISOString(),
     result: round.result
       ? {

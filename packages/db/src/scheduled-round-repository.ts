@@ -1,14 +1,12 @@
 import { and, asc, desc, eq, lte, sql } from 'drizzle-orm';
-import { createExecuteCheckRoundJob } from '@watchrail/contracts';
 import type { WatchrailDatabase } from './client.js';
 import {
-  checkExecutionAssignments,
-  checkRoundOutbox,
   checkRounds,
   monitorConfigurationVersions,
   monitors,
   type CheckRoundRecord,
 } from './schema.js';
+import { createRoutedAssignment } from './round-routing.js';
 
 export class ScheduledRoundRepository {
   constructor(private readonly db: WatchrailDatabase) {}
@@ -38,7 +36,10 @@ export class ScheduledRoundRepository {
 
       for (const monitor of due) {
         const [configuration] = await tx
-          .select({ id: monitorConfigurationVersions.id })
+          .select({
+            id: monitorConfigurationVersions.id,
+            locations: monitorConfigurationVersions.locations,
+          })
           .from(monitorConfigurationVersions)
           .where(
             and(
@@ -65,16 +66,10 @@ export class ScheduledRoundRepository {
           .returning();
         if (!round) throw new Error('The scheduled check-round insert returned no record.');
 
-        await tx.insert(checkExecutionAssignments).values({
+        await createRoutedAssignment(tx, {
           organizationId: monitor.organizationId,
           roundId: round.id,
-          location: 'local',
-          status: 'PENDING',
-        });
-
-        await tx.insert(checkRoundOutbox).values({
-          roundId: round.id,
-          payload: createExecuteCheckRoundJob(round.id),
+          locations: configuration.locations,
         });
 
         await tx

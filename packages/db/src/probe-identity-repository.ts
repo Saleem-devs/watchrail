@@ -1,6 +1,11 @@
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import type { WatchrailDatabase } from './client.js';
 import {
+  HTTP_ENGINE_VERSION,
+  deriveProbeAgentHealth,
+  type ProbeAgentHealth,
+} from '@watchrail/domain';
+import {
   probeAgentCredentials,
   probeAgentEnrollments,
   probeAgents,
@@ -26,6 +31,16 @@ export interface ProbeEnrollmentRecord {
   consumedAt: Date | null;
   revokedAt: Date | null;
   createdAt: Date;
+}
+
+export interface ProbeAgentHealthRecord extends ProbeAgentRecord {
+  health: ProbeAgentHealth;
+  engineCompatible: boolean;
+}
+
+export interface ProbeLocationHealthRecord extends ProbeLocationRecord {
+  health: 'NOT_CONNECTED' | 'ONLINE' | 'STALE' | 'OFFLINE' | 'DISABLED';
+  activeAgentCount: number;
 }
 
 export class ProbeIdentityNotFoundError extends Error {}
@@ -54,6 +69,41 @@ export class ProbeIdentityRepository {
       .from(probeLocations)
       .where(eq(probeLocations.organizationId, organizationId))
       .orderBy(asc(probeLocations.createdAt), asc(probeLocations.id));
+  }
+
+  async listLocationHealth(organizationId: string): Promise<ProbeLocationHealthRecord[]> {
+    const [locations, agents, clock] = await Promise.all([
+      this.listLocations(organizationId),
+      this.listAgents(organizationId),
+      this.databaseNow(),
+    ]);
+    return locations.map((location) => {
+      const active = agents.filter(
+        (agent) =>
+          agent.locationId === location.id &&
+          agent.status === 'ACTIVE' &&
+          agent.engineVersion === HTTP_ENGINE_VERSION,
+      );
+      const healths = active.map((agent) =>
+        deriveProbeAgentHealth({
+          status: agent.status,
+          lastHeartbeatAt: agent.lastHeartbeatAt,
+          heartbeatIntervalMs: agent.heartbeatIntervalMs,
+          now: clock,
+        }),
+      );
+      const health =
+        location.status === 'DISABLED'
+          ? 'DISABLED'
+          : healths.includes('ONLINE')
+            ? 'ONLINE'
+            : healths.includes('STALE')
+              ? 'STALE'
+              : active.length > 0
+                ? 'OFFLINE'
+                : 'NOT_CONNECTED';
+      return { ...location, health, activeAgentCount: active.length };
+    });
   }
 
   async setLocationStatus(
@@ -304,6 +354,29 @@ export class ProbeIdentityRepository {
       .from(probeAgents)
       .where(eq(probeAgents.organizationId, organizationId))
       .orderBy(asc(probeAgents.createdAt), asc(probeAgents.id));
+  }
+
+  async listAgentHealth(organizationId: string): Promise<ProbeAgentHealthRecord[]> {
+    const [agents, now] = await Promise.all([this.listAgents(organizationId), this.databaseNow()]);
+    return agents.map((agent) => ({
+      ...agent,
+      health: deriveProbeAgentHealth({
+        status: agent.status,
+        lastHeartbeatAt: agent.lastHeartbeatAt,
+        heartbeatIntervalMs: agent.heartbeatIntervalMs,
+        now,
+      }),
+      engineCompatible: agent.engineVersion === HTTP_ENGINE_VERSION,
+    }));
+  }
+
+  private async databaseNow(): Promise<Date> {
+    const result = await this.db.execute<{ now: string }>(
+      sql`select date_trunc('milliseconds', clock_timestamp()) as now`,
+    );
+    const now = result.rows[0]?.now;
+    if (!now) throw new Error('Database clock returned no value.');
+    return new Date(now);
   }
 
   async revokeAgent(organizationId: string, agentId: string): Promise<void> {

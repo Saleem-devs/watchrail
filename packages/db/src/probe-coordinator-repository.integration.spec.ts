@@ -306,6 +306,24 @@ describe('probe coordinator repository', () => {
     expect(incidents.rows).toHaveLength(0);
   });
 
+  it('abandons unclaimed remote assignments after the configured pending deadline', async () => {
+    const fixture = await createFixture('unclaimed', true);
+    await connection.pool.query(
+      `update check_execution_assignments
+          set created_at=clock_timestamp()-interval '11 seconds'
+        where id=$1`,
+      [fixture.assignmentId],
+    );
+
+    expect(await coordinator.reconcileExpired(100, 10_000)).toBe(1);
+    const result = await connection.pool.query<{ outcome: string; stage: string; reason: string }>(
+      'select outcome, stage, reason from check_execution_results where assignment_id=$1',
+      [fixture.assignmentId],
+    );
+    expect(result.rows).toEqual([{ outcome: 'UNKNOWN', stage: 'PROBE', reason: 'INTERNAL_ERROR' }]);
+    expect((await connection.pool.query('select id from incidents')).rows).toHaveLength(0);
+  });
+
   async function createFixture(suffix = 'default', scheduled = false) {
     const location = await connection.pool.query<{ id: string }>(
       `insert into probe_locations (organization_id,name,slug) values ($1,$2,$3) returning id`,

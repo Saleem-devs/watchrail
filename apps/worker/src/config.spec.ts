@@ -32,6 +32,7 @@ describe('loadWorkerConfig', () => {
       availabilityFlushIntervalMs: 60_000,
       probeReconciliationBatchSize: 100,
       probeReconciliationIntervalMs: 1_000,
+      probePendingAssignmentTimeoutMs: 120_000,
       headerEncryptionKeyring: { activeKeyId: 'test' },
       assertionEncryptionKeyring: { activeKeyId: 'test' },
       webhookSigningSecretKeyring: { activeKeyId: 'test' },

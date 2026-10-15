@@ -163,7 +163,11 @@ export class ProbeAgentRuntime {
   private async heartbeatLoop(): Promise<void> {
     while (!this.stopping) {
       try {
-        await this.client.heartbeat(HTTP_ENGINE_VERSION, this.lifecycleAbort.signal);
+        await this.client.heartbeat(
+          HTTP_ENGINE_VERSION,
+          this.config.heartbeatIntervalMs,
+          this.lifecycleAbort.signal,
+        );
       } catch (error) {
         if (error instanceof ProbeCoordinatorError && error.kind === 'AUTH') {
           this.stopping = true;

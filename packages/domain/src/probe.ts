@@ -10,6 +10,23 @@ export const PROBE_LEASE_DURATION_MS = 30_000;
 export const PROBE_MAX_EXECUTION_MS = 120_000;
 export const PROBE_MAX_ATTEMPTS = 3;
 export const PROBE_RECONCILIATION_BATCH_SIZE = 100;
+export const PROBE_HEARTBEAT_INTERVAL_LIMITS = { minimumMs: 5_000, maximumMs: 60_000 } as const;
+export type ProbeAgentHealth = 'NOT_CONNECTED' | 'ONLINE' | 'STALE' | 'OFFLINE' | 'REVOKED';
+
+export function deriveProbeAgentHealth(input: {
+  status: ProbeAgentStatus;
+  lastHeartbeatAt: Date | null;
+  heartbeatIntervalMs: number;
+  now: Date;
+}): ProbeAgentHealth {
+  if (input.status === 'PENDING') return 'NOT_CONNECTED';
+  if (input.status === 'REVOKED') return 'REVOKED';
+  if (!input.lastHeartbeatAt) return 'OFFLINE';
+  const age = Math.max(0, input.now.getTime() - input.lastHeartbeatAt.getTime());
+  if (age <= input.heartbeatIntervalMs * 2) return 'ONLINE';
+  if (age <= input.heartbeatIntervalMs * 4) return 'STALE';
+  return 'OFFLINE';
+}
 // Remote clocks may drift slightly, but agent timestamps must remain tied to
 // the authoritative execution window so they cannot rewrite incident history.
 export const PROBE_RESULT_CLOCK_SKEW_MS = 60_000;

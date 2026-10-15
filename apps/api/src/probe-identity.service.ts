@@ -38,7 +38,7 @@ export class ProbeIdentityService {
   }
 
   listLocations(context: RequestContext) {
-    return this.probes.listLocations(context.organizationId);
+    return this.probes.listLocationHealth(context.organizationId);
   }
 
   setLocationStatus(context: RequestContext, locationId: string, value: unknown) {
@@ -74,7 +74,7 @@ export class ProbeIdentityService {
   }
 
   listAgents(context: RequestContext) {
-    return this.probes.listAgents(context.organizationId);
+    return this.probes.listAgentHealth(context.organizationId);
   }
 
   async revokeAgent(context: RequestContext, agentId: string): Promise<void> {

@@ -16,6 +16,7 @@ export interface WorkerConfig {
   availabilityFlushIntervalMs: number;
   probeReconciliationBatchSize: number;
   probeReconciliationIntervalMs: number;
+  probePendingAssignmentTimeoutMs: number;
   headerEncryptionKeyring: HeaderEncryptionKeyring;
   assertionEncryptionKeyring: AssertionEncryptionKeyring;
   webhookSigningSecretKeyring: WebhookSigningSecretKeyring;
@@ -134,6 +135,13 @@ export function loadWorkerConfig(environment: NodeJS.ProcessEnv = process.env): 
       environment.PROBE_RECONCILIATION_INTERVAL_MS,
       'PROBE_RECONCILIATION_INTERVAL_MS',
       1_000,
+    ),
+    probePendingAssignmentTimeoutMs: parseIntegerRange(
+      environment.PROBE_PENDING_ASSIGNMENT_TIMEOUT_MS,
+      'PROBE_PENDING_ASSIGNMENT_TIMEOUT_MS',
+      120_000,
+      10_000,
+      900_000,
     ),
     headerEncryptionKeyring: loadHeaderEncryptionKeyring(environment),
     assertionEncryptionKeyring: loadAssertionEncryptionKeyring(environment),

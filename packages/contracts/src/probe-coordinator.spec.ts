@@ -72,8 +72,14 @@ describe('probe coordinator contracts', () => {
   });
 
   it('parses exact claim and heartbeat compatibility contracts', () => {
-    const input = { contractVersion: 1, engineVersion: 'watchrail-http-v1' };
-    expect(parseProbeClaimRequest(input)).toEqual(input);
+    const input = {
+      contractVersion: 1,
+      engineVersion: 'watchrail-http-v1',
+      heartbeatIntervalMs: 15_000,
+    };
+    expect(
+      parseProbeClaimRequest({ contractVersion: 1, engineVersion: 'watchrail-http-v1' }),
+    ).toEqual({ contractVersion: 1, engineVersion: 'watchrail-http-v1' });
     expect(parseProbeHeartbeat(input)).toEqual(input);
     expect(() => parseProbeClaimRequest({ ...input, locationId })).toThrow(
       InvalidProbeCoordinatorContractError,

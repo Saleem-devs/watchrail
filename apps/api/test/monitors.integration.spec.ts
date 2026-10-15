@@ -103,6 +103,41 @@ describe('monitor API', () => {
     expect(listed.body.data[0].id).toBe(created.body.data.id);
   });
 
+  it('replaces the immutable execution location with an owned active remote location', async () => {
+    const monitor = await request(app.getHttpServer())
+      .post('/api/monitors')
+      .send({ name: 'Remote API', url: 'https://example.com/health' })
+      .expect(201);
+    const location = await request(app.getHttpServer())
+      .post('/api/probe-locations')
+      .send({ name: 'Lagos', slug: 'lagos' })
+      .expect(201);
+
+    const updated = await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitor.body.data.id as string}/locations`)
+      .send({ locations: [location.body.data.id] })
+      .expect(200);
+    expect(updated.body.data.locations).toEqual([location.body.data.id]);
+
+    const versions = await database.$client.query<{ locations: string[] }>(
+      'select locations from monitor_configuration_versions where monitor_id=$1 order by version_number',
+      [monitor.body.data.id],
+    );
+    expect(versions.rows.map((row) => row.locations)).toEqual([
+      ['local'],
+      [location.body.data.id],
+    ]);
+
+    await request(app.getHttpServer())
+      .patch(`/api/probe-locations/${location.body.data.id as string}/status`)
+      .send({ status: 'DISABLED' })
+      .expect(200);
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitor.body.data.id as string}/locations`)
+      .send({ locations: [location.body.data.id] })
+      .expect(409);
+  });
+
   it('reads live uptime and daily metrics without materializing the tail, retaining metrics through mutations', async () => {
     const created = await request(app.getHttpServer())
       .post('/api/monitors')
@@ -858,6 +893,7 @@ describe('monitor API', () => {
       trigger: 'MANUAL',
       status: 'COMPLETED',
       assignmentStatus: 'COMPLETED',
+      location: 'local',
       createdAt: accepted.body.data.createdAt,
       result: {
         outcome: 'PASS',

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   InvalidProbeLocationIdentityError,
+  deriveProbeAgentHealth,
   parseProbeLocationIdentity,
   probeAssignmentLocation,
 } from './probe.js';
@@ -29,5 +30,49 @@ describe('probe domain', () => {
   it('uses the local sentinel only when no remote location is selected', () => {
     expect(probeAssignmentLocation(null)).toBe('local');
     expect(probeAssignmentLocation(locationId.toUpperCase())).toBe(locationId);
+  });
+
+  it('derives lifecycle-aware health from the configured heartbeat interval', () => {
+    const now = new Date('2026-10-14T10:00:00.000Z');
+    expect(
+      deriveProbeAgentHealth({
+        status: 'ACTIVE',
+        lastHeartbeatAt: new Date(now.getTime() - 30_000),
+        heartbeatIntervalMs: 15_000,
+        now,
+      }),
+    ).toBe('ONLINE');
+    expect(
+      deriveProbeAgentHealth({
+        status: 'ACTIVE',
+        lastHeartbeatAt: new Date(now.getTime() - 60_000),
+        heartbeatIntervalMs: 15_000,
+        now,
+      }),
+    ).toBe('STALE');
+    expect(
+      deriveProbeAgentHealth({
+        status: 'ACTIVE',
+        lastHeartbeatAt: new Date(now.getTime() - 60_001),
+        heartbeatIntervalMs: 15_000,
+        now,
+      }),
+    ).toBe('OFFLINE');
+    expect(
+      deriveProbeAgentHealth({
+        status: 'PENDING',
+        lastHeartbeatAt: null,
+        heartbeatIntervalMs: 15_000,
+        now,
+      }),
+    ).toBe('NOT_CONNECTED');
+    expect(
+      deriveProbeAgentHealth({
+        status: 'REVOKED',
+        lastHeartbeatAt: now,
+        heartbeatIntervalMs: 15_000,
+        now,
+      }),
+    ).toBe('REVOKED');
   });
 });

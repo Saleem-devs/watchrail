@@ -146,6 +146,7 @@ export class WorkerRuntime
       try {
         const count = await this.probeCoordinator!.reconcileExpired(
           this.config.probeReconciliationBatchSize,
+          this.config.probePendingAssignmentTimeoutMs,
         );
         if (count < this.config.probeReconciliationBatchSize) {
           await this.wait(this.config.probeReconciliationIntervalMs);

@@ -162,6 +162,13 @@
       "when": 1791760985836,
       "tag": "0022_sour_wraith",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1792015899094,
+      "tag": "0023_hot_frightful_four",
+      "breakpoints": true
     }
   ]
 }

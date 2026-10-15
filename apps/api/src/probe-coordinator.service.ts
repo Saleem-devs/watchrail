@@ -115,7 +115,9 @@ export class ProbeCoordinatorService {
 
   async heartbeat(machine: ProbeMachineIdentity, body: unknown) {
     const input = parseOrBadRequest(() => parseProbeHeartbeat(body));
-    return this.authorized(() => this.coordinator.heartbeat(machine, input.engineVersion));
+    return this.authorized(() =>
+      this.coordinator.heartbeat(machine, input.engineVersion, input.heartbeatIntervalMs),
+    );
   }
 
   private async authorized<T>(operation: () => Promise<T>): Promise<T> {

@@ -15,6 +15,7 @@ import {
   checkRounds,
   monitorConfigurationVersions,
   monitors,
+  probeLocations,
 } from './schema.js';
 
 const organizationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -37,7 +38,8 @@ describe('ScheduledRoundRepository', () => {
         check_execution_assignments,
         check_rounds,
         monitor_configuration_versions,
-        monitors
+        monitors,
+        probe_locations
       cascade
     `);
   });
@@ -92,6 +94,29 @@ describe('ScheduledRoundRepository', () => {
 
     await expect(new ScheduledRoundRepository(connection.db).dispatchDue(100)).resolves.toEqual([]);
     expect(await connection.db.select().from(checkRounds)).toHaveLength(1);
+  });
+
+  it('routes scheduled work remotely without publishing a local queue event', async () => {
+    const monitor = await createDueMonitor('Remote due');
+    const [location] = await connection.db
+      .insert(probeLocations)
+      .values({ organizationId, name: 'Frankfurt', slug: 'frankfurt' })
+      .returning();
+    await new MonitorRepository(connection.db).updateLocations(organizationId, monitor.id, [
+      location!.id,
+    ]);
+
+    const [round] = await new ScheduledRoundRepository(connection.db).dispatchDue(100);
+    const [assignment] = await connection.db
+      .select()
+      .from(checkExecutionAssignments)
+      .where(eq(checkExecutionAssignments.roundId, round!.id));
+    expect(assignment).toMatchObject({
+      location: location!.id,
+      probeLocationId: location!.id,
+      status: 'PENDING',
+    });
+    expect(await connection.db.select().from(checkRoundOutbox)).toEqual([]);
   });
 
   it('ignores non-due, paused, and archived monitors', async () => {

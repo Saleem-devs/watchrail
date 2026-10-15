@@ -14,6 +14,7 @@ import {
   checkRounds,
   monitorConfigurationVersions,
   monitors,
+  probeLocations,
 } from './schema.js';
 
 const organizationA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -39,7 +40,8 @@ describe('ManualRoundRepository', () => {
         check_execution_assignments,
         check_rounds,
         monitor_configuration_versions,
-        monitors
+        monitors,
+        probe_locations
       cascade
     `);
   });
@@ -111,6 +113,37 @@ describe('ManualRoundRepository', () => {
     });
 
     expect(outbox[0]!.publishedAt).toBeNull();
+  });
+
+  it('routes a manual round to its immutable remote location without a local outbox event', async () => {
+    const monitor = await createMonitorForOrganization(organizationA);
+    const [location] = await connection.db
+      .insert(probeLocations)
+      .values({ organizationId: organizationA, name: 'Lagos', slug: 'lagos' })
+      .returning();
+    await new MonitorRepository(connection.db).updateLocations(organizationA, monitor.id, [
+      location!.id,
+    ]);
+
+    const round = await new ManualRoundRepository(connection.db).create(organizationA, monitor.id);
+    const [assignment] = await connection.db
+      .select()
+      .from(checkExecutionAssignments)
+      .where(eq(checkExecutionAssignments.roundId, round.id));
+
+    expect(assignment).toMatchObject({
+      location: location!.id,
+      probeLocationId: location!.id,
+      executionPolicyVersion: 'http-v1',
+      requiredEngineVersion: 'watchrail-http-v1',
+      status: 'PENDING',
+    });
+    expect(
+      await connection.db
+        .select()
+        .from(checkRoundOutbox)
+        .where(eq(checkRoundOutbox.roundId, round.id)),
+    ).toEqual([]);
   });
 
   it('rolls back round state when outbox creation fails', async () => {

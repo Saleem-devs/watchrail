@@ -25,10 +25,14 @@ export class ProbeCoordinatorClient {
     private readonly requestTimeoutMs = 10_000,
   ) {}
 
-  async heartbeat(engineVersion: string, signal?: AbortSignal): Promise<void> {
+  async heartbeat(
+    engineVersion: string,
+    heartbeatIntervalMs: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
     await this.request('/api/probe-machine/heartbeat', {
       method: 'POST',
-      body: JSON.stringify({ contractVersion: 1, engineVersion }),
+      body: JSON.stringify({ contractVersion: 1, engineVersion, heartbeatIntervalMs }),
       signal: signal ?? null,
     });
   }
