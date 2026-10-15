@@ -40,6 +40,8 @@ import {
   type ResponseAssertionConfigurationV1,
   EMPTY_ASSERTION_CONFIGURATION,
   EMPTY_ASSERTION_EVALUATION,
+  type AggregateRoundDecisionV1,
+  type ProbeObservationV1,
 } from '@watchrail/domain';
 
 export const httpMethodEnum = pgEnum('http_method', HTTP_METHODS);
@@ -737,6 +739,12 @@ export const checkExecutionAssignments = pgTable(
       table.roundId,
       table.id,
     ),
+    unique('check_execution_assignments_regional_identity_unique').on(
+      table.organizationId,
+      table.roundId,
+      table.id,
+      table.location,
+    ),
     unique('check_execution_assignments_organization_id_unique').on(table.organizationId, table.id),
     unique('check_execution_assignments_location_identity_unique').on(
       table.organizationId,
@@ -922,6 +930,155 @@ export const checkExecutionResults = pgTable(
   ],
 );
 
+export const checkRegionalExecutions = pgTable(
+  'check_regional_executions',
+  {
+    id: uuid('id').primaryKey(),
+    organizationId: uuid('organization_id').notNull(),
+    roundId: uuid('round_id').notNull(),
+    assignmentId: uuid('assignment_id').notNull(),
+    location: varchar('location', { length: 64 }).notNull(),
+    agentId: varchar('agent_id', { length: 128 }).notNull(),
+    role: varchar('role', { length: 16 }).notNull(),
+    observation: jsonb('observation').$type<ProbeObservationV1>().notNull(),
+    acceptedAt: timestamp('accepted_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'check_regional_executions_assignment_fk',
+      columns: [table.organizationId, table.roundId, table.assignmentId, table.location],
+      foreignColumns: [
+        checkExecutionAssignments.organizationId,
+        checkExecutionAssignments.roundId,
+        checkExecutionAssignments.id,
+        checkExecutionAssignments.location,
+      ],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'check_regional_executions_round_location_fk',
+      columns: [table.organizationId, table.roundId, table.location],
+      foreignColumns: [
+        checkRoundLocations.organizationId,
+        checkRoundLocations.roundId,
+        checkRoundLocations.location,
+      ],
+    }).onDelete('cascade'),
+    unique('check_regional_executions_identity_unique').on(
+      table.organizationId,
+      table.roundId,
+      table.location,
+      table.id,
+    ),
+    unique('check_regional_executions_role_unique').on(
+      table.organizationId,
+      table.roundId,
+      table.location,
+      table.role,
+    ),
+    check(
+      'check_regional_executions_role_valid',
+      sql`${table.role} in ('PRIMARY', 'CONFIRMATION')`,
+    ),
+    check(
+      'check_regional_executions_observation_object',
+      sql`jsonb_typeof(${table.observation}) = 'object'`,
+    ),
+  ],
+);
+
+export const checkRegionalEvaluations = pgTable(
+  'check_regional_evaluations',
+  {
+    organizationId: uuid('organization_id').notNull(),
+    roundId: uuid('round_id').notNull(),
+    location: varchar('location', { length: 64 }).notNull(),
+    phase: varchar('phase', { length: 32 }).notNull().default('AWAITING_PRIMARY'),
+    outcome: varchar('outcome', { length: 32 }),
+    terminalReason: varchar('terminal_reason', { length: 32 }),
+    primaryExecutionId: uuid('primary_execution_id'),
+    confirmationExecutionId: uuid('confirmation_execution_id'),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      name: 'check_regional_evaluations_pk',
+      columns: [table.organizationId, table.roundId, table.location],
+    }),
+    foreignKey({
+      name: 'check_regional_evaluations_round_location_fk',
+      columns: [table.organizationId, table.roundId, table.location],
+      foreignColumns: [
+        checkRoundLocations.organizationId,
+        checkRoundLocations.roundId,
+        checkRoundLocations.location,
+      ],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'check_regional_evaluations_primary_execution_fk',
+      columns: [table.organizationId, table.roundId, table.location, table.primaryExecutionId],
+      foreignColumns: [
+        checkRegionalExecutions.organizationId,
+        checkRegionalExecutions.roundId,
+        checkRegionalExecutions.location,
+        checkRegionalExecutions.id,
+      ],
+    }),
+    foreignKey({
+      name: 'check_regional_evaluations_confirmation_execution_fk',
+      columns: [table.organizationId, table.roundId, table.location, table.confirmationExecutionId],
+      foreignColumns: [
+        checkRegionalExecutions.organizationId,
+        checkRegionalExecutions.roundId,
+        checkRegionalExecutions.location,
+        checkRegionalExecutions.id,
+      ],
+    }),
+    check(
+      'check_regional_evaluations_phase_valid',
+      sql`${table.phase} in ('AWAITING_PRIMARY', 'AWAITING_CONFIRMATION', 'TERMINAL')`,
+    ),
+    check(
+      'check_regional_evaluations_outcome_valid',
+      sql`${table.outcome} is null or ${table.outcome} in ('PASS', 'CONFIRMED_FAIL', 'UNKNOWN')`,
+    ),
+    check(
+      'check_regional_evaluations_terminal_consistent',
+      sql`(${table.phase} = 'TERMINAL') = (${table.outcome} is not null and ${table.terminalReason} is not null)`,
+    ),
+  ],
+);
+
+export const checkRoundAggregates = pgTable(
+  'check_round_aggregates',
+  {
+    organizationId: uuid('organization_id').notNull(),
+    roundId: uuid('round_id').notNull(),
+    outcome: varchar('outcome', { length: 16 }).notNull(),
+    aggregate: jsonb('aggregate').$type<AggregateRoundDecisionV1>().notNull(),
+    finalizedAt: timestamp('finalized_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      name: 'check_round_aggregates_pk',
+      columns: [table.organizationId, table.roundId],
+    }),
+    foreignKey({
+      name: 'check_round_aggregates_round_fk',
+      columns: [table.organizationId, table.roundId],
+      foreignColumns: [checkRounds.organizationId, checkRounds.id],
+    }).onDelete('cascade'),
+    check(
+      'check_round_aggregates_outcome_valid',
+      sql`${table.outcome} in ('UP', 'DEGRADED', 'DOWN', 'UNKNOWN')`,
+    ),
+    check(
+      'check_round_aggregates_payload_object',
+      sql`jsonb_typeof(${table.aggregate}) = 'object'`,
+    ),
+  ],
+);
+
 export const monitorIncidentState = pgTable(
   'monitor_incident_state',
   {
@@ -930,6 +1087,10 @@ export const monitorIncidentState = pgTable(
     consecutiveFailures: integer('consecutive_failures').notNull().default(0),
     failureStreakStartedAt: timestamp('failure_streak_started_at', { withTimezone: true }),
     failureStreakStartedRoundId: uuid('failure_streak_started_round_id'),
+    multiLocationSeverity: varchar('multi_location_severity', { length: 16 }),
+    multiLocationHealthyRecoveryStreak: integer('multi_location_healthy_recovery_streak')
+      .notNull()
+      .default(0),
     lastProcessedRoundCreatedAt: timestamp('last_processed_round_created_at', {
       withTimezone: true,
     }),
@@ -955,6 +1116,14 @@ export const monitorIncidentState = pgTable(
       'monitor_incident_state_last_processed_consistent',
       sql`(${table.lastProcessedRoundCreatedAt} is null) = (${table.lastProcessedRoundId} is null)`,
     ),
+    check(
+      'monitor_incident_state_multi_location_severity_valid',
+      sql`${table.multiLocationSeverity} is null or ${table.multiLocationSeverity} in ('DEGRADED', 'DOWN')`,
+    ),
+    check(
+      'monitor_incident_state_multi_location_recovery_valid',
+      sql`${table.multiLocationHealthyRecoveryStreak} between 0 and 1 and (${table.multiLocationSeverity} is not null or ${table.multiLocationHealthyRecoveryStreak} = 0)`,
+    ),
   ],
 );
 
@@ -971,6 +1140,7 @@ export const incidents = pgTable(
     startedByRoundId: uuid('started_by_round_id').notNull(),
     openedByRoundId: uuid('opened_by_round_id').notNull(),
     resolvedByRoundId: uuid('resolved_by_round_id'),
+    severity: varchar('severity', { length: 16 }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -1007,6 +1177,10 @@ export const incidents = pgTable(
     check(
       'incidents_resolution_consistent',
       sql`(${table.status} = 'RESOLVED') = (${table.resolvedAt} is not null and ${table.resolvedByRoundId} is not null)`,
+    ),
+    check(
+      'incidents_severity_valid',
+      sql`${table.severity} is null or ${table.severity} in ('DEGRADED', 'DOWN')`,
     ),
   ],
 );

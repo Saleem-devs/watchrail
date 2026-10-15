@@ -18,6 +18,7 @@ import type { ProbeMachineIdentity } from './probe-identity-repository.js';
 import {
   checkExecutionAssignments,
   checkExecutionResults,
+  checkRoundLocations,
   checkRounds,
   monitorConfigurationVersions,
   probeAgentCredentials,
@@ -214,6 +215,7 @@ export class ProbeCoordinatorRepository {
           and(
             eq(checkExecutionAssignments.organizationId, machine.organizationId),
             eq(checkExecutionAssignments.probeLocationId, machine.locationId),
+            eq(checkRounds.status, 'PENDING'),
             or(
               and(
                 eq(checkExecutionAssignments.status, 'PENDING'),
@@ -401,6 +403,12 @@ export class ProbeCoordinatorRepository {
           and(
             eq(checkExecutionAssignments.status, 'PENDING'),
             sql`${checkExecutionAssignments.probeLocationId} is not null`,
+            sql`(
+              select count(*)
+              from ${checkRoundLocations}
+              where ${checkRoundLocations.organizationId} = ${checkExecutionAssignments.organizationId}
+                and ${checkRoundLocations.roundId} = ${checkExecutionAssignments.roundId}
+            ) = 1`,
             sql`${checkExecutionAssignments.pendingSince} <= clock_timestamp() - (${pendingTimeoutMs} * interval '1 millisecond')`,
           ),
         )
@@ -446,6 +454,12 @@ export class ProbeCoordinatorRepository {
             eq(checkExecutionAssignments.status, 'RUNNING'),
             lte(checkExecutionAssignments.claimExpiresAt, sql`clock_timestamp()`),
             sql`${checkExecutionAssignments.probeLocationId} is not null`,
+            sql`(
+              select count(*)
+              from ${checkRoundLocations}
+              where ${checkRoundLocations.organizationId} = ${checkExecutionAssignments.organizationId}
+                and ${checkRoundLocations.roundId} = ${checkExecutionAssignments.roundId}
+            ) = 1`,
           ),
         )
         .orderBy(asc(checkExecutionAssignments.claimExpiresAt), asc(checkExecutionAssignments.id))

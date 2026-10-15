@@ -5,6 +5,7 @@ import {
   isRoundNewer,
   type AvailabilityObservationInput,
   type MonitorLifecycleState,
+  type AggregateHealthState,
 } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
 import { monitorAvailabilityState, monitors } from './schema.js';
@@ -120,6 +121,41 @@ export async function applyAvailabilityObservation(
 ): Promise<void> {
   const currentState = classifyAvailabilityObservation(input);
   if (currentState === null) return;
+  const state = await lockAvailability(tx, round.organizationId, round.monitorId);
+  if (
+    state.currentState === 'EXCLUDED' ||
+    !state.enabledSince ||
+    round.createdAt < state.enabledSince ||
+    round.createdAt < state.trackingStartedAt ||
+    !isRoundNewer(
+      { createdAt: round.createdAt, roundId: round.id },
+      state.lastProcessedRoundCreatedAt && state.lastProcessedRoundId
+        ? { createdAt: state.lastProcessedRoundCreatedAt, roundId: state.lastProcessedRoundId }
+        : null,
+    )
+  )
+    return;
+  const at = await acceptanceTime(tx);
+  await accrueAvailability(tx, state, at);
+  await tx
+    .update(monitorAvailabilityState)
+    .set({
+      currentState,
+      stateSince: currentState === state.currentState ? state.stateSince : at,
+      lastProcessedRoundCreatedAt: round.createdAt,
+      lastProcessedRoundId: round.id,
+      updatedAt: at,
+    })
+    .where(eq(monitorAvailabilityState.monitorId, round.monitorId));
+}
+
+export async function applyAggregateAvailabilityObservation(
+  tx: Transaction,
+  round: { id: string; createdAt: Date; organizationId: string; monitorId: string },
+  outcome: AggregateHealthState,
+): Promise<void> {
+  const currentState =
+    outcome === 'UP' ? 'AVAILABLE' : outcome === 'UNKNOWN' ? 'UNKNOWN' : 'UNAVAILABLE';
   const state = await lockAvailability(tx, round.organizationId, round.monitorId);
   if (
     state.currentState === 'EXCLUDED' ||

@@ -8,6 +8,7 @@ import {
 import type { BullMqCheckJobConsumer, BullMqCheckJobPublisher } from '@watchrail/queue';
 import type {
   AvailabilityRepository,
+  MultiLocationRoundFinalizationRepository,
   ProbeCoordinatorRepository,
   ScheduledRoundRepository,
 } from '@watchrail/db';
@@ -29,6 +30,7 @@ export class WorkerRuntime
   private schedulerRunning: Promise<void> | undefined;
   private availabilityRunning: Promise<void> | undefined;
   private probeReconciliationRunning: Promise<void> | undefined;
+  private roundFinalizationRunning: Promise<void> | undefined;
   private webhookRunning: Promise<void>[] = [];
   private readonly wakeups = new Set<() => void>();
 
@@ -41,6 +43,7 @@ export class WorkerRuntime
     private readonly config: WorkerConfig,
     private readonly webhookDelivery?: WebhookDeliveryProcessor,
     private readonly probeCoordinator?: ProbeCoordinatorRepository,
+    private readonly multiLocationFinalization?: MultiLocationRoundFinalizationRepository,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -49,6 +52,9 @@ export class WorkerRuntime
     this.availabilityRunning = this.runAvailabilityFlush();
     this.probeReconciliationRunning = this.probeCoordinator
       ? this.runProbeReconciliation()
+      : undefined;
+    this.roundFinalizationRunning = this.multiLocationFinalization
+      ? this.runRoundFinalization()
       : undefined;
     this.webhookRunning = this.webhookDelivery
       ? Array.from({ length: this.config.webhookDeliveryConcurrency }, () =>
@@ -65,6 +71,7 @@ export class WorkerRuntime
       this.schedulerRunning,
       this.availabilityRunning,
       this.probeReconciliationRunning,
+      this.roundFinalizationRunning,
       ...this.webhookRunning,
       this.consumer.close(),
     ]);
@@ -153,6 +160,22 @@ export class WorkerRuntime
         }
       } catch {
         this.logger.error('Probe lease reconciliation dependency failure.');
+        await this.wait(this.config.dependencyErrorDelayMs);
+      }
+    }
+  }
+
+  private async runRoundFinalization(): Promise<void> {
+    while (!this.stopping) {
+      try {
+        const count = await this.multiLocationFinalization!.finalizeDue(
+          this.config.probeReconciliationBatchSize,
+        );
+        if (count < this.config.probeReconciliationBatchSize) {
+          await this.wait(this.config.probeReconciliationIntervalMs);
+        }
+      } catch {
+        this.logger.error('Multi-location round finalization dependency failure.');
         await this.wait(this.config.dependencyErrorDelayMs);
       }
     }

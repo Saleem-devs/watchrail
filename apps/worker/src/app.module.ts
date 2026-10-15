@@ -11,6 +11,7 @@ import {
   createWatchrailDatabase,
   NotificationDeliveryRepository,
   ProbeCoordinatorRepository,
+  MultiLocationRoundFinalizationRepository,
 } from '@watchrail/db';
 import type { WatchrailDatabase } from '@watchrail/db';
 import { CheckOutboxRelay, createExponentialBackoff } from './check-outbox-relay.js';
@@ -36,6 +37,11 @@ import { WebhookDeliveryWorker } from './webhook-delivery-worker.js';
       provide: ProbeCoordinatorRepository,
       inject: [getDrizzleToken()],
       useFactory: (db: WatchrailDatabase) => new ProbeCoordinatorRepository(db),
+    },
+    {
+      provide: MultiLocationRoundFinalizationRepository,
+      inject: [getDrizzleToken()],
+      useFactory: (db: WatchrailDatabase) => new MultiLocationRoundFinalizationRepository(db),
     },
     {
       provide: NotificationDeliveryRepository,
@@ -148,6 +154,7 @@ import { WebhookDeliveryWorker } from './webhook-delivery-worker.js';
         WORKER_CONFIG,
         WebhookDeliveryWorker,
         ProbeCoordinatorRepository,
+        MultiLocationRoundFinalizationRepository,
       ],
       useFactory: (
         relay: CheckOutboxRelay,
@@ -158,6 +165,7 @@ import { WebhookDeliveryWorker } from './webhook-delivery-worker.js';
         config: WorkerConfig,
         webhookDelivery: WebhookDeliveryWorker,
         probeCoordinator: ProbeCoordinatorRepository,
+        multiLocationFinalization: MultiLocationRoundFinalizationRepository,
       ) =>
         new WorkerRuntime(
           relay,
@@ -168,6 +176,7 @@ import { WebhookDeliveryWorker } from './webhook-delivery-worker.js';
           config,
           webhookDelivery,
           probeCoordinator,
+          multiLocationFinalization,
         ),
     },
   ],
