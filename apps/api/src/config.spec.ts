@@ -37,7 +37,20 @@ describe('loadAppConfig', () => {
       nodeEnv: 'development',
       developmentIdentityEnabled: true,
       port: 4000,
+      probePendingAssignmentTimeoutMs: 120_000,
     });
+  });
+
+  it('validates the pending probe assignment timeout used by machine claims', () => {
+    expect(() =>
+      loadAppConfig({
+        NODE_ENV: 'development',
+        DATABASE_URL: 'postgresql://example.invalid/watchrail',
+        DEV_IDENTITY_ENABLED: 'true',
+        PROBE_PENDING_ASSIGNMENT_TIMEOUT_MS: '9999',
+        ...encryptionEnvironment,
+      }),
+    ).toThrow('PROBE_PENDING_ASSIGNMENT_TIMEOUT_MS must be an integer from 10000 to 900000.');
   });
 
   it('requires an explicit internal status-page token in production', () => {

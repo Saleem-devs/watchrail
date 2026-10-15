@@ -169,6 +169,13 @@
       "when": 1792015899094,
       "tag": "0023_hot_frightful_four",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1792061205978,
+      "tag": "0024_blushing_xavin",
+      "breakpoints": true
     }
   ]
 }

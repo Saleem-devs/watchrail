@@ -131,6 +131,7 @@ export function Dashboard() {
   const [incidentHistoryErrors, setIncidentHistoryErrors] = useState<Record<string, string>>({});
   const pollTimeouts = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const incidentHistoryRequests = useRef(new Set<string>());
+  const probeLocationsRequest = useRef(false);
 
   useEffect(() => {
     void loadMonitors();
@@ -330,7 +331,8 @@ export function Dashboard() {
   }
 
   async function loadProbeLocations(): Promise<void> {
-    if (probeLocations.length > 0) return;
+    if (probeLocationsRequest.current) return;
+    probeLocationsRequest.current = true;
     try {
       const response = await fetch('/api/probe-locations', {
         headers: { Accept: 'application/json' },
@@ -340,6 +342,8 @@ export function Dashboard() {
       if (Array.isArray(body.data)) setProbeLocations(body.data);
     } catch {
       // Local execution remains available when probe discovery is temporarily unavailable.
+    } finally {
+      probeLocationsRequest.current = false;
     }
   }
 

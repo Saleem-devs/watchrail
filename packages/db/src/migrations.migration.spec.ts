@@ -268,20 +268,25 @@ describe('database migrations', () => {
       probe_location_id: string | null;
       execution_policy_version: string;
       required_engine_version: string;
+      pending_since: Date;
+      created_at: Date;
     }>(
-      `select location, probe_location_id, execution_policy_version, required_engine_version
+      `select location, probe_location_id, execution_policy_version, required_engine_version,
+              pending_since, created_at
          from check_execution_assignments
         where id = $1`,
       [existingRound.assignmentId],
     );
-    expect(migratedAssignment.rows).toEqual([
-      {
-        location: 'local',
-        probe_location_id: null,
-        execution_policy_version: 'http-v1',
-        required_engine_version: 'watchrail-http-v1',
-      },
-    ]);
+    expect(migratedAssignment.rows).toHaveLength(1);
+    expect(migratedAssignment.rows[0]).toMatchObject({
+      location: 'local',
+      probe_location_id: null,
+      execution_policy_version: 'http-v1',
+      required_engine_version: 'watchrail-http-v1',
+    });
+    expect(migratedAssignment.rows[0]!.pending_since).toEqual(
+      migratedAssignment.rows[0]!.created_at,
+    );
 
     const scheduling = await connection.db.execute<{
       lifecycle_state: string;

@@ -9,6 +9,7 @@ export interface AppConfig {
   assertionEncryptionKeyring: AssertionEncryptionKeyring;
   webhookSigningSecretKeyring: WebhookSigningSecretKeyring;
   publicStatusPageInternalToken: string;
+  probePendingAssignmentTimeoutMs: number;
 }
 
 export function loadAppConfig(environment: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -46,7 +47,28 @@ export function loadAppConfig(environment: NodeJS.ProcessEnv = process.env): App
     assertionEncryptionKeyring: loadAssertionEncryptionKeyring(environment),
     webhookSigningSecretKeyring: loadWebhookSigningSecretKeyring(environment),
     publicStatusPageInternalToken,
+    probePendingAssignmentTimeoutMs: parseIntegerRange(
+      environment.PROBE_PENDING_ASSIGNMENT_TIMEOUT_MS,
+      'PROBE_PENDING_ASSIGNMENT_TIMEOUT_MS',
+      120_000,
+      10_000,
+      900_000,
+    ),
   };
+}
+
+function parseIntegerRange(
+  value: string | undefined,
+  name: string,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
+  const parsed = value === undefined ? fallback : Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
+    throw new Error(`${name} must be an integer from ${minimum} to ${maximum}.`);
+  }
+  return parsed;
 }
 
 function parseNodeEnvironment(value: string | undefined): AppConfig['nodeEnv'] {
