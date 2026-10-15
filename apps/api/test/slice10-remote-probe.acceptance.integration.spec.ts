@@ -226,9 +226,8 @@ describe('Slice 10 remote probe acceptance', () => {
       process.execPath,
       [resolve(process.cwd(), '../../tooling/probe-agent-acceptance-process.mjs')],
       {
-        cwd: resolve(process.cwd(), '../..'),
+        cwd: temporaryDirectory,
         env: {
-          ...process.env,
           NODE_ENV: 'test',
           PROBE_COORDINATOR_URL: `http://127.0.0.1:${address.port}`,
           PROBE_ENROLLMENT_ID: enrollment.id,
