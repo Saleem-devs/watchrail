@@ -43,10 +43,7 @@ export class MultiLocationRoundFinalizationRepository {
       const locations = await loadLocations(tx, organizationId, roundId);
       if (locations.length < 2)
         throw new Error('Multi-location finalization requires two locations.');
-      await tx
-        .insert(checkRegionalEvaluations)
-        .values(locations.map((location) => ({ organizationId, roundId, location })))
-        .onConflictDoNothing();
+      await ensureEvaluations(tx, organizationId, roundId, locations);
     });
   }
 
@@ -80,12 +77,13 @@ export class MultiLocationRoundFinalizationRepository {
           existing.location === input.location &&
           existing.agentId === input.agentId &&
           existing.role === input.role &&
-          JSON.stringify(existing.observation) === JSON.stringify(input.observation)
+          observationsEqual(existing.observation, input.observation)
           ? { state: 'DUPLICATE', evaluation }
           : { state: 'REJECTED', reason: 'CONFLICTING_REPLAY' };
       }
       if (round.status === 'COMPLETED') return { state: 'REJECTED', reason: 'ROUND_COMPLETED' };
 
+      await ensureEvaluations(tx, input.organizationId, input.roundId, [input.location]);
       const evaluation = await loadEvaluation(
         tx,
         input.organizationId,
@@ -180,6 +178,7 @@ async function tryFinalizeLocked(
   const locations = await loadLocations(tx, round.organizationId, round.id);
   if (locations.length < 2)
     throw new Error('Legacy single-location round requires legacy finalization.');
+  await ensureEvaluations(tx, round.organizationId, round.id, locations);
   const states = await loadEvaluations(tx, round.organizationId, round.id, locations);
   const now = await databaseNow(tx);
   const snapshot = createMultiLocationRoundSnapshot({
@@ -261,10 +260,29 @@ async function applyMultiLocationIncident(
     )
     .limit(1)
     .for('update');
+  const storedSeverity: 'DEGRADED' | 'DOWN' | null =
+    state.multiLocationSeverity === 'DEGRADED' || state.multiLocationSeverity === 'DOWN'
+      ? state.multiLocationSeverity
+      : null;
+  const adoptedSeverity: 'DEGRADED' | 'DOWN' | null =
+    storedSeverity ??
+    (active
+      ? aggregate.outcome === 'DEGRADED' || aggregate.outcome === 'DOWN'
+        ? aggregate.outcome
+        : active.severity === 'DEGRADED'
+          ? 'DEGRADED'
+          : 'DOWN'
+      : null);
+  if (active && storedSeverity === null && adoptedSeverity !== null) {
+    await tx
+      .update(incidents)
+      .set({ severity: adoptedSeverity })
+      .where(eq(incidents.id, active.id));
+  }
   const directive = deriveMultiLocationIncidentDirective({
     selectedLocations: aggregate.counts.selected,
     outcome: aggregate.outcome,
-    activeSeverity: state.multiLocationSeverity as 'DEGRADED' | 'DOWN' | null,
+    activeSeverity: adoptedSeverity,
     healthyRecoveryStreak: state.multiLocationHealthyRecoveryStreak as 0 | 1,
   });
   const common = {
@@ -359,11 +377,32 @@ async function applyMultiLocationIncident(
     .update(monitorIncidentState)
     .set({
       ...common,
-      multiLocationSeverity: state.multiLocationSeverity,
+      multiLocationSeverity: adoptedSeverity,
       multiLocationHealthyRecoveryStreak: recovery,
     })
     .where(eq(monitorIncidentState.monitorId, round.monitorId));
   return { type: 'NONE' };
+}
+
+async function ensureEvaluations(
+  tx: Transaction,
+  organizationId: string,
+  roundId: string,
+  locations: readonly string[],
+) {
+  if (locations.length === 0) return;
+  await tx
+    .insert(checkRegionalEvaluations)
+    .values(locations.map((location) => ({ organizationId, roundId, location })))
+    .onConflictDoNothing();
+}
+
+function observationsEqual(left: ProbeObservationV1, right: ProbeObservationV1): boolean {
+  return (
+    left.outcome === right.outcome &&
+    left.reason === right.reason &&
+    left.assertionOutcome === right.assertionOutcome
+  );
 }
 
 async function lockRound(tx: Transaction, organizationId: string, roundId: string) {

@@ -4,11 +4,12 @@ import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { createMonitor } from '@watchrail/domain';
+import { createMonitor, type ProbeObservationV1 } from '@watchrail/domain';
 import { createDatabaseConnection, type DatabaseConnection } from './client.js';
 import { migrateDatabase } from './migration.js';
 import { MonitorRepository } from './monitor-repository.js';
 import { MultiLocationRoundFinalizationRepository } from './multi-location-finalization-repository.js';
+import { ProbeCoordinatorRepository } from './probe-coordinator-repository.js';
 import { createPreparedRoutedAssignments, createRoundLocationSnapshot } from './round-routing.js';
 import {
   checkExecutionAssignments,
@@ -16,6 +17,7 @@ import {
   checkRoundAggregates,
   checkRounds,
   incidents,
+  monitorIncidentState,
   monitorConfigurationVersions,
   notificationEvents,
   probeLocations,
@@ -92,6 +94,70 @@ describe('authoritative multi-location finalization', () => {
     expect(await connection.db.select().from(checkRoundAggregates)).toHaveLength(1);
   });
 
+  it('accepts semantically identical regional replays before and after round completion', async () => {
+    const fixture = await createFixture(2, 'MANUAL');
+    const repository = new MultiLocationRoundFinalizationRepository(connection.db);
+    const location = fixture.locations[0]!;
+    const executionId = randomUUID();
+    const input = {
+      organizationId,
+      roundId: fixture.roundId,
+      assignmentId: fixture.assignments.get(location)!,
+      location,
+      executionId,
+      agentId: 'replay-agent',
+      role: 'PRIMARY' as const,
+    };
+    const original: ProbeObservationV1 = {
+      outcome: 'PASS',
+      reason: 'COMPLETED',
+      assertionOutcome: 'PASS',
+    };
+    const reordered: ProbeObservationV1 = {
+      assertionOutcome: 'PASS',
+      reason: 'COMPLETED',
+      outcome: 'PASS',
+    };
+
+    expect(await repository.recordExecution({ ...input, observation: original })).toMatchObject({
+      state: 'ACCEPTED',
+    });
+    expect(await repository.recordExecution({ ...input, observation: reordered })).toMatchObject({
+      state: 'DUPLICATE',
+    });
+    await accept(repository, fixture, 1, 'PASS');
+    expect((await roundStatus(fixture.roundId)).status).toBe('COMPLETED');
+    expect(await repository.recordExecution({ ...input, observation: reordered })).toMatchObject({
+      state: 'DUPLICATE',
+    });
+  });
+
+  it('keeps legacy reconciliation away from deadline-finalized multi-location assignments', async () => {
+    const fixture = await createFixture(2, 'MANUAL');
+    const repository = new MultiLocationRoundFinalizationRepository(connection.db);
+    await connection.db
+      .update(checkRounds)
+      .set({ finalizationDeadlineAt: sql`clock_timestamp() - interval '1 second'` })
+      .where(eq(checkRounds.id, fixture.roundId));
+    await connection.db
+      .update(checkExecutionAssignments)
+      .set({ pendingSince: sql`clock_timestamp() - interval '10 minutes'` })
+      .where(eq(checkExecutionAssignments.roundId, fixture.roundId));
+
+    expect(await repository.tryFinalizeRound(organizationId, fixture.roundId)).toMatchObject({
+      state: 'FINALIZE',
+    });
+    expect(await new ProbeCoordinatorRepository(connection.db).reconcileExpired(100, 60_000)).toBe(
+      0,
+    );
+    expect(
+      await connection.db
+        .select({ status: checkExecutionAssignments.status })
+        .from(checkExecutionAssignments)
+        .where(eq(checkExecutionAssignments.roundId, fixture.roundId)),
+    ).toEqual([{ status: 'PENDING' }, { status: 'PENDING' }]);
+  });
+
   it('rolls back evidence, aggregate, incident, notification and round completion together', async () => {
     const fixture = await createFixture(3, 'SCHEDULED');
     const repository = new MultiLocationRoundFinalizationRepository(connection.db);
@@ -150,6 +216,39 @@ describe('authoritative multi-location finalization', () => {
       status: 'RESOLVED',
     });
     expect(await connection.db.select().from(notificationEvents)).toHaveLength(2);
+  });
+
+  it('adopts an existing single-location incident when multi-location evaluation begins', async () => {
+    const fixture = await createFixture(2, 'SCHEDULED');
+    const repository = new MultiLocationRoundFinalizationRepository(connection.db);
+    const incidentId = randomUUID();
+    await connection.db.insert(incidents).values({
+      id: incidentId,
+      organizationId,
+      monitorId: fixture.monitorId,
+      status: 'OPEN',
+      severity: null,
+      startedAt: fixture.createdAt,
+      openedAt: fixture.createdAt,
+      startedByRoundId: fixture.roundId,
+      openedByRoundId: fixture.roundId,
+    });
+    await connection.db
+      .update(monitorIncidentState)
+      .set({
+        consecutiveFailures: 3,
+        failureStreakStartedAt: fixture.createdAt,
+        failureStreakStartedRoundId: fixture.roundId,
+      })
+      .where(eq(monitorIncidentState.monitorId, fixture.monitorId));
+
+    await accept(repository, fixture, 0, 'PASS');
+    await failAndConfirm(repository, fixture, 1);
+
+    const open = await connection.db.select().from(incidents);
+    expect(open).toHaveLength(1);
+    expect(open[0]).toMatchObject({ id: incidentId, status: 'OPEN', severity: 'DEGRADED' });
+    expect(await connection.db.select().from(notificationEvents)).toEqual([]);
   });
 
   async function createFixture(locationCount: number, trigger: 'MANUAL' | 'SCHEDULED') {
