@@ -19,6 +19,7 @@
     "test": "pnpm build:packages && pnpm -r --if-present test",
     "test:integration": "pnpm build:packages && pnpm -r --if-present test:integration",
     "test:e2e": "pnpm build && pnpm db:migrate && playwright test",
+    "test:acceptance:slice10": "pnpm build:packages && pnpm --filter @watchrail/probe-agent build && pnpm --filter @watchrail/api exec vitest run test/slice10-remote-probe.acceptance.integration.spec.ts",
     "db:generate": "pnpm --filter @watchrail/contracts build && pnpm --filter @watchrail/domain build && pnpm --filter @watchrail/db db:generate",
     "db:migrate": "pnpm --filter @watchrail/contracts build && pnpm --filter @watchrail/domain build && pnpm --filter @watchrail/db db:migrate",
     "db:migrate:check": "pnpm --filter @watchrail/db test:migrations",

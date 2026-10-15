@@ -20,3 +20,9 @@ PROBE_MACHINE_CREDENTIAL=<43-character base64url credential>
 The runtime sends heartbeats independently, claims one fenced lease at a time, renews while the check
 is executing, and retries transient result-submission failures using the exact same serialized body.
 Authentication or stale-lease responses stop that claim from being submitted.
+
+Rejected result submissions emit the coordinator event `probe_result_submission_rejected`. The
+event contains only organization, location, agent, assignment and attempt identifiers plus a stable
+rejection reason. It must never include the machine credential, claim token, request configuration,
+response values or submitted result. Production log storage should retain these audit events for 30
+days; longer retention is an operator policy and does not change coordinator behavior.

@@ -9,7 +9,7 @@
     "lint": "eslint src test --max-warnings 0",
     "start": "node dist/main.js",
     "test": "vitest run --exclude '**/*.integration.spec.ts'",
-    "test:integration": "vitest run --dir test",
+    "test:integration": "pnpm --filter @watchrail/probe-agent build && vitest run --dir test",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
