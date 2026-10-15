@@ -214,15 +214,10 @@ describe('probe persistence invariants', () => {
       organizationId,
       createMonitor({ name: 'API', url: 'https://example.com/health' }),
     );
-    const round = await rounds.create(organizationId, monitor.id);
     if (locationId !== null) {
-      await connection.pool.query(
-        `update check_execution_assignments
-            set location = $1::text, probe_location_id = $1::uuid
-          where organization_id = $2 and round_id = $3`,
-        [locationId, organizationId, round.id],
-      );
+      await monitors.updateLocations(organizationId, monitor.id, [locationId]);
     }
+    const round = await rounds.create(organizationId, monitor.id);
     const result = await connection.pool.query<{ id: string }>(
       'select id from check_execution_assignments where round_id = $1',
       [round.id],

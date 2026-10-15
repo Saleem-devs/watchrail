@@ -12,6 +12,7 @@ import type { AggregateHealthState } from './status-page.js';
 export const MULTI_LOCATION_CONTRACT_VERSION = 1 as const;
 export const MULTI_LOCATION_AGGREGATION_POLICY_VERSION = 1 as const;
 export const MULTI_LOCATION_CONFIRMATION_POLICY_VERSION = 1 as const;
+export const MULTI_LOCATION_ROUND_FINALIZATION_WINDOW_MS = 120_000 as const;
 export const REGIONAL_TERMINAL_OUTCOMES = ['PASS', 'CONFIRMED_FAIL', 'UNKNOWN'] as const;
 
 export type RegionalTerminalOutcome = (typeof REGIONAL_TERMINAL_OUTCOMES)[number];

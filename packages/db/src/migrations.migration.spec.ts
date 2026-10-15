@@ -13,6 +13,8 @@ const existingMonitor = {
 
 const existingPausedMonitorId = '55555555-5555-4555-8555-555555555555';
 const existingArchivedMonitorId = '66666666-6666-4666-8666-666666666666';
+const legacyRemoteLocationId = 'abcdefab-cdef-4abc-8def-abcdefabcdef';
+const legacyUppercaseRemoteLocationId = legacyRemoteLocationId.toUpperCase();
 
 const existingRound = {
   id: '22222222-2222-4222-8222-222222222222',
@@ -115,9 +117,38 @@ describe('database migrations', () => {
     `);
 
     await applyMigration(migrations, 3);
-    for (let index = 4; index < migrations.length; index += 1) {
+    for (let index = 4; index < migrations.length - 1; index += 1) {
       await applyMigration(migrations, index);
     }
+
+    await connection.db.execute(sql`
+      insert into probe_locations (id, organization_id, name, slug)
+      values (
+        ${legacyRemoteLocationId},
+        ${existingMonitor.organizationId},
+        'Legacy remote',
+        'legacy-remote'
+      )
+    `);
+    await connection.db.execute(sql`
+      update monitors
+      set locations = jsonb_build_array(${legacyUppercaseRemoteLocationId}::text)
+      where id = ${existingMonitor.id}
+    `);
+    await connection.db.execute(sql`
+      update monitor_configuration_versions
+      set locations = jsonb_build_array(${legacyUppercaseRemoteLocationId}::text)
+      where monitor_id = ${existingMonitor.id}
+    `);
+    await connection.db.execute(sql`
+      update check_execution_assignments
+      set
+        location = ${legacyRemoteLocationId},
+        probe_location_id = ${legacyRemoteLocationId}
+      where id = ${existingRound.assignmentId}
+    `);
+
+    await applyMigration(migrations, migrations.length - 1);
 
     const result = await connection.db.execute<{
       table_name: string;
@@ -132,6 +163,7 @@ describe('database migrations', () => {
           'check_execution_assignments',
           'check_execution_results',
           'check_round_outbox'
+          ,'check_round_locations'
           ,'incidents'
           ,'monitor_incident_state'
           ,'notification_deliveries'
@@ -150,6 +182,7 @@ describe('database migrations', () => {
     expect(result.rows.map((row) => row.table_name)).toEqual([
       'check_execution_assignments',
       'check_execution_results',
+      'check_round_locations',
       'check_round_outbox',
       'check_rounds',
       'incidents',
@@ -259,7 +292,7 @@ describe('database migrations', () => {
         method: 'GET',
         timeout_ms: 10_000,
         interval_seconds: 60,
-        locations: ['local'],
+        locations: [legacyRemoteLocationId],
       },
     ]);
 
@@ -279,14 +312,55 @@ describe('database migrations', () => {
     );
     expect(migratedAssignment.rows).toHaveLength(1);
     expect(migratedAssignment.rows[0]).toMatchObject({
-      location: 'local',
-      probe_location_id: null,
+      location: legacyRemoteLocationId,
+      probe_location_id: legacyRemoteLocationId,
       execution_policy_version: 'http-v1',
       required_engine_version: 'watchrail-http-v1',
     });
     expect(migratedAssignment.rows[0]!.pending_since).toEqual(
       migratedAssignment.rows[0]!.created_at,
     );
+
+    const migratedRound = await connection.pool.query<{
+      contract_version: number;
+      aggregation_policy_version: number;
+      confirmation_policy_version: number;
+      created_at: Date;
+      finalization_deadline_at: Date;
+    }>(
+      `select contract_version, aggregation_policy_version, confirmation_policy_version,
+              created_at, finalization_deadline_at
+         from check_rounds
+        where id = $1`,
+      [existingRound.id],
+    );
+    expect(migratedRound.rows[0]).toMatchObject({
+      contract_version: 1,
+      aggregation_policy_version: 1,
+      confirmation_policy_version: 1,
+    });
+    expect(
+      migratedRound.rows[0]!.finalization_deadline_at.getTime() -
+        migratedRound.rows[0]!.created_at.getTime(),
+    ).toBe(120_000);
+    expect(
+      await connection.pool.query(
+        `select organization_id, round_id, location, probe_location_id, position
+           from check_round_locations
+          where round_id = $1`,
+        [existingRound.id],
+      ),
+    ).toMatchObject({
+      rows: [
+        {
+          organization_id: existingMonitor.organizationId,
+          round_id: existingRound.id,
+          location: legacyRemoteLocationId,
+          probe_location_id: legacyRemoteLocationId,
+          position: 0,
+        },
+      ],
+    });
 
     const scheduling = await connection.db.execute<{
       lifecycle_state: string;

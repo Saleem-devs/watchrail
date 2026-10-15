@@ -436,12 +436,11 @@ describe('probe coordinator repository', () => {
       organizationId,
       createMonitor({ name: `Monitor ${suffix}`, url: 'https://example.com/health' }),
     );
+    await monitors.updateLocations(organizationId, monitor.id, [location.rows[0]!.id]);
     const round = await rounds.create(organizationId, monitor.id);
     const assignment = await connection.pool.query<{ id: string }>(
-      `update check_execution_assignments
-          set location=$1::text, probe_location_id=$1::uuid
-        where round_id=$2 returning id`,
-      [location.rows[0]!.id, round.id],
+      'select id from check_execution_assignments where round_id=$1',
+      [round.id],
     );
     if (scheduled) {
       await connection.pool.query(`update check_rounds set trigger='SCHEDULED' where id=$1`, [

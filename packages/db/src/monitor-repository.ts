@@ -1,10 +1,11 @@
 // packages/db/src/monitor-repository.ts
 
 import { randomUUID } from 'node:crypto';
-import { and, desc, eq, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import {
   EMPTY_ASSERTION_CONFIGURATION,
   assertAssertionsCompatibleWithMethod,
+  normalizeLocationSnapshot,
   parseStoredAssertionConfiguration,
   type ResponseAssertionConfigurationV1,
   type HttpMonitorSettings,
@@ -401,7 +402,7 @@ export class MonitorRepository {
   async updateLocations(
     organizationId: string,
     monitorId: string,
-    locations: [string],
+    requestedLocations: readonly string[],
   ): Promise<MonitorRecord> {
     return this.db.transaction(async (tx) => {
       const [monitor] = await tx
@@ -412,21 +413,24 @@ export class MonitorRepository {
         .for('update');
       if (!monitor) throw new MonitorUpdateNotFoundError();
 
-      const location = locations[0];
-      if (location !== 'local') {
-        const [remote] = await tx
+      const locations = normalizeLocationSnapshot(requestedLocations);
+      const remoteLocationIds = locations.filter((location) => location !== 'local');
+      if (remoteLocationIds.length > 0) {
+        const remote = await tx
           .select({ id: probeLocations.id })
           .from(probeLocations)
           .where(
             and(
               eq(probeLocations.organizationId, organizationId),
-              eq(probeLocations.id, location),
+              inArray(probeLocations.id, remoteLocationIds),
               eq(probeLocations.status, 'ACTIVE'),
             ),
           )
-          .limit(1)
+          .orderBy(asc(probeLocations.id))
           .for('key share');
-        if (!remote) throw new MonitorLocationUnavailableError();
+        if (remote.length !== remoteLocationIds.length) {
+          throw new MonitorLocationUnavailableError();
+        }
       }
 
       const [configuration] = await tx
@@ -441,13 +445,16 @@ export class MonitorRepository {
         .orderBy(desc(monitorConfigurationVersions.versionNumber))
         .limit(1);
       if (!configuration) throw new Error('Monitor has no configuration version.');
-      if (configuration.locations.length === 1 && configuration.locations[0] === location) {
+      if (
+        configuration.locations.length === locations.length &&
+        configuration.locations.every((location, index) => location === locations[index])
+      ) {
         return monitor;
       }
 
       const [updated] = await tx
         .update(monitors)
-        .set({ locations, updatedAt: sql`clock_timestamp()` })
+        .set({ locations: [...locations], updatedAt: sql`clock_timestamp()` })
         .where(and(eq(monitors.id, monitorId), eq(monitors.organizationId, organizationId)))
         .returning();
       if (!updated) throw new Error('The monitor update returned no record.');
@@ -464,7 +471,7 @@ export class MonitorRepository {
         statusPolicy: configuration.statusPolicy,
         requestHeaders: configuration.requestHeaders,
         assertions: configuration.assertions,
-        locations,
+        locations: [...locations],
       });
       return updated;
     });

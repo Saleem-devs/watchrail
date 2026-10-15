@@ -405,7 +405,7 @@ export const monitors = pgTable(
 
     check(
       'monitors_locations_non_empty',
-      sql`jsonb_typeof(${table.locations}) = 'array' and jsonb_array_length(${table.locations}) = 1`,
+      sql`watchrail_location_snapshot_is_valid(${table.locations})`,
     ),
     check('monitors_request_headers_array', sql`jsonb_typeof(${table.requestHeaders}) = 'array'`),
     check('monitors_assertions_object', sql`jsonb_typeof(${table.assertions}) = 'object'`),
@@ -560,10 +560,7 @@ export const monitorConfigurationVersions = pgTable(
 
     check(
       'monitor_configuration_versions_locations_non_empty',
-      sql`
-        jsonb_typeof(${table.locations}) = 'array'
-        and jsonb_array_length(${table.locations}) = 1
-      `,
+      sql`watchrail_location_snapshot_is_valid(${table.locations})`,
     ),
     check(
       'monitor_configuration_versions_request_headers_array',
@@ -590,6 +587,13 @@ export const checkRounds = pgTable(
 
     status: checkRoundStatusEnum('status').notNull().default('PENDING'),
 
+    contractVersion: integer('contract_version').notNull().default(1),
+    aggregationPolicyVersion: integer('aggregation_policy_version').notNull().default(1),
+    confirmationPolicyVersion: integer('confirmation_policy_version').notNull().default(1),
+    finalizationDeadlineAt: timestamp('finalization_deadline_at', { withTimezone: true })
+      .notNull()
+      .default(sql`clock_timestamp() + interval '120 seconds'`),
+
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -611,11 +615,66 @@ export const checkRounds = pgTable(
 
     unique('check_rounds_organization_id_unique').on(table.organizationId, table.id),
 
+    check('check_rounds_contract_version_supported', sql`${table.contractVersion} = 1`),
+    check(
+      'check_rounds_aggregation_policy_version_supported',
+      sql`${table.aggregationPolicyVersion} = 1`,
+    ),
+    check(
+      'check_rounds_confirmation_policy_version_supported',
+      sql`${table.confirmationPolicyVersion} = 1`,
+    ),
+    check(
+      'check_rounds_finalization_deadline_after_creation',
+      sql`${table.finalizationDeadlineAt} > ${table.createdAt}`,
+    ),
+
     index('check_rounds_monitor_created_idx').on(
       table.organizationId,
       table.monitorId,
       table.createdAt,
       table.id,
+    ),
+  ],
+);
+
+export const checkRoundLocations = pgTable(
+  'check_round_locations',
+  {
+    organizationId: uuid('organization_id').notNull(),
+    roundId: uuid('round_id').notNull(),
+    location: varchar('location', { length: 64 }).notNull(),
+    probeLocationId: uuid('probe_location_id'),
+    position: integer('position').notNull(),
+  },
+  (table) => [
+    primaryKey({
+      name: 'check_round_locations_pk',
+      columns: [table.organizationId, table.roundId, table.location],
+    }),
+    unique('check_round_locations_round_position_unique').on(
+      table.organizationId,
+      table.roundId,
+      table.position,
+    ),
+    foreignKey({
+      name: 'check_round_locations_round_fk',
+      columns: [table.organizationId, table.roundId],
+      foreignColumns: [checkRounds.organizationId, checkRounds.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'check_round_locations_probe_location_fk',
+      columns: [table.organizationId, table.probeLocationId],
+      foreignColumns: [probeLocations.organizationId, probeLocations.id],
+    }),
+    check('check_round_locations_position_non_negative', sql`${table.position} >= 0`),
+    check(
+      'check_round_locations_identity_consistent',
+      sql`(
+        (${table.location} = 'local' and ${table.probeLocationId} is null)
+        or
+        (${table.probeLocationId} is not null and ${table.location} = ${table.probeLocationId}::text)
+      )`,
     ),
   ],
 );
@@ -653,6 +712,16 @@ export const checkExecutionAssignments = pgTable(
       name: 'check_execution_assignments_round_fk',
       columns: [table.organizationId, table.roundId],
       foreignColumns: [checkRounds.organizationId, checkRounds.id],
+    }).onDelete('cascade'),
+
+    foreignKey({
+      name: 'check_execution_assignments_round_location_fk',
+      columns: [table.organizationId, table.roundId, table.location],
+      foreignColumns: [
+        checkRoundLocations.organizationId,
+        checkRoundLocations.roundId,
+        checkRoundLocations.location,
+      ],
     }).onDelete('cascade'),
 
     foreignKey({
@@ -1204,6 +1273,7 @@ export type MonitorConfigurationVersionRecord = typeof monitorConfigurationVersi
 export type NewMonitorConfigurationVersionRecord = typeof monitorConfigurationVersions.$inferInsert;
 
 export type CheckRoundRecord = typeof checkRounds.$inferSelect;
+export type CheckRoundLocationRecord = typeof checkRoundLocations.$inferSelect;
 
 export type CheckExecutionAssignmentRecord = typeof checkExecutionAssignments.$inferSelect;
 

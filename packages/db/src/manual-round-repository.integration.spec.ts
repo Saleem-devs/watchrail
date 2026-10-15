@@ -10,6 +10,7 @@ import { migrateDatabase } from './migration.js';
 import { MonitorRepository } from './monitor-repository.js';
 import {
   checkExecutionAssignments,
+  checkRoundLocations,
   checkRoundOutbox,
   checkRounds,
   monitorConfigurationVersions,
@@ -75,7 +76,31 @@ describe('ManualRoundRepository', () => {
       monitorId: monitor.id,
       trigger: 'MANUAL',
       status: 'PENDING',
+      contractVersion: 1,
+      aggregationPolicyVersion: 1,
+      confirmationPolicyVersion: 1,
     });
+    expect(
+      round.finalizationDeadlineAt.getTime() - round.createdAt.getTime(),
+    ).toBeGreaterThanOrEqual(119_000);
+    expect(round.finalizationDeadlineAt.getTime() - round.createdAt.getTime()).toBeLessThanOrEqual(
+      121_000,
+    );
+
+    expect(
+      await connection.db
+        .select()
+        .from(checkRoundLocations)
+        .where(eq(checkRoundLocations.roundId, round.id)),
+    ).toEqual([
+      {
+        organizationId: organizationA,
+        roundId: round.id,
+        location: 'local',
+        probeLocationId: null,
+        position: 0,
+      },
+    ]);
 
     const configurations = await connection.db
       .select()
@@ -138,6 +163,20 @@ describe('ManualRoundRepository', () => {
       requiredEngineVersion: 'watchrail-http-v1',
       status: 'PENDING',
     });
+    expect(
+      await connection.db
+        .select()
+        .from(checkRoundLocations)
+        .where(eq(checkRoundLocations.roundId, round.id)),
+    ).toEqual([
+      {
+        organizationId: organizationA,
+        roundId: round.id,
+        location: location!.id,
+        probeLocationId: location!.id,
+        position: 0,
+      },
+    ]);
     expect(
       await connection.db
         .select()

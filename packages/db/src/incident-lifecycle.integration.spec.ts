@@ -202,11 +202,17 @@ describe('incident lifecycle', () => {
     const newer = await scheduledRound();
     await connection.db
       .update(checkRounds)
-      .set({ createdAt: new Date('2030-01-01T00:00:00Z') })
+      .set({
+        createdAt: new Date('2030-01-01T00:00:00Z'),
+        finalizationDeadlineAt: new Date('2030-01-01T00:02:00Z'),
+      })
       .where(eq(checkRounds.id, older.id));
     await connection.db
       .update(checkRounds)
-      .set({ createdAt: new Date('2030-01-01T00:01:00Z') })
+      .set({
+        createdAt: new Date('2030-01-01T00:01:00Z'),
+        finalizationDeadlineAt: new Date('2030-01-01T00:03:00Z'),
+      })
       .where(eq(checkRounds.id, newer.id));
 
     await complete(newer.id, unhealthy());
