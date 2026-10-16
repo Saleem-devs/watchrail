@@ -31,8 +31,8 @@ import {
 type Transaction = Parameters<Parameters<WatchrailDatabase['transaction']>[0]>[0];
 
 export type RegionalExecutionAcceptance =
-  | { state: 'ACCEPTED'; evaluation: RegionalEvaluationV1 }
-  | { state: 'DUPLICATE'; evaluation: RegionalEvaluationV1 }
+  | { state: 'ACCEPTED'; evaluation: RegionalEvaluationV1; roundFinalized: boolean }
+  | { state: 'DUPLICATE'; evaluation: RegionalEvaluationV1; roundFinalized: boolean }
   | { state: 'REJECTED'; reason: string };
 
 export interface RegionalExecutionInput {
@@ -133,7 +133,7 @@ export async function recordRegionalExecution(
       existing.role === input.role &&
       observationsEqual(existing.observation, input.observation) &&
       (input.resultDigest === undefined || existing.resultDigest === input.resultDigest)
-      ? { state: 'DUPLICATE', evaluation }
+      ? { state: 'DUPLICATE', evaluation, roundFinalized: round.status === 'COMPLETED' }
       : { state: 'REJECTED', reason: 'CONFLICTING_REPLAY' };
   }
   if (round.status === 'COMPLETED') return { state: 'REJECTED', reason: 'ROUND_COMPLETED' };
@@ -173,8 +173,12 @@ export async function recordRegionalExecution(
     acceptedAt,
   });
   await persistEvaluation(tx, input.organizationId, input.roundId, decision.state, acceptedAt);
-  await tryFinalizeLocked(tx, round);
-  return { state: 'ACCEPTED', evaluation: decision.state };
+  const finalization = await tryFinalizeLocked(tx, round);
+  return {
+    state: 'ACCEPTED',
+    evaluation: decision.state,
+    roundFinalized: finalization.state === 'FINALIZE' || finalization.state === 'ALREADY_FINALIZED',
+  };
 }
 
 async function tryFinalizeLocked(

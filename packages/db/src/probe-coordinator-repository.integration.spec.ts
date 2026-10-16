@@ -102,6 +102,21 @@ describe('probe coordinator repository', () => {
     ).resolves.toBeNull();
   });
 
+  it('rejects configuration after the authoritative round deadline before reconciliation', async () => {
+    const fixture = await createFixture('configuration-deadline');
+    const lease = await claimLease(fixture.machine);
+    await connection.pool.query(
+      `update check_rounds
+       set finalization_deadline_at=clock_timestamp()-interval '1 millisecond'
+       where id=(select round_id from check_execution_assignments where id=$1)`,
+      [fixture.assignmentId],
+    );
+
+    await expect(
+      coordinator.configuration(fixture.machine, lease.attemptId, lease.claimToken),
+    ).resolves.toBeNull();
+  });
+
   it('expires an old lease and fences stale results after replacement', async () => {
     const fixture = await createFixture();
     const first = await claimLease(fixture.machine);
@@ -559,6 +574,83 @@ describe('probe coordinator repository', () => {
         )
       ).rows,
     ).toEqual([{ status: 'COMPLETED' }, { status: 'COMPLETED' }]);
+  });
+
+  it('does not reopen an assignment when accepted evidence crosses the round deadline', async () => {
+    const first = await createMachine('boundary-first');
+    const second = await createMachine('boundary-second');
+    const monitor = await monitors.create(
+      organizationId,
+      createMonitor({ name: 'Deadline boundary', url: 'https://example.com/health' }),
+    );
+    await monitors.updateLocations(organizationId, monitor.id, [
+      first.locationId,
+      second.locationId,
+    ]);
+    const round = await new ManualRoundRepository(connection.db, true).create(
+      organizationId,
+      monitor.id,
+    );
+    const enabled = new ProbeCoordinatorRepository(connection.db, true);
+    const claim = await enabled.claim(first.machine, HTTP_ENGINE_VERSION);
+    if (claim.state !== 'CLAIMED') throw new Error('Expected a regional claim.');
+    await connection.pool.query(`
+      create function watchrail_test_delay_regional_evidence() returns trigger language plpgsql as $$
+      begin
+        perform pg_sleep(0.15);
+        return new;
+      end;
+      $$;
+      create trigger watchrail_test_delay_regional_evidence
+      before insert on check_regional_executions
+      for each row execute function watchrail_test_delay_regional_evidence();
+    `);
+    try {
+      await connection.pool.query(
+        `update check_rounds
+         set finalization_deadline_at=clock_timestamp()+interval '75 milliseconds'
+         where id=$1`,
+        [round.id],
+      );
+      expect(
+        await enabled.submit(
+          first.machine,
+          resultReference(claim.lease),
+          claim.lease.claimToken,
+          failingResult(),
+        ),
+      ).toEqual({ state: 'ACCEPTED', duplicate: false });
+    } finally {
+      await connection.pool.query(`
+        drop trigger watchrail_test_delay_regional_evidence on check_regional_executions;
+        drop function watchrail_test_delay_regional_evidence();
+      `);
+    }
+
+    expect(
+      (
+        await connection.pool.query<{ status: string }>(
+          'select status from check_rounds where id=$1',
+          [round.id],
+        )
+      ).rows,
+    ).toEqual([{ status: 'COMPLETED' }]);
+    expect(
+      (
+        await connection.pool.query<{ status: string }>(
+          'select status from check_execution_assignments where id=$1',
+          [claim.lease.assignmentId],
+        )
+      ).rows,
+    ).toEqual([{ status: 'COMPLETED' }]);
+    expect(
+      (
+        await connection.pool.query<{ status: string; terminal_reason: string | null }>(
+          'select status, terminal_reason from probe_execution_attempts where id=$1',
+          [claim.lease.attemptId],
+        )
+      ).rows,
+    ).toEqual([{ status: 'REJECTED', terminal_reason: 'ROUND_FINALIZED' }]);
   });
 
   it('falls back to the primary agent when no healthy confirmation peer exists', async () => {

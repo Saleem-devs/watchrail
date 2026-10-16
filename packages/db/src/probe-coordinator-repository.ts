@@ -101,6 +101,7 @@ export class ProbeCoordinatorRepository {
   ): Promise<ProbeExecutionConfigurationRecord | null> {
     return this.db.transaction(async (tx) => {
       await lockActiveMachine(tx, machine);
+      if (!(await lockPendingRoundForAttempt(tx, machine, attemptId))) return null;
       const [row] = await tx
         .select({
           assignmentId: checkExecutionAssignments.id,
@@ -442,37 +443,39 @@ export class ProbeCoordinatorRepository {
         if (acceptance.state === 'REJECTED') {
           return { state: 'REJECTED', reason: 'NON_AUTHORITATIVE_LEASE' };
         }
-        await tx
-          .update(probeExecutionAttempts)
-          .set({
-            status: 'SUBMITTED',
-            submittedAt: acceptedAt,
-            submittedEngineVersion: reference.engineVersion,
-            terminalReason: null,
-            updatedAt: acceptedAt,
-          })
-          .where(eq(probeExecutionAttempts.id, attempt.id));
-        if (acceptance.evaluation.phase === 'AWAITING_CONFIRMATION') {
+        if (!acceptance.roundFinalized) {
           await tx
-            .update(checkExecutionAssignments)
+            .update(probeExecutionAttempts)
             .set({
-              status: 'PENDING',
-              claimToken: null,
-              claimExpiresAt: null,
-              pendingSince: acceptedAt,
-              completedAt: null,
+              status: 'SUBMITTED',
+              submittedAt: acceptedAt,
+              submittedEngineVersion: reference.engineVersion,
+              terminalReason: null,
+              updatedAt: acceptedAt,
             })
-            .where(eq(checkExecutionAssignments.id, assignment.id));
-        } else {
-          await tx
-            .update(checkExecutionAssignments)
-            .set({
-              status: 'COMPLETED',
-              claimToken: null,
-              claimExpiresAt: null,
-              completedAt: acceptedAt,
-            })
-            .where(eq(checkExecutionAssignments.id, assignment.id));
+            .where(eq(probeExecutionAttempts.id, attempt.id));
+          if (acceptance.evaluation.phase === 'AWAITING_CONFIRMATION') {
+            await tx
+              .update(checkExecutionAssignments)
+              .set({
+                status: 'PENDING',
+                claimToken: null,
+                claimExpiresAt: null,
+                pendingSince: acceptedAt,
+                completedAt: null,
+              })
+              .where(eq(checkExecutionAssignments.id, assignment.id));
+          } else {
+            await tx
+              .update(checkExecutionAssignments)
+              .set({
+                status: 'COMPLETED',
+                claimToken: null,
+                claimExpiresAt: null,
+                completedAt: acceptedAt,
+              })
+              .where(eq(checkExecutionAssignments.id, assignment.id));
+          }
         }
         return { state: 'ACCEPTED', duplicate: acceptance.state === 'DUPLICATE' };
       }
@@ -840,6 +843,43 @@ async function lockAssignment(
     .limit(1)
     .for('update', { of: checkExecutionAssignments });
   return assignment;
+}
+
+async function lockPendingRoundForAttempt(
+  tx: Transaction,
+  machine: ProbeMachineIdentity,
+  attemptId: string,
+): Promise<boolean> {
+  const [round] = await tx
+    .select({
+      acceptingWork: sql<boolean>`${checkRounds.status} = 'PENDING' and ${checkRounds.finalizationDeadlineAt} > clock_timestamp()`,
+    })
+    .from(checkRounds)
+    .innerJoin(
+      checkExecutionAssignments,
+      and(
+        eq(checkExecutionAssignments.organizationId, checkRounds.organizationId),
+        eq(checkExecutionAssignments.roundId, checkRounds.id),
+      ),
+    )
+    .innerJoin(
+      probeExecutionAttempts,
+      and(
+        eq(probeExecutionAttempts.organizationId, checkExecutionAssignments.organizationId),
+        eq(probeExecutionAttempts.assignmentId, checkExecutionAssignments.id),
+      ),
+    )
+    .where(
+      and(
+        eq(probeExecutionAttempts.organizationId, machine.organizationId),
+        eq(probeExecutionAttempts.id, attemptId),
+        eq(probeExecutionAttempts.agentId, machine.agentId),
+        eq(probeExecutionAttempts.locationId, machine.locationId),
+      ),
+    )
+    .limit(1)
+    .for('update', { of: checkRounds });
+  return round?.acceptingWork === true;
 }
 
 async function lockRoundForAssignment(

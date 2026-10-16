@@ -35,6 +35,9 @@ export class ScheduledRoundRepository {
           and(
             eq(monitors.lifecycleState, 'ENABLED'),
             lte(monitors.nextCheckAt, sql`clock_timestamp()`),
+            this.multiLocationExecutionEnabled
+              ? undefined
+              : sql`jsonb_array_length(${monitors.locations}) = 1`,
           ),
         )
         .orderBy(asc(monitors.nextCheckAt), asc(monitors.id))
