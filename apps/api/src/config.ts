@@ -10,6 +10,7 @@ export interface AppConfig {
   webhookSigningSecretKeyring: WebhookSigningSecretKeyring;
   publicStatusPageInternalToken: string;
   probePendingAssignmentTimeoutMs: number;
+  multiLocationExecutionEnabled: boolean;
 }
 
 export function loadAppConfig(environment: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -53,6 +54,10 @@ export function loadAppConfig(environment: NodeJS.ProcessEnv = process.env): App
       120_000,
       10_000,
       900_000,
+    ),
+    multiLocationExecutionEnabled: parseBoolean(
+      environment.MULTI_LOCATION_EXECUTION_ENABLED,
+      'MULTI_LOCATION_EXECUTION_ENABLED',
     ),
   };
 }

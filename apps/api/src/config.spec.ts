@@ -38,6 +38,7 @@ describe('loadAppConfig', () => {
       developmentIdentityEnabled: true,
       port: 4000,
       probePendingAssignmentTimeoutMs: 120_000,
+      multiLocationExecutionEnabled: false,
     });
   });
 
@@ -51,6 +52,27 @@ describe('loadAppConfig', () => {
         ...encryptionEnvironment,
       }),
     ).toThrow('PROBE_PENDING_ASSIGNMENT_TIMEOUT_MS must be an integer from 10000 to 900000.');
+  });
+
+  it('requires an explicit boolean multi-location readiness gate', () => {
+    expect(
+      loadAppConfig({
+        NODE_ENV: 'development',
+        DATABASE_URL: 'postgresql://example.invalid/watchrail',
+        DEV_IDENTITY_ENABLED: 'true',
+        MULTI_LOCATION_EXECUTION_ENABLED: 'true',
+        ...encryptionEnvironment,
+      }).multiLocationExecutionEnabled,
+    ).toBe(true);
+    expect(() =>
+      loadAppConfig({
+        NODE_ENV: 'development',
+        DATABASE_URL: 'postgresql://example.invalid/watchrail',
+        DEV_IDENTITY_ENABLED: 'true',
+        MULTI_LOCATION_EXECUTION_ENABLED: 'yes',
+        ...encryptionEnvironment,
+      }),
+    ).toThrow('MULTI_LOCATION_EXECUTION_ENABLED must be true or false.');
   });
 
   it('requires an explicit internal status-page token in production', () => {

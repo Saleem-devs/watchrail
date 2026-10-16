@@ -15,7 +15,10 @@ import {
 import { createRoundLocationSnapshot, createRoutedAssignment } from './round-routing.js';
 
 export class ScheduledRoundRepository {
-  constructor(private readonly db: WatchrailDatabase) {}
+  constructor(
+    private readonly db: WatchrailDatabase,
+    private readonly multiLocationExecutionEnabled = false,
+  ) {}
 
   async dispatchDue(batchSize: number): Promise<CheckRoundRecord[]> {
     assertBatchSize(batchSize);
@@ -85,6 +88,7 @@ export class ScheduledRoundRepository {
           organizationId: monitor.organizationId,
           roundId: round.id,
           locations,
+          multiLocationExecutionEnabled: this.multiLocationExecutionEnabled,
         });
 
         await tx

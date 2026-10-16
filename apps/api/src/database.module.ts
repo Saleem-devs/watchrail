@@ -31,8 +31,9 @@ import { APP_CONFIG, type AppConfig } from './config.js';
   providers: [
     {
       provide: ProbeCoordinatorRepository,
-      inject: [getDrizzleToken()],
-      useFactory: (db: WatchrailDatabase) => new ProbeCoordinatorRepository(db),
+      inject: [getDrizzleToken(), APP_CONFIG],
+      useFactory: (db: WatchrailDatabase, config: AppConfig) =>
+        new ProbeCoordinatorRepository(db, config.multiLocationExecutionEnabled),
     },
     {
       provide: ProbeIdentityRepository,
@@ -71,8 +72,9 @@ import { APP_CONFIG, type AppConfig } from './config.js';
     },
     {
       provide: ManualRoundRepository,
-      inject: [getDrizzleToken()],
-      useFactory: (db: WatchrailDatabase) => new ManualRoundRepository(db),
+      inject: [getDrizzleToken(), APP_CONFIG],
+      useFactory: (db: WatchrailDatabase, config: AppConfig) =>
+        new ManualRoundRepository(db, config.multiLocationExecutionEnabled),
     },
     {
       provide: CheckHistoryRepository,

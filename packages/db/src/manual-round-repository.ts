@@ -41,7 +41,10 @@ export class MonitorConfigurationInvariantError extends Error {
 }
 
 export class ManualRoundRepository {
-  constructor(private readonly db: WatchrailDatabase) {}
+  constructor(
+    private readonly db: WatchrailDatabase,
+    private readonly multiLocationExecutionEnabled = false,
+  ) {}
 
   async create(organizationId: string, monitorId: string): Promise<CheckRoundRecord> {
     return this.db.transaction(async (tx) => {
@@ -119,7 +122,12 @@ export class ManualRoundRepository {
         roundId: round.id,
         locations: configuration.locations,
       });
-      await createRoutedAssignment(tx, { organizationId, roundId: round.id, locations });
+      await createRoutedAssignment(tx, {
+        organizationId,
+        roundId: round.id,
+        locations,
+        multiLocationExecutionEnabled: this.multiLocationExecutionEnabled,
+      });
 
       return round;
     });

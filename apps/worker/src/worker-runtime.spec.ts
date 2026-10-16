@@ -21,6 +21,7 @@ const config = {
   probeReconciliationBatchSize: 100,
   probeReconciliationIntervalMs: 1_000,
   probePendingAssignmentTimeoutMs: 120_000,
+  multiLocationExecutionEnabled: false,
   webhookDeliveryConcurrency: 2,
   webhookDeliveryIdlePollIntervalMs: 500,
 } as WorkerConfig;

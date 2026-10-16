@@ -33,6 +33,7 @@ describe('loadWorkerConfig', () => {
       probeReconciliationBatchSize: 100,
       probeReconciliationIntervalMs: 1_000,
       probePendingAssignmentTimeoutMs: 120_000,
+      multiLocationExecutionEnabled: false,
       headerEncryptionKeyring: { activeKeyId: 'test' },
       assertionEncryptionKeyring: { activeKeyId: 'test' },
       webhookSigningSecretKeyring: { activeKeyId: 'test' },
@@ -44,6 +45,21 @@ describe('loadWorkerConfig', () => {
       webhookDeliveryConcurrency: 5,
       webhookDeliveryIdlePollIntervalMs: 500,
     });
+  });
+
+  it('requires an explicit boolean multi-location readiness gate', () => {
+    expect(
+      loadWorkerConfig({
+        ...requiredEnvironment,
+        MULTI_LOCATION_EXECUTION_ENABLED: 'true',
+      }).multiLocationExecutionEnabled,
+    ).toBe(true);
+    expect(() =>
+      loadWorkerConfig({
+        ...requiredEnvironment,
+        MULTI_LOCATION_EXECUTION_ENABLED: 'enabled',
+      }),
+    ).toThrow('MULTI_LOCATION_EXECUTION_ENABLED must be true or false.');
   });
 
   it.each([

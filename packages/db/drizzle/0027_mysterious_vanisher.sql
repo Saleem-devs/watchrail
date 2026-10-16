@@ -1,0 +1,2 @@
+ALTER TABLE "check_regional_executions" ADD COLUMN "result_digest" varchar(64);--> statement-breakpoint
+ALTER TABLE "check_regional_executions" ADD CONSTRAINT "check_regional_executions_result_digest_format" CHECK ("check_regional_executions"."result_digest" is null or "check_regional_executions"."result_digest" ~ '^[0-9a-f]{64}$');
