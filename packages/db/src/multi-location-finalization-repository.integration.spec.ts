@@ -155,7 +155,7 @@ describe('authoritative multi-location finalization', () => {
         .select({ status: checkExecutionAssignments.status })
         .from(checkExecutionAssignments)
         .where(eq(checkExecutionAssignments.roundId, fixture.roundId)),
-    ).toEqual([{ status: 'PENDING' }, { status: 'PENDING' }]);
+    ).toEqual([{ status: 'COMPLETED' }, { status: 'COMPLETED' }]);
   });
 
   it('rolls back evidence, aggregate, incident, notification and round completion together', async () => {

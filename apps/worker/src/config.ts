@@ -17,6 +17,7 @@ export interface WorkerConfig {
   probeReconciliationBatchSize: number;
   probeReconciliationIntervalMs: number;
   probePendingAssignmentTimeoutMs: number;
+  multiLocationExecutionEnabled: boolean;
   headerEncryptionKeyring: HeaderEncryptionKeyring;
   assertionEncryptionKeyring: AssertionEncryptionKeyring;
   webhookSigningSecretKeyring: WebhookSigningSecretKeyring;
@@ -143,6 +144,10 @@ export function loadWorkerConfig(environment: NodeJS.ProcessEnv = process.env): 
       10_000,
       900_000,
     ),
+    multiLocationExecutionEnabled: parseBoolean(
+      environment.MULTI_LOCATION_EXECUTION_ENABLED,
+      'MULTI_LOCATION_EXECUTION_ENABLED',
+    ),
     headerEncryptionKeyring: loadHeaderEncryptionKeyring(environment),
     assertionEncryptionKeyring: loadAssertionEncryptionKeyring(environment),
     webhookSigningSecretKeyring: loadWebhookSigningSecretKeyring(environment),
@@ -170,6 +175,12 @@ export function loadWorkerConfig(environment: NodeJS.ProcessEnv = process.env): 
       500,
     ),
   };
+}
+
+function parseBoolean(value: string | undefined, name: string): boolean {
+  if (value === 'true') return true;
+  if (value === 'false' || value === undefined) return false;
+  throw new Error(`${name} must be true or false.`);
 }
 
 function parseIntegerRange(

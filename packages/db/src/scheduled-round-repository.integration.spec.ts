@@ -136,6 +136,43 @@ describe('ScheduledRoundRepository', () => {
     expect(await connection.db.select().from(checkRoundOutbox)).toEqual([]);
   });
 
+  it('skips disabled multi-location monitors without blocking eligible due work', async () => {
+    const incompatible = await createDueMonitor(
+      'Disabled multi-location',
+      60,
+      new Date('2026-01-01T00:00:00Z'),
+    );
+    const eligible = await createDueMonitor(
+      'Eligible single-location',
+      60,
+      new Date('2026-01-01T00:00:01Z'),
+    );
+    const locations = await connection.db
+      .insert(probeLocations)
+      .values([
+        { organizationId, name: 'Lagos', slug: 'lagos-disabled-gate' },
+        { organizationId, name: 'Frankfurt', slug: 'frankfurt-disabled-gate' },
+      ])
+      .returning();
+    await new MonitorRepository(connection.db).updateLocations(
+      organizationId,
+      incompatible.id,
+      locations.map((location) => location.id),
+    );
+
+    const rounds = await new ScheduledRoundRepository(connection.db, false).dispatchDue(1);
+
+    expect(rounds.map((round) => round.monitorId)).toEqual([eligible.id]);
+    expect(
+      (await connection.db.select().from(checkRounds)).map((round) => round.monitorId),
+    ).toEqual([eligible.id]);
+    const [projection] = await connection.db
+      .select({ nextCheckAt: monitors.nextCheckAt })
+      .from(monitors)
+      .where(eq(monitors.id, incompatible.id));
+    expect(projection?.nextCheckAt).toEqual(incompatible.nextCheckAt);
+  });
+
   it('ignores non-due, paused, and archived monitors', async () => {
     const future = await createMonitorRecord('Future');
     const paused = await createMonitorRecord('Paused');

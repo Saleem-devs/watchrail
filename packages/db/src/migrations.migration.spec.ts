@@ -117,7 +117,11 @@ describe('database migrations', () => {
     `);
 
     await applyMigration(migrations, 3);
-    for (let index = 4; index < migrations.length - 2; index += 1) {
+    const multiLocationMigrationIndex = migrations.findIndex((migration) =>
+      migration.sql.some((statement) => statement.includes('check_round_locations')),
+    );
+    expect(multiLocationMigrationIndex).toBeGreaterThan(3);
+    for (let index = 4; index < multiLocationMigrationIndex; index += 1) {
       await applyMigration(migrations, index);
     }
 
@@ -148,7 +152,7 @@ describe('database migrations', () => {
       where id = ${existingRound.assignmentId}
     `);
 
-    for (let index = migrations.length - 2; index < migrations.length; index += 1) {
+    for (let index = multiLocationMigrationIndex; index < migrations.length; index += 1) {
       await applyMigration(migrations, index);
     }
 

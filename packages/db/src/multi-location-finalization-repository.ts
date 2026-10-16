@@ -17,6 +17,7 @@ import {
   type IncidentTransition,
 } from './notification-event-repository.js';
 import {
+  checkExecutionAssignments,
   checkRegionalEvaluations,
   checkRegionalExecutions,
   checkRoundAggregates,
@@ -24,14 +25,27 @@ import {
   checkRounds,
   incidents,
   monitorIncidentState,
+  probeExecutionAttempts,
 } from './schema.js';
 
 type Transaction = Parameters<Parameters<WatchrailDatabase['transaction']>[0]>[0];
 
 export type RegionalExecutionAcceptance =
-  | { state: 'ACCEPTED'; evaluation: RegionalEvaluationV1 }
-  | { state: 'DUPLICATE'; evaluation: RegionalEvaluationV1 }
+  | { state: 'ACCEPTED'; evaluation: RegionalEvaluationV1; roundFinalized: boolean }
+  | { state: 'DUPLICATE'; evaluation: RegionalEvaluationV1; roundFinalized: boolean }
   | { state: 'REJECTED'; reason: string };
+
+export interface RegionalExecutionInput {
+  organizationId: string;
+  roundId: string;
+  assignmentId: string;
+  location: string;
+  executionId: string;
+  agentId: string;
+  role: 'PRIMARY' | 'CONFIRMATION';
+  observation: ProbeObservationV1;
+  resultDigest?: string;
+}
 
 export class MultiLocationRoundFinalizationRepository {
   constructor(private readonly db: WatchrailDatabase) {}
@@ -47,84 +61,8 @@ export class MultiLocationRoundFinalizationRepository {
     });
   }
 
-  async recordExecution(input: {
-    organizationId: string;
-    roundId: string;
-    assignmentId: string;
-    location: string;
-    executionId: string;
-    agentId: string;
-    role: 'PRIMARY' | 'CONFIRMATION';
-    observation: ProbeObservationV1;
-  }): Promise<RegionalExecutionAcceptance> {
-    return this.db.transaction(async (tx) => {
-      const round = await lockRound(tx, input.organizationId, input.roundId);
-      const [existing] = await tx
-        .select()
-        .from(checkRegionalExecutions)
-        .where(eq(checkRegionalExecutions.id, input.executionId))
-        .limit(1);
-      if (existing) {
-        const evaluation = await loadEvaluation(
-          tx,
-          input.organizationId,
-          input.roundId,
-          input.location,
-        );
-        return existing.organizationId === input.organizationId &&
-          existing.roundId === input.roundId &&
-          existing.assignmentId === input.assignmentId &&
-          existing.location === input.location &&
-          existing.agentId === input.agentId &&
-          existing.role === input.role &&
-          observationsEqual(existing.observation, input.observation)
-          ? { state: 'DUPLICATE', evaluation }
-          : { state: 'REJECTED', reason: 'CONFLICTING_REPLAY' };
-      }
-      if (round.status === 'COMPLETED') return { state: 'REJECTED', reason: 'ROUND_COMPLETED' };
-
-      await ensureEvaluations(tx, input.organizationId, input.roundId, [input.location]);
-      const evaluation = await loadEvaluation(
-        tx,
-        input.organizationId,
-        input.roundId,
-        input.location,
-      );
-      const expectedRole = evaluation.phase === 'AWAITING_PRIMARY' ? 'PRIMARY' : 'CONFIRMATION';
-      if (evaluation.phase === 'TERMINAL' || input.role !== expectedRole) {
-        return { state: 'REJECTED', reason: 'REGION_TERMINAL' };
-      }
-      const acceptedAt = await databaseNow(tx);
-      const decision = reduceRegionalEvidence({
-        state: evaluation,
-        execution: {
-          executionId: input.executionId,
-          agentId: input.agentId,
-          acceptedAt: acceptedAt.toISOString(),
-          observation: input.observation,
-        },
-        createdAt: round.createdAt.toISOString(),
-        deadlineAt: round.finalizationDeadlineAt.toISOString(),
-        roundCompleted: false,
-      });
-      if (decision.disposition === 'REJECTED') {
-        return { state: 'REJECTED', reason: decision.reason };
-      }
-      await tx.insert(checkRegionalExecutions).values({
-        id: input.executionId,
-        organizationId: input.organizationId,
-        roundId: input.roundId,
-        assignmentId: input.assignmentId,
-        location: input.location,
-        agentId: input.agentId,
-        role: input.role,
-        observation: input.observation,
-        acceptedAt,
-      });
-      await persistEvaluation(tx, input.organizationId, input.roundId, decision.state, acceptedAt);
-      await tryFinalizeLocked(tx, round);
-      return { state: 'ACCEPTED', evaluation: decision.state };
-    });
+  async recordExecution(input: RegionalExecutionInput): Promise<RegionalExecutionAcceptance> {
+    return this.db.transaction((tx) => recordRegionalExecution(tx, input));
   }
 
   async tryFinalizeRound(
@@ -168,6 +106,79 @@ export class MultiLocationRoundFinalizationRepository {
     }
     return finalized;
   }
+}
+
+export async function recordRegionalExecution(
+  tx: Transaction,
+  input: RegionalExecutionInput,
+): Promise<RegionalExecutionAcceptance> {
+  const round = await lockRound(tx, input.organizationId, input.roundId);
+  const [existing] = await tx
+    .select()
+    .from(checkRegionalExecutions)
+    .where(eq(checkRegionalExecutions.id, input.executionId))
+    .limit(1);
+  if (existing) {
+    const evaluation = await loadEvaluation(
+      tx,
+      input.organizationId,
+      input.roundId,
+      input.location,
+    );
+    return existing.organizationId === input.organizationId &&
+      existing.roundId === input.roundId &&
+      existing.assignmentId === input.assignmentId &&
+      existing.location === input.location &&
+      existing.agentId === input.agentId &&
+      existing.role === input.role &&
+      observationsEqual(existing.observation, input.observation) &&
+      (input.resultDigest === undefined || existing.resultDigest === input.resultDigest)
+      ? { state: 'DUPLICATE', evaluation, roundFinalized: round.status === 'COMPLETED' }
+      : { state: 'REJECTED', reason: 'CONFLICTING_REPLAY' };
+  }
+  if (round.status === 'COMPLETED') return { state: 'REJECTED', reason: 'ROUND_COMPLETED' };
+
+  await ensureEvaluations(tx, input.organizationId, input.roundId, [input.location]);
+  const evaluation = await loadEvaluation(tx, input.organizationId, input.roundId, input.location);
+  const expectedRole = evaluation.phase === 'AWAITING_PRIMARY' ? 'PRIMARY' : 'CONFIRMATION';
+  if (evaluation.phase === 'TERMINAL' || input.role !== expectedRole) {
+    return { state: 'REJECTED', reason: 'REGION_TERMINAL' };
+  }
+  const acceptedAt = await databaseNow(tx);
+  const decision = reduceRegionalEvidence({
+    state: evaluation,
+    execution: {
+      executionId: input.executionId,
+      agentId: input.agentId,
+      acceptedAt: acceptedAt.toISOString(),
+      observation: input.observation,
+    },
+    createdAt: round.createdAt.toISOString(),
+    deadlineAt: round.finalizationDeadlineAt.toISOString(),
+    roundCompleted: false,
+  });
+  if (decision.disposition === 'REJECTED') {
+    return { state: 'REJECTED', reason: decision.reason };
+  }
+  await tx.insert(checkRegionalExecutions).values({
+    id: input.executionId,
+    organizationId: input.organizationId,
+    roundId: input.roundId,
+    assignmentId: input.assignmentId,
+    location: input.location,
+    agentId: input.agentId,
+    role: input.role,
+    observation: input.observation,
+    resultDigest: input.resultDigest,
+    acceptedAt,
+  });
+  await persistEvaluation(tx, input.organizationId, input.roundId, decision.state, acceptedAt);
+  const finalization = await tryFinalizeLocked(tx, round);
+  return {
+    state: 'ACCEPTED',
+    evaluation: decision.state,
+    roundFinalized: finalization.state === 'FINALIZE' || finalization.state === 'ALREADY_FINALIZED',
+  };
 }
 
 async function tryFinalizeLocked(
@@ -218,6 +229,39 @@ async function tryFinalizeLocked(
     await stageIncidentNotification(tx, transition);
   }
   await tx.update(checkRounds).set({ status: 'COMPLETED' }).where(eq(checkRounds.id, round.id));
+  await tx
+    .update(probeExecutionAttempts)
+    .set({
+      status: 'REJECTED',
+      terminalReason: 'ROUND_FINALIZED',
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(probeExecutionAttempts.organizationId, round.organizationId),
+        eq(probeExecutionAttempts.status, 'LEASED'),
+        sql`${probeExecutionAttempts.assignmentId} in (
+          select ${checkExecutionAssignments.id}
+          from ${checkExecutionAssignments}
+          where ${checkExecutionAssignments.roundId} = ${round.id}
+        )`,
+      ),
+    );
+  await tx
+    .update(checkExecutionAssignments)
+    .set({
+      status: 'COMPLETED',
+      claimToken: null,
+      claimExpiresAt: null,
+      completedAt: now,
+    })
+    .where(
+      and(
+        eq(checkExecutionAssignments.organizationId, round.organizationId),
+        eq(checkExecutionAssignments.roundId, round.id),
+        inArray(checkExecutionAssignments.status, ['PENDING', 'RUNNING']),
+      ),
+    );
   return decision;
 }
 

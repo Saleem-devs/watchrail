@@ -57,9 +57,21 @@ export async function createRoundLocationSnapshot(
 
 export async function createRoutedAssignment(
   tx: Transaction,
-  input: { organizationId: string; roundId: string; locations: readonly string[] },
+  input: {
+    organizationId: string;
+    roundId: string;
+    locations: readonly string[];
+    multiLocationExecutionEnabled?: boolean;
+  },
 ): Promise<void> {
-  if (input.locations.length !== 1) throw new MonitorLocationInvariantError();
+  if (input.locations.length !== 1 && input.multiLocationExecutionEnabled !== true) {
+    throw new MonitorLocationInvariantError();
+  }
+  // Slice 11.4 activates independent remote agents first. A local participant
+  // still uses the single-location worker path until it can emit regional evidence.
+  if (input.locations.length > 1 && input.locations.includes('local')) {
+    throw new MonitorLocationInvariantError();
+  }
   await createPreparedRoutedAssignments(tx, input);
 }
 

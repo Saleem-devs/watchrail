@@ -7,6 +7,7 @@ import type { AuthoritativeCheckResult } from './check-execution-repository.js';
 import { ManualRoundRepository } from './manual-round-repository.js';
 import { migrateDatabase } from './migration.js';
 import { MonitorRepository } from './monitor-repository.js';
+import { MultiLocationRoundFinalizationRepository } from './multi-location-finalization-repository.js';
 import { ProbeCoordinatorRepository } from './probe-coordinator-repository.js';
 import type { ProbeMachineIdentity } from './probe-identity-repository.js';
 
@@ -96,6 +97,21 @@ describe('probe coordinator repository', () => {
     ).resolves.toBeNull();
 
     await expire(lease.assignmentId, lease.attemptId);
+    await expect(
+      coordinator.configuration(fixture.machine, lease.attemptId, lease.claimToken),
+    ).resolves.toBeNull();
+  });
+
+  it('rejects configuration after the authoritative round deadline before reconciliation', async () => {
+    const fixture = await createFixture('configuration-deadline');
+    const lease = await claimLease(fixture.machine);
+    await connection.pool.query(
+      `update check_rounds
+       set finalization_deadline_at=clock_timestamp()-interval '1 millisecond'
+       where id=(select round_id from check_execution_assignments where id=$1)`,
+      [fixture.assignmentId],
+    );
+
     await expect(
       coordinator.configuration(fixture.machine, lease.attemptId, lease.claimToken),
     ).resolves.toBeNull();
@@ -417,6 +433,334 @@ describe('probe coordinator repository', () => {
     ).toEqual([{ status: 'COMPLETED' }]);
   });
 
+  it('executes remote locations in parallel and confirms failures with a different healthy agent', async () => {
+    const first = await createMachine('multi-first');
+    const second = await createMachine('multi-second');
+    const confirmation = await createMachine('multi-confirmation', first.locationId, true);
+    const monitor = await monitors.create(
+      organizationId,
+      createMonitor({ name: 'Multi-location execution', url: 'https://example.com/health' }),
+    );
+    await monitors.updateLocations(organizationId, monitor.id, [
+      first.locationId,
+      second.locationId,
+    ]);
+    const round = await new ManualRoundRepository(connection.db, true).create(
+      organizationId,
+      monitor.id,
+    );
+    const enabled = new ProbeCoordinatorRepository(connection.db, true);
+
+    const firstClaim = await enabled.claim(first.machine, HTTP_ENGINE_VERSION);
+    const secondClaim = await enabled.claim(second.machine, HTTP_ENGINE_VERSION);
+    expect(firstClaim.state).toBe('CLAIMED');
+    expect(secondClaim.state).toBe('CLAIMED');
+    if (firstClaim.state !== 'CLAIMED' || secondClaim.state !== 'CLAIMED') {
+      throw new Error('Expected parallel regional claims.');
+    }
+    const firstFailure = failingResult();
+    expect(
+      await enabled.submit(
+        first.machine,
+        resultReference(firstClaim.lease),
+        firstClaim.lease.claimToken,
+        firstFailure,
+      ),
+    ).toEqual({ state: 'ACCEPTED', duplicate: false });
+    expect(
+      await enabled.submit(
+        first.machine,
+        resultReference(firstClaim.lease),
+        firstClaim.lease.claimToken,
+        firstFailure,
+      ),
+    ).toEqual({ state: 'ACCEPTED', duplicate: true });
+    expect(
+      await enabled.submit(
+        first.machine,
+        resultReference(firstClaim.lease),
+        firstClaim.lease.claimToken,
+        { ...firstFailure, attemptDurationMs: 99 },
+      ),
+    ).toEqual({ state: 'REJECTED', reason: 'REPLAY_MISMATCH' });
+    expect(await enabled.claim(first.machine, HTTP_ENGINE_VERSION)).toEqual({ state: 'NO_WORK' });
+    const confirmationClaim = await enabled.claim(confirmation.machine, HTTP_ENGINE_VERSION);
+    expect(confirmationClaim.state).toBe('CLAIMED');
+    if (confirmationClaim.state !== 'CLAIMED') throw new Error('Expected confirmation claim.');
+    await enabled.submit(
+      confirmation.machine,
+      resultReference(confirmationClaim.lease),
+      confirmationClaim.lease.claimToken,
+      failingResult(),
+    );
+    const secondResult = passingResult();
+    await enabled.submit(
+      second.machine,
+      resultReference(secondClaim.lease),
+      secondClaim.lease.claimToken,
+      secondResult,
+    );
+
+    expect(
+      await enabled.submit(
+        second.machine,
+        resultReference(secondClaim.lease),
+        secondClaim.lease.claimToken,
+        secondResult,
+      ),
+    ).toEqual({ state: 'ACCEPTED', duplicate: true });
+    expect(
+      await enabled.submit(
+        second.machine,
+        resultReference(secondClaim.lease),
+        secondClaim.lease.claimToken,
+        { ...secondResult, attemptDurationMs: secondResult.attemptDurationMs + 1 },
+      ),
+    ).toEqual({ state: 'REJECTED', reason: 'REPLAY_MISMATCH' });
+    expect(
+      (
+        await connection.pool.query<{ status: string; terminal_reason: string | null }>(
+          'select status, terminal_reason from probe_execution_attempts where id=$1',
+          [secondClaim.lease.attemptId],
+        )
+      ).rows,
+    ).toEqual([{ status: 'SUBMITTED', terminal_reason: null }]);
+
+    expect(
+      (
+        await connection.pool.query<{ outcome: string }>(
+          'select outcome from check_round_aggregates where round_id=$1',
+          [round.id],
+        )
+      ).rows,
+    ).toEqual([{ outcome: 'DEGRADED' }]);
+    expect(
+      (
+        await connection.pool.query<{ status: string }>(
+          'select status from check_rounds where id=$1',
+          [round.id],
+        )
+      ).rows,
+    ).toEqual([{ status: 'COMPLETED' }]);
+  });
+
+  it('fences pending and leased regional work when the authoritative deadline wins', async () => {
+    const first = await createMachine('deadline-first');
+    const second = await createMachine('deadline-second');
+    const monitor = await monitors.create(
+      organizationId,
+      createMonitor({ name: 'Deadline fencing', url: 'https://example.com/health' }),
+    );
+    await monitors.updateLocations(organizationId, monitor.id, [
+      first.locationId,
+      second.locationId,
+    ]);
+    const round = await new ManualRoundRepository(connection.db, true).create(
+      organizationId,
+      monitor.id,
+    );
+    const enabled = new ProbeCoordinatorRepository(connection.db, true);
+    const claim = await enabled.claim(first.machine, HTTP_ENGINE_VERSION);
+    if (claim.state !== 'CLAIMED') throw new Error('Expected a regional claim.');
+    await connection.pool.query(
+      `update check_rounds
+       set created_at=clock_timestamp()-interval '5 minutes',
+           finalization_deadline_at=clock_timestamp()-interval '1 second'
+       where id=$1`,
+      [round.id],
+    );
+
+    expect(await new MultiLocationRoundFinalizationRepository(connection.db).finalizeDue(10)).toBe(
+      1,
+    );
+    expect(
+      await enabled.renew(first.machine, resultReference(claim.lease), claim.lease.claimToken),
+    ).toBeNull();
+    expect(
+      await enabled.submit(
+        first.machine,
+        resultReference(claim.lease),
+        claim.lease.claimToken,
+        passingResult(),
+      ),
+    ).toEqual({ state: 'REJECTED', reason: 'NON_AUTHORITATIVE_LEASE' });
+    expect(
+      (
+        await connection.pool.query<{ status: string; terminal_reason: string | null }>(
+          `select status, terminal_reason from probe_execution_attempts where id=$1`,
+          [claim.lease.attemptId],
+        )
+      ).rows,
+    ).toEqual([{ status: 'REJECTED', terminal_reason: 'ROUND_FINALIZED' }]);
+    expect(
+      (
+        await connection.pool.query<{ status: string }>(
+          'select status from check_execution_assignments where round_id=$1 order by location',
+          [round.id],
+        )
+      ).rows,
+    ).toEqual([{ status: 'COMPLETED' }, { status: 'COMPLETED' }]);
+  });
+
+  it('does not reopen an assignment when accepted evidence crosses the round deadline', async () => {
+    const first = await createMachine('boundary-first');
+    const second = await createMachine('boundary-second');
+    const monitor = await monitors.create(
+      organizationId,
+      createMonitor({ name: 'Deadline boundary', url: 'https://example.com/health' }),
+    );
+    await monitors.updateLocations(organizationId, monitor.id, [
+      first.locationId,
+      second.locationId,
+    ]);
+    const round = await new ManualRoundRepository(connection.db, true).create(
+      organizationId,
+      monitor.id,
+    );
+    const enabled = new ProbeCoordinatorRepository(connection.db, true);
+    const claim = await enabled.claim(first.machine, HTTP_ENGINE_VERSION);
+    if (claim.state !== 'CLAIMED') throw new Error('Expected a regional claim.');
+    await connection.pool.query(`
+      create function watchrail_test_delay_regional_evidence() returns trigger language plpgsql as $$
+      begin
+        perform pg_sleep(0.15);
+        return new;
+      end;
+      $$;
+      create trigger watchrail_test_delay_regional_evidence
+      before insert on check_regional_executions
+      for each row execute function watchrail_test_delay_regional_evidence();
+    `);
+    try {
+      await connection.pool.query(
+        `update check_rounds
+         set finalization_deadline_at=clock_timestamp()+interval '75 milliseconds'
+         where id=$1`,
+        [round.id],
+      );
+      const result = failingResult();
+      expect(
+        await enabled.submit(
+          first.machine,
+          resultReference(claim.lease),
+          claim.lease.claimToken,
+          result,
+        ),
+      ).toEqual({ state: 'ACCEPTED', duplicate: false });
+      expect(
+        await enabled.submit(
+          first.machine,
+          resultReference(claim.lease),
+          claim.lease.claimToken,
+          result,
+        ),
+      ).toEqual({ state: 'ACCEPTED', duplicate: true });
+      expect(
+        await enabled.submit(first.machine, resultReference(claim.lease), claim.lease.claimToken, {
+          ...result,
+          attemptDurationMs: result.attemptDurationMs + 1,
+        }),
+      ).toEqual({ state: 'REJECTED', reason: 'REPLAY_MISMATCH' });
+    } finally {
+      await connection.pool.query(`
+        drop trigger watchrail_test_delay_regional_evidence on check_regional_executions;
+        drop function watchrail_test_delay_regional_evidence();
+      `);
+    }
+
+    expect(
+      (
+        await connection.pool.query<{ status: string }>(
+          'select status from check_rounds where id=$1',
+          [round.id],
+        )
+      ).rows,
+    ).toEqual([{ status: 'COMPLETED' }]);
+    expect(
+      (
+        await connection.pool.query<{ status: string }>(
+          'select status from check_execution_assignments where id=$1',
+          [claim.lease.assignmentId],
+        )
+      ).rows,
+    ).toEqual([{ status: 'COMPLETED' }]);
+    expect(
+      (
+        await connection.pool.query<{ status: string; terminal_reason: string | null }>(
+          'select status, terminal_reason from probe_execution_attempts where id=$1',
+          [claim.lease.attemptId],
+        )
+      ).rows,
+    ).toEqual([{ status: 'SUBMITTED', terminal_reason: null }]);
+  });
+
+  it('falls back to the primary agent when no healthy confirmation peer exists', async () => {
+    const first = await createMachine('fallback-first');
+    const second = await createMachine('fallback-second');
+    const monitor = await monitors.create(
+      organizationId,
+      createMonitor({ name: 'Confirmation fallback', url: 'https://example.com/health' }),
+    );
+    await monitors.updateLocations(organizationId, monitor.id, [
+      first.locationId,
+      second.locationId,
+    ]);
+    await new ManualRoundRepository(connection.db, true).create(organizationId, monitor.id);
+    const enabled = new ProbeCoordinatorRepository(connection.db, true);
+    const primary = await enabled.claim(first.machine, HTTP_ENGINE_VERSION);
+    if (primary.state !== 'CLAIMED') throw new Error('Expected a primary claim.');
+    await enabled.submit(
+      first.machine,
+      resultReference(primary.lease),
+      primary.lease.claimToken,
+      failingResult(),
+    );
+
+    const confirmation = await enabled.claim(first.machine, HTTP_ENGINE_VERSION);
+    expect(confirmation).toMatchObject({
+      state: 'CLAIMED',
+      lease: { assignmentId: primary.lease.assignmentId, attemptNumber: 2 },
+    });
+  });
+
+  async function createMachine(suffix: string, existingLocationId?: string, online = false) {
+    const locationId =
+      existingLocationId ??
+      (
+        await connection.pool.query<{ id: string }>(
+          `insert into probe_locations (organization_id,name,slug) values ($1,$2,$3) returning id`,
+          [organizationId, `Location ${suffix}`, `location-${suffix}`],
+        )
+      ).rows[0]!.id;
+    const agent = await connection.pool.query<{ id: string }>(
+      `insert into probe_agents
+        (organization_id,location_id,name,status,last_heartbeat_at,engine_version)
+       values ($1,$2,$3,'ACTIVE',$4,$5) returning id`,
+      [
+        organizationId,
+        locationId,
+        `Agent ${suffix}`,
+        online ? new Date() : null,
+        HTTP_ENGINE_VERSION,
+      ],
+    );
+    const credential = await connection.pool.query<{ id: string }>(
+      `insert into probe_agent_credentials (organization_id,agent_id,version_number,verifier)
+       values ($1,$2,1,$3) returning id`,
+      [organizationId, agent.rows[0]!.id, verifierFor(suffix)],
+    );
+    return {
+      locationId,
+      machine: {
+        agentId: agent.rows[0]!.id,
+        organizationId,
+        locationId,
+        credentialId: credential.rows[0]!.id,
+        credentialVersion: 1,
+      } satisfies ProbeMachineIdentity,
+    };
+  }
+
   async function createFixture(suffix = 'default', scheduled = false) {
     const location = await connection.pool.query<{ id: string }>(
       `insert into probe_locations (organization_id,name,slug) values ($1,$2,$3) returning id`,
@@ -531,5 +875,15 @@ function passingResult(): AuthoritativeCheckResult {
     redirects: [],
     assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
     checkedAt: new Date(),
+  };
+}
+
+function failingResult(): AuthoritativeCheckResult {
+  return {
+    ...passingResult(),
+    outcome: 'FAIL',
+    reason: 'REQUEST_TIMEOUT',
+    statusCode: null,
+    responseTimeMs: null,
   };
 }

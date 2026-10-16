@@ -35,8 +35,9 @@ import { WebhookDeliveryWorker } from './webhook-delivery-worker.js';
   providers: [
     {
       provide: ProbeCoordinatorRepository,
-      inject: [getDrizzleToken()],
-      useFactory: (db: WatchrailDatabase) => new ProbeCoordinatorRepository(db),
+      inject: [getDrizzleToken(), WORKER_CONFIG],
+      useFactory: (db: WatchrailDatabase, config: WorkerConfig) =>
+        new ProbeCoordinatorRepository(db, config.multiLocationExecutionEnabled),
     },
     {
       provide: MultiLocationRoundFinalizationRepository,
@@ -91,8 +92,9 @@ import { WebhookDeliveryWorker } from './webhook-delivery-worker.js';
     },
     {
       provide: ScheduledRoundRepository,
-      inject: [getDrizzleToken()],
-      useFactory: (db: WatchrailDatabase) => new ScheduledRoundRepository(db),
+      inject: [getDrizzleToken(), WORKER_CONFIG],
+      useFactory: (db: WatchrailDatabase, config: WorkerConfig) =>
+        new ScheduledRoundRepository(db, config.multiLocationExecutionEnabled),
     },
     {
       provide: AvailabilityRepository,
