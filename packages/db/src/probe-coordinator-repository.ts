@@ -443,17 +443,17 @@ export class ProbeCoordinatorRepository {
         if (acceptance.state === 'REJECTED') {
           return { state: 'REJECTED', reason: 'NON_AUTHORITATIVE_LEASE' };
         }
+        await tx
+          .update(probeExecutionAttempts)
+          .set({
+            status: 'SUBMITTED',
+            submittedAt: acceptedAt,
+            submittedEngineVersion: reference.engineVersion,
+            terminalReason: null,
+            updatedAt: acceptedAt,
+          })
+          .where(eq(probeExecutionAttempts.id, attempt.id));
         if (!acceptance.roundFinalized) {
-          await tx
-            .update(probeExecutionAttempts)
-            .set({
-              status: 'SUBMITTED',
-              submittedAt: acceptedAt,
-              submittedEngineVersion: reference.engineVersion,
-              terminalReason: null,
-              updatedAt: acceptedAt,
-            })
-            .where(eq(probeExecutionAttempts.id, attempt.id));
           if (acceptance.evaluation.phase === 'AWAITING_CONFIRMATION') {
             await tx
               .update(checkExecutionAssignments)

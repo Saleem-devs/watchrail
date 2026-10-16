@@ -493,12 +493,38 @@ describe('probe coordinator repository', () => {
       confirmationClaim.lease.claimToken,
       failingResult(),
     );
+    const secondResult = passingResult();
     await enabled.submit(
       second.machine,
       resultReference(secondClaim.lease),
       secondClaim.lease.claimToken,
-      passingResult(),
+      secondResult,
     );
+
+    expect(
+      await enabled.submit(
+        second.machine,
+        resultReference(secondClaim.lease),
+        secondClaim.lease.claimToken,
+        secondResult,
+      ),
+    ).toEqual({ state: 'ACCEPTED', duplicate: true });
+    expect(
+      await enabled.submit(
+        second.machine,
+        resultReference(secondClaim.lease),
+        secondClaim.lease.claimToken,
+        { ...secondResult, attemptDurationMs: secondResult.attemptDurationMs + 1 },
+      ),
+    ).toEqual({ state: 'REJECTED', reason: 'REPLAY_MISMATCH' });
+    expect(
+      (
+        await connection.pool.query<{ status: string; terminal_reason: string | null }>(
+          'select status, terminal_reason from probe_execution_attempts where id=$1',
+          [secondClaim.lease.attemptId],
+        )
+      ).rows,
+    ).toEqual([{ status: 'SUBMITTED', terminal_reason: null }]);
 
     expect(
       (
@@ -612,14 +638,29 @@ describe('probe coordinator repository', () => {
          where id=$1`,
         [round.id],
       );
+      const result = failingResult();
       expect(
         await enabled.submit(
           first.machine,
           resultReference(claim.lease),
           claim.lease.claimToken,
-          failingResult(),
+          result,
         ),
       ).toEqual({ state: 'ACCEPTED', duplicate: false });
+      expect(
+        await enabled.submit(
+          first.machine,
+          resultReference(claim.lease),
+          claim.lease.claimToken,
+          result,
+        ),
+      ).toEqual({ state: 'ACCEPTED', duplicate: true });
+      expect(
+        await enabled.submit(first.machine, resultReference(claim.lease), claim.lease.claimToken, {
+          ...result,
+          attemptDurationMs: result.attemptDurationMs + 1,
+        }),
+      ).toEqual({ state: 'REJECTED', reason: 'REPLAY_MISMATCH' });
     } finally {
       await connection.pool.query(`
         drop trigger watchrail_test_delay_regional_evidence on check_regional_executions;
@@ -650,7 +691,7 @@ describe('probe coordinator repository', () => {
           [claim.lease.attemptId],
         )
       ).rows,
-    ).toEqual([{ status: 'REJECTED', terminal_reason: 'ROUND_FINALIZED' }]);
+    ).toEqual([{ status: 'SUBMITTED', terminal_reason: null }]);
   });
 
   it('falls back to the primary agent when no healthy confirmation peer exists', async () => {
