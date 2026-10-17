@@ -25,6 +25,7 @@ import type { ProbeMachineRequest } from './probe-machine-auth.js';
 import { ProbeMachineAuthGuard } from './probe-machine-auth.js';
 import { ProbeIdentityService } from './probe-identity.service.js';
 import type { RequestWithContext } from './request-context.js';
+import { Public } from './auth.guard.js';
 
 @Controller('probe-locations')
 export class ProbeLocationsController {
@@ -110,6 +111,7 @@ export class ProbeAgentsController {
   }
 }
 
+@Public()
 @Controller('probe-machine')
 export class ProbeMachineController {
   constructor(

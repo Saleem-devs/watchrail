@@ -1,4 +1,9 @@
 export * from './client.js';
+// Consumers that combine exported schema objects with Drizzle predicates must
+// use this package's Drizzle instance. Re-export the small predicate surface
+// used by integration tests to avoid optional-peer identity splits.
+export { eq, sql } from 'drizzle-orm';
+export * from './auth-membership-repository.js';
 export { AvailabilityRepository } from './availability-repository.js';
 export { MultiLocationRoundFinalizationRepository } from './multi-location-finalization-repository.js';
 export * from './check-execution-repository.js';

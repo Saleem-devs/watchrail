@@ -1,4 +1,33 @@
+import {
+  loadHeaderEncryptionKeyring,
+  type HeaderEncryptionKeyring,
+} from '@watchrail/http-header-security';
+import {
+  loadAssertionEncryptionKeyring,
+  type AssertionEncryptionKeyring,
+} from '@watchrail/assertion-security';
+import {
+  loadWebhookSigningSecretKeyring,
+  type WebhookSigningSecretKeyring,
+} from '@watchrail/webhook-security';
+import { loadMailConfig, type MailConfig } from './mail.js';
+
 export const APP_CONFIG = Symbol('APP_CONFIG');
+
+export interface BetterAuthProviderConfig {
+  clientId: string;
+  clientSecret: string;
+}
+
+export interface BetterAuthConfig {
+  secret: string;
+  baseUrl: string;
+  trustedOrigins: string[];
+  otpExpiresInSeconds: number;
+  github?: BetterAuthProviderConfig;
+  gitlab?: BetterAuthProviderConfig;
+  google?: BetterAuthProviderConfig;
+}
 
 export interface AppConfig {
   nodeEnv: 'development' | 'test' | 'production';
@@ -11,6 +40,9 @@ export interface AppConfig {
   publicStatusPageInternalToken: string;
   probePendingAssignmentTimeoutMs: number;
   multiLocationExecutionEnabled: boolean;
+  betterAuth: BetterAuthConfig;
+  mail: MailConfig;
+  frontendOrigins: string[];
 }
 
 export function loadAppConfig(environment: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -39,6 +71,25 @@ export function loadAppConfig(environment: NodeJS.ProcessEnv = process.env): App
     throw new Error('PUBLIC_STATUS_PAGE_INTERNAL_TOKEN must contain at least 32 characters.');
   }
 
+  const betterAuthSecret =
+    environment.BETTER_AUTH_SECRET ??
+    (nodeEnv === 'production' ? undefined : 'dev-secret-not-for-production-use-at-least-32-chars');
+  if (!betterAuthSecret || betterAuthSecret.length < 32) {
+    throw new Error('BETTER_AUTH_SECRET must contain at least 32 characters.');
+  }
+
+  const betterAuthBaseUrl =
+    environment.BETTER_AUTH_URL ??
+    (nodeEnv === 'production' ? undefined : `http://localhost:${port}`);
+  if (!betterAuthBaseUrl) {
+    throw new Error('BETTER_AUTH_URL is required in production.');
+  }
+
+  const github = loadOAuthProvider(environment, 'GITHUB');
+  const gitlab = loadOAuthProvider(environment, 'GITLAB');
+  const google = loadOAuthProvider(environment, 'GOOGLE');
+  const frontendOrigins = loadFrontendOrigins(environment, nodeEnv);
+
   return {
     nodeEnv,
     port,
@@ -59,7 +110,75 @@ export function loadAppConfig(environment: NodeJS.ProcessEnv = process.env): App
       environment.MULTI_LOCATION_EXECUTION_ENABLED,
       'MULTI_LOCATION_EXECUTION_ENABLED',
     ),
+    betterAuth: {
+      secret: betterAuthSecret,
+      baseUrl: betterAuthBaseUrl,
+      trustedOrigins: frontendOrigins,
+      otpExpiresInSeconds: parseIntegerRange(
+        environment.AUTH_OTP_EXPIRES_IN_SECONDS,
+        'AUTH_OTP_EXPIRES_IN_SECONDS',
+        600,
+        60,
+        3600,
+      ),
+      ...(github ? { github } : {}),
+      ...(gitlab ? { gitlab } : {}),
+      ...(google ? { google } : {}),
+    },
+    mail: loadMailConfig(environment),
+    frontendOrigins,
   };
+}
+
+function loadFrontendOrigins(
+  environment: NodeJS.ProcessEnv,
+  nodeEnv: AppConfig['nodeEnv'],
+): string[] {
+  const configured = [
+    environment.FRONTEND_URL,
+    ...(environment.BETTER_AUTH_TRUSTED_ORIGINS?.split(',') ?? []),
+  ]
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value));
+
+  if (configured.length === 0 && nodeEnv !== 'production') {
+    configured.push('http://localhost:3000', 'http://localhost:3010');
+  }
+  if (configured.length === 0) {
+    throw new Error('FRONTEND_URL is required in production.');
+  }
+
+  return [...new Set(configured.map(parseOrigin))];
+}
+
+function parseOrigin(value: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error('Frontend origins must be absolute HTTP or HTTPS URLs.');
+  }
+  if (
+    (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
+    parsed.username ||
+    parsed.password ||
+    parsed.pathname !== '/' ||
+    parsed.search ||
+    parsed.hash
+  ) {
+    throw new Error('Frontend origins must be bare HTTP or HTTPS origins.');
+  }
+  return parsed.origin;
+}
+
+function loadOAuthProvider(
+  environment: NodeJS.ProcessEnv,
+  prefix: 'GITHUB' | 'GITLAB' | 'GOOGLE',
+): BetterAuthProviderConfig | undefined {
+  const clientId = environment[`${prefix}_CLIENT_ID`];
+  const clientSecret = environment[`${prefix}_CLIENT_SECRET`];
+  if (!clientId || !clientSecret) return undefined;
+  return { clientId, clientSecret };
 }
 
 function parseIntegerRange(
@@ -87,15 +206,3 @@ function parseBoolean(value: string | undefined, name: string): boolean {
   if (value === 'false' || value === undefined) return false;
   throw new Error(`${name} must be true or false.`);
 }
-import {
-  loadHeaderEncryptionKeyring,
-  type HeaderEncryptionKeyring,
-} from '@watchrail/http-header-security';
-import {
-  loadAssertionEncryptionKeyring,
-  type AssertionEncryptionKeyring,
-} from '@watchrail/assertion-security';
-import {
-  loadWebhookSigningSecretKeyring,
-  type WebhookSigningSecretKeyring,
-} from '@watchrail/webhook-security';

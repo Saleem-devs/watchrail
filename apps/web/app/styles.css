@@ -705,3 +705,367 @@ form {
     animation: none;
   }
 }
+
+/* ─── Sign-in shell & panel ─────────────────────────────────────────────────── */
+
+.sign-in-shell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px 16px;
+}
+
+.sign-in-panel {
+  width: 100%;
+  max-width: 400px;
+  padding: 36px 32px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.sign-in-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 24px;
+}
+
+.sign-in-logo {
+  color: var(--accent);
+  font-size: 22px;
+  line-height: 1;
+}
+
+.sign-in-product {
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.sign-in-heading {
+  margin: 0 0 6px;
+  font-size: 20px;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.sign-in-subheading {
+  margin: 0 0 20px;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* ─── Social buttons ─────────────────────────────────────────────────────────── */
+
+.sign-in-social-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.sign-in-social-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 9px 14px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
+  transition:
+    border-color 0.12s,
+    background 0.12s;
+  width: 100%;
+}
+
+.sign-in-social-btn:hover:not(:disabled) {
+  background: #192125;
+  border-color: #3a4e55;
+}
+
+.sign-in-social-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sign-in-social-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* ─── Divider ──────────────────────────────────────────────────────────────── */
+
+.sign-in-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.sign-in-divider::before,
+.sign-in-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* ─── Email form ─────────────────────────────────────────────────────────────── */
+
+.sign-in-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 640;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.sign-in-input {
+  display: block;
+  width: 100%;
+  padding: 9px 11px;
+  background: var(--background);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 14px;
+  transition: border-color 0.12s;
+}
+
+.sign-in-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.sign-in-input:disabled {
+  opacity: 0.6;
+}
+
+.sign-in-otp-input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 22px;
+  letter-spacing: 0.25em;
+  text-align: center;
+}
+
+.sign-in-error {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  background: rgba(255, 138, 138, 0.08);
+  border: 1px solid rgba(255, 138, 138, 0.25);
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.sign-in-primary-btn {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  padding: 10px 16px;
+  background: var(--accent);
+  border: none;
+  color: #050f0a;
+  font-size: 14px;
+  font-weight: 680;
+  cursor: pointer;
+  transition: opacity 0.12s;
+}
+
+.sign-in-primary-btn:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+.sign-in-primary-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ─── OTP resend & back link ─────────────────────────────────────────────────── */
+
+.sign-in-resend {
+  margin-top: 16px;
+  text-align: center;
+  font-size: 12px;
+}
+
+.sign-in-resend-timer {
+  color: var(--muted);
+}
+
+.sign-in-resend-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  transition: text-decoration-color 0.12s;
+}
+
+.sign-in-resend-btn:hover:not(:disabled) {
+  text-decoration-color: var(--accent);
+}
+
+.sign-in-resend-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sign-in-back {
+  margin-top: 12px;
+  text-align: center;
+  font-size: 12px;
+}
+
+.sign-in-back a {
+  color: var(--muted);
+  text-decoration: none;
+  transition: color 0.12s;
+}
+
+.sign-in-back a:hover {
+  color: var(--text);
+}
+
+/* ─── Footnote ───────────────────────────────────────────────────────────────── */
+
+.sign-in-footnote {
+  margin-top: 20px;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.5;
+}
+
+.sign-in-footnote a {
+  color: var(--muted);
+  text-underline-offset: 2px;
+}
+
+.sign-in-footnote a:hover {
+  color: var(--text);
+}
+
+/* ─── Org switcher (header) ──────────────────────────────────────────────────── */
+
+.org-switcher-wrapper {
+  position: relative;
+}
+
+.org-switcher {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: border-color 0.12s;
+}
+
+.org-switcher:hover {
+  border-color: #3a4e55;
+}
+
+.org-switcher-name {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.org-switcher-caret {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.org-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 50;
+  min-width: 220px;
+  padding: 6px 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.org-dropdown-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  background: none;
+  border: none;
+  width: 100%;
+  text-align: left;
+  transition: background 0.1s;
+}
+
+.org-dropdown-item:hover {
+  background: var(--surface-raised);
+}
+
+.org-dropdown-item.active {
+  color: var(--accent);
+}
+
+.org-dropdown-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 6px 0;
+}
+
+.org-dropdown-action {
+  display: block;
+  padding: 8px 14px;
+  font-size: 12px;
+  color: var(--muted);
+  background: none;
+  border: none;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition: color 0.1s;
+}
+
+.org-dropdown-action:hover {
+  color: var(--text);
+}
+
+/* ─── Sign-in responsive ─────────────────────────────────────────────────────── */
+
+@media (max-width: 460px) {
+  .sign-in-panel {
+    padding: 28px 20px;
+  }
+
+  .sign-in-social-row {
+    grid-template-columns: 1fr;
+  }
+}
