@@ -1,32 +1,43 @@
 import { Buffer } from 'node:buffer';
-import { and, asc, desc, eq, lt, or } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, lt, or, sql } from 'drizzle-orm';
 import {
   parseHttpRedirectHops,
   parseStoredAssertionEvaluation,
   type AssertionEvaluationV1,
   type CheckRoundTrigger,
   type HttpRedirectHop,
+  type AggregateRoundDecisionV1,
+  type AggregateHealthState,
+  type RegionalEvaluationV1,
 } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
 import {
   checkExecutionAssignments,
   checkExecutionResults,
+  checkRegionalEvaluations,
+  checkRegionalExecutions,
+  checkRoundAggregates,
   checkRounds,
   monitors,
   type CheckExecutionAssignmentRecord,
   type CheckExecutionResultRecord,
   type CheckRoundRecord,
+  type RegionalDiagnosticSummary,
 } from './schema.js';
 
 export type CurrentAvailability = 'AVAILABLE' | 'UNAVAILABLE' | 'UNKNOWN';
 
 export interface CurrentCheck {
+  kind: 'SINGLE_LOCATION' | 'MULTI_LOCATION';
   availability: CurrentAvailability;
   responseTimeMs: number | null;
   checkedAt: Date;
   roundId: string;
   trigger: CheckRoundTrigger;
-  location: string;
+  location: string | null;
+  aggregateOutcome: AggregateHealthState | null;
+  coverage: { numerator: number; denominator: number } | null;
+  reachability: { numerator: number; denominator: number } | null;
 }
 
 export interface CheckHistoryListItem {
@@ -34,33 +45,71 @@ export interface CheckHistoryListItem {
   monitorId: string;
   trigger: CheckRoundTrigger;
   status: CheckRoundRecord['status'];
-  assignmentStatus: CheckExecutionAssignmentRecord['status'];
-  location: string;
+  assignmentStatus: CheckExecutionAssignmentRecord['status'] | null;
+  location: string | null;
   createdAt: Date;
-  result: {
-    outcome: CheckExecutionResultRecord['outcome'];
-    stage: CheckExecutionResultRecord['stage'];
-    reason: CheckExecutionResultRecord['reason'];
-    statusCode: number | null;
-    responseTimeMs: number | null;
-    attemptDurationMs: number;
-    assertionOutcome: AssertionEvaluationV1['outcome'];
-    checkedAt: Date;
-  } | null;
+  result:
+    | {
+        kind: 'SINGLE_LOCATION';
+        outcome: CheckExecutionResultRecord['outcome'];
+        stage: CheckExecutionResultRecord['stage'];
+        reason: CheckExecutionResultRecord['reason'];
+        statusCode: number | null;
+        responseTimeMs: number | null;
+        attemptDurationMs: number;
+        assertionOutcome: AssertionEvaluationV1['outcome'];
+        checkedAt: Date;
+      }
+    | {
+        kind: 'MULTI_LOCATION';
+        outcome: AggregateHealthState;
+        counts: AggregateRoundDecisionV1['counts'];
+        coverage: AggregateRoundDecisionV1['coverage'];
+        reachability: AggregateRoundDecisionV1['reachability'];
+        finalizedAt: Date;
+      }
+    | null;
 }
 
 export interface CheckHistoryDetail extends Omit<CheckHistoryListItem, 'result'> {
-  result: {
-    outcome: CheckExecutionResultRecord['outcome'];
-    stage: CheckExecutionResultRecord['stage'];
-    reason: CheckExecutionResultRecord['reason'];
-    statusCode: number | null;
-    responseTimeMs: number | null;
-    attemptDurationMs: number;
-    redirects: HttpRedirectHop[];
-    assertionEvaluation: AssertionEvaluationV1;
-    checkedAt: Date;
-  } | null;
+  result:
+    | {
+        kind: 'SINGLE_LOCATION';
+        outcome: CheckExecutionResultRecord['outcome'];
+        stage: CheckExecutionResultRecord['stage'];
+        reason: CheckExecutionResultRecord['reason'];
+        statusCode: number | null;
+        responseTimeMs: number | null;
+        attemptDurationMs: number;
+        redirects: HttpRedirectHop[];
+        assertionEvaluation: AssertionEvaluationV1;
+        checkedAt: Date;
+      }
+    | {
+        kind: 'MULTI_LOCATION';
+        outcome: AggregateHealthState;
+        counts: AggregateRoundDecisionV1['counts'];
+        coverage: AggregateRoundDecisionV1['coverage'];
+        reachability: AggregateRoundDecisionV1['reachability'];
+        finalizedAt: Date;
+        regions: RegionalHistoryDetail[];
+      }
+    | null;
+}
+
+export interface RegionalHistoryDetail {
+  location: string;
+  phase: RegionalEvaluationV1['phase'];
+  outcome: 'PASS' | 'CONFIRMED_FAIL' | 'UNKNOWN' | null;
+  terminalReason: string | null;
+  executions: Array<{
+    id: string;
+    role: 'PRIMARY' | 'CONFIRMATION';
+    agentId: string;
+    observation: unknown;
+    diagnosticSummary: RegionalDiagnosticSummary | null;
+    acceptedAt: Date;
+  }>;
 }
 
 export interface CheckHistoryPage {
@@ -113,50 +162,7 @@ export class CheckHistoryRepository {
         responseTimeMs: checkExecutionResults.responseTimeMs,
         checkedAt: checkExecutionResults.checkedAt,
         location: checkExecutionAssignments.location,
-      })
-      .from(checkRounds)
-      .innerJoin(
-        checkExecutionAssignments,
-        and(
-          eq(checkExecutionAssignments.organizationId, checkRounds.organizationId),
-          eq(checkExecutionAssignments.roundId, checkRounds.id),
-        ),
-      )
-      .innerJoin(
-        checkExecutionResults,
-        and(
-          eq(checkExecutionResults.organizationId, checkRounds.organizationId),
-          eq(checkExecutionResults.roundId, checkRounds.id),
-          eq(checkExecutionResults.assignmentId, checkExecutionAssignments.id),
-        ),
-      )
-      .where(eq(checkRounds.organizationId, organizationId))
-      .orderBy(asc(checkRounds.monitorId), desc(checkRounds.createdAt), desc(checkRounds.id));
-
-    return new Map(
-      rows.map((row) => [
-        row.monitorId,
-        {
-          availability: availabilityFor(row.outcome),
-          responseTimeMs: row.responseTimeMs,
-          checkedAt: row.checkedAt,
-          roundId: row.roundId,
-          trigger: row.trigger,
-          location: row.location,
-        },
-      ]),
-    );
-  }
-
-  async currentForMonitor(organizationId: string, monitorId: string): Promise<CurrentCheck | null> {
-    const [row] = await this.db
-      .select({
-        roundId: checkRounds.id,
-        trigger: checkRounds.trigger,
-        outcome: checkExecutionResults.outcome,
-        responseTimeMs: checkExecutionResults.responseTimeMs,
-        checkedAt: checkExecutionResults.checkedAt,
-        location: checkExecutionAssignments.location,
+        createdAt: checkRounds.createdAt,
       })
       .from(checkRounds)
       .innerJoin(
@@ -175,21 +181,76 @@ export class CheckHistoryRepository {
         ),
       )
       .where(
-        and(eq(checkRounds.organizationId, organizationId), eq(checkRounds.monitorId, monitorId)),
+        and(
+          eq(checkRounds.organizationId, organizationId),
+          sql`not exists (
+            select 1 from ${checkRoundAggregates}
+            where ${checkRoundAggregates.organizationId} = ${checkRounds.organizationId}
+              and ${checkRoundAggregates.roundId} = ${checkRounds.id}
+          )`,
+        ),
       )
-      .orderBy(desc(checkRounds.createdAt), desc(checkRounds.id))
-      .limit(1);
+      .orderBy(asc(checkRounds.monitorId), desc(checkRounds.createdAt), desc(checkRounds.id));
 
-    return row
-      ? {
-          availability: availabilityFor(row.outcome),
-          responseTimeMs: row.responseTimeMs,
-          checkedAt: row.checkedAt,
-          roundId: row.roundId,
-          trigger: row.trigger,
-          location: row.location,
-        }
-      : null;
+    const projections = new Map<string, CurrentCheck>();
+    const newestRound = new Map<string, { createdAt: Date; roundId: string }>();
+    for (const row of rows) {
+      projections.set(row.monitorId, {
+        kind: 'SINGLE_LOCATION',
+        availability: availabilityFor(row.outcome),
+        responseTimeMs: row.responseTimeMs,
+        checkedAt: row.checkedAt,
+        roundId: row.roundId,
+        trigger: row.trigger,
+        location: row.location,
+        aggregateOutcome: null,
+        coverage: null,
+        reachability: null,
+      });
+      newestRound.set(row.monitorId, { createdAt: row.createdAt, roundId: row.roundId });
+    }
+    const aggregates = await this.db
+      .selectDistinctOn([checkRounds.monitorId], {
+        monitorId: checkRounds.monitorId,
+        roundId: checkRounds.id,
+        trigger: checkRounds.trigger,
+        createdAt: checkRounds.createdAt,
+        finalizedAt: checkRoundAggregates.finalizedAt,
+        outcome: checkRoundAggregates.outcome,
+        aggregate: checkRoundAggregates.aggregate,
+      })
+      .from(checkRoundAggregates)
+      .innerJoin(
+        checkRounds,
+        and(
+          eq(checkRounds.organizationId, checkRoundAggregates.organizationId),
+          eq(checkRounds.id, checkRoundAggregates.roundId),
+        ),
+      )
+      .where(eq(checkRoundAggregates.organizationId, organizationId))
+      .orderBy(asc(checkRounds.monitorId), desc(checkRounds.createdAt), desc(checkRounds.id));
+    for (const row of aggregates) {
+      const newest = newestRound.get(row.monitorId);
+      if (newest && compareRoundOrder(newest, row) >= 0) continue;
+      projections.set(row.monitorId, {
+        kind: 'MULTI_LOCATION',
+        availability: aggregateAvailabilityFor(row.outcome as AggregateHealthState),
+        responseTimeMs: null,
+        checkedAt: row.finalizedAt,
+        roundId: row.roundId,
+        trigger: row.trigger,
+        location: null,
+        aggregateOutcome: row.outcome as AggregateHealthState,
+        coverage: row.aggregate.coverage,
+        reachability: row.aggregate.reachability,
+      });
+      newestRound.set(row.monitorId, { createdAt: row.createdAt, roundId: row.roundId });
+    }
+    return projections;
+  }
+
+  async currentForMonitor(organizationId: string, monitorId: string): Promise<CurrentCheck | null> {
+    return (await this.currentForOrganization(organizationId)).get(monitorId) ?? null;
   }
 
   async listForMonitor(
@@ -202,23 +263,14 @@ export class CheckHistoryRepository {
     const cursorDate = cursor ? new Date(cursor.createdAt) : undefined;
 
     const rows = await this.db
-      .select(historySelection)
+      .select({
+        id: checkRounds.id,
+        monitorId: checkRounds.monitorId,
+        trigger: checkRounds.trigger,
+        status: checkRounds.status,
+        createdAt: checkRounds.createdAt,
+      })
       .from(checkRounds)
-      .innerJoin(
-        checkExecutionAssignments,
-        and(
-          eq(checkExecutionAssignments.organizationId, checkRounds.organizationId),
-          eq(checkExecutionAssignments.roundId, checkRounds.id),
-        ),
-      )
-      .leftJoin(
-        checkExecutionResults,
-        and(
-          eq(checkExecutionResults.organizationId, checkRounds.organizationId),
-          eq(checkExecutionResults.roundId, checkRounds.id),
-          eq(checkExecutionResults.assignmentId, checkExecutionAssignments.id),
-        ),
-      )
       .where(
         and(
           eq(checkRounds.organizationId, organizationId),
@@ -237,7 +289,67 @@ export class CheckHistoryRepository {
 
     const hasNextPage = rows.length > query.limit;
     const pageRows = hasNextPage ? rows.slice(0, query.limit) : rows;
-    const items = pageRows.map(toListItem);
+    const roundIds = pageRows.map(({ id }) => id);
+    const [singleRows, aggregateRows] =
+      roundIds.length === 0
+        ? [[], []]
+        : await Promise.all([
+            this.db
+              .select(historySelection)
+              .from(checkRounds)
+              .innerJoin(
+                checkExecutionAssignments,
+                and(
+                  eq(checkExecutionAssignments.organizationId, checkRounds.organizationId),
+                  eq(checkExecutionAssignments.roundId, checkRounds.id),
+                ),
+              )
+              .leftJoin(
+                checkExecutionResults,
+                and(
+                  eq(checkExecutionResults.organizationId, checkRounds.organizationId),
+                  eq(checkExecutionResults.roundId, checkRounds.id),
+                  eq(checkExecutionResults.assignmentId, checkExecutionAssignments.id),
+                ),
+              )
+              .where(inArray(checkRounds.id, roundIds))
+              .orderBy(asc(checkExecutionAssignments.location)),
+            this.db
+              .select()
+              .from(checkRoundAggregates)
+              .where(
+                and(
+                  eq(checkRoundAggregates.organizationId, organizationId),
+                  inArray(checkRoundAggregates.roundId, roundIds),
+                ),
+              ),
+          ]);
+    const singleByRound = new Map<string, HistoryRow>();
+    for (const row of singleRows) if (!singleByRound.has(row.id)) singleByRound.set(row.id, row);
+    const aggregateByRound = new Map(aggregateRows.map((row) => [row.roundId, row]));
+    const items = pageRows.map((round) => {
+      const aggregate = aggregateByRound.get(round.id);
+      if (aggregate) {
+        return {
+          ...round,
+          assignmentStatus: 'COMPLETED' as const,
+          location: null,
+          result: {
+            kind: 'MULTI_LOCATION' as const,
+            outcome: aggregate.outcome as AggregateHealthState,
+            counts: aggregate.aggregate.counts,
+            coverage: aggregate.aggregate.coverage,
+            reachability: aggregate.aggregate.reachability,
+            finalizedAt: aggregate.finalizedAt,
+          },
+        };
+      }
+      const single = singleByRound.get(round.id);
+      if (!single) {
+        return { ...round, assignmentStatus: null, location: null, result: null };
+      }
+      return toListItem(single);
+    });
     const last = pageRows.at(-1);
     return {
       items,
@@ -257,6 +369,86 @@ export class CheckHistoryRepository {
     monitorId: string,
     roundId: string,
   ): Promise<CheckHistoryDetail | null> {
+    const [round] = await this.db
+      .select()
+      .from(checkRounds)
+      .where(
+        and(
+          eq(checkRounds.organizationId, organizationId),
+          eq(checkRounds.monitorId, monitorId),
+          eq(checkRounds.id, roundId),
+        ),
+      )
+      .limit(1);
+
+    if (!round) return null;
+    const [aggregate] = await this.db
+      .select()
+      .from(checkRoundAggregates)
+      .where(
+        and(
+          eq(checkRoundAggregates.organizationId, organizationId),
+          eq(checkRoundAggregates.roundId, roundId),
+        ),
+      )
+      .limit(1);
+    if (aggregate) {
+      const [evaluations, executions] = await Promise.all([
+        this.db
+          .select()
+          .from(checkRegionalEvaluations)
+          .where(
+            and(
+              eq(checkRegionalEvaluations.organizationId, organizationId),
+              eq(checkRegionalEvaluations.roundId, roundId),
+            ),
+          )
+          .orderBy(asc(checkRegionalEvaluations.location)),
+        this.db
+          .select()
+          .from(checkRegionalExecutions)
+          .where(
+            and(
+              eq(checkRegionalExecutions.organizationId, organizationId),
+              eq(checkRegionalExecutions.roundId, roundId),
+            ),
+          )
+          .orderBy(asc(checkRegionalExecutions.location), asc(checkRegionalExecutions.acceptedAt)),
+      ]);
+      return {
+        id: round.id,
+        monitorId: round.monitorId,
+        trigger: round.trigger,
+        status: round.status,
+        assignmentStatus: 'COMPLETED',
+        location: null,
+        createdAt: round.createdAt,
+        result: {
+          kind: 'MULTI_LOCATION',
+          outcome: aggregate.outcome as AggregateHealthState,
+          counts: aggregate.aggregate.counts,
+          coverage: aggregate.aggregate.coverage,
+          reachability: aggregate.aggregate.reachability,
+          finalizedAt: aggregate.finalizedAt,
+          regions: evaluations.map((evaluation) => ({
+            location: evaluation.location,
+            phase: evaluation.phase as RegionalEvaluationV1['phase'],
+            outcome: evaluation.outcome as RegionalHistoryDetail['outcome'],
+            terminalReason: evaluation.terminalReason,
+            executions: executions
+              .filter((execution) => execution.location === evaluation.location)
+              .map((execution) => ({
+                id: execution.id,
+                role: execution.role as 'PRIMARY' | 'CONFIRMATION',
+                agentId: execution.agentId,
+                observation: execution.observation,
+                diagnosticSummary: parseRegionalDiagnosticSummary(execution.diagnosticSummary),
+                acceptedAt: execution.acceptedAt,
+              })),
+          })),
+        },
+      };
+    }
     const [row] = await this.db
       .select(historySelection)
       .from(checkRounds)
@@ -283,7 +475,6 @@ export class CheckHistoryRepository {
         ),
       )
       .limit(1);
-
     if (!row) return null;
     const assertionEvaluation = row.resultId
       ? parseStoredAssertionEvaluation(row.assertionEvaluation)
@@ -298,6 +489,7 @@ export class CheckHistoryRepository {
       createdAt: row.createdAt,
       result: row.resultId
         ? {
+            kind: 'SINGLE_LOCATION',
             outcome: required(row.outcome),
             stage: required(row.stage),
             reason: required(row.reason),
@@ -320,6 +512,14 @@ export class CheckHistoryRepository {
       .limit(1);
     if (!monitor) throw new CheckHistoryMonitorNotFoundError();
   }
+}
+
+function compareRoundOrder(
+  left: { createdAt: Date; roundId: string },
+  right: { createdAt: Date; roundId: string },
+): number {
+  const timeDifference = left.createdAt.getTime() - right.createdAt.getTime();
+  return timeDifference === 0 ? left.roundId.localeCompare(right.roundId) : timeDifference;
 }
 
 const historySelection = {
@@ -356,6 +556,7 @@ function toListItem(row: HistoryRow): CheckHistoryListItem {
     createdAt: row.createdAt,
     result: row.resultId
       ? {
+          kind: 'SINGLE_LOCATION',
           outcome: required(row.outcome),
           stage: required(row.stage),
           reason: required(row.reason),
@@ -450,6 +651,51 @@ function availabilityFor(outcome: CheckExecutionResultRecord['outcome']): Curren
   if (outcome === 'PASS') return 'AVAILABLE';
   if (outcome === 'FAIL') return 'UNAVAILABLE';
   return 'UNKNOWN';
+}
+
+function aggregateAvailabilityFor(outcome: AggregateHealthState): CurrentAvailability {
+  if (outcome === 'UP') return 'AVAILABLE';
+  if (outcome === 'UNKNOWN') return 'UNKNOWN';
+  return 'UNAVAILABLE';
+}
+
+function parseRegionalDiagnosticSummary(value: unknown): RegionalDiagnosticSummary | null {
+  if (value === null) return null;
+  if (!isRecord(value)) throw new Error('Stored regional diagnostic summary is invalid.');
+  const keys = Object.keys(value).sort();
+  const expected = [
+    'attemptDurationMs',
+    'checkedAt',
+    'reason',
+    'responseTimeMs',
+    'stage',
+    'statusCode',
+  ];
+  const validStage = ['DNS', 'CONNECT', 'TLS', 'HTTP', 'PROBE'].includes(String(value.stage));
+  const validTime = (candidate: unknown) =>
+    candidate === null ||
+    (typeof candidate === 'number' && Number.isFinite(candidate) && candidate >= 0);
+  if (
+    keys.length !== expected.length ||
+    keys.some((key, index) => key !== expected[index]) ||
+    !validStage ||
+    typeof value.reason !== 'string' ||
+    value.reason.length < 1 ||
+    value.reason.length > 120 ||
+    (value.statusCode !== null &&
+      (!Number.isSafeInteger(value.statusCode) ||
+        Number(value.statusCode) < 100 ||
+        Number(value.statusCode) > 599)) ||
+    !validTime(value.responseTimeMs) ||
+    !validTime(value.attemptDurationMs) ||
+    typeof value.attemptDurationMs !== 'number' ||
+    typeof value.checkedAt !== 'string' ||
+    Number.isNaN(Date.parse(value.checkedAt)) ||
+    new Date(value.checkedAt).toISOString() !== value.checkedAt
+  ) {
+    throw new Error('Stored regional diagnostic summary is invalid.');
+  }
+  return value as unknown as RegionalDiagnosticSummary;
 }
 
 function required<T>(value: T | null): T {

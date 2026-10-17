@@ -26,6 +26,7 @@ import {
   incidents,
   monitorIncidentState,
   probeExecutionAttempts,
+  type RegionalDiagnosticSummary,
 } from './schema.js';
 
 type Transaction = Parameters<Parameters<WatchrailDatabase['transaction']>[0]>[0];
@@ -44,6 +45,7 @@ export interface RegionalExecutionInput {
   agentId: string;
   role: 'PRIMARY' | 'CONFIRMATION';
   observation: ProbeObservationV1;
+  diagnosticSummary?: RegionalDiagnosticSummary;
   resultDigest?: string;
 }
 
@@ -169,6 +171,7 @@ export async function recordRegionalExecution(
     agentId: input.agentId,
     role: input.role,
     observation: input.observation,
+    diagnosticSummary: input.diagnosticSummary,
     resultDigest: input.resultDigest,
     acceptedAt,
   });

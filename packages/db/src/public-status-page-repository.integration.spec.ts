@@ -161,6 +161,26 @@ describe('PublicStatusPageRepository', () => {
     });
   });
 
+  it('projects degraded incident severity as a partial rather than major component outage', async () => {
+    await createPage(true);
+    await completeScheduled(webMonitorId, healthy());
+    await completeScheduled(apiMonitorId, unhealthy());
+    await completeScheduled(apiMonitorId, unhealthy());
+    await completeScheduled(apiMonitorId, unhealthy());
+    await connection.db
+      .update(incidents)
+      .set({ severity: 'DEGRADED' })
+      .where(eq(incidents.monitorId, apiMonitorId));
+
+    const projection = await new PublicStatusPageRepository(connection.db).findPublishedBySlug(
+      slug,
+    );
+    expect(projection).toMatchObject({
+      status: 'PARTIAL_OUTAGE',
+      components: [{ status: 'PARTIAL_OUTAGE' }, { status: 'OPERATIONAL' }],
+    });
+  });
+
   async function createPage(published: boolean) {
     return new StatusPageRepository(connection.db).create(organizationId, {
       name: 'Acme Status',

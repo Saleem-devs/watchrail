@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 
+const multiLocationUiEnabled = process.env.NEXT_PUBLIC_MULTI_LOCATION_EXECUTION_ENABLED === 'true';
+
 interface Monitor {
   id: string;
   name: string;
@@ -41,14 +43,23 @@ interface IncidentState {
     startedByRoundId: string;
     openedByRoundId: string;
   } | null;
+  multiLocationIncident?: {
+    severity: 'DEGRADED' | 'DOWN';
+    healthyRecoveryStreak: 0 | 1;
+    healthyRecoveryThreshold: 2;
+  } | null;
 }
 
 interface CurrentCheck {
+  kind: 'SINGLE_LOCATION' | 'MULTI_LOCATION';
   availability: 'AVAILABLE' | 'UNAVAILABLE' | 'UNKNOWN';
   responseTimeMs: number | null;
   checkedAt: string;
   roundId: string;
   trigger: 'MANUAL' | 'SCHEDULED';
+  aggregateOutcome: 'UP' | 'DEGRADED' | 'DOWN' | 'UNKNOWN' | null;
+  coverage: { numerator: number; denominator: number } | null;
+  reachability: { numerator: number; denominator: number } | null;
 }
 
 interface FieldErrors {
@@ -67,25 +78,60 @@ interface ManualRound {
   monitorId: string;
   trigger: 'MANUAL' | 'SCHEDULED';
   status: 'PENDING' | 'COMPLETED';
-  assignmentStatus: 'PENDING' | 'RUNNING' | 'COMPLETED';
+  assignmentStatus: 'PENDING' | 'RUNNING' | 'COMPLETED' | null;
   createdAt: string;
-  result: {
-    outcome: 'PASS' | 'FAIL' | 'UNKNOWN';
-    stage: 'DNS' | 'CONNECT' | 'TLS' | 'HTTP' | 'PROBE';
-    reason: string;
-    statusCode: number | null;
-    responseTimeMs: number | null;
-    attemptDurationMs: number;
-    redirects: Array<{
-      sequence: number;
-      statusCode: 301 | 302 | 303 | 307 | 308;
-      source: { targetId: number; origin: string };
-      destination: { targetId: number; origin: string } | null;
-      responseTimeMs: number;
-      headers: 'PRESERVED' | 'STRIPPED' | 'NOT_SENT';
-    }>;
-    checkedAt: string;
-  } | null;
+  result:
+    | {
+        kind?: 'SINGLE_LOCATION';
+        outcome: 'PASS' | 'FAIL' | 'UNKNOWN';
+        stage: 'DNS' | 'CONNECT' | 'TLS' | 'HTTP' | 'PROBE';
+        reason: string;
+        statusCode: number | null;
+        responseTimeMs: number | null;
+        attemptDurationMs: number;
+        redirects: Array<{
+          sequence: number;
+          statusCode: 301 | 302 | 303 | 307 | 308;
+          source: { targetId: number; origin: string };
+          destination: { targetId: number; origin: string } | null;
+          responseTimeMs: number;
+          headers: 'PRESERVED' | 'STRIPPED' | 'NOT_SENT';
+        }>;
+        checkedAt: string;
+      }
+    | {
+        kind: 'MULTI_LOCATION';
+        outcome: 'UP' | 'DEGRADED' | 'DOWN' | 'UNKNOWN';
+        counts: {
+          selected: number;
+          pass: number;
+          confirmedFail: number;
+          unknown: number;
+          conclusive: number;
+        };
+        coverage: { numerator: number; denominator: number };
+        reachability: { numerator: number; denominator: number } | null;
+        finalizedAt: string;
+        regions?: Array<{
+          location: string;
+          phase: string;
+          outcome: 'PASS' | 'CONFIRMED_FAIL' | 'UNKNOWN' | null;
+          terminalReason: string | null;
+          executions: Array<{
+            id: string;
+            role: 'PRIMARY' | 'CONFIRMATION';
+            diagnosticSummary: {
+              stage: string;
+              reason: string;
+              statusCode: number | null;
+              responseTimeMs: number | null;
+              attemptDurationMs: number;
+              checkedAt: string;
+            } | null;
+          }>;
+        }>;
+      }
+    | null;
 }
 
 interface HistoryPage {
@@ -123,6 +169,13 @@ export function Dashboard() {
   const [history, setHistory] = useState<Record<string, HistoryPage>>({});
   const [visibleHistoryIds, setVisibleHistoryIds] = useState<Set<string>>(() => new Set());
   const [loadingHistoryIds, setLoadingHistoryIds] = useState<Set<string>>(() => new Set());
+  const [historyDetails, setHistoryDetails] = useState<Record<string, ManualRound>>({});
+  const [expandedHistoryRoundIds, setExpandedHistoryRoundIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [loadingHistoryRoundIds, setLoadingHistoryRoundIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [incidentHistory, setIncidentHistory] = useState<Record<string, IncidentHistoryPage>>({});
   const [visibleIncidentIds, setVisibleIncidentIds] = useState<Set<string>>(() => new Set());
   const [loadingIncidentHistoryIds, setLoadingIncidentHistoryIds] = useState<Set<string>>(
@@ -304,15 +357,19 @@ export function Dashboard() {
     event: FormEvent<HTMLFormElement>,
   ): Promise<void> {
     event.preventDefault();
-    const rawLocation = new FormData(event.currentTarget).get('location');
-    if (typeof rawLocation !== 'string') return;
-    const location = rawLocation;
+    const locations = new FormData(event.currentTarget)
+      .getAll('location')
+      .filter((value): value is string => typeof value === 'string');
+    if (locations.length === 0 || (locations.includes('local') && locations.length > 1)) {
+      setPageError('Select local only, or one or more remote locations.');
+      return;
+    }
     setUpdatingSettingsIds((current) => new Set(current).add(monitorId));
     try {
       const response = await fetch(`/api/monitors/${monitorId}/locations`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ locations: [location] }),
+        body: JSON.stringify({ locations }),
       });
       const body = (await response.json()) as { data?: Monitor } & ApiError;
       if (!response.ok || !body.data) throw new Error('Could not update execution location.');
@@ -430,6 +487,39 @@ export function Dashboard() {
       setLoadingHistoryIds((current) => {
         const next = new Set(current);
         next.delete(monitorId);
+        return next;
+      });
+    }
+  }
+
+  async function toggleHistoryRound(monitorId: string, roundId: string): Promise<void> {
+    if (expandedHistoryRoundIds.has(roundId)) {
+      setExpandedHistoryRoundIds((current) => {
+        const next = new Set(current);
+        next.delete(roundId);
+        return next;
+      });
+      return;
+    }
+    setExpandedHistoryRoundIds((current) => new Set(current).add(roundId));
+    if (historyDetails[roundId] || loadingHistoryRoundIds.has(roundId)) return;
+    setLoadingHistoryRoundIds((current) => new Set(current).add(roundId));
+    try {
+      const response = await fetch(`/api/monitors/${monitorId}/check-rounds/${roundId}`, {
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) throw new Error('Could not load regional evidence.');
+      const body = (await response.json()) as { data: ManualRound };
+      setHistoryDetails((current) => ({ ...current, [roundId]: body.data }));
+    } catch {
+      setRunErrors((current) => ({
+        ...current,
+        [monitorId]: 'Watchrail could not load this round’s regional evidence.',
+      }));
+    } finally {
+      setLoadingHistoryRoundIds((current) => {
+        const next = new Set(current);
+        next.delete(roundId);
         return next;
       });
     }
@@ -678,15 +768,39 @@ export function Dashboard() {
                       <span>{monitor.locations.join(', ')}</span>
                       <span>{monitor.lifecycleState.toLowerCase()}</span>
                     </div>
+                    {monitor.currentCheck?.kind === 'MULTI_LOCATION' ? (
+                      <dl
+                        className="uptime-summary"
+                        aria-label={`Latest regional aggregate for ${monitor.name}`}
+                      >
+                        <div>
+                          <dt>Aggregate</dt>
+                          <dd>{monitor.currentCheck.aggregateOutcome}</dd>
+                        </div>
+                        <div>
+                          <dt>Evidence coverage</dt>
+                          <dd>{formatRatio(monitor.currentCheck.coverage)}</dd>
+                        </div>
+                        <div>
+                          <dt>Reachability</dt>
+                          <dd>{formatRatio(monitor.currentCheck.reachability)}</dd>
+                        </div>
+                      </dl>
+                    ) : null}
                     <form
                       className="status-policy-form"
                       onSubmit={(event) => void updateLocation(monitor.id, event)}
                     >
                       <label>
-                        Execution location
+                        Execution {multiLocationUiEnabled ? 'locations' : 'location'}
                         <select
                           name="location"
-                          defaultValue={monitor.locations[0] ?? 'local'}
+                          multiple={multiLocationUiEnabled}
+                          defaultValue={
+                            multiLocationUiEnabled
+                              ? monitor.locations
+                              : (monitor.locations[0] ?? 'local')
+                          }
                           onFocus={() => void loadProbeLocations()}
                         >
                           <option value="local">Local</option>
@@ -827,6 +941,10 @@ export function Dashboard() {
                         page={history[monitor.id]}
                         loading={loadingHistoryIds.has(monitor.id)}
                         onLoadMore={() => void loadHistory(monitor.id, true)}
+                        details={historyDetails}
+                        expandedRoundIds={expandedHistoryRoundIds}
+                        loadingRoundIds={loadingHistoryRoundIds}
+                        onToggleRound={(roundId) => void toggleHistoryRound(monitor.id, roundId)}
                       />
                     ) : null}
                   </div>
@@ -885,6 +1003,9 @@ function ManualDiagnostic({
   }
 
   const { result } = round;
+  if (result.kind === 'MULTI_LOCATION') {
+    return <MultiLocationDiagnostic result={result} label="Latest manual diagnostic" />;
+  }
   return (
     <div className="manual-diagnostic" aria-live="polite">
       <div className="diagnostic-heading">
@@ -936,6 +1057,62 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
+function MultiLocationDiagnostic({
+  result,
+  label,
+}: {
+  result: Extract<NonNullable<ManualRound['result']>, { kind: 'MULTI_LOCATION' }>;
+  label: string;
+}) {
+  return (
+    <div className="manual-diagnostic" aria-live="polite">
+      <div className="diagnostic-heading">
+        <span className="diagnostic-label">{label}</span>
+        <strong className={`diagnostic-outcome diagnostic-${result.outcome.toLowerCase()}`}>
+          {result.outcome}
+        </strong>
+      </div>
+      <dl className="diagnostic-metrics">
+        <Metric label="Evidence coverage" value={formatRatio(result.coverage)} />
+        <Metric label="Reachability" value={formatRatio(result.reachability)} />
+        <Metric label="Regions" value={String(result.counts.selected)} />
+        <Metric label="Finalized" value={new Date(result.finalizedAt).toLocaleTimeString()} />
+      </dl>
+      {result.regions ? (
+        <ul aria-label="Regional evidence">
+          {result.regions.map((region) => (
+            <li key={region.location}>
+              <strong>{region.location}</strong> —{' '}
+              {region.outcome === 'CONFIRMED_FAIL'
+                ? 'Confirmed failure'
+                : region.outcome === 'PASS'
+                  ? 'Pass'
+                  : region.outcome === 'UNKNOWN'
+                    ? 'Unknown'
+                    : 'Pending'}
+              {region.executions.map((execution) =>
+                execution.diagnosticSummary ? (
+                  <small key={execution.id}>
+                    {' '}
+                    · {execution.role.toLowerCase()} ·{' '}
+                    {execution.diagnosticSummary.statusCode ?? 'no HTTP'} ·{' '}
+                    {formatMilliseconds(execution.diagnosticSummary.responseTimeMs)}
+                  </small>
+                ) : null,
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+function formatRatio(value: { numerator: number; denominator: number } | null): string {
+  if (!value || value.denominator === 0) return '—';
+  return `${((value.numerator / value.denominator) * 100).toFixed(1)}%`;
+}
+
 function formatMilliseconds(value: number | null): string {
   return value === null ? '—' : `${Math.round(value)} ms`;
 }
@@ -953,6 +1130,8 @@ function monitorState(check: CurrentCheck | null): 'awaiting' | 'pass' | 'fail' 
 
 function monitorStateLabel(check: CurrentCheck | null): string {
   if (!check) return 'No completed check';
+  if (check.aggregateOutcome)
+    return `Current aggregate health: ${check.aggregateOutcome.toLowerCase()}`;
   return `Current availability: ${check.availability.toLowerCase()}`;
 }
 
@@ -960,26 +1139,67 @@ function CheckHistory({
   page,
   loading,
   onLoadMore,
+  details,
+  expandedRoundIds,
+  loadingRoundIds,
+  onToggleRound,
 }: {
   page: HistoryPage | undefined;
   loading: boolean;
   onLoadMore: () => void;
+  details: Record<string, ManualRound>;
+  expandedRoundIds: Set<string>;
+  loadingRoundIds: Set<string>;
+  onToggleRound: (roundId: string) => void;
 }) {
   if (!page && loading) return <p role="status">Loading check history…</p>;
   if (!page || page.items.length === 0) return <p>No checks recorded yet.</p>;
   return (
     <section aria-label="Check history">
       <ol>
-        {page.items.map((round) => (
-          <li key={round.id}>
-            <strong>{round.trigger}</strong>{' '}
-            {round.result
-              ? `${round.result.outcome} · ${round.result.reason}`
-              : round.assignmentStatus}
-            {' · '}
-            <time dateTime={round.createdAt}>{new Date(round.createdAt).toLocaleString()}</time>
-          </li>
-        ))}
+        {page.items.map((round) => {
+          const regionalResult = round.result?.kind === 'MULTI_LOCATION' ? round.result : null;
+          const singleResult =
+            round.result && round.result.kind !== 'MULTI_LOCATION' ? round.result : null;
+          const isRegional = regionalResult !== null;
+          const isExpanded = expandedRoundIds.has(round.id);
+          const detail = details[round.id];
+          return (
+            <li key={round.id}>
+              <strong>{round.trigger}</strong>{' '}
+              {round.result
+                ? isRegional
+                  ? `${regionalResult.outcome} · ${formatRatio(regionalResult.coverage)}`
+                  : `${singleResult!.outcome} · ${singleResult!.reason}`
+                : round.assignmentStatus}
+              {' · '}
+              <time dateTime={round.createdAt}>{new Date(round.createdAt).toLocaleString()}</time>
+              {isRegional ? (
+                <>
+                  {' '}
+                  <button
+                    className="quiet-button"
+                    type="button"
+                    disabled={loadingRoundIds.has(round.id)}
+                    onClick={() => onToggleRound(round.id)}
+                  >
+                    {loadingRoundIds.has(round.id)
+                      ? 'Loading evidence…'
+                      : isExpanded
+                        ? 'Hide regional evidence'
+                        : 'Show regional evidence'}
+                  </button>
+                  {isExpanded && detail?.result?.kind === 'MULTI_LOCATION' ? (
+                    <MultiLocationDiagnostic
+                      result={detail.result}
+                      label="Historical regional evidence"
+                    />
+                  ) : null}
+                </>
+              ) : null}
+            </li>
+          );
+        })}
       </ol>
       {page.nextCursor ? (
         <button className="quiet-button" type="button" disabled={loading} onClick={onLoadMore}>
@@ -992,6 +1212,20 @@ function CheckHistory({
 
 function IncidentSummary({ state }: { state: IncidentState | undefined }) {
   if (state?.currentIncident) {
+    if (state.multiLocationIncident) {
+      const label =
+        state.multiLocationIncident.severity === 'DOWN' ? 'MAJOR OUTAGE' : 'PARTIAL OUTAGE';
+      return (
+        <p aria-label="Incident state">
+          <strong>Incident: {label}</strong> · Started{' '}
+          {new Date(state.currentIncident.startedAt).toLocaleString()} · detected{' '}
+          {new Date(state.currentIncident.openedAt).toLocaleString()}
+          {state.multiLocationIncident.healthyRecoveryStreak > 0
+            ? ` · Recovery ${state.multiLocationIncident.healthyRecoveryStreak}/${state.multiLocationIncident.healthyRecoveryThreshold} healthy rounds`
+            : ''}
+        </p>
+      );
+    }
     return (
       <p aria-label="Incident state">
         <strong>Incident: OPEN</strong> · Started{' '}

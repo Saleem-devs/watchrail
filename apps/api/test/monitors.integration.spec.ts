@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { Logger, type INestApplication } from '@nestjs/common';
 import { getDrizzleToken } from '@nestjs/drizzle';
@@ -10,6 +11,8 @@ import {
   createDatabaseConnection,
   migrateDatabase,
   MonitorRepository,
+  ManualRoundRepository,
+  MultiLocationRoundFinalizationRepository,
 } from '@watchrail/db';
 import { createMonitor } from '@watchrail/domain';
 import type { WatchrailDatabase } from '@watchrail/db';
@@ -27,6 +30,7 @@ describe('monitor API', () => {
     process.env.NODE_ENV = 'test';
     process.env.DATABASE_URL = container.getConnectionUri();
     process.env.DEV_IDENTITY_ENABLED = 'true';
+    process.env.MULTI_LOCATION_EXECUTION_ENABLED = 'true';
     process.env.HTTP_HEADER_ACTIVE_KEY_ID = 'test';
     process.env.HTTP_HEADER_ENCRYPTION_KEYS = JSON.stringify({
       test: Buffer.alloc(32).toString('base64'),
@@ -123,10 +127,7 @@ describe('monitor API', () => {
       'select locations from monitor_configuration_versions where monitor_id=$1 order by version_number',
       [monitor.body.data.id],
     );
-    expect(versions.rows.map((row) => row.locations)).toEqual([
-      ['local'],
-      [location.body.data.id],
-    ]);
+    expect(versions.rows.map((row) => row.locations)).toEqual([['local'], [location.body.data.id]]);
 
     await request(app.getHttpServer())
       .patch(`/api/probe-locations/${location.body.data.id as string}/status`)
@@ -980,6 +981,83 @@ describe('monitor API', () => {
     expect(withIncident.body.data[0].incidentState).toMatchObject({
       failureStreak: { count: 3, threshold: 3 },
       currentIncident: { id: incidentId, status: 'OPEN' },
+    });
+  });
+
+  it('returns one aggregate history row with regional diagnostic drill-down', async () => {
+    const created = await request(app.getHttpServer())
+      .post('/api/monitors')
+      .send({ name: 'Regional API history', url: 'https://example.com/health' })
+      .expect(201);
+    const monitorId = created.body.data.id as string;
+    const locations = [] as string[];
+    for (const slug of ['regional-api-lagos', 'regional-api-frankfurt']) {
+      const response = await request(app.getHttpServer())
+        .post('/api/probe-locations')
+        .send({ name: slug, slug })
+        .expect(201);
+      locations.push(response.body.data.id as string);
+    }
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/locations`)
+      .send({ locations })
+      .expect(200);
+    const round = await new ManualRoundRepository(database, true).create(
+      '00000000-0000-4000-8000-000000000002',
+      monitorId,
+    );
+    const finalizer = new MultiLocationRoundFinalizationRepository(database);
+    for (const [index, location] of locations.entries()) {
+      const assignment = await database.$client.query<{ id: string }>(
+        'select id from check_execution_assignments where round_id=$1 and location=$2',
+        [round.id, location],
+      );
+      await finalizer.recordExecution({
+        organizationId: '00000000-0000-4000-8000-000000000002',
+        roundId: round.id,
+        assignmentId: assignment.rows[0]!.id,
+        location,
+        executionId: randomUUID(),
+        agentId: `api-agent-${index}`,
+        role: 'PRIMARY',
+        observation: { outcome: 'PASS', reason: 'COMPLETED', assertionOutcome: 'PASS' },
+        diagnosticSummary: {
+          stage: 'HTTP',
+          reason: 'COMPLETED',
+          statusCode: 200,
+          responseTimeMs: 15,
+          attemptDurationMs: 20,
+          checkedAt: new Date().toISOString(),
+        },
+      });
+    }
+
+    const list = await request(app.getHttpServer())
+      .get(`/api/monitors/${monitorId}/check-rounds`)
+      .expect(200);
+    expect(list.body.data).toHaveLength(1);
+    expect(list.body.data[0]).toMatchObject({
+      id: round.id,
+      result: { kind: 'MULTI_LOCATION', outcome: 'UP', counts: { selected: 2, pass: 2 } },
+    });
+    const detail = await request(app.getHttpServer())
+      .get(`/api/monitors/${monitorId}/check-rounds/${round.id}`)
+      .expect(200);
+    expect(detail.body.data).toMatchObject({
+      result: {
+        kind: 'MULTI_LOCATION',
+        outcome: 'UP',
+        regions: [
+          { outcome: 'PASS', executions: [{ diagnosticSummary: { statusCode: 200 } }] },
+          { outcome: 'PASS', executions: [{ diagnosticSummary: { statusCode: 200 } }] },
+        ],
+      },
+    });
+    const monitors = await request(app.getHttpServer()).get('/api/monitors').expect(200);
+    expect(monitors.body.data[0].currentCheck).toMatchObject({
+      kind: 'MULTI_LOCATION',
+      aggregateOutcome: 'UP',
+      coverage: { numerator: 2, denominator: 2 },
     });
   });
 

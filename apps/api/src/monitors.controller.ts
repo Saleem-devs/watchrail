@@ -60,7 +60,11 @@ interface MonitorResponse {
     checkedAt: string;
     roundId: string;
     trigger: CurrentCheck['trigger'];
-    location: string;
+    kind: CurrentCheck['kind'];
+    location: string | null;
+    aggregateOutcome: CurrentCheck['aggregateOutcome'];
+    coverage: CurrentCheck['coverage'];
+    reachability: CurrentCheck['reachability'];
   } | null;
   incidentState: ReturnType<typeof toIncidentStateResponse>;
   uptime: UptimeMetrics;
@@ -71,20 +75,44 @@ interface CheckRoundResponse {
   monitorId: string;
   trigger: 'MANUAL' | 'SCHEDULED';
   status: string;
-  assignmentStatus: string;
+  assignmentStatus: string | null;
   location: string | null;
   createdAt: string;
-  result: {
-    outcome: string;
-    stage: string;
-    reason: string;
-    statusCode: number | null;
-    responseTimeMs: number | null;
-    attemptDurationMs: number;
-    redirects: HttpRedirectHop[];
-    assertionEvaluation: AssertionEvaluationV1;
-    checkedAt: string;
-  } | null;
+  result:
+    | {
+        outcome: string;
+        stage: string;
+        reason: string;
+        statusCode: number | null;
+        responseTimeMs: number | null;
+        attemptDurationMs: number;
+        redirects: HttpRedirectHop[];
+        assertionEvaluation: AssertionEvaluationV1;
+        checkedAt: string;
+      }
+    | {
+        kind: 'MULTI_LOCATION';
+        outcome: string;
+        counts: unknown;
+        coverage: unknown;
+        reachability: unknown;
+        finalizedAt: string;
+        regions: Array<{
+          location: string;
+          phase: string;
+          outcome: string | null;
+          terminalReason: string | null;
+          executions: Array<{
+            id: string;
+            role: string;
+            agentId: string;
+            observation: unknown;
+            diagnosticSummary: unknown;
+            acceptedAt: string;
+          }>;
+        }>;
+      }
+    | null;
 }
 
 @Controller('monitors')
@@ -339,6 +367,7 @@ function toIncidentStateResponse(state: CurrentIncidentState) {
           openedAt: state.currentIncident.openedAt.toISOString(),
         }
       : null,
+    ...(state.multiLocationIncident ? { multiLocationIncident: state.multiLocationIncident } : {}),
   };
 }
 
@@ -428,10 +457,19 @@ function toCheckRoundResponse(round: CheckHistoryDetail): CheckRoundResponse {
     location: round.location,
     createdAt: round.createdAt.toISOString(),
     result: round.result
-      ? {
-          ...round.result,
-          checkedAt: round.result.checkedAt.toISOString(),
-        }
+      ? round.result.kind === 'SINGLE_LOCATION'
+        ? toSingleLocationDetailResponse(round.result)
+        : {
+            ...round.result,
+            finalizedAt: round.result.finalizedAt.toISOString(),
+            regions: round.result.regions.map((region) => ({
+              ...region,
+              executions: region.executions.map((execution) => ({
+                ...execution,
+                acceptedAt: execution.acceptedAt.toISOString(),
+              })),
+            })),
+          }
       : null,
   };
 }
@@ -441,7 +479,40 @@ function toHistoryListItem(round: CheckHistoryListItem) {
     ...round,
     createdAt: round.createdAt.toISOString(),
     result: round.result
-      ? { ...round.result, checkedAt: round.result.checkedAt.toISOString() }
+      ? round.result.kind === 'SINGLE_LOCATION'
+        ? toSingleLocationListResponse(round.result)
+        : { ...round.result, finalizedAt: round.result.finalizedAt.toISOString() }
       : null,
+  };
+}
+
+function toSingleLocationDetailResponse(
+  result: Extract<NonNullable<CheckHistoryDetail['result']>, { kind: 'SINGLE_LOCATION' }>,
+) {
+  return {
+    outcome: result.outcome,
+    stage: result.stage,
+    reason: result.reason,
+    statusCode: result.statusCode,
+    responseTimeMs: result.responseTimeMs,
+    attemptDurationMs: result.attemptDurationMs,
+    redirects: result.redirects,
+    assertionEvaluation: result.assertionEvaluation,
+    checkedAt: result.checkedAt.toISOString(),
+  };
+}
+
+function toSingleLocationListResponse(
+  result: Extract<NonNullable<CheckHistoryListItem['result']>, { kind: 'SINGLE_LOCATION' }>,
+) {
+  return {
+    outcome: result.outcome,
+    stage: result.stage,
+    reason: result.reason,
+    statusCode: result.statusCode,
+    responseTimeMs: result.responseTimeMs,
+    attemptDurationMs: result.attemptDurationMs,
+    assertionOutcome: result.assertionOutcome,
+    checkedAt: result.checkedAt.toISOString(),
   };
 }

@@ -15,8 +15,9 @@ import { createDatabaseConnection, type DatabaseConnection } from './client.js';
 import { ManualRoundRepository } from './manual-round-repository.js';
 import { migrateDatabase } from './migration.js';
 import { MonitorRepository } from './monitor-repository.js';
+import { MultiLocationRoundFinalizationRepository } from './multi-location-finalization-repository.js';
 import { ScheduledRoundRepository } from './scheduled-round-repository.js';
-import { checkExecutionResults, checkRounds, monitors } from './schema.js';
+import { checkExecutionResults, checkRounds, monitors, probeLocations } from './schema.js';
 
 const organizationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const otherOrganizationId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -144,6 +145,154 @@ describe('CheckHistoryRepository', () => {
     await expect(
       history.findForMonitor(otherOrganizationId, monitor.id, round.id),
     ).resolves.toBeNull();
+  });
+
+  it('paginates multi-location history by logical round and exposes aggregate regional evidence', async () => {
+    const monitor = await createMonitorRecord(organizationId, 'Regional history');
+    const locations = await connection.db
+      .insert(probeLocations)
+      .values([
+        { organizationId, name: 'Lagos', slug: 'history-lagos' },
+        { organizationId, name: 'Frankfurt', slug: 'history-frankfurt' },
+      ])
+      .returning();
+    await new MonitorRepository(connection.db).updateLocations(
+      organizationId,
+      monitor.id,
+      locations.map(({ id }) => id),
+    );
+    const round = await new ManualRoundRepository(connection.db, true).create(
+      organizationId,
+      monitor.id,
+    );
+    const finalizer = new MultiLocationRoundFinalizationRepository(connection.db);
+    for (const [index, location] of locations.entries()) {
+      const assignment = await connection.pool.query<{ id: string }>(
+        'select id from check_execution_assignments where round_id=$1 and location=$2',
+        [round.id, location.id],
+      );
+      await finalizer.recordExecution({
+        organizationId,
+        roundId: round.id,
+        assignmentId: assignment.rows[0]!.id,
+        location: location.id,
+        executionId: randomUUID(),
+        agentId: `agent-${index}`,
+        role: 'PRIMARY',
+        observation: { outcome: 'PASS', reason: 'COMPLETED', assertionOutcome: 'PASS' },
+        diagnosticSummary: {
+          stage: 'HTTP',
+          reason: 'COMPLETED',
+          statusCode: 200,
+          responseTimeMs: 10 + index,
+          attemptDurationMs: 20 + index,
+          checkedAt: new Date().toISOString(),
+        },
+      });
+    }
+
+    const page = await history.listForMonitor(organizationId, monitor.id, { limit: 25 });
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]).toMatchObject({
+      id: round.id,
+      result: {
+        kind: 'MULTI_LOCATION',
+        outcome: 'UP',
+        counts: { selected: 2, pass: 2 },
+      },
+    });
+    const detail = await history.findForMonitor(organizationId, monitor.id, round.id);
+    expect(detail).toMatchObject({
+      result: {
+        kind: 'MULTI_LOCATION',
+        outcome: 'UP',
+        regions: [
+          { outcome: 'PASS', executions: [{ diagnosticSummary: { statusCode: 200 } }] },
+          { outcome: 'PASS', executions: [{ diagnosticSummary: { statusCode: 200 } }] },
+        ],
+      },
+    });
+    expect((await history.currentForMonitor(organizationId, monitor.id))?.aggregateOutcome).toBe(
+      'UP',
+    );
+  });
+
+  it('chooses the latest logical observation after bounding aggregate history per monitor', async () => {
+    const monitor = await createMonitorRecord(organizationId, 'Current regional projection');
+    const locations = await connection.db
+      .insert(probeLocations)
+      .values([
+        { organizationId, name: 'Lagos projection', slug: 'projection-lagos' },
+        { organizationId, name: 'Frankfurt projection', slug: 'projection-frankfurt' },
+      ])
+      .returning();
+    const locationIds = locations.map(({ id }) => id);
+    const monitors = new MonitorRepository(connection.db);
+    await monitors.updateLocations(organizationId, monitor.id, locationIds);
+    const finalizer = new MultiLocationRoundFinalizationRepository(connection.db);
+    const createAggregate = async () => {
+      const round = await new ManualRoundRepository(connection.db, true).create(
+        organizationId,
+        monitor.id,
+      );
+      for (const [index, location] of locationIds.entries()) {
+        const assignment = await connection.pool.query<{ id: string }>(
+          'select id from check_execution_assignments where round_id=$1 and location=$2',
+          [round.id, location],
+        );
+        await finalizer.recordExecution({
+          organizationId,
+          roundId: round.id,
+          assignmentId: assignment.rows[0]!.id,
+          location,
+          executionId: randomUUID(),
+          agentId: `projection-agent-${round.id}-${index}`,
+          role: 'PRIMARY',
+          observation: { outcome: 'PASS', reason: 'COMPLETED', assertionOutcome: 'PASS' },
+        });
+      }
+      return round;
+    };
+
+    const historicalAggregate = await createAggregate();
+    const latestAggregate = await createAggregate();
+    await monitors.updateLocations(organizationId, monitor.id, ['local']);
+    const single = await createAndComplete(monitor.id, 'FAIL', 503, 22);
+    const base = new Date('2026-10-17T12:00:00.000Z');
+    await connection.db
+      .update(checkRounds)
+      .set({
+        createdAt: new Date(base.getTime() - 2_000),
+        finalizationDeadlineAt: new Date(base.getTime() + 120_000),
+      })
+      .where(eq(checkRounds.id, historicalAggregate.id));
+    await connection.db
+      .update(checkRounds)
+      .set({
+        createdAt: new Date(base.getTime() - 1_000),
+        finalizationDeadlineAt: new Date(base.getTime() + 120_000),
+      })
+      .where(eq(checkRounds.id, latestAggregate.id));
+    await connection.db
+      .update(checkRounds)
+      .set({ createdAt: base, finalizationDeadlineAt: new Date(base.getTime() + 120_000) })
+      .where(eq(checkRounds.id, single.id));
+
+    await expect(history.currentForMonitor(organizationId, monitor.id)).resolves.toMatchObject({
+      kind: 'SINGLE_LOCATION',
+      roundId: single.id,
+      availability: 'UNAVAILABLE',
+    });
+
+    await connection.db
+      .update(checkRounds)
+      .set({ createdAt: base })
+      .where(eq(checkRounds.id, latestAggregate.id));
+    const expectedRoundId = [latestAggregate.id, single.id].sort().reverse()[0];
+    await expect(history.currentForMonitor(organizationId, monitor.id)).resolves.toMatchObject({
+      roundId: expectedRoundId,
+      kind: expectedRoundId === latestAggregate.id ? 'MULTI_LOCATION' : 'SINGLE_LOCATION',
+    });
   });
 
   it('rejects corrupted durable diagnostics on both list and detail reads', async () => {

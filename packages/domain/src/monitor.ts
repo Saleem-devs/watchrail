@@ -75,23 +75,33 @@ export interface MonitorFieldErrors {
 }
 
 export interface MonitorLocationSettings {
-  locations: [string];
+  locations: string[];
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 export function parseMonitorLocationSettings(value: unknown): MonitorLocationSettings {
   if (!hasExactKeys(value, ['locations']) || !Array.isArray(value.locations)) {
-    throw new MonitorInputError({ locations: ['Provide exactly one execution location.'] });
+    throw new MonitorInputError({ locations: ['Provide one to seven execution locations.'] });
   }
-  if (value.locations.length !== 1) {
-    throw new MonitorInputError({ locations: ['Choose exactly one execution location.'] });
+  if (value.locations.length < 1 || value.locations.length > 7) {
+    throw new MonitorInputError({ locations: ['Choose one to seven execution locations.'] });
   }
-  const location: unknown = (value.locations as unknown[])[0];
-  if (typeof location !== 'string' || (location !== 'local' && !UUID_PATTERN.test(location))) {
-    throw new MonitorInputError({ locations: ['Choose local or a remote location ID.'] });
+  const locations = (value.locations as unknown[]).map((location) => {
+    if (typeof location !== 'string' || (location !== 'local' && !UUID_PATTERN.test(location))) {
+      throw new MonitorInputError({ locations: ['Choose local or remote location IDs.'] });
+    }
+    return location.toLowerCase();
+  });
+  if (new Set(locations).size !== locations.length) {
+    throw new MonitorInputError({ locations: ['Execution locations must be unique.'] });
   }
-  return { locations: [location] };
+  if (locations.includes('local') && locations.length > 1) {
+    throw new MonitorInputError({
+      locations: ['Local execution cannot be combined with remote locations.'],
+    });
+  }
+  return { locations: locations.sort() };
 }
 
 export interface HttpMonitorSettings {

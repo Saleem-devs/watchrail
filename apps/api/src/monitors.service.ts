@@ -396,6 +396,11 @@ export class MonitorsService {
   ): Promise<MonitorRecord> {
     try {
       const { locations } = parseMonitorLocationSettings(value);
+      if (locations.length > 1 && !this.config.multiLocationExecutionEnabled) {
+        throw new MonitorInputError({
+          locations: ['Multi-location execution is not enabled.'],
+        });
+      }
       return await this.monitors.updateLocations(context.organizationId, monitorId, locations);
     } catch (error) {
       if (error instanceof MonitorInputError) {

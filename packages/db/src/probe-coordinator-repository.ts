@@ -390,6 +390,7 @@ export class ProbeCoordinatorRepository {
           agentId: machine.agentId,
           role: storedExecution.role as 'PRIMARY' | 'CONFIRMATION',
           observation: observationFromResult(result),
+          diagnosticSummary: diagnosticSummaryFromResult(result),
           resultDigest: resultDigest(result),
         });
         return replay.state === 'DUPLICATE'
@@ -438,6 +439,7 @@ export class ProbeCoordinatorRepository {
           agentId: machine.agentId,
           role,
           observation: observationFromResult(result),
+          diagnosticSummary: diagnosticSummaryFromResult(result),
           resultDigest: resultDigest(result),
         });
         if (acceptance.state === 'REJECTED') {
@@ -751,6 +753,17 @@ function observationFromResult(result: AuthoritativeCheckResult) {
     outcome: result.outcome,
     reason: result.reason,
     assertionOutcome: result.assertionEvaluation.outcome,
+  } as const;
+}
+
+function diagnosticSummaryFromResult(result: AuthoritativeCheckResult) {
+  return {
+    stage: result.stage,
+    reason: result.reason,
+    statusCode: result.statusCode,
+    responseTimeMs: result.responseTimeMs,
+    attemptDurationMs: result.attemptDurationMs,
+    checkedAt: result.checkedAt.toISOString(),
   } as const;
 }
 
