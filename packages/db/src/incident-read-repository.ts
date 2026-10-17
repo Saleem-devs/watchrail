@@ -19,6 +19,11 @@ export interface CurrentIncidentState {
     startedByRoundId: string;
     openedByRoundId: string;
   } | null;
+  multiLocationIncident: {
+    severity: 'DEGRADED' | 'DOWN';
+    healthyRecoveryStreak: 0 | 1;
+    healthyRecoveryThreshold: 2;
+  } | null;
 }
 
 export interface IncidentHistoryItem {
@@ -175,6 +180,8 @@ const currentSelection = {
   consecutiveFailures: monitorIncidentState.consecutiveFailures,
   failureStreakStartedAt: monitorIncidentState.failureStreakStartedAt,
   failureStreakStartedRoundId: monitorIncidentState.failureStreakStartedRoundId,
+  multiLocationSeverity: monitorIncidentState.multiLocationSeverity,
+  multiLocationHealthyRecoveryStreak: monitorIncidentState.multiLocationHealthyRecoveryStreak,
   incidentId: incidents.id,
   incidentStartedAt: incidents.startedAt,
   incidentOpenedAt: incidents.openedAt,
@@ -194,6 +201,8 @@ function toCurrentState(row: {
   consecutiveFailures: number;
   failureStreakStartedAt: Date | null;
   failureStreakStartedRoundId: string | null;
+  multiLocationSeverity: string | null;
+  multiLocationHealthyRecoveryStreak: number;
   incidentId: string | null;
   incidentStartedAt: Date | null;
   incidentOpenedAt: Date | null;
@@ -220,7 +229,20 @@ function toCurrentState(row: {
           openedByRoundId: required(row.incidentOpenedByRoundId),
         }
       : null,
+    multiLocationIncident:
+      row.multiLocationSeverity === 'DEGRADED' || row.multiLocationSeverity === 'DOWN'
+        ? {
+            severity: row.multiLocationSeverity,
+            healthyRecoveryStreak: parseRecoveryStreak(row.multiLocationHealthyRecoveryStreak),
+            healthyRecoveryThreshold: 2,
+          }
+        : null,
   };
+}
+
+function parseRecoveryStreak(value: number): 0 | 1 {
+  if (value !== 0 && value !== 1) throw new IncidentStateInvariantError();
+  return value;
 }
 
 export class IncidentMonitorNotFoundError extends Error {

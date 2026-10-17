@@ -43,6 +43,11 @@ interface IncidentState {
     startedByRoundId: string;
     openedByRoundId: string;
   } | null;
+  multiLocationIncident?: {
+    severity: 'DEGRADED' | 'DOWN';
+    healthyRecoveryStreak: 0 | 1;
+    healthyRecoveryThreshold: 2;
+  } | null;
 }
 
 interface CurrentCheck {
@@ -164,6 +169,13 @@ export function Dashboard() {
   const [history, setHistory] = useState<Record<string, HistoryPage>>({});
   const [visibleHistoryIds, setVisibleHistoryIds] = useState<Set<string>>(() => new Set());
   const [loadingHistoryIds, setLoadingHistoryIds] = useState<Set<string>>(() => new Set());
+  const [historyDetails, setHistoryDetails] = useState<Record<string, ManualRound>>({});
+  const [expandedHistoryRoundIds, setExpandedHistoryRoundIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [loadingHistoryRoundIds, setLoadingHistoryRoundIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [incidentHistory, setIncidentHistory] = useState<Record<string, IncidentHistoryPage>>({});
   const [visibleIncidentIds, setVisibleIncidentIds] = useState<Set<string>>(() => new Set());
   const [loadingIncidentHistoryIds, setLoadingIncidentHistoryIds] = useState<Set<string>>(
@@ -475,6 +487,39 @@ export function Dashboard() {
       setLoadingHistoryIds((current) => {
         const next = new Set(current);
         next.delete(monitorId);
+        return next;
+      });
+    }
+  }
+
+  async function toggleHistoryRound(monitorId: string, roundId: string): Promise<void> {
+    if (expandedHistoryRoundIds.has(roundId)) {
+      setExpandedHistoryRoundIds((current) => {
+        const next = new Set(current);
+        next.delete(roundId);
+        return next;
+      });
+      return;
+    }
+    setExpandedHistoryRoundIds((current) => new Set(current).add(roundId));
+    if (historyDetails[roundId] || loadingHistoryRoundIds.has(roundId)) return;
+    setLoadingHistoryRoundIds((current) => new Set(current).add(roundId));
+    try {
+      const response = await fetch(`/api/monitors/${monitorId}/check-rounds/${roundId}`, {
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) throw new Error('Could not load regional evidence.');
+      const body = (await response.json()) as { data: ManualRound };
+      setHistoryDetails((current) => ({ ...current, [roundId]: body.data }));
+    } catch {
+      setRunErrors((current) => ({
+        ...current,
+        [monitorId]: 'Watchrail could not load this round’s regional evidence.',
+      }));
+    } finally {
+      setLoadingHistoryRoundIds((current) => {
+        const next = new Set(current);
+        next.delete(roundId);
         return next;
       });
     }
@@ -896,6 +941,10 @@ export function Dashboard() {
                         page={history[monitor.id]}
                         loading={loadingHistoryIds.has(monitor.id)}
                         onLoadMore={() => void loadHistory(monitor.id, true)}
+                        details={historyDetails}
+                        expandedRoundIds={expandedHistoryRoundIds}
+                        loadingRoundIds={loadingHistoryRoundIds}
+                        onToggleRound={(roundId) => void toggleHistoryRound(monitor.id, roundId)}
                       />
                     ) : null}
                   </div>
@@ -1090,28 +1139,67 @@ function CheckHistory({
   page,
   loading,
   onLoadMore,
+  details,
+  expandedRoundIds,
+  loadingRoundIds,
+  onToggleRound,
 }: {
   page: HistoryPage | undefined;
   loading: boolean;
   onLoadMore: () => void;
+  details: Record<string, ManualRound>;
+  expandedRoundIds: Set<string>;
+  loadingRoundIds: Set<string>;
+  onToggleRound: (roundId: string) => void;
 }) {
   if (!page && loading) return <p role="status">Loading check history…</p>;
   if (!page || page.items.length === 0) return <p>No checks recorded yet.</p>;
   return (
     <section aria-label="Check history">
       <ol>
-        {page.items.map((round) => (
-          <li key={round.id}>
-            <strong>{round.trigger}</strong>{' '}
-            {round.result
-              ? round.result.kind === 'MULTI_LOCATION'
-                ? `${round.result.outcome} · ${formatRatio(round.result.coverage)}`
-                : `${round.result.outcome} · ${round.result.reason}`
-              : round.assignmentStatus}
-            {' · '}
-            <time dateTime={round.createdAt}>{new Date(round.createdAt).toLocaleString()}</time>
-          </li>
-        ))}
+        {page.items.map((round) => {
+          const regionalResult = round.result?.kind === 'MULTI_LOCATION' ? round.result : null;
+          const singleResult =
+            round.result && round.result.kind !== 'MULTI_LOCATION' ? round.result : null;
+          const isRegional = regionalResult !== null;
+          const isExpanded = expandedRoundIds.has(round.id);
+          const detail = details[round.id];
+          return (
+            <li key={round.id}>
+              <strong>{round.trigger}</strong>{' '}
+              {round.result
+                ? isRegional
+                  ? `${regionalResult.outcome} · ${formatRatio(regionalResult.coverage)}`
+                  : `${singleResult!.outcome} · ${singleResult!.reason}`
+                : round.assignmentStatus}
+              {' · '}
+              <time dateTime={round.createdAt}>{new Date(round.createdAt).toLocaleString()}</time>
+              {isRegional ? (
+                <>
+                  {' '}
+                  <button
+                    className="quiet-button"
+                    type="button"
+                    disabled={loadingRoundIds.has(round.id)}
+                    onClick={() => onToggleRound(round.id)}
+                  >
+                    {loadingRoundIds.has(round.id)
+                      ? 'Loading evidence…'
+                      : isExpanded
+                        ? 'Hide regional evidence'
+                        : 'Show regional evidence'}
+                  </button>
+                  {isExpanded && detail?.result?.kind === 'MULTI_LOCATION' ? (
+                    <MultiLocationDiagnostic
+                      result={detail.result}
+                      label="Historical regional evidence"
+                    />
+                  ) : null}
+                </>
+              ) : null}
+            </li>
+          );
+        })}
       </ol>
       {page.nextCursor ? (
         <button className="quiet-button" type="button" disabled={loading} onClick={onLoadMore}>
@@ -1124,6 +1212,20 @@ function CheckHistory({
 
 function IncidentSummary({ state }: { state: IncidentState | undefined }) {
   if (state?.currentIncident) {
+    if (state.multiLocationIncident) {
+      const label =
+        state.multiLocationIncident.severity === 'DOWN' ? 'MAJOR OUTAGE' : 'PARTIAL OUTAGE';
+      return (
+        <p aria-label="Incident state">
+          <strong>Incident: {label}</strong> · Started{' '}
+          {new Date(state.currentIncident.startedAt).toLocaleString()} · detected{' '}
+          {new Date(state.currentIncident.openedAt).toLocaleString()}
+          {state.multiLocationIncident.healthyRecoveryStreak > 0
+            ? ` · Recovery ${state.multiLocationIncident.healthyRecoveryStreak}/${state.multiLocationIncident.healthyRecoveryThreshold} healthy rounds`
+            : ''}
+        </p>
+      );
+    }
     return (
       <p aria-label="Incident state">
         <strong>Incident: OPEN</strong> · Started{' '}

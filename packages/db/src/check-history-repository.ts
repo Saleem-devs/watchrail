@@ -193,7 +193,7 @@ export class CheckHistoryRepository {
       .orderBy(asc(checkRounds.monitorId), desc(checkRounds.createdAt), desc(checkRounds.id));
 
     const projections = new Map<string, CurrentCheck>();
-    const created = new Map<string, Date>();
+    const newestRound = new Map<string, { createdAt: Date; roundId: string }>();
     for (const row of rows) {
       projections.set(row.monitorId, {
         kind: 'SINGLE_LOCATION',
@@ -207,10 +207,10 @@ export class CheckHistoryRepository {
         coverage: null,
         reachability: null,
       });
-      created.set(row.monitorId, row.createdAt);
+      newestRound.set(row.monitorId, { createdAt: row.createdAt, roundId: row.roundId });
     }
     const aggregates = await this.db
-      .select({
+      .selectDistinctOn([checkRounds.monitorId], {
         monitorId: checkRounds.monitorId,
         roundId: checkRounds.id,
         trigger: checkRounds.trigger,
@@ -228,14 +228,10 @@ export class CheckHistoryRepository {
         ),
       )
       .where(eq(checkRoundAggregates.organizationId, organizationId))
-      .orderBy(desc(checkRounds.createdAt), desc(checkRounds.id));
+      .orderBy(asc(checkRounds.monitorId), desc(checkRounds.createdAt), desc(checkRounds.id));
     for (const row of aggregates) {
-      if (
-        created.has(row.monitorId) &&
-        created.get(row.monitorId)!.getTime() >= row.createdAt.getTime()
-      )
-        continue;
-      if (projections.get(row.monitorId)?.kind === 'MULTI_LOCATION') continue;
+      const newest = newestRound.get(row.monitorId);
+      if (newest && compareRoundOrder(newest, row) >= 0) continue;
       projections.set(row.monitorId, {
         kind: 'MULTI_LOCATION',
         availability: aggregateAvailabilityFor(row.outcome as AggregateHealthState),
@@ -248,7 +244,7 @@ export class CheckHistoryRepository {
         coverage: row.aggregate.coverage,
         reachability: row.aggregate.reachability,
       });
-      created.set(row.monitorId, row.createdAt);
+      newestRound.set(row.monitorId, { createdAt: row.createdAt, roundId: row.roundId });
     }
     return projections;
   }
@@ -516,6 +512,14 @@ export class CheckHistoryRepository {
       .limit(1);
     if (!monitor) throw new CheckHistoryMonitorNotFoundError();
   }
+}
+
+function compareRoundOrder(
+  left: { createdAt: Date; roundId: string },
+  right: { createdAt: Date; roundId: string },
+): number {
+  const timeDifference = left.createdAt.getTime() - right.createdAt.getTime();
+  return timeDifference === 0 ? left.roundId.localeCompare(right.roundId) : timeDifference;
 }
 
 const historySelection = {

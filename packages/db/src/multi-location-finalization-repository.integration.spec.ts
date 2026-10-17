@@ -7,6 +7,7 @@ import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { createMonitor, type ProbeObservationV1 } from '@watchrail/domain';
 import { createDatabaseConnection, type DatabaseConnection } from './client.js';
 import { migrateDatabase } from './migration.js';
+import { IncidentReadRepository } from './incident-read-repository.js';
 import { MonitorRepository } from './monitor-repository.js';
 import { MultiLocationRoundFinalizationRepository } from './multi-location-finalization-repository.js';
 import { ProbeCoordinatorRepository } from './probe-coordinator-repository.js';
@@ -197,12 +198,28 @@ describe('authoritative multi-location finalization', () => {
       status: 'OPEN',
       severity: 'DOWN',
     });
+    const incidentReads = new IncidentReadRepository(connection.db);
+    await expect(
+      incidentReads.currentForMonitor(organizationId, failed.monitorId),
+    ).resolves.toMatchObject({
+      failureStreak: null,
+      multiLocationIncident: {
+        severity: 'DOWN',
+        healthyRecoveryStreak: 0,
+        healthyRecoveryThreshold: 2,
+      },
+    });
 
     const firstHealthy = await createNextRound(failed);
     await repository.initializeRound(organizationId, firstHealthy.roundId);
     await accept(repository, firstHealthy, 0, 'PASS');
     await accept(repository, firstHealthy, 1, 'PASS');
     expect((await connection.db.select().from(incidents))[0]).toMatchObject({ status: 'OPEN' });
+    await expect(
+      incidentReads.currentForMonitor(organizationId, failed.monitorId),
+    ).resolves.toMatchObject({
+      multiLocationIncident: { severity: 'DOWN', healthyRecoveryStreak: 1 },
+    });
     expect(await repository.tryFinalizeRound(organizationId, firstHealthy.roundId)).toEqual({
       state: 'ALREADY_FINALIZED',
     });

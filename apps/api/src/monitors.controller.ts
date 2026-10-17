@@ -367,6 +367,7 @@ function toIncidentStateResponse(state: CurrentIncidentState) {
           openedAt: state.currentIncident.openedAt.toISOString(),
         }
       : null,
+    ...(state.multiLocationIncident ? { multiLocationIncident: state.multiLocationIncident } : {}),
   };
 }
 

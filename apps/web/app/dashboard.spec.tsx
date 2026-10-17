@@ -356,7 +356,22 @@ describe('Dashboard', () => {
         roundId: 'regional-round',
         trigger: 'SCHEDULED',
       },
-      incidentState: { failureStreak: null, currentIncident: null },
+      incidentState: {
+        failureStreak: null,
+        currentIncident: {
+          id: 'incident-1',
+          status: 'OPEN',
+          startedAt: checkedAt,
+          openedAt: checkedAt,
+          startedByRoundId: 'regional-round',
+          openedByRoundId: 'regional-round',
+        },
+        multiLocationIncident: {
+          severity: 'DEGRADED',
+          healthyRecoveryStreak: 1,
+          healthyRecoveryThreshold: 2,
+        },
+      },
       uptime: { uptimePercent: null, coveragePercent: null },
     };
     const fetchMock = vi
@@ -386,6 +401,57 @@ describe('Dashboard', () => {
           }),
           { status: 200 },
         ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: {
+              id: 'regional-round',
+              monitorId: monitor.id,
+              trigger: 'SCHEDULED',
+              status: 'COMPLETED',
+              assignmentStatus: 'COMPLETED',
+              createdAt: checkedAt,
+              result: {
+                kind: 'MULTI_LOCATION',
+                outcome: 'DEGRADED',
+                counts: {
+                  selected: 3,
+                  pass: 2,
+                  confirmedFail: 1,
+                  unknown: 0,
+                  conclusive: 3,
+                },
+                coverage: { numerator: 3, denominator: 3 },
+                reachability: { numerator: 2, denominator: 3 },
+                finalizedAt: checkedAt,
+                regions: [
+                  {
+                    location: 'Lagos',
+                    phase: 'TERMINAL',
+                    outcome: 'CONFIRMED_FAIL',
+                    terminalReason: 'CONFIRMED_FAILURE',
+                    executions: [
+                      {
+                        id: 'execution-1',
+                        role: 'PRIMARY',
+                        diagnosticSummary: {
+                          stage: 'HTTP',
+                          reason: 'UNEXPECTED_STATUS',
+                          statusCode: 503,
+                          responseTimeMs: 41,
+                          attemptDurationMs: 44,
+                          checkedAt,
+                        },
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          }),
+          { status: 200 },
+        ),
       );
 
     render(<Dashboard />);
@@ -394,12 +460,24 @@ describe('Dashboard', () => {
     expect(aggregate).toHaveTextContent('DEGRADED');
     expect(aggregate).toHaveTextContent('100.0%');
     expect(aggregate).toHaveTextContent('66.7%');
+    expect(screen.getByLabelText('Incident state')).toHaveTextContent('Incident: PARTIAL OUTAGE');
+    expect(screen.getByLabelText('Incident state')).toHaveTextContent(
+      'Recovery 1/2 healthy rounds',
+    );
+    expect(screen.getByLabelText('Incident state')).not.toHaveTextContent('consecutive failures');
 
     await userEvent.click(screen.getByRole('button', { name: 'Show history' }));
     expect(await screen.findByRole('region', { name: 'Check history' })).toHaveTextContent(
       'SCHEDULED DEGRADED · 100.0%',
     );
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await userEvent.click(screen.getByRole('button', { name: 'Show regional evidence' }));
+    const evidence = await screen.findByText('Historical regional evidence');
+    expect(evidence.closest('.manual-diagnostic')).toHaveTextContent(
+      'Lagos — Confirmed failure · primary · 503 · 41 ms',
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Hide regional evidence' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Show regional evidence' }));
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it('prevents duplicate incident-history pagination requests', async () => {
