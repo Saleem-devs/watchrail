@@ -14,6 +14,8 @@ import {
   ScheduledRoundRepository,
   WebhookEndpointRepository,
   monitors,
+  eq,
+  sql,
   type AuthoritativeCheckResult,
 } from '@watchrail/db';
 import type { WatchrailDatabase } from '@watchrail/db';
@@ -24,7 +26,6 @@ import {
   type EncryptedWebhookSigningSecretV1,
 } from '@watchrail/webhook-security';
 import request from 'supertest';
-import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { APP_CONFIG, type AppConfig } from '../src/config.js';

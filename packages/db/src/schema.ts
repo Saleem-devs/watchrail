@@ -1479,3 +1479,139 @@ export type ProbeAgentRecord = typeof probeAgents.$inferSelect;
 export type ProbeAgentEnrollmentRecord = typeof probeAgentEnrollments.$inferSelect;
 export type ProbeAgentCredentialRecord = typeof probeAgentCredentials.$inferSelect;
 export type ProbeExecutionAttemptRecord = typeof probeExecutionAttempts.$inferSelect;
+
+// ─── Better Auth tables ───────────────────────────────────────────────────────
+// These tables are managed by Better Auth. Do not hand-edit their structure
+// without updating the Drizzle migration accordingly.
+
+export const authUser = pgTable('user', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: text('name').notNull(),
+  email: text('email').notNull().unique(),
+  emailVerified: boolean('email_verified').notNull().default(false),
+  image: text('image'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+export const authSession = pgTable('session', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  expiresAt: timestamp('expires_at').notNull(),
+  token: text('token').notNull().unique(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  ipAddress: text('ip_address'),
+  userAgent: text('user_agent'),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => authUser.id, { onDelete: 'cascade' }),
+  activeOrganizationId: uuid('active_organization_id').references(() => authOrganization.id, {
+    onDelete: 'set null',
+  }),
+});
+
+export const authAccount = pgTable('account', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  accountId: text('account_id').notNull(),
+  providerId: text('provider_id').notNull(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => authUser.id, { onDelete: 'cascade' }),
+  accessToken: text('access_token'),
+  refreshToken: text('refresh_token'),
+  idToken: text('id_token'),
+  accessTokenExpiresAt: timestamp('access_token_expires_at'),
+  refreshTokenExpiresAt: timestamp('refresh_token_expires_at'),
+  scope: text('scope'),
+  password: text('password'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+export const authVerification = pgTable('verification', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  identifier: text('identifier').notNull(),
+  value: text('value').notNull(),
+  expiresAt: timestamp('expires_at').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+export const authOrganization = pgTable('organization', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: text('name').notNull(),
+  slug: text('slug').unique(),
+  logo: text('logo'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  metadata: text('metadata'),
+});
+
+export const authMember = pgTable(
+  'member',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => authOrganization.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => authUser.id, { onDelete: 'cascade' }),
+    role: text('role').notNull().default('member'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    unique('member_organization_user_unique').on(table.organizationId, table.userId),
+    check(
+      'member_role_valid',
+      sql`${table.role} IN ('owner', 'admin', 'editor', 'viewer', 'member')`,
+    ),
+  ],
+);
+
+export const authInvitation = pgTable('invitation', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  organizationId: uuid('organization_id')
+    .notNull()
+    .references(() => authOrganization.id, { onDelete: 'cascade' }),
+  email: text('email').notNull(),
+  role: text('role'),
+  status: text('status').notNull().default('pending'),
+  expiresAt: timestamp('expires_at').notNull(),
+  inviterId: uuid('inviter_id')
+    .notNull()
+    .references(() => authUser.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+export const authApiKey = pgTable('api_key', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: text('name'),
+  start: text('start'),
+  prefix: text('prefix'),
+  key: text('key').notNull().unique(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => authUser.id, { onDelete: 'cascade' }),
+  refillInterval: integer('refill_interval'),
+  refillAmount: integer('refill_amount'),
+  lastRefillAt: timestamp('last_refill_at'),
+  enabled: boolean('enabled').default(true),
+  rateLimitEnabled: boolean('rate_limit_enabled').default(false),
+  rateLimitTimeWindow: integer('rate_limit_time_window'),
+  rateLimitMax: integer('rate_limit_max'),
+  requestCount: integer('request_count').default(0),
+  remaining: integer('remaining'),
+  lastRequest: timestamp('last_request'),
+  expiresAt: timestamp('expires_at'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  permissions: text('permissions'),
+  metadata: text('metadata'),
+});
+
+export type AuthUserRecord = typeof authUser.$inferSelect;
+export type AuthSessionRecord = typeof authSession.$inferSelect;
+export type AuthOrganizationRecord = typeof authOrganization.$inferSelect;
+export type AuthMemberRecord = typeof authMember.$inferSelect;
+export type AuthInvitationRecord = typeof authInvitation.$inferSelect;
+export type AuthApiKeyRecord = typeof authApiKey.$inferSelect;
