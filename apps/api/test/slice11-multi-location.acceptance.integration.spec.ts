@@ -235,6 +235,21 @@ describe('Slice 11 multi-location acceptance', () => {
         expect.objectContaining({ outcome: 'PASS' }),
       ]),
     });
+    const failedRegionExecutions = await database.pool.query<{
+      agent_id: string;
+      role: 'PRIMARY' | 'CONFIRMATION';
+    }>(
+      `select agent_id, role
+       from check_regional_executions
+       where round_id = $1 and location = $2
+       order by role`,
+      [degraded.id, locationIds[0]],
+    );
+    expect(failedRegionExecutions.rows.map(({ role }) => role).sort()).toEqual([
+      'CONFIRMATION',
+      'PRIMARY',
+    ]);
+    expect(new Set(failedRegionExecutions.rows.map(({ agent_id }) => agent_id)).size).toBe(2);
     const incidentId = await expectIncidentState(monitor.id, 'DEGRADED', 0);
     if (!incidentId) throw new Error('Expected the degraded round to open an incident.');
     await expectAvailability(monitor.id, 'UNAVAILABLE');
@@ -293,6 +308,7 @@ describe('Slice 11 multi-location acceptance', () => {
     const delayedAgent = await startAgent(delayedEnrollment, 'deadline-fencing', {
       location: 'lagos',
       submissionDelayMs: 4_000,
+      coordinatorRequestTimeoutMs: 10_000,
     });
     agents.push(delayedAgent);
 
@@ -317,8 +333,7 @@ describe('Slice 11 multi-location acceptance', () => {
     });
 
     const fencedState = await durableRoundState(deadlineRound.id, incidentId);
-    await submitCaptured(lateSubmission, JSON.parse(lateSubmission.body)).expect(409);
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 4_500));
+    await waitForCapturedResponse(delayedAgent, lateSubmission.url, 409);
     expect(await durableRoundState(deadlineRound.id, incidentId)).toEqual(fencedState);
     const fencedAttempts = await database.pool.query<{ status: string }>(
       `select a.status
@@ -334,7 +349,11 @@ describe('Slice 11 multi-location acceptance', () => {
   async function startAgent(
     enrollment: { id: string; token: string },
     suffix: string,
-    options: { location?: string; submissionDelayMs?: number } = {},
+    options: {
+      location?: string;
+      submissionDelayMs?: number;
+      coordinatorRequestTimeoutMs?: number;
+    } = {},
   ): Promise<AgentProcess> {
     const address = app.getHttpServer().address() as AddressInfo;
     const directory = await mkdtemp(resolve(tmpdir(), `watchrail-slice11-${suffix}-`));
@@ -359,7 +378,9 @@ describe('Slice 11 multi-location acceptance', () => {
           PROBE_POLL_INTERVAL_MS: '1000',
           PROBE_HEARTBEAT_INTERVAL_MS: '5000',
           PROBE_RENEWAL_INTERVAL_MS: '5000',
-          PROBE_COORDINATOR_REQUEST_TIMEOUT_MS: '3000',
+          PROBE_COORDINATOR_REQUEST_TIMEOUT_MS: String(
+            options.coordinatorRequestTimeoutMs ?? 3_000,
+          ),
           PROBE_ACCEPTANCE_SUBMISSION_CAPTURE_FILE: captureFile,
           ...(options.location ? { PROBE_ACCEPTANCE_LOCATION: options.location } : {}),
           ...(options.submissionDelayMs
@@ -529,10 +550,17 @@ describe('Slice 11 multi-location acceptance', () => {
   }
 
   interface CapturedSubmission {
+    kind: 'request';
     url: string;
     authorization: string;
     claimToken: string;
     body: string;
+  }
+
+  interface CapturedSubmissionResponse {
+    kind: 'response';
+    url: string;
+    status: number;
   }
 
   async function capturedSubmission(roundId: string): Promise<CapturedSubmission> {
@@ -553,12 +581,38 @@ describe('Slice 11 multi-location acceptance', () => {
       }
       for (const line of content.trim().split('\n').reverse()) {
         if (!line) continue;
-        const captured = JSON.parse(line) as CapturedSubmission;
+        const captured = JSON.parse(line) as CapturedSubmission | CapturedSubmissionResponse;
+        if (captured.kind !== 'request') continue;
         const attemptId = captured.url.split('/').at(-2);
         if (attemptId && attemptIds.has(attemptId)) return captured;
       }
     }
     throw new Error(`No captured submission found for round ${roundId}.`);
+  }
+
+  async function waitForCapturedResponse(
+    agent: AgentProcess,
+    url: string,
+    expectedStatus: number,
+  ): Promise<void> {
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      try {
+        const lines = (await readFile(agent.captureFile, 'utf8')).trim().split('\n');
+        const responses = lines
+          .filter(Boolean)
+          .map((line) => JSON.parse(line) as CapturedSubmission | CapturedSubmissionResponse)
+          .filter(
+            (entry): entry is CapturedSubmissionResponse =>
+              entry.kind === 'response' && entry.url === url,
+          );
+        if (responses.some(({ status }) => status === expectedStatus)) return;
+      } catch {
+        // The capture file may not exist until the first submission is attempted.
+      }
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+    }
+    throw new Error(`Timed out waiting for agent submission response ${expectedStatus}.`);
   }
 
   async function waitForCapturedSubmission(roundId: string): Promise<CapturedSubmission> {
@@ -588,6 +642,9 @@ describe('Slice 11 multi-location acceptance', () => {
       event_count: number;
       delivery_count: number;
       assignments: unknown;
+      attempts: unknown;
+      regional_evaluations: unknown;
+      regional_executions: unknown;
     }>(
       `select
          (select aggregate from check_round_aggregates where round_id = $1) as aggregate,
@@ -597,7 +654,15 @@ describe('Slice 11 multi-location acceptance', () => {
             inner join notification_events e on e.id = d.event_id
             where e.incident_id = $2) as delivery_count,
          (select jsonb_agg(jsonb_build_object('id', id, 'status', status) order by id)
-            from check_execution_assignments where round_id = $1) as assignments`,
+            from check_execution_assignments where round_id = $1) as assignments,
+         (select jsonb_agg(jsonb_build_object('id', a.id, 'status', a.status) order by a.id)
+            from probe_execution_attempts a
+            inner join check_execution_assignments x on x.id = a.assignment_id
+            where x.round_id = $1) as attempts,
+         (select jsonb_agg(to_jsonb(e) - 'updated_at' order by e.location)
+            from check_regional_evaluations e where e.round_id = $1) as regional_evaluations,
+         (select jsonb_agg(to_jsonb(e) order by e.location, e.role)
+            from check_regional_executions e where e.round_id = $1) as regional_executions`,
       [roundId, incidentId],
     );
     return snapshot.rows[0]!;

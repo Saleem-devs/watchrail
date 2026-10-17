@@ -50,6 +50,7 @@ const fetcher = captureFile
         await appendFile(
           captureFile,
           `${JSON.stringify({
+            kind: 'request',
             url,
             authorization: new globalThis.Headers(init?.headers).get('authorization'),
             claimToken: new globalThis.Headers(init?.headers).get('x-watchrail-claim-token'),
@@ -62,7 +63,15 @@ const fetcher = captureFile
           await new Promise((resolve) => globalThis.setTimeout(resolve, delay));
         }
       }
-      return globalThis.fetch(input, init);
+      const response = await globalThis.fetch(input, init);
+      if (url.endsWith('/results')) {
+        await appendFile(
+          captureFile,
+          `${JSON.stringify({ kind: 'response', url, status: response.status })}\n`,
+          'utf8',
+        );
+      }
+      return response;
     }
   : globalThis.fetch;
 
