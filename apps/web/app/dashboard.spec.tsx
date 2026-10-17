@@ -332,6 +332,76 @@ describe('Dashboard', () => {
     );
   });
 
+  it('renders one aggregate current state and history row for a multi-location round', async () => {
+    const checkedAt = '2026-10-17T12:00:00.000Z';
+    const monitor = {
+      id: 'monitor-1',
+      name: 'Regional API',
+      url: 'https://example.com/health',
+      method: 'GET',
+      lifecycleState: 'ENABLED',
+      timeoutMs: 10_000,
+      followRedirects: true,
+      statusPolicy: { type: 'ANY_2XX' },
+      locations: ['location-a', 'location-b', 'location-c'],
+      createdAt: checkedAt,
+      currentCheck: {
+        kind: 'MULTI_LOCATION',
+        availability: 'UNAVAILABLE',
+        aggregateOutcome: 'DEGRADED',
+        coverage: { numerator: 3, denominator: 3 },
+        reachability: { numerator: 2, denominator: 3 },
+        responseTimeMs: null,
+        checkedAt,
+        roundId: 'regional-round',
+        trigger: 'SCHEDULED',
+      },
+      incidentState: { failureStreak: null, currentIncident: null },
+      uptime: { uptimePercent: null, coveragePercent: null },
+    };
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [monitor] }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: 'regional-round',
+                monitorId: monitor.id,
+                trigger: 'SCHEDULED',
+                status: 'COMPLETED',
+                assignmentStatus: 'COMPLETED',
+                createdAt: checkedAt,
+                result: {
+                  kind: 'MULTI_LOCATION',
+                  outcome: 'DEGRADED',
+                  coverage: { numerator: 3, denominator: 3 },
+                  reachability: { numerator: 2, denominator: 3 },
+                  finalizedAt: checkedAt,
+                },
+              },
+            ],
+            page: { nextCursor: null },
+          }),
+          { status: 200 },
+        ),
+      );
+
+    render(<Dashboard />);
+    expect(await screen.findByLabelText('Current aggregate health: degraded')).toBeInTheDocument();
+    const aggregate = screen.getByLabelText('Latest regional aggregate for Regional API');
+    expect(aggregate).toHaveTextContent('DEGRADED');
+    expect(aggregate).toHaveTextContent('100.0%');
+    expect(aggregate).toHaveTextContent('66.7%');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Show history' }));
+    expect(await screen.findByRole('region', { name: 'Check history' })).toHaveTextContent(
+      'SCHEDULED DEGRADED · 100.0%',
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('prevents duplicate incident-history pagination requests', async () => {
     const monitor = {
       id: 'monitor-1',

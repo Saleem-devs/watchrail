@@ -941,6 +941,7 @@ export const checkRegionalExecutions = pgTable(
     agentId: varchar('agent_id', { length: 128 }).notNull(),
     role: varchar('role', { length: 16 }).notNull(),
     observation: jsonb('observation').$type<ProbeObservationV1>().notNull(),
+    diagnosticSummary: jsonb('diagnostic_summary').$type<RegionalDiagnosticSummary>(),
     resultDigest: varchar('result_digest', { length: 64 }),
     acceptedAt: timestamp('accepted_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -985,11 +986,24 @@ export const checkRegionalExecutions = pgTable(
       sql`jsonb_typeof(${table.observation}) = 'object'`,
     ),
     check(
+      'check_regional_executions_diagnostic_summary_object',
+      sql`${table.diagnosticSummary} is null or jsonb_typeof(${table.diagnosticSummary}) = 'object'`,
+    ),
+    check(
       'check_regional_executions_result_digest_format',
       sql`${table.resultDigest} is null or ${table.resultDigest} ~ '^[0-9a-f]{64}$'`,
     ),
   ],
 );
+
+export interface RegionalDiagnosticSummary {
+  stage: 'DNS' | 'CONNECT' | 'TLS' | 'HTTP' | 'PROBE';
+  reason: string;
+  statusCode: number | null;
+  responseTimeMs: number | null;
+  attemptDurationMs: number;
+  checkedAt: string;
+}
 
 export const checkRegionalEvaluations = pgTable(
   'check_regional_evaluations',

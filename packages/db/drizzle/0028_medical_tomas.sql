@@ -1,0 +1,2 @@
+ALTER TABLE "check_regional_executions" ADD COLUMN "diagnostic_summary" jsonb;--> statement-breakpoint
+ALTER TABLE "check_regional_executions" ADD CONSTRAINT "check_regional_executions_diagnostic_summary_object" CHECK ("check_regional_executions"."diagnostic_summary" is null or jsonb_typeof("check_regional_executions"."diagnostic_summary") = 'object');

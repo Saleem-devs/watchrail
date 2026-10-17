@@ -50,6 +50,7 @@ export class PublicStatusPageRepository {
             lifecycleState: monitors.lifecycleState,
             availabilityState: monitorAvailabilityState.currentState,
             activeIncidentId: incidents.id,
+            activeIncidentSeverity: incidents.severity,
           })
           .from(statusPageComponents)
           .innerJoin(
@@ -81,7 +82,9 @@ export class PublicStatusPageRepository {
         const components = rows.map((row) => {
           if (!row.availabilityState) throw new PublicStatusPageStateInvariantError();
           const aggregateState: AggregateHealthState = row.activeIncidentId
-            ? 'DOWN'
+            ? row.activeIncidentSeverity === 'DEGRADED'
+              ? 'DEGRADED'
+              : 'DOWN'
             : row.availabilityState === 'AVAILABLE'
               ? 'UP'
               : 'UNKNOWN';

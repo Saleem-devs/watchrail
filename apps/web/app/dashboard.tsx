@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 
+const multiLocationUiEnabled = process.env.NEXT_PUBLIC_MULTI_LOCATION_EXECUTION_ENABLED === 'true';
+
 interface Monitor {
   id: string;
   name: string;
@@ -44,11 +46,15 @@ interface IncidentState {
 }
 
 interface CurrentCheck {
+  kind: 'SINGLE_LOCATION' | 'MULTI_LOCATION';
   availability: 'AVAILABLE' | 'UNAVAILABLE' | 'UNKNOWN';
   responseTimeMs: number | null;
   checkedAt: string;
   roundId: string;
   trigger: 'MANUAL' | 'SCHEDULED';
+  aggregateOutcome: 'UP' | 'DEGRADED' | 'DOWN' | 'UNKNOWN' | null;
+  coverage: { numerator: number; denominator: number } | null;
+  reachability: { numerator: number; denominator: number } | null;
 }
 
 interface FieldErrors {
@@ -67,25 +73,60 @@ interface ManualRound {
   monitorId: string;
   trigger: 'MANUAL' | 'SCHEDULED';
   status: 'PENDING' | 'COMPLETED';
-  assignmentStatus: 'PENDING' | 'RUNNING' | 'COMPLETED';
+  assignmentStatus: 'PENDING' | 'RUNNING' | 'COMPLETED' | null;
   createdAt: string;
-  result: {
-    outcome: 'PASS' | 'FAIL' | 'UNKNOWN';
-    stage: 'DNS' | 'CONNECT' | 'TLS' | 'HTTP' | 'PROBE';
-    reason: string;
-    statusCode: number | null;
-    responseTimeMs: number | null;
-    attemptDurationMs: number;
-    redirects: Array<{
-      sequence: number;
-      statusCode: 301 | 302 | 303 | 307 | 308;
-      source: { targetId: number; origin: string };
-      destination: { targetId: number; origin: string } | null;
-      responseTimeMs: number;
-      headers: 'PRESERVED' | 'STRIPPED' | 'NOT_SENT';
-    }>;
-    checkedAt: string;
-  } | null;
+  result:
+    | {
+        kind?: 'SINGLE_LOCATION';
+        outcome: 'PASS' | 'FAIL' | 'UNKNOWN';
+        stage: 'DNS' | 'CONNECT' | 'TLS' | 'HTTP' | 'PROBE';
+        reason: string;
+        statusCode: number | null;
+        responseTimeMs: number | null;
+        attemptDurationMs: number;
+        redirects: Array<{
+          sequence: number;
+          statusCode: 301 | 302 | 303 | 307 | 308;
+          source: { targetId: number; origin: string };
+          destination: { targetId: number; origin: string } | null;
+          responseTimeMs: number;
+          headers: 'PRESERVED' | 'STRIPPED' | 'NOT_SENT';
+        }>;
+        checkedAt: string;
+      }
+    | {
+        kind: 'MULTI_LOCATION';
+        outcome: 'UP' | 'DEGRADED' | 'DOWN' | 'UNKNOWN';
+        counts: {
+          selected: number;
+          pass: number;
+          confirmedFail: number;
+          unknown: number;
+          conclusive: number;
+        };
+        coverage: { numerator: number; denominator: number };
+        reachability: { numerator: number; denominator: number } | null;
+        finalizedAt: string;
+        regions?: Array<{
+          location: string;
+          phase: string;
+          outcome: 'PASS' | 'CONFIRMED_FAIL' | 'UNKNOWN' | null;
+          terminalReason: string | null;
+          executions: Array<{
+            id: string;
+            role: 'PRIMARY' | 'CONFIRMATION';
+            diagnosticSummary: {
+              stage: string;
+              reason: string;
+              statusCode: number | null;
+              responseTimeMs: number | null;
+              attemptDurationMs: number;
+              checkedAt: string;
+            } | null;
+          }>;
+        }>;
+      }
+    | null;
 }
 
 interface HistoryPage {
@@ -304,15 +345,19 @@ export function Dashboard() {
     event: FormEvent<HTMLFormElement>,
   ): Promise<void> {
     event.preventDefault();
-    const rawLocation = new FormData(event.currentTarget).get('location');
-    if (typeof rawLocation !== 'string') return;
-    const location = rawLocation;
+    const locations = new FormData(event.currentTarget)
+      .getAll('location')
+      .filter((value): value is string => typeof value === 'string');
+    if (locations.length === 0 || (locations.includes('local') && locations.length > 1)) {
+      setPageError('Select local only, or one or more remote locations.');
+      return;
+    }
     setUpdatingSettingsIds((current) => new Set(current).add(monitorId));
     try {
       const response = await fetch(`/api/monitors/${monitorId}/locations`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ locations: [location] }),
+        body: JSON.stringify({ locations }),
       });
       const body = (await response.json()) as { data?: Monitor } & ApiError;
       if (!response.ok || !body.data) throw new Error('Could not update execution location.');
@@ -678,15 +723,39 @@ export function Dashboard() {
                       <span>{monitor.locations.join(', ')}</span>
                       <span>{monitor.lifecycleState.toLowerCase()}</span>
                     </div>
+                    {monitor.currentCheck?.kind === 'MULTI_LOCATION' ? (
+                      <dl
+                        className="uptime-summary"
+                        aria-label={`Latest regional aggregate for ${monitor.name}`}
+                      >
+                        <div>
+                          <dt>Aggregate</dt>
+                          <dd>{monitor.currentCheck.aggregateOutcome}</dd>
+                        </div>
+                        <div>
+                          <dt>Evidence coverage</dt>
+                          <dd>{formatRatio(monitor.currentCheck.coverage)}</dd>
+                        </div>
+                        <div>
+                          <dt>Reachability</dt>
+                          <dd>{formatRatio(monitor.currentCheck.reachability)}</dd>
+                        </div>
+                      </dl>
+                    ) : null}
                     <form
                       className="status-policy-form"
                       onSubmit={(event) => void updateLocation(monitor.id, event)}
                     >
                       <label>
-                        Execution location
+                        Execution {multiLocationUiEnabled ? 'locations' : 'location'}
                         <select
                           name="location"
-                          defaultValue={monitor.locations[0] ?? 'local'}
+                          multiple={multiLocationUiEnabled}
+                          defaultValue={
+                            multiLocationUiEnabled
+                              ? monitor.locations
+                              : (monitor.locations[0] ?? 'local')
+                          }
                           onFocus={() => void loadProbeLocations()}
                         >
                           <option value="local">Local</option>
@@ -885,6 +954,9 @@ function ManualDiagnostic({
   }
 
   const { result } = round;
+  if (result.kind === 'MULTI_LOCATION') {
+    return <MultiLocationDiagnostic result={result} label="Latest manual diagnostic" />;
+  }
   return (
     <div className="manual-diagnostic" aria-live="polite">
       <div className="diagnostic-heading">
@@ -936,6 +1008,62 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
+function MultiLocationDiagnostic({
+  result,
+  label,
+}: {
+  result: Extract<NonNullable<ManualRound['result']>, { kind: 'MULTI_LOCATION' }>;
+  label: string;
+}) {
+  return (
+    <div className="manual-diagnostic" aria-live="polite">
+      <div className="diagnostic-heading">
+        <span className="diagnostic-label">{label}</span>
+        <strong className={`diagnostic-outcome diagnostic-${result.outcome.toLowerCase()}`}>
+          {result.outcome}
+        </strong>
+      </div>
+      <dl className="diagnostic-metrics">
+        <Metric label="Evidence coverage" value={formatRatio(result.coverage)} />
+        <Metric label="Reachability" value={formatRatio(result.reachability)} />
+        <Metric label="Regions" value={String(result.counts.selected)} />
+        <Metric label="Finalized" value={new Date(result.finalizedAt).toLocaleTimeString()} />
+      </dl>
+      {result.regions ? (
+        <ul aria-label="Regional evidence">
+          {result.regions.map((region) => (
+            <li key={region.location}>
+              <strong>{region.location}</strong> —{' '}
+              {region.outcome === 'CONFIRMED_FAIL'
+                ? 'Confirmed failure'
+                : region.outcome === 'PASS'
+                  ? 'Pass'
+                  : region.outcome === 'UNKNOWN'
+                    ? 'Unknown'
+                    : 'Pending'}
+              {region.executions.map((execution) =>
+                execution.diagnosticSummary ? (
+                  <small key={execution.id}>
+                    {' '}
+                    · {execution.role.toLowerCase()} ·{' '}
+                    {execution.diagnosticSummary.statusCode ?? 'no HTTP'} ·{' '}
+                    {formatMilliseconds(execution.diagnosticSummary.responseTimeMs)}
+                  </small>
+                ) : null,
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+function formatRatio(value: { numerator: number; denominator: number } | null): string {
+  if (!value || value.denominator === 0) return '—';
+  return `${((value.numerator / value.denominator) * 100).toFixed(1)}%`;
+}
+
 function formatMilliseconds(value: number | null): string {
   return value === null ? '—' : `${Math.round(value)} ms`;
 }
@@ -953,6 +1081,8 @@ function monitorState(check: CurrentCheck | null): 'awaiting' | 'pass' | 'fail' 
 
 function monitorStateLabel(check: CurrentCheck | null): string {
   if (!check) return 'No completed check';
+  if (check.aggregateOutcome)
+    return `Current aggregate health: ${check.aggregateOutcome.toLowerCase()}`;
   return `Current availability: ${check.availability.toLowerCase()}`;
 }
 
@@ -974,7 +1104,9 @@ function CheckHistory({
           <li key={round.id}>
             <strong>{round.trigger}</strong>{' '}
             {round.result
-              ? `${round.result.outcome} · ${round.result.reason}`
+              ? round.result.kind === 'MULTI_LOCATION'
+                ? `${round.result.outcome} · ${formatRatio(round.result.coverage)}`
+                : `${round.result.outcome} · ${round.result.reason}`
               : round.assignmentStatus}
             {' · '}
             <time dateTime={round.createdAt}>{new Date(round.createdAt).toLocaleString()}</time>

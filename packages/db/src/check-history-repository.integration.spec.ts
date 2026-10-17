@@ -15,8 +15,9 @@ import { createDatabaseConnection, type DatabaseConnection } from './client.js';
 import { ManualRoundRepository } from './manual-round-repository.js';
 import { migrateDatabase } from './migration.js';
 import { MonitorRepository } from './monitor-repository.js';
+import { MultiLocationRoundFinalizationRepository } from './multi-location-finalization-repository.js';
 import { ScheduledRoundRepository } from './scheduled-round-repository.js';
-import { checkExecutionResults, checkRounds, monitors } from './schema.js';
+import { checkExecutionResults, checkRounds, monitors, probeLocations } from './schema.js';
 
 const organizationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const otherOrganizationId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -144,6 +145,76 @@ describe('CheckHistoryRepository', () => {
     await expect(
       history.findForMonitor(otherOrganizationId, monitor.id, round.id),
     ).resolves.toBeNull();
+  });
+
+  it('paginates multi-location history by logical round and exposes aggregate regional evidence', async () => {
+    const monitor = await createMonitorRecord(organizationId, 'Regional history');
+    const locations = await connection.db
+      .insert(probeLocations)
+      .values([
+        { organizationId, name: 'Lagos', slug: 'history-lagos' },
+        { organizationId, name: 'Frankfurt', slug: 'history-frankfurt' },
+      ])
+      .returning();
+    await new MonitorRepository(connection.db).updateLocations(
+      organizationId,
+      monitor.id,
+      locations.map(({ id }) => id),
+    );
+    const round = await new ManualRoundRepository(connection.db, true).create(
+      organizationId,
+      monitor.id,
+    );
+    const finalizer = new MultiLocationRoundFinalizationRepository(connection.db);
+    for (const [index, location] of locations.entries()) {
+      const assignment = await connection.pool.query<{ id: string }>(
+        'select id from check_execution_assignments where round_id=$1 and location=$2',
+        [round.id, location.id],
+      );
+      await finalizer.recordExecution({
+        organizationId,
+        roundId: round.id,
+        assignmentId: assignment.rows[0]!.id,
+        location: location.id,
+        executionId: randomUUID(),
+        agentId: `agent-${index}`,
+        role: 'PRIMARY',
+        observation: { outcome: 'PASS', reason: 'COMPLETED', assertionOutcome: 'PASS' },
+        diagnosticSummary: {
+          stage: 'HTTP',
+          reason: 'COMPLETED',
+          statusCode: 200,
+          responseTimeMs: 10 + index,
+          attemptDurationMs: 20 + index,
+          checkedAt: new Date().toISOString(),
+        },
+      });
+    }
+
+    const page = await history.listForMonitor(organizationId, monitor.id, { limit: 25 });
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]).toMatchObject({
+      id: round.id,
+      result: {
+        kind: 'MULTI_LOCATION',
+        outcome: 'UP',
+        counts: { selected: 2, pass: 2 },
+      },
+    });
+    const detail = await history.findForMonitor(organizationId, monitor.id, round.id);
+    expect(detail).toMatchObject({
+      result: {
+        kind: 'MULTI_LOCATION',
+        outcome: 'UP',
+        regions: [
+          { outcome: 'PASS', executions: [{ diagnosticSummary: { statusCode: 200 } }] },
+          { outcome: 'PASS', executions: [{ diagnosticSummary: { statusCode: 200 } }] },
+        ],
+      },
+    });
+    expect((await history.currentForMonitor(organizationId, monitor.id))?.aggregateOutcome).toBe(
+      'UP',
+    );
   });
 
   it('rejects corrupted durable diagnostics on both list and detail reads', async () => {

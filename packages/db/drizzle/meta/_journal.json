@@ -197,6 +197,13 @@
       "when": 1792102557430,
       "tag": "0027_mysterious_vanisher",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1792188580878,
+      "tag": "0028_medical_tomas",
+      "breakpoints": true
     }
   ]
 }

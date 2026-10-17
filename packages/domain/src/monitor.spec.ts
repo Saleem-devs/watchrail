@@ -5,10 +5,25 @@ import {
   MonitorInputError,
   parseHttpMonitorSettings,
   parseMonitorLifecycleSettings,
+  parseMonitorLocationSettings,
   parseMonitorScheduleSettings,
 } from './monitor.js';
 
 describe('createMonitor', () => {
+  it('accepts canonical remote multi-location settings and rejects mixed local routing', () => {
+    expect(
+      parseMonitorLocationSettings({
+        locations: ['BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'],
+      }),
+    ).toEqual({
+      locations: ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'],
+    });
+    expect(() =>
+      parseMonitorLocationSettings({
+        locations: ['local', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'],
+      }),
+    ).toThrow(MonitorInputError);
+  });
   it('normalizes input and applies server-owned defaults', () => {
     expect(createMonitor({ name: '  API  ', url: 'https://example.com/health' })).toEqual({
       name: 'API',
