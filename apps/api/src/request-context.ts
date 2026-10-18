@@ -1,4 +1,4 @@
-import { Inject, Injectable, UnauthorizedException, type NestMiddleware } from '@nestjs/common';
+import { Inject, Injectable, type NestMiddleware } from '@nestjs/common';
 import type { NextFunction, Request, Response } from 'express';
 import { APP_CONFIG, type AppConfig } from './config.js';
 
@@ -22,7 +22,8 @@ export class DevelopmentIdentityMiddleware implements NestMiddleware {
 
   use(request: RequestWithContext, _response: Response, next: NextFunction): void {
     if (!this.config.developmentIdentityEnabled) {
-      throw new UnauthorizedException('Authentication is required.');
+      next();
+      return;
     }
 
     request.watchrailContext = DEVELOPMENT_REQUEST_CONTEXT;

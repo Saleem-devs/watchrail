@@ -64,11 +64,11 @@ CREATE TABLE "member" (
   "id" UUID NOT NULL PRIMARY KEY DEFAULT gen_random_uuid(),
   "organization_id" UUID NOT NULL REFERENCES "organization"("id") ON DELETE CASCADE,
   "user_id" UUID NOT NULL REFERENCES "user"("id") ON DELETE CASCADE,
-  "role" TEXT NOT NULL DEFAULT 'member',
+  "role" TEXT NOT NULL DEFAULT 'viewer',
   "created_at" TIMESTAMP NOT NULL DEFAULT NOW(),
   CONSTRAINT "member_organization_user_unique" UNIQUE ("organization_id", "user_id"),
   CONSTRAINT "member_role_valid" CHECK (
-    "role" IN ('owner', 'admin', 'editor', 'viewer', 'member')
+    "role" IN ('owner', 'admin', 'editor', 'viewer')
   )
 );
 
@@ -97,6 +97,7 @@ CREATE TABLE "api_key" (
   "prefix" TEXT,
   "key" TEXT NOT NULL UNIQUE,
   "user_id" UUID NOT NULL REFERENCES "user"("id") ON DELETE CASCADE,
+  "organization_id" UUID NOT NULL REFERENCES "organization"("id") ON DELETE CASCADE,
   "refill_interval" INTEGER,
   "refill_amount" INTEGER,
   "last_refill_at" TIMESTAMP,
@@ -118,8 +119,9 @@ CREATE TABLE "api_key" (
 
 CREATE INDEX "session_user_id_idx" ON "session" ("user_id");
 CREATE INDEX "account_user_id_idx" ON "account" ("user_id");
-CREATE INDEX "account_provider_idx" ON "account" ("provider_id", "account_id");
+CREATE UNIQUE INDEX "account_provider_account_unique" ON "account" ("provider_id", "account_id");
 CREATE INDEX "member_organization_idx" ON "member" ("organization_id");
 CREATE INDEX "member_user_idx" ON "member" ("user_id");
 CREATE INDEX "invitation_organization_idx" ON "invitation" ("organization_id");
 CREATE INDEX "api_key_user_idx" ON "api_key" ("user_id");
+CREATE INDEX "api_key_organization_idx" ON "api_key" ("organization_id");

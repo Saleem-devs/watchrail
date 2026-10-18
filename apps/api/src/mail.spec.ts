@@ -42,4 +42,13 @@ describe('console mail transport', () => {
       }),
     ).toThrow('MAIL_CONSOLE_SHOW_OTP cannot be true in production.');
   });
+
+  it('refuses the non-delivering console provider in production', () => {
+    expect(() =>
+      loadMailConfig({
+        NODE_ENV: 'production',
+        MAIL_PROVIDER: 'console',
+      }),
+    ).toThrow('MAIL_PROVIDER=console cannot be used in production.');
+  });
 });

@@ -25,6 +25,7 @@ import {
   authOrganization,
   authMember,
   authInvitation,
+  eq,
 } from '@watchrail/db';
 import { createMailTransport, type MailConfig, type MailTransport } from './mail.js';
 import { organizationAccessControl, organizationRoles } from './permissions.js';
@@ -124,23 +125,19 @@ export function createAuth(db: NodePgDatabase<Record<string, unknown>>, config: 
       user: {
         create: {
           after: async (user) => {
-            // Provision a personal workspace on every new sign-up.
-            const slug = `personal-${user.id.slice(0, 8)}`;
-            try {
-              await instance.api.createOrganization({
-                body: {
-                  name: `${user.name}'s Workspace`,
-                  slug,
-                  userId: user.id,
-                },
-              });
-            } catch (err: unknown) {
-              const message = err instanceof Error ? err.message : String(err);
-              // Duplicate slug means the org was already created (idempotent).
-              if (!message.includes('UNIQUE') && !message.includes('unique')) {
-                throw err;
-              }
-            }
+            await ensurePersonalWorkspace(user.id, user.name);
+          },
+        },
+      },
+      session: {
+        create: {
+          after: async (session) => {
+            const [user] = await db
+              .select({ name: authUser.name })
+              .from(authUser)
+              .where(eq(authUser.id, session.userId))
+              .limit(1);
+            if (user) await ensurePersonalWorkspace(session.userId, user.name);
           },
         },
       },
@@ -160,6 +157,36 @@ export function createAuth(db: NodePgDatabase<Record<string, unknown>>, config: 
       },
     },
   });
+
+  async function ensurePersonalWorkspace(userId: string, userName: string): Promise<void> {
+    const [existing] = await db
+      .select({ id: authMember.id })
+      .from(authMember)
+      .where(eq(authMember.userId, userId))
+      .limit(1);
+    if (existing) return;
+
+    const slug = `personal-${userId.slice(0, 8)}`;
+    try {
+      await instance.api.createOrganization({
+        body: {
+          name: `${userName}'s Workspace`,
+          slug,
+          userId,
+        },
+      });
+    } catch (err: unknown) {
+      // A concurrent sign-in or the original sign-up hook may have won. Verify
+      // durable membership rather than treating every uniqueness failure as
+      // successful onboarding.
+      const [repaired] = await db
+        .select({ id: authMember.id })
+        .from(authMember)
+        .where(eq(authMember.userId, userId))
+        .limit(1);
+      if (!repaired) throw err;
+    }
+  }
 
   return instance;
 }

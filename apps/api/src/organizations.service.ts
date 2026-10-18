@@ -207,7 +207,7 @@ export class OrganizationsService {
 function requireAssignableRole(value: string): OrganizationRole {
   if (!isOrganizationRole(value) || value === 'owner') {
     throw new BadRequestException(
-      'Role must be one of admin, editor, viewer, or member. Ownership must be transferred explicitly.',
+      'Role must be one of admin, editor, or viewer. Ownership must be transferred explicitly.',
     );
   }
   return value;

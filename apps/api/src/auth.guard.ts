@@ -21,11 +21,12 @@ import type { CanActivate, ExecutionContext } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
-import { AuthMembershipRepository } from '@watchrail/db';
+import { AuthApiKeyRepository, AuthMembershipRepository } from '@watchrail/db';
 import type { WatchrailAuth } from './auth.js';
 import { WATCHRAIL_AUTH } from './auth.tokens.js';
 import { hasPermission, type Permission } from './permissions.js';
 import type { RequestWithContext } from './request-context.js';
+import { hashApiKey, parseApiKeyPermissions } from './api-credentials.service.js';
 
 // ─── Decorators ───────────────────────────────────────────────────────────────
 
@@ -62,6 +63,7 @@ export class WatchrailAuthGuard implements CanActivate {
   constructor(
     @Inject(WATCHRAIL_AUTH) private readonly auth: WatchrailAuth,
     private readonly memberships: AuthMembershipRepository,
+    private readonly apiKeys: AuthApiKeyRepository,
     private readonly reflector: Reflector,
   ) {}
 
@@ -79,21 +81,48 @@ export class WatchrailAuthGuard implements CanActivate {
     // ─── Dev identity bypass ─────────────────────────────────────────────────
     // DevelopmentIdentityMiddleware runs before guards and sets watchrailContext.
     // When it's active (test mode), skip Better Auth validation.
+    const requiredPermission = this.reflector.getAllAndOverride<Permission | undefined>(
+      PERMISSION_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+
+    // Protected application routes must declare their authorization policy.
+    // This makes newly-added endpoints fail closed instead of silently becoming
+    // available to every authenticated organization member.
+    if (!requiredPermission) {
+      throw new ForbiddenException('This endpoint has no authorization policy.');
+    }
+
     if (request.watchrailContext) {
       // Context was set by DevelopmentIdentityMiddleware.
       // Still check permission if required.
-      const requiredPermission = this.reflector.get<Permission | undefined>(
-        PERMISSION_KEY,
-        context.getHandler(),
-      );
+      if (!hasPermission('owner', requiredPermission)) {
+        throw new ForbiddenException(
+          `Permission denied: '${requiredPermission}' is required for this operation.`,
+        );
+      }
+      return true;
+    }
+
+    const apiKey = extractApiKey(request);
+    if (apiKey) {
+      const identity = await this.apiKeys.authenticate(hashApiKey(apiKey));
+      const scopes = identity ? parseApiKeyPermissions(identity.permissions) : null;
+      if (!identity || !scopes) {
+        throw new UnauthorizedException('Authentication is required.');
+      }
       if (
-        requiredPermission &&
-        !hasPermission('owner', requiredPermission) // dev identity has owner-level access
+        !scopes.includes(requiredPermission) ||
+        !hasPermission(identity.role, requiredPermission)
       ) {
         throw new ForbiddenException(
           `Permission denied: '${requiredPermission}' is required for this operation.`,
         );
       }
+      request.watchrailContext = {
+        actorId: identity.userId,
+        organizationId: identity.organizationId,
+      };
       return true;
     }
 
@@ -129,12 +158,7 @@ export class WatchrailAuthGuard implements CanActivate {
     }
 
     // Check the required permission.
-    const requiredPermission = this.reflector.get<Permission | undefined>(
-      PERMISSION_KEY,
-      context.getHandler(),
-    );
-
-    if (requiredPermission && !hasPermission(role, requiredPermission)) {
+    if (!hasPermission(role, requiredPermission)) {
       throw new ForbiddenException(
         `Permission denied: '${requiredPermission}' is required for this operation.`,
       );
@@ -166,6 +190,13 @@ function buildHeaders(request: Request): Headers {
   if (authHeader) headers.set('authorization', authHeader);
 
   return headers;
+}
+
+function extractApiKey(request: Request): string | null {
+  const authorization = request.headers.authorization;
+  if (!authorization?.startsWith('Bearer wrk_')) return null;
+  const token = authorization.slice('Bearer '.length);
+  return /^wrk_[A-Za-z0-9_-]{43}$/u.test(token) ? token : null;
 }
 
 function isUuid(value: string): boolean {

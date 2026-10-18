@@ -1510,23 +1510,30 @@ export const authSession = pgTable('session', {
   }),
 });
 
-export const authAccount = pgTable('account', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  accountId: text('account_id').notNull(),
-  providerId: text('provider_id').notNull(),
-  userId: uuid('user_id')
-    .notNull()
-    .references(() => authUser.id, { onDelete: 'cascade' }),
-  accessToken: text('access_token'),
-  refreshToken: text('refresh_token'),
-  idToken: text('id_token'),
-  accessTokenExpiresAt: timestamp('access_token_expires_at'),
-  refreshTokenExpiresAt: timestamp('refresh_token_expires_at'),
-  scope: text('scope'),
-  password: text('password'),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-  updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
+export const authAccount = pgTable(
+  'account',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    accountId: text('account_id').notNull(),
+    providerId: text('provider_id').notNull(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => authUser.id, { onDelete: 'cascade' }),
+    accessToken: text('access_token'),
+    refreshToken: text('refresh_token'),
+    idToken: text('id_token'),
+    accessTokenExpiresAt: timestamp('access_token_expires_at'),
+    refreshTokenExpiresAt: timestamp('refresh_token_expires_at'),
+    scope: text('scope'),
+    password: text('password'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    unique('account_provider_account_unique').on(table.providerId, table.accountId),
+    index('account_user_id_idx').on(table.userId),
+  ],
+);
 
 export const authVerification = pgTable('verification', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -1556,15 +1563,12 @@ export const authMember = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => authUser.id, { onDelete: 'cascade' }),
-    role: text('role').notNull().default('member'),
+    role: text('role').notNull().default('viewer'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (table) => [
     unique('member_organization_user_unique').on(table.organizationId, table.userId),
-    check(
-      'member_role_valid',
-      sql`${table.role} IN ('owner', 'admin', 'editor', 'viewer', 'member')`,
-    ),
+    check('member_role_valid', sql`${table.role} IN ('owner', 'admin', 'editor', 'viewer')`),
   ],
 );
 
@@ -1583,31 +1587,41 @@ export const authInvitation = pgTable('invitation', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
-export const authApiKey = pgTable('api_key', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  name: text('name'),
-  start: text('start'),
-  prefix: text('prefix'),
-  key: text('key').notNull().unique(),
-  userId: uuid('user_id')
-    .notNull()
-    .references(() => authUser.id, { onDelete: 'cascade' }),
-  refillInterval: integer('refill_interval'),
-  refillAmount: integer('refill_amount'),
-  lastRefillAt: timestamp('last_refill_at'),
-  enabled: boolean('enabled').default(true),
-  rateLimitEnabled: boolean('rate_limit_enabled').default(false),
-  rateLimitTimeWindow: integer('rate_limit_time_window'),
-  rateLimitMax: integer('rate_limit_max'),
-  requestCount: integer('request_count').default(0),
-  remaining: integer('remaining'),
-  lastRequest: timestamp('last_request'),
-  expiresAt: timestamp('expires_at'),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-  updatedAt: timestamp('updated_at').notNull().defaultNow(),
-  permissions: text('permissions'),
-  metadata: text('metadata'),
-});
+export const authApiKey = pgTable(
+  'api_key',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    name: text('name'),
+    start: text('start'),
+    prefix: text('prefix'),
+    key: text('key').notNull().unique(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => authUser.id, { onDelete: 'cascade' }),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => authOrganization.id, { onDelete: 'cascade' }),
+    refillInterval: integer('refill_interval'),
+    refillAmount: integer('refill_amount'),
+    lastRefillAt: timestamp('last_refill_at'),
+    enabled: boolean('enabled').default(true),
+    rateLimitEnabled: boolean('rate_limit_enabled').default(false),
+    rateLimitTimeWindow: integer('rate_limit_time_window'),
+    rateLimitMax: integer('rate_limit_max'),
+    requestCount: integer('request_count').default(0),
+    remaining: integer('remaining'),
+    lastRequest: timestamp('last_request'),
+    expiresAt: timestamp('expires_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+    permissions: text('permissions'),
+    metadata: text('metadata'),
+  },
+  (table) => [
+    index('api_key_user_idx').on(table.userId),
+    index('api_key_organization_idx').on(table.organizationId),
+  ],
+);
 
 export type AuthUserRecord = typeof authUser.$inferSelect;
 export type AuthSessionRecord = typeof authSession.$inferSelect;

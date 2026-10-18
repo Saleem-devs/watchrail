@@ -71,6 +71,7 @@ export class OrganizationsController {
 
   @Post('current/leave')
   @HttpCode(204)
+  @RequirePermission(PERMISSIONS.ORGANIZATION_READ)
   async leaveOrganization(@Req() request: RequestWithContext) {
     await this.orgs.leaveOrganization(request.watchrailContext, buildHeaders(request));
   }
@@ -78,15 +79,8 @@ export class OrganizationsController {
   @Post('current/transfer-ownership')
   @HttpCode(204)
   @RequirePermission(PERMISSIONS.ORGANIZATION_TRANSFER)
-  async transferOwnership(
-    @Req() request: RequestWithContext,
-    @Body() body: { userId: string },
-  ) {
-    await this.orgs.transferOwnership(
-      request.watchrailContext,
-      buildHeaders(request),
-      body.userId,
-    );
+  async transferOwnership(@Req() request: RequestWithContext, @Body() body: { userId: string }) {
+    await this.orgs.transferOwnership(request.watchrailContext, buildHeaders(request), body.userId);
   }
 
   // ─── Members ──────────────────────────────────────────────────────────────
@@ -119,10 +113,7 @@ export class OrganizationsController {
   @Delete('current/members/:memberId')
   @HttpCode(204)
   @RequirePermission(PERMISSIONS.MEMBER_REMOVE)
-  async removeMember(
-    @Req() request: RequestWithContext,
-    @Param('memberId') memberId: string,
-  ) {
+  async removeMember(@Req() request: RequestWithContext, @Param('memberId') memberId: string) {
     await this.orgs.removeMember(request.watchrailContext, buildHeaders(request), memberId);
   }
 
@@ -154,11 +145,7 @@ export class OrganizationsController {
     @Req() request: RequestWithContext,
     @Param('invitationId') invitationId: string,
   ) {
-    await this.orgs.revokeInvitation(
-      request.watchrailContext,
-      buildHeaders(request),
-      invitationId,
-    );
+    await this.orgs.revokeInvitation(request.watchrailContext, buildHeaders(request), invitationId);
   }
 }
 

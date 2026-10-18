@@ -35,10 +35,13 @@ import {
 } from './probe-machine-auth.js';
 import { OrganizationsController } from './organizations.controller.js';
 import { OrganizationsService } from './organizations.service.js';
+import { ApiCredentialsController } from './api-credentials.controller.js';
+import { ApiCredentialsService } from './api-credentials.service.js';
 
 @Module({
   imports: [ConfigModule, DatabaseModule, AuthModule],
   controllers: [
+    ApiCredentialsController,
     InternalStatusPagesController,
     MonitorsController,
     OrganizationsController,
@@ -67,6 +70,7 @@ import { OrganizationsService } from './organizations.service.js';
 
     // Application services
     MonitorsService,
+    ApiCredentialsService,
     OrganizationsService,
     {
       provide: PublicStatusPageRateLimiter,
@@ -126,6 +130,7 @@ export class AppModule implements NestModule {
         StatusPagesController,
         WebhookEndpointsController,
         OrganizationsController,
+        ApiCredentialsController,
       );
 
     consumer.apply(ProbeMachineNoStoreMiddleware).forRoutes(ProbeMachineController);

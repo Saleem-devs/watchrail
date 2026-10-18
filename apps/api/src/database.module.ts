@@ -14,6 +14,7 @@ import {
   WebhookDeliveryReadRepository,
   WebhookEndpointRepository,
   AuthMembershipRepository,
+  AuthApiKeyRepository,
 } from '@watchrail/db';
 import type { WatchrailDatabase } from '@watchrail/db';
 import { ConfigModule } from './config.module.js';
@@ -30,6 +31,11 @@ import { APP_CONFIG, type AppConfig } from './config.js';
     }),
   ],
   providers: [
+    {
+      provide: AuthApiKeyRepository,
+      inject: [getDrizzleToken()],
+      useFactory: (db: WatchrailDatabase) => new AuthApiKeyRepository(db),
+    },
     {
       provide: AuthMembershipRepository,
       inject: [getDrizzleToken()],
@@ -94,6 +100,7 @@ import { APP_CONFIG, type AppConfig } from './config.js';
     },
   ],
   exports: [
+    AuthApiKeyRepository,
     AuthMembershipRepository,
     UptimeReadRepository,
     CheckHistoryRepository,

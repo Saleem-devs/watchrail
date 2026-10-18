@@ -14,12 +14,11 @@ describe('Watchrail organization permissions', () => {
     expect(isOrganizationRole('super-admin')).toBe(false);
   });
 
-  it('grants viewer and legacy member roles read-only access', () => {
-    for (const role of ['viewer', 'member']) {
-      expect(hasPermission(role, PERMISSIONS.MONITOR_READ)).toBe(true);
-      expect(hasPermission(role, PERMISSIONS.MONITOR_UPDATE)).toBe(false);
-      expect(hasPermission(role, PERMISSIONS.MEMBER_INVITE)).toBe(false);
-    }
+  it('grants viewers read-only access and rejects the legacy member role', () => {
+    expect(hasPermission('viewer', PERMISSIONS.MONITOR_READ)).toBe(true);
+    expect(hasPermission('viewer', PERMISSIONS.MONITOR_UPDATE)).toBe(false);
+    expect(hasPermission('viewer', PERMISSIONS.MEMBER_INVITE)).toBe(false);
+    expect(hasPermission('member', PERMISSIONS.MONITOR_READ)).toBe(false);
   });
 
   it('allows editors to operate monitors without administering membership', () => {

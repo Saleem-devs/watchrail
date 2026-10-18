@@ -32,6 +32,8 @@ import {
 } from '@watchrail/domain';
 import { MonitorsService } from './monitors.service.js';
 import type { RequestWithContext } from './request-context.js';
+import { RequirePermission } from './auth.guard.js';
+import { PERMISSIONS } from './permissions.js';
 
 interface MonitorResponse {
   id: string;
@@ -120,6 +122,7 @@ export class MonitorsController {
   constructor(@Inject(MonitorsService) private readonly monitors: MonitorsService) {}
 
   @Post()
+  @RequirePermission(PERMISSIONS.MONITOR_CREATE)
   async create(
     @Req() request: RequestWithContext,
     @Body() command: CreateMonitorCommand,
@@ -129,6 +132,7 @@ export class MonitorsController {
   }
 
   @Get()
+  @RequirePermission(PERMISSIONS.MONITOR_READ)
   async list(@Req() request: RequestWithContext): Promise<{ data: MonitorResponse[] }> {
     const monitors = await this.monitors.list(request.watchrailContext);
     return {
@@ -139,6 +143,7 @@ export class MonitorsController {
   }
 
   @Get(':monitorId/uptime')
+  @RequirePermission(PERMISSIONS.AVAILABILITY_READ)
   async getUptime(
     @Req() request: RequestWithContext,
     @Param('monitorId', new ParseUUIDPipe()) monitorId: string,
@@ -148,6 +153,7 @@ export class MonitorsController {
   }
 
   @Get(':monitorId/uptime/daily')
+  @RequirePermission(PERMISSIONS.AVAILABILITY_READ)
   async getDailyUptime(
     @Req() request: RequestWithContext,
     @Param('monitorId', new ParseUUIDPipe()) monitorId: string,
@@ -157,6 +163,7 @@ export class MonitorsController {
   }
 
   @Patch(':monitorId/status-policy')
+  @RequirePermission(PERMISSIONS.MONITOR_UPDATE)
   async updateStatusPolicy(
     @Req() request: RequestWithContext,
     @Param('monitorId') monitorId: string,
@@ -171,6 +178,7 @@ export class MonitorsController {
   }
 
   @Patch(':monitorId/http-settings')
+  @RequirePermission(PERMISSIONS.MONITOR_UPDATE)
   async updateHttpSettings(
     @Req() request: RequestWithContext,
     @Param('monitorId') monitorId: string,
@@ -185,6 +193,7 @@ export class MonitorsController {
   }
 
   @Patch(':monitorId/request-headers')
+  @RequirePermission(PERMISSIONS.MONITOR_UPDATE)
   async updateRequestHeaders(
     @Req() request: RequestWithContext,
     @Param('monitorId') monitorId: string,
@@ -199,6 +208,7 @@ export class MonitorsController {
   }
 
   @Patch(':monitorId/schedule-settings')
+  @RequirePermission(PERMISSIONS.MONITOR_UPDATE)
   async updateScheduleSettings(
     @Req() request: RequestWithContext,
     @Param('monitorId') monitorId: string,
@@ -213,6 +223,7 @@ export class MonitorsController {
   }
 
   @Patch(':monitorId/lifecycle')
+  @RequirePermission(PERMISSIONS.MONITOR_UPDATE)
   async updateLifecycle(
     @Req() request: RequestWithContext,
     @Param('monitorId') monitorId: string,
@@ -223,6 +234,7 @@ export class MonitorsController {
   }
 
   @Patch(':monitorId/locations')
+  @RequirePermission(PERMISSIONS.MONITOR_UPDATE)
   async updateLocations(
     @Req() request: RequestWithContext,
     @Param('monitorId') monitorId: string,
@@ -233,6 +245,7 @@ export class MonitorsController {
   }
 
   @Patch(':monitorId/assertions')
+  @RequirePermission(PERMISSIONS.MONITOR_UPDATE)
   async updateAssertions(
     @Req() request: RequestWithContext,
     @Param('monitorId') monitorId: string,
@@ -243,6 +256,7 @@ export class MonitorsController {
   }
 
   @Post(':monitorId/check-rounds')
+  @RequirePermission(PERMISSIONS.MONITOR_EXECUTE)
   @HttpCode(202)
   async runNow(
     @Req() request: RequestWithContext,
@@ -253,6 +267,7 @@ export class MonitorsController {
   }
 
   @Get(':monitorId/check-rounds')
+  @RequirePermission(PERMISSIONS.CHECK_READ)
   async listCheckHistory(
     @Req() request: RequestWithContext,
     @Param('monitorId') monitorId: string,
@@ -273,6 +288,7 @@ export class MonitorsController {
   }
 
   @Get(':monitorId/check-rounds/:roundId')
+  @RequirePermission(PERMISSIONS.CHECK_READ)
   async getCheckRound(
     @Req() request: RequestWithContext,
     @Param('monitorId') monitorId: string,
@@ -283,6 +299,7 @@ export class MonitorsController {
   }
 
   @Get(':monitorId/incidents')
+  @RequirePermission(PERMISSIONS.INCIDENT_READ)
   async listIncidents(
     @Req() request: RequestWithContext,
     @Param('monitorId') monitorId: string,
@@ -300,6 +317,7 @@ export class MonitorsController {
   }
 
   @Get(':monitorId/incidents/:incidentId')
+  @RequirePermission(PERMISSIONS.INCIDENT_READ)
   async getIncident(
     @Req() request: RequestWithContext,
     @Param('monitorId') monitorId: string,

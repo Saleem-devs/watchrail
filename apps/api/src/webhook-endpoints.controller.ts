@@ -16,17 +16,21 @@ import type {
 } from '@watchrail/db';
 import type { RequestWithContext } from './request-context.js';
 import { WebhookEndpointsService } from './webhook-endpoints.service.js';
+import { RequirePermission } from './auth.guard.js';
+import { PERMISSIONS } from './permissions.js';
 
 @Controller('webhook-endpoints')
 export class WebhookEndpointsController {
   constructor(private readonly endpoints: WebhookEndpointsService) {}
 
   @Post()
+  @RequirePermission(PERMISSIONS.WEBHOOK_MANAGE)
   async create(@Req() request: RequestWithContext, @Body() body: unknown) {
     return { data: toResponse(await this.endpoints.create(request.watchrailContext, body)) };
   }
 
   @Get()
+  @RequirePermission(PERMISSIONS.WEBHOOK_READ)
   async list(@Req() request: RequestWithContext) {
     return {
       data: (await this.endpoints.list(request.watchrailContext)).map(toResponse),
@@ -34,6 +38,7 @@ export class WebhookEndpointsController {
   }
 
   @Get(':endpointId/deliveries')
+  @RequirePermission(PERMISSIONS.NOTIFICATION_READ)
   async listDeliveries(
     @Req() request: RequestWithContext,
     @Param('endpointId', ParseUUIDPipe) endpointId: string,
@@ -47,6 +52,7 @@ export class WebhookEndpointsController {
   }
 
   @Get(':endpointId/deliveries/:deliveryId')
+  @RequirePermission(PERMISSIONS.NOTIFICATION_READ)
   async findDelivery(
     @Req() request: RequestWithContext,
     @Param('endpointId', ParseUUIDPipe) endpointId: string,
@@ -60,6 +66,7 @@ export class WebhookEndpointsController {
   }
 
   @Get(':endpointId')
+  @RequirePermission(PERMISSIONS.WEBHOOK_READ)
   async find(
     @Req() request: RequestWithContext,
     @Param('endpointId', ParseUUIDPipe) endpointId: string,
@@ -70,6 +77,7 @@ export class WebhookEndpointsController {
   }
 
   @Patch(':endpointId/settings')
+  @RequirePermission(PERMISSIONS.WEBHOOK_MANAGE)
   async updateSettings(
     @Req() request: RequestWithContext,
     @Param('endpointId', ParseUUIDPipe) endpointId: string,
@@ -83,6 +91,7 @@ export class WebhookEndpointsController {
   }
 
   @Patch(':endpointId/enabled')
+  @RequirePermission(PERMISSIONS.WEBHOOK_MANAGE)
   async setEnabled(
     @Req() request: RequestWithContext,
     @Param('endpointId', ParseUUIDPipe) endpointId: string,

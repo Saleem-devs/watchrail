@@ -62,7 +62,7 @@ export const PERMISSIONS = {
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
 
-export const ORGANIZATION_ROLES = ['owner', 'admin', 'editor', 'viewer', 'member'] as const;
+export const ORGANIZATION_ROLES = ['owner', 'admin', 'editor', 'viewer'] as const;
 
 export type OrganizationRole = (typeof ORGANIZATION_ROLES)[number];
 
@@ -116,9 +116,6 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
   admin: ADMIN_PERMISSIONS,
   editor: EDITOR_PERMISSIONS,
   viewer: VIEWER_PERMISSIONS,
-  // Better Auth organization plugin uses 'member' as the default role name;
-  // map it to viewer permissions so new invitees get read-only access by default.
-  member: VIEWER_PERMISSIONS,
 };
 
 /**
@@ -152,13 +149,6 @@ export const organizationRoles = {
     ac: ['read'],
   }),
   viewer: organizationAccessControl.newRole({
-    organization: [],
-    member: [],
-    invitation: [],
-    team: [],
-    ac: ['read'],
-  }),
-  member: organizationAccessControl.newRole({
     organization: [],
     member: [],
     invitation: [],

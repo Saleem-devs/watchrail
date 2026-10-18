@@ -4,6 +4,7 @@ export * from './client.js';
 // used by integration tests to avoid optional-peer identity splits.
 export { eq, sql } from 'drizzle-orm';
 export * from './auth-membership-repository.js';
+export * from './auth-api-key-repository.js';
 export { AvailabilityRepository } from './availability-repository.js';
 export { MultiLocationRoundFinalizationRepository } from './multi-location-finalization-repository.js';
 export * from './check-execution-repository.js';

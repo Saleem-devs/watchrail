@@ -91,6 +91,9 @@ export function loadMailConfig(env: NodeJS.ProcessEnv = process.env): MailConfig
   if (showConsoleOtp && env.NODE_ENV === 'production') {
     throw new Error('MAIL_CONSOLE_SHOW_OTP cannot be true in production.');
   }
+  if (provider === 'console' && env.NODE_ENV === 'production') {
+    throw new Error('MAIL_PROVIDER=console cannot be used in production.');
+  }
 
   if (provider === 'smtp') {
     const host = env.SMTP_HOST;
