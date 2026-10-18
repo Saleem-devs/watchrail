@@ -8,3 +8,5 @@ pnpm-lock.yaml
 playwright-report
 README.md
 test-results
+packages/db/drizzle/meta/_journal.json
+packages/db/drizzle/meta/*_snapshot.json
