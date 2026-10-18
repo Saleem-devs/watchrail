@@ -6,6 +6,8 @@ import {
   type OnApplicationShutdown,
 } from '@nestjs/common';
 import type { BullMqCheckJobConsumer, BullMqCheckJobPublisher } from '@watchrail/queue';
+import type { BullMqAuthEmailConsumer, BullMqAuthEmailPublisher } from '@watchrail/queue';
+import type { AuthEmailOutboxRelay } from './auth-email-worker.js';
 import type {
   AvailabilityRepository,
   MultiLocationRoundFinalizationRepository,
@@ -32,6 +34,7 @@ export class WorkerRuntime
   private probeReconciliationRunning: Promise<void> | undefined;
   private roundFinalizationRunning: Promise<void> | undefined;
   private webhookRunning: Promise<void>[] = [];
+  private authEmailRunning: Promise<void> | undefined;
   private readonly wakeups = new Set<() => void>();
 
   constructor(
@@ -44,6 +47,9 @@ export class WorkerRuntime
     private readonly webhookDelivery?: WebhookDeliveryProcessor,
     private readonly probeCoordinator?: ProbeCoordinatorRepository,
     private readonly multiLocationFinalization?: MultiLocationRoundFinalizationRepository,
+    private readonly authEmailRelay?: AuthEmailOutboxRelay,
+    private readonly authEmailConsumer?: BullMqAuthEmailConsumer,
+    private readonly authEmailPublisher?: BullMqAuthEmailPublisher,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -61,6 +67,7 @@ export class WorkerRuntime
           this.runWebhookDelivery(),
         )
       : [];
+    this.authEmailRunning = this.authEmailRelay ? this.runAuthEmailRelay() : undefined;
   }
 
   async beforeApplicationShutdown(): Promise<void> {
@@ -73,12 +80,27 @@ export class WorkerRuntime
       this.probeReconciliationRunning,
       this.roundFinalizationRunning,
       ...this.webhookRunning,
+      this.authEmailRunning,
       this.consumer.close(),
+      this.authEmailConsumer?.close(),
     ]);
   }
 
   async onApplicationShutdown(): Promise<void> {
     await this.publisher.close();
+    await this.authEmailPublisher?.close();
+  }
+
+  private async runAuthEmailRelay(): Promise<void> {
+    while (!this.stopping) {
+      try {
+        const result = await this.authEmailRelay!.processNext();
+        if (result === 'IDLE') await this.wait(this.config.idlePollIntervalMs);
+      } catch {
+        this.logger.error('Auth email outbox relay dependency failure.');
+        await this.wait(this.config.dependencyErrorDelayMs);
+      }
+    }
   }
 
   private async runOutboxRelay(): Promise<void> {

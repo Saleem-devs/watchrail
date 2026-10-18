@@ -15,7 +15,9 @@ import { APP_CONFIG, type AppConfig } from './config.js';
 import { PUBLIC_STATUS_PAGE_NO_STORE } from './public-status-page-http.js';
 import { InternalStatusPageRateLimiter } from './public-status-page-rate-limiter.js';
 import { PublicStatusPagesService } from './public-status-pages.service.js';
+import { Public } from './auth.guard.js';
 
+@Public()
 @Controller('internal/status-pages')
 export class InternalStatusPagesController {
   constructor(

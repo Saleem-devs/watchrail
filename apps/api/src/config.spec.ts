@@ -10,6 +10,8 @@ const encryptionEnvironment = {
   WEBHOOK_SIGNING_SECRET_ENCRYPTION_KEYS: JSON.stringify({
     test: Buffer.alloc(32).toString('base64'),
   }),
+  AUTH_EMAIL_ACTIVE_KEY_ID: 'test',
+  AUTH_EMAIL_ENCRYPTION_KEYS: JSON.stringify({ test: Buffer.alloc(32).toString('base64') }),
 };
 
 describe('loadAppConfig', () => {
@@ -39,6 +41,7 @@ describe('loadAppConfig', () => {
       port: 4000,
       probePendingAssignmentTimeoutMs: 120_000,
       multiLocationExecutionEnabled: false,
+      frontendOrigins: ['http://localhost:3000', 'http://localhost:3010'],
     });
   });
 
@@ -84,5 +87,34 @@ describe('loadAppConfig', () => {
         ...encryptionEnvironment,
       }),
     ).toThrow('PUBLIC_STATUS_PAGE_INTERNAL_TOKEN must contain at least 32 characters.');
+  });
+
+  it('normalizes configured frontend origins for CORS and Better Auth', () => {
+    const config = loadAppConfig({
+      NODE_ENV: 'development',
+      DATABASE_URL: 'postgresql://example.invalid/watchrail',
+      DEV_IDENTITY_ENABLED: 'false',
+      FRONTEND_URL: 'http://localhost:3010',
+      BETTER_AUTH_TRUSTED_ORIGINS: 'https://preview.watchrail.example,http://localhost:3010',
+      ...encryptionEnvironment,
+    });
+
+    expect(config.frontendOrigins).toEqual([
+      'http://localhost:3010',
+      'https://preview.watchrail.example',
+    ]);
+    expect(config.betterAuth.trustedOrigins).toEqual(config.frontendOrigins);
+  });
+
+  it('rejects trusted origins containing paths or credentials', () => {
+    expect(() =>
+      loadAppConfig({
+        NODE_ENV: 'development',
+        DATABASE_URL: 'postgresql://example.invalid/watchrail',
+        DEV_IDENTITY_ENABLED: 'false',
+        FRONTEND_URL: 'https://watchrail.example/sign-in',
+        ...encryptionEnvironment,
+      }),
+    ).toThrow('Frontend origins must be bare HTTP or HTTPS origins.');
   });
 });

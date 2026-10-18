@@ -25,12 +25,15 @@ import type { ProbeMachineRequest } from './probe-machine-auth.js';
 import { ProbeMachineAuthGuard } from './probe-machine-auth.js';
 import { ProbeIdentityService } from './probe-identity.service.js';
 import type { RequestWithContext } from './request-context.js';
+import { Public, RequirePermission } from './auth.guard.js';
+import { PERMISSIONS } from './permissions.js';
 
 @Controller('probe-locations')
 export class ProbeLocationsController {
   constructor(@Inject(ProbeIdentityService) private readonly probes: ProbeIdentityService) {}
 
   @Post()
+  @RequirePermission(PERMISSIONS.PROBE_MANAGE)
   async create(@Req() request: RequestWithContext, @Body() body: unknown) {
     return {
       data: locationResponse(await this.probes.createLocation(request.watchrailContext, body)),
@@ -38,6 +41,7 @@ export class ProbeLocationsController {
   }
 
   @Get()
+  @RequirePermission(PERMISSIONS.PROBE_READ)
   async list(@Req() request: RequestWithContext) {
     return {
       data: (await this.probes.listLocations(request.watchrailContext)).map(locationResponse),
@@ -45,6 +49,7 @@ export class ProbeLocationsController {
   }
 
   @Patch(':locationId/status')
+  @RequirePermission(PERMISSIONS.PROBE_MANAGE)
   async setStatus(
     @Req() request: RequestWithContext,
     @Param('locationId', ParseUUIDPipe) locationId: string,
@@ -58,6 +63,7 @@ export class ProbeLocationsController {
   }
 
   @Post(':locationId/enrollments')
+  @RequirePermission(PERMISSIONS.PROBE_MANAGE)
   @Header('Cache-Control', 'no-store')
   async issueEnrollment(
     @Req() request: RequestWithContext,
@@ -82,6 +88,7 @@ export class ProbeEnrollmentsController {
   constructor(@Inject(ProbeIdentityService) private readonly probes: ProbeIdentityService) {}
 
   @Post(':enrollmentId/revoke')
+  @RequirePermission(PERMISSIONS.PROBE_MANAGE)
   @HttpCode(204)
   async revoke(
     @Req() request: RequestWithContext,
@@ -96,11 +103,13 @@ export class ProbeAgentsController {
   constructor(@Inject(ProbeIdentityService) private readonly probes: ProbeIdentityService) {}
 
   @Get()
+  @RequirePermission(PERMISSIONS.PROBE_READ)
   async list(@Req() request: RequestWithContext) {
     return { data: (await this.probes.listAgents(request.watchrailContext)).map(agentResponse) };
   }
 
   @Post(':agentId/revoke')
+  @RequirePermission(PERMISSIONS.PROBE_MANAGE)
   @HttpCode(204)
   async revoke(
     @Req() request: RequestWithContext,
@@ -110,6 +119,7 @@ export class ProbeAgentsController {
   }
 }
 
+@Public()
 @Controller('probe-machine')
 export class ProbeMachineController {
   constructor(

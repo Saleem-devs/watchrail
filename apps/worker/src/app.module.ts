@@ -2,7 +2,12 @@ import { Module } from '@nestjs/common';
 import { DrizzleModule, getDrizzleToken } from '@nestjs/drizzle';
 import { NodeHttpExecutor } from '@watchrail/check-engine';
 import { WebhookDeliveryEngine } from '@watchrail/webhook-delivery';
-import { BullMqCheckJobConsumer, BullMqCheckJobPublisher } from '@watchrail/queue';
+import {
+  BullMqAuthEmailConsumer,
+  BullMqAuthEmailPublisher,
+  BullMqCheckJobConsumer,
+  BullMqCheckJobPublisher,
+} from '@watchrail/queue';
 import {
   CheckExecutionRepository,
   CheckRoundOutboxRepository,
@@ -12,6 +17,7 @@ import {
   NotificationDeliveryRepository,
   ProbeCoordinatorRepository,
   MultiLocationRoundFinalizationRepository,
+  AuthEmailOutboxRepository,
 } from '@watchrail/db';
 import type { WatchrailDatabase } from '@watchrail/db';
 import { CheckOutboxRelay, createExponentialBackoff } from './check-outbox-relay.js';
@@ -20,6 +26,7 @@ import { WorkerConfigModule } from './config.module.js';
 import { WORKER_CONFIG, type WorkerConfig } from './config.js';
 import { WorkerRuntime } from './worker-runtime.js';
 import { WebhookDeliveryWorker } from './webhook-delivery-worker.js';
+import { AuthEmailJobHandler, AuthEmailOutboxRelay } from './auth-email-worker.js';
 
 @Module({
   imports: [
@@ -33,6 +40,38 @@ import { WebhookDeliveryWorker } from './webhook-delivery-worker.js';
     }),
   ],
   providers: [
+    {
+      provide: AuthEmailOutboxRepository,
+      inject: [getDrizzleToken()],
+      useFactory: (db: WatchrailDatabase) => new AuthEmailOutboxRepository(db),
+    },
+    {
+      provide: BullMqAuthEmailPublisher,
+      inject: [WORKER_CONFIG],
+      useFactory: (config: WorkerConfig) => BullMqAuthEmailPublisher.connect(config.redisUrl),
+    },
+    {
+      provide: AuthEmailJobHandler,
+      inject: [AuthEmailOutboxRepository, WORKER_CONFIG],
+      useFactory: (outbox: AuthEmailOutboxRepository, config: WorkerConfig) =>
+        new AuthEmailJobHandler(outbox, config.authEmailKeyring, config.smtp),
+    },
+    {
+      provide: BullMqAuthEmailConsumer,
+      inject: [WORKER_CONFIG, AuthEmailJobHandler],
+      useFactory: (config: WorkerConfig, handler: AuthEmailJobHandler) =>
+        BullMqAuthEmailConsumer.connect(
+          config.redisUrl,
+          (job) => handler.handle(job.messageId),
+          (messageId) => handler.markTerminalFailure(messageId),
+        ),
+    },
+    {
+      provide: AuthEmailOutboxRelay,
+      inject: [AuthEmailOutboxRepository, BullMqAuthEmailPublisher],
+      useFactory: (outbox: AuthEmailOutboxRepository, publisher: BullMqAuthEmailPublisher) =>
+        new AuthEmailOutboxRelay(outbox, publisher),
+    },
     {
       provide: ProbeCoordinatorRepository,
       inject: [getDrizzleToken(), WORKER_CONFIG],
@@ -157,6 +196,9 @@ import { WebhookDeliveryWorker } from './webhook-delivery-worker.js';
         WebhookDeliveryWorker,
         ProbeCoordinatorRepository,
         MultiLocationRoundFinalizationRepository,
+        AuthEmailOutboxRelay,
+        BullMqAuthEmailConsumer,
+        BullMqAuthEmailPublisher,
       ],
       useFactory: (
         relay: CheckOutboxRelay,
@@ -168,6 +210,9 @@ import { WebhookDeliveryWorker } from './webhook-delivery-worker.js';
         webhookDelivery: WebhookDeliveryWorker,
         probeCoordinator: ProbeCoordinatorRepository,
         multiLocationFinalization: MultiLocationRoundFinalizationRepository,
+        authEmailRelay: AuthEmailOutboxRelay,
+        authEmailConsumer: BullMqAuthEmailConsumer,
+        authEmailPublisher: BullMqAuthEmailPublisher,
       ) =>
         new WorkerRuntime(
           relay,
@@ -179,6 +224,9 @@ import { WebhookDeliveryWorker } from './webhook-delivery-worker.js';
           webhookDelivery,
           probeCoordinator,
           multiLocationFinalization,
+          authEmailRelay,
+          authEmailConsumer,
+          authEmailPublisher,
         ),
     },
   ],

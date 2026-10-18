@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { OrgSwitcher } from '../components/org-switcher';
 
 const multiLocationUiEnabled = process.env.NEXT_PUBLIC_MULTI_LOCATION_EXECUTION_ENABLED === 'true';
 
@@ -594,7 +595,7 @@ export function Dashboard() {
           </span>
           <span>Watchrail</span>
         </a>
-        <span className="mode-badge">Local development identity</span>
+        <OrgSwitcher />
       </header>
 
       <section className="hero" id="top">
