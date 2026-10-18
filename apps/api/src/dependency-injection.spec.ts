@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ApiCredentialsController } from './api-credentials.controller.js';
 import { ApiCredentialsService } from './api-credentials.service.js';
 import { OrganizationsService } from './organizations.service.js';
-import { StatusPagesController } from './status-pages.controller.js';
+import { StatusPagesController } from './modules/status-pages/status-pages.controller.js';
 import { WebhookEndpointsController } from './webhook-endpoints.controller.js';
 
 describe('tsx dependency injection metadata', () => {
