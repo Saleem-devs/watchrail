@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ensureActiveOrganization } from '../../../lib/auth-client';
+import { safeNextPath } from '../../../lib/safe-next-path';
 
 export default function CompleteSignInPage() {
   const router = useRouter();
@@ -18,7 +19,8 @@ export default function CompleteSignInPage() {
           setError('Your workspace could not be selected. Please sign in again.');
           return;
         }
-        router.replace('/');
+        const nextPath = safeNextPath(new URLSearchParams(window.location.search).get('next'));
+        router.replace(nextPath);
         router.refresh();
       })
       .catch(() => {

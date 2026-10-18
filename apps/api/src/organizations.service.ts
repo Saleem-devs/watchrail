@@ -32,6 +32,7 @@ export interface MemberResponse {
   userId: string;
   role: string;
   createdAt: string;
+  user?: { name: string; email: string };
 }
 
 export interface InvitationResponse {
@@ -227,6 +228,7 @@ interface MemberRecord {
   userId: string;
   role: string;
   createdAt?: Date | string;
+  user?: { name: string; email: string };
 }
 
 interface InvitationRecord {
@@ -252,6 +254,7 @@ function formatMember(m: MemberRecord): MemberResponse {
     userId: m.userId,
     role: m.role,
     createdAt: toIso(m.createdAt),
+    ...(m.user ? { user: { name: m.user.name, email: m.user.email } } : {}),
   };
 }
 

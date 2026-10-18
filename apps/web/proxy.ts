@@ -49,7 +49,7 @@ export function proxy(request: NextRequest): NextResponse | undefined {
     // Unauthenticated user trying to access a protected page.
     const url = request.nextUrl.clone();
     url.pathname = '/sign-in';
-    url.searchParams.set('next', pathname);
+    url.searchParams.set('next', `${pathname}${request.nextUrl.search}`);
     return NextResponse.redirect(url);
   }
 

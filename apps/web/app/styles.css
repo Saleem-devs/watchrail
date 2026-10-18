@@ -1069,3 +1069,117 @@ form {
     grid-template-columns: 1fr;
   }
 }
+.settings-shell {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 48px 24px 96px;
+}
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 28px;
+}
+.settings-header h1 {
+  margin: 4px 0;
+}
+.eyebrow {
+  color: var(--muted, #91a1a6);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.settings-card {
+  border: 1px solid #26383d;
+  background: #0d1518;
+  padding: 24px;
+  margin: 18px 0;
+}
+.settings-card h2 {
+  margin-top: 0;
+}
+.settings-form {
+  display: grid;
+  gap: 16px;
+}
+.settings-form.inline {
+  grid-template-columns: 2fr 1fr auto;
+  align-items: end;
+}
+.settings-form label {
+  display: grid;
+  gap: 7px;
+}
+.settings-form input,
+.settings-form select,
+.settings-row select {
+  background: #142126;
+  color: inherit;
+  border: 1px solid #365057;
+  padding: 10px;
+}
+.settings-form button,
+.credential-secret button {
+  padding: 11px 16px;
+  background: #63f5af;
+  border: 0;
+  font-weight: 700;
+}
+.settings-list {
+  display: grid;
+  margin-top: 18px;
+}
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  justify-content: space-between;
+  padding: 14px 0;
+  border-top: 1px solid #25363b;
+}
+.settings-row div {
+  display: grid;
+  gap: 4px;
+}
+.settings-row small {
+  color: #91a1a6;
+}
+.danger {
+  color: #ff8585;
+  background: transparent;
+  border: 1px solid #7c3d42;
+  padding: 8px 12px;
+}
+.settings-notice,
+.credential-secret {
+  border: 1px solid #365057;
+  padding: 14px;
+  background: #122026;
+}
+.credential-secret {
+  display: grid;
+  gap: 10px;
+  margin: 18px 0;
+}
+.credential-secret code {
+  overflow-wrap: anywhere;
+}
+.scope-option {
+  display: inline-flex !important;
+  margin: 7px 16px 7px 0;
+}
+.scope-option input {
+  width: auto;
+}
+.org-dropdown-action {
+  text-decoration: none;
+  display: block;
+}
+@media (max-width: 700px) {
+  .settings-form.inline {
+    grid-template-columns: 1fr;
+  }
+  .settings-row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+}

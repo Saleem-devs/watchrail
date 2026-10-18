@@ -10,6 +10,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { authClient } from '../lib/auth-client';
+import Link from 'next/link';
 
 interface Org {
   id: string;
@@ -18,8 +19,21 @@ interface Org {
 }
 
 export function OrgSwitcher() {
-  const router = useRouter();
   const { data: session } = authClient.useSession();
+
+  if (!session?.user) return null;
+  return <AuthenticatedOrgSwitcher session={session} />;
+}
+
+function AuthenticatedOrgSwitcher({
+  session,
+}: {
+  session: {
+    user: { name: string };
+    session: { activeOrganizationId?: string | null | undefined };
+  };
+}) {
+  const router = useRouter();
   const [orgs, setOrgs] = useState<Org[]>([]);
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -47,8 +61,6 @@ export function OrgSwitcher() {
     if (open) document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [open]);
-
-  if (!session?.user) return null;
 
   const activeOrg = orgs.find((o) => o.id === session.session.activeOrganizationId) ?? orgs[0];
 
@@ -106,6 +118,14 @@ export function OrgSwitcher() {
           ))}
 
           <div className="org-dropdown-divider" />
+
+          <Link
+            className="org-dropdown-action"
+            href="/settings/organization"
+            onClick={() => setOpen(false)}
+          >
+            Organization settings
+          </Link>
 
           <button
             type="button"

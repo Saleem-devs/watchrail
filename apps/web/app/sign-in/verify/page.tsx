@@ -3,6 +3,7 @@
 import { Suspense, type FormEvent, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { authClient, ensureActiveOrganization } from '../../../lib/auth-client';
+import { safeNextPath } from '../../../lib/safe-next-path';
 
 const RESEND_COOLDOWN_SECONDS = 60;
 
@@ -10,6 +11,7 @@ function OtpVerifyForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const email = searchParams.get('email') ?? '';
+  const nextPath = safeNextPath(searchParams.get('next'));
 
   const [otp, setOtp] = useState('');
   const [verifying, setVerifying] = useState(false);
@@ -51,7 +53,7 @@ function OtpVerifyForm() {
         setError('Your workspace could not be selected. Please try signing in again.');
         return;
       }
-      router.push('/');
+      router.push(nextPath);
     } catch {
       setError('Verification failed. Please try again.');
     } finally {

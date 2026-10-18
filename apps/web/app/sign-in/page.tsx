@@ -3,6 +3,7 @@
 import { type FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { authClient } from '../../lib/auth-client';
+import { safeNextPath } from '../../lib/safe-next-path';
 
 // ─── OAuth provider helpers ───────────────────────────────────────────────────
 
@@ -73,13 +74,17 @@ export default function SignInPage() {
   const [emailError, setEmailError] = useState<string | null>(null);
   const [socialPending, setSocialPending] = useState<string | null>(null);
 
+  function returnPath(): string {
+    return safeNextPath(new URLSearchParams(window.location.search).get('next'));
+  }
+
   async function handleSocial(provider: 'github' | 'gitlab' | 'google') {
     setSocialPending(provider);
     setEmailError(null);
     try {
       await authClient.signIn.social({
         provider,
-        callbackURL: '/sign-in/complete',
+        callbackURL: `/sign-in/complete?next=${encodeURIComponent(returnPath())}`,
       });
       // Better Auth handles the redirect; control doesn't normally return here.
     } catch {
@@ -106,7 +111,9 @@ export default function SignInPage() {
         setEmailError(result.error.message ?? 'Failed to send verification code.');
         return;
       }
-      router.push(`/sign-in/verify?email=${encodeURIComponent(trimmed)}`);
+      router.push(
+        `/sign-in/verify?email=${encodeURIComponent(trimmed)}&next=${encodeURIComponent(returnPath())}`,
+      );
     } catch {
       setEmailError('Failed to send verification code. Please try again.');
     } finally {
