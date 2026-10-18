@@ -14,7 +14,7 @@ import {
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
-import { AuthMembershipInvariantError, AuthMembershipRepository } from '@watchrail/db';
+import { AuthMembershipInvariantError, AuthMembershipRepository, AuthEmailOutboxRepository } from '@watchrail/db';
 import { WATCHRAIL_AUTH } from './auth.tokens.js';
 import type { WatchrailAuth } from './auth.js';
 import type { RequestContext } from './request-context.js';
@@ -48,6 +48,7 @@ export class OrganizationsService {
   constructor(
     @Inject(WATCHRAIL_AUTH) private readonly auth: WatchrailAuth,
     private readonly memberships: AuthMembershipRepository,
+    private readonly authEmailOutbox: AuthEmailOutboxRepository,
   ) {}
 
   async listOrganizations(
@@ -179,6 +180,9 @@ export class OrganizationsService {
       body: { invitationId },
       headers: requestHeaders,
     });
+    // The worker also verifies authoritative invitation state, covering cancellations
+    // made through Better Auth directly rather than through this controller.
+    await this.authEmailOutbox.supersedeInvitation(invitationId);
   }
 
   async transferOwnership(

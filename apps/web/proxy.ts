@@ -4,15 +4,9 @@
  * In Next.js 16 the middleware file is named proxy.ts (not middleware.ts) and
  * the exported function is named `proxy` (not `middleware`).
  *
- * This proxy checks for a valid Better Auth session cookie and redirects
- * unauthenticated users to /sign-in for any non-public route.
- *
- * Cookie name: Better Auth sets `better-auth.session_token` in development and
- * `__Secure-better-auth.session_token` over HTTPS in production.
- *
- * NOTE: The proxy only checks for the presence of the session cookie, not its
- * cryptographic validity — the NestJS API guard does the authoritative check.
- * An attacker with a forged cookie will still be blocked at the API layer.
+ * This proxy checks for the presence (not validity) of a Better Auth session
+ * cookie when protecting pages. Only the NestJS API validates credentials.
+ * Sign-in routes must remain reachable even with an expired or revoked cookie.
  */
 
 import { NextResponse } from 'next/server';
@@ -50,14 +44,6 @@ export function proxy(request: NextRequest): NextResponse | undefined {
     const url = request.nextUrl.clone();
     url.pathname = '/sign-in';
     url.searchParams.set('next', `${pathname}${request.nextUrl.search}`);
-    return NextResponse.redirect(url);
-  }
-
-  if (authenticated && pathname.startsWith('/sign-in') && pathname !== '/sign-in/complete') {
-    // Authenticated user hitting the sign-in page — send to dashboard.
-    const url = request.nextUrl.clone();
-    url.pathname = '/';
-    url.search = '';
     return NextResponse.redirect(url);
   }
 

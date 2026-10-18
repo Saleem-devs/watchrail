@@ -199,6 +199,40 @@ describe('passwordless identity provisioning', () => {
     });
   });
 
+  it('serializes concurrent staging and expires previously published deliveries', async () => {
+    const keyring = { activeKeyId: 'test', keys: new Map([['test', Buffer.alloc(32, 7)]]) };
+    const outbox = new AuthEmailOutboxRepository(database);
+    const supersessionKey = `otp:sign-in:parallel-${randomUUID()}@example.test`;
+    const ids = await Promise.all(
+      Array.from({ length: 8 }, (_, index) =>
+        outbox.stage({
+          kind: 'OTP',
+          recipient: 'parallel@example.test',
+          supersessionKey,
+          payload: { type: 'OTP', to: 'parallel@example.test', otp: String(index).padStart(6, '0') },
+          expiresAt: new Date(Date.now() + 60_000),
+          keyring,
+        }),
+      ),
+    );
+    const staged = await database
+      .select()
+      .from(authEmailOutbox)
+      .where(eq(authEmailOutbox.supersessionKey, createHash('sha256').update(supersessionKey).digest('hex')));
+    expect(staged).toHaveLength(8);
+    expect(staged.filter((row) => row.supersededAt === null).map((row) => row.id)).toHaveLength(1);
+
+    const publishedId = ids[0]!;
+    await database.update(authEmailOutbox)
+      .set({ publishedAt: new Date(), supersededAt: null, expiresAt: new Date(Date.now() - 1) })
+      .where(eq(authEmailOutbox.id, publishedId));
+    expect(await outbox.forDelivery(publishedId)).toBeNull();
+    const [expired] = await database.select().from(authEmailOutbox)
+      .where(eq(authEmailOutbox.id, publishedId));
+    expect(expired?.lastErrorCode).toBe('EXPIRED');
+    expect(expired?.failedAt).toBeInstanceOf(Date);
+  });
+
   it('accepts, revokes, and expires organization invitations', async () => {
     const keyring = { activeKeyId: 'test', keys: new Map([['test', Buffer.alloc(32, 4)]]) };
     const auth = createAuth(database, {
@@ -264,6 +298,8 @@ describe('passwordless identity provisioning', () => {
       headers: owner.headers,
     });
     await auth.api.cancelInvitation({ body: { invitationId: revoked.id }, headers: owner.headers });
+    const outbox = new AuthEmailOutboxRepository(database);
+    expect(await outbox.isInvitationPending(revoked.id)).toBe(false);
     const [revokedRecord] = await database
       .select({ status: authInvitation.status })
       .from(authInvitation)

@@ -88,6 +88,12 @@ export class AuthEmailJobHandler {
       typeof payload['frontendOrigin'] === 'string' &&
       isHttpOrigin(payload['frontendOrigin'])
     ) {
+      // Revocation, acceptance and expiry may happen after the email was queued.
+      // Checking the outbox alone is insufficient (Better Auth can cancel directly).
+      if (!(await this.outbox.isInvitationPending(payload['invitationId']))) {
+        await this.outbox.markFailed(messageId, 'INVITATION_INACTIVE');
+        return;
+      }
       const url = `${payload['frontendOrigin']}/accept-invitation?id=${encodeURIComponent(payload['invitationId'])}`;
       await this.send({
         from: this.from,

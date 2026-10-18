@@ -119,6 +119,39 @@ describe('AuthEmailJobHandler', () => {
     expect(outbox.markDelivered).not.toHaveBeenCalled();
   });
 
+  it('does not deliver an invitation revoked after queue publication', async () => {
+    const encryptedPayload = encryptAuthEmail(
+      {
+        type: 'INVITATION',
+        to: 'invitee@example.test',
+        invitationId: '72dc5a63-9ab0-4bf7-898d-778b2bb22af7',
+        organizationName: 'Example Org',
+        frontendOrigin: 'https://watchrail.example.test',
+      },
+      messageId,
+      keyring,
+    );
+    const outbox = {
+      forDelivery: vi.fn().mockResolvedValue({ id: messageId, encryptedPayload }),
+      isInvitationPending: vi.fn().mockResolvedValue(false),
+      markDelivered: vi.fn(),
+      markFailed: vi.fn().mockResolvedValue(undefined),
+    };
+    const handler = new AuthEmailJobHandler(
+      outbox as unknown as AuthEmailOutboxRepository,
+      keyring,
+      { host: 'smtp.example.test', port: 587, secure: false, from: 'Watchrail <noreply@example.test>' },
+    );
+
+    await handler.handle(messageId);
+
+    expect(outbox.isInvitationPending).toHaveBeenCalledWith(
+      '72dc5a63-9ab0-4bf7-898d-778b2bb22af7',
+    );
+    expect(sendMail).not.toHaveBeenCalled();
+    expect(outbox.markFailed).toHaveBeenCalledWith(messageId, 'INVITATION_INACTIVE');
+  });
+
   it('replaces provider failures with a secret-free retry error', async () => {
     const encryptedPayload = encryptAuthEmail(
       { type: 'OTP', to: 'person@example.test', otp: '987654' },

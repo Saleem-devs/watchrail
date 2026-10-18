@@ -96,21 +96,17 @@ export function createAuth(db: NodePgDatabase<Record<string, unknown>>, config: 
         sendVerificationOTP: async ({ email, otp, type }) => {
           if (type === 'sign-in') {
             if (emailOutbox && config.authEmailKeyring) {
-              try {
-                await emailOutbox.stage({
-                  kind: 'OTP',
-                  recipient: email,
-                  supersessionKey: `otp:sign-in:${email.toLowerCase()}`,
-                  payload: { type: 'OTP', to: email, otp },
-                  expiresAt: new Date(Date.now() + config.otpExpiresInSeconds * 1000),
-                  keyring: config.authEmailKeyring,
-                });
-              } catch (error) {
-                await db
-                  .delete(authVerification)
-                  .where(eq(authVerification.identifier, `sign-in-otp-${email.toLowerCase()}`));
-                throw error;
-              }
+              // Do not delete Better Auth's verification record on staging failure:
+              // another concurrent resend may already have replaced it.
+              // Failed delivery intent leaves an undisclosed, short-lived OTP to expire.
+              await emailOutbox.stage({
+                kind: 'OTP',
+                recipient: email,
+                supersessionKey: `otp:sign-in:${email.toLowerCase()}`,
+                payload: { type: 'OTP', to: email, otp },
+                expiresAt: new Date(Date.now() + config.otpExpiresInSeconds * 1000),
+                keyring: config.authEmailKeyring,
+              });
             } else {
               await mailer.sendOTP({ to: email, otp });
             }

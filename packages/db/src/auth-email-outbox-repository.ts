@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { and, eq, isNull, lte, sql } from 'drizzle-orm';
+import { and, eq, gt, isNull, lte, sql } from 'drizzle-orm';
 import type { WatchrailDatabase } from './client.js';
-import { authEmailOutbox } from './schema.js';
+import { authEmailOutbox, authInvitation } from './schema.js';
 import { encryptAuthEmail, type AuthEmailKeyring } from './auth-email-security.js';
 
 export class AuthEmailOutboxRepository {
@@ -18,6 +18,9 @@ export class AuthEmailOutboxRepository {
     const id = randomUUID();
     const supersessionKey = createHash('sha256').update(input.supersessionKey).digest('hex');
     await this.db.transaction(async (tx) => {
+      // Serialize staging by logical recipient/purpose, including the empty-set case.
+      // Row locks alone cannot stop two concurrent inserts both appearing active.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${supersessionKey}, 0))`);
       await tx
         .update(authEmailOutbox)
         .set({ supersededAt: new Date() })
@@ -47,7 +50,7 @@ export class AuthEmailOutboxRepository {
       .set({ failedAt: now, lastErrorCode: 'EXPIRED' })
       .where(
         and(
-          isNull(authEmailOutbox.publishedAt),
+          isNull(authEmailOutbox.deliveredAt),
           isNull(authEmailOutbox.supersededAt),
           isNull(authEmailOutbox.failedAt),
           lte(authEmailOutbox.expiresAt, now),
@@ -95,7 +98,54 @@ export class AuthEmailOutboxRepository {
     return rows.length === 1;
   }
 
+  /** Cancel any pending delivery for an invitation, including already-published jobs. */
+  async supersedeInvitation(invitationId: string): Promise<void> {
+    const key = createHash('sha256').update(`invitation:${invitationId}`).digest('hex');
+    await this.db
+      .update(authEmailOutbox)
+      .set({ supersededAt: new Date() })
+      .where(
+        and(
+          eq(authEmailOutbox.supersessionKey, key),
+          eq(authEmailOutbox.kind, 'INVITATION'),
+          isNull(authEmailOutbox.deliveredAt),
+          isNull(authEmailOutbox.supersededAt),
+          isNull(authEmailOutbox.failedAt),
+        ),
+      );
+  }
+
+  /** Validate against authoritative Better Auth state, including direct plugin API changes. */
+  async isInvitationPending(invitationId: string, now = new Date()): Promise<boolean> {
+    const [active] = await this.db
+      .select({ id: authInvitation.id })
+      .from(authInvitation)
+      .where(
+        and(
+          eq(authInvitation.id, invitationId),
+          eq(authInvitation.status, 'pending'),
+          gt(authInvitation.expiresAt, now),
+        ),
+      )
+      .limit(1);
+    return Boolean(active);
+  }
+
   async forDelivery(id: string, now = new Date()) {
+    // BullMQ may dispatch after expiry, even if the row was already published.
+    // Record a terminal state instead of silently acknowledging the stale job.
+    await this.db
+      .update(authEmailOutbox)
+      .set({ failedAt: now, lastErrorCode: 'EXPIRED' })
+      .where(
+        and(
+          eq(authEmailOutbox.id, id),
+          isNull(authEmailOutbox.deliveredAt),
+          isNull(authEmailOutbox.supersededAt),
+          isNull(authEmailOutbox.failedAt),
+          lte(authEmailOutbox.expiresAt, now),
+        ),
+      );
     const [message] = await this.db
       .select()
       .from(authEmailOutbox)
@@ -123,6 +173,12 @@ export class AuthEmailOutboxRepository {
     await this.db
       .update(authEmailOutbox)
       .set({ failedAt: new Date(), lastErrorCode: code })
-      .where(eq(authEmailOutbox.id, id));
+      .where(
+        and(
+          eq(authEmailOutbox.id, id),
+          isNull(authEmailOutbox.deliveredAt),
+          isNull(authEmailOutbox.failedAt),
+        ),
+      );
   }
 }
