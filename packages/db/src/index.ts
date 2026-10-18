@@ -5,6 +5,8 @@ export * from './client.js';
 export { eq, sql } from 'drizzle-orm';
 export * from './auth-membership-repository.js';
 export * from './auth-api-key-repository.js';
+export * from './auth-email-security.js';
+export * from './auth-email-outbox-repository.js';
 export { AvailabilityRepository } from './availability-repository.js';
 export { MultiLocationRoundFinalizationRepository } from './multi-location-finalization-repository.js';
 export * from './check-execution-repository.js';

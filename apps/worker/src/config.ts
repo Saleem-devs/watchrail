@@ -28,9 +28,18 @@ export interface WorkerConfig {
   webhookDeliveryRetryMaxMs: number;
   webhookDeliveryConcurrency: number;
   webhookDeliveryIdlePollIntervalMs: number;
+  authEmailKeyring: AuthEmailKeyring;
+  smtp: { host: string; port: number; secure: boolean; user?: string; pass?: string; from: string };
 }
 
 export function loadWorkerConfig(environment: NodeJS.ProcessEnv = process.env): WorkerConfig {
+  if (environment.NODE_ENV === 'production' && !environment.SMTP_HOST) {
+    throw new Error('SMTP_HOST is required in production.');
+  }
+  const smtpPort = Number(environment.SMTP_PORT ?? 587);
+  if (!Number.isInteger(smtpPort) || smtpPort < 1 || smtpPort > 65_535) {
+    throw new Error('SMTP_PORT must be an integer from 1 through 65535.');
+  }
   const databaseUrl = requireUrl(environment.DATABASE_URL, 'DATABASE_URL', [
     'postgres:',
     'postgresql:',
@@ -174,6 +183,25 @@ export function loadWorkerConfig(environment: NodeJS.ProcessEnv = process.env): 
       'WEBHOOK_DELIVERY_IDLE_POLL_INTERVAL_MS',
       500,
     ),
+    authEmailKeyring: loadAuthEmailKeyring(
+      environment.NODE_ENV === 'production'
+        ? environment
+        : {
+            ...environment,
+            AUTH_EMAIL_ACTIVE_KEY_ID: environment.AUTH_EMAIL_ACTIVE_KEY_ID ?? 'development',
+            AUTH_EMAIL_ENCRYPTION_KEYS:
+              environment.AUTH_EMAIL_ENCRYPTION_KEYS ??
+              JSON.stringify({ development: Buffer.alloc(32, 7).toString('base64') }),
+          },
+    ),
+    smtp: {
+      host: environment.SMTP_HOST ?? 'localhost',
+      port: smtpPort,
+      secure: environment.SMTP_SECURE === 'true',
+      ...(environment.SMTP_USER ? { user: environment.SMTP_USER } : {}),
+      ...(environment.SMTP_PASS ? { pass: environment.SMTP_PASS } : {}),
+      from: environment.MAIL_FROM ?? 'Watchrail <noreply@watchrail.dev>',
+    },
   };
 }
 
@@ -236,3 +264,4 @@ import {
   loadWebhookSigningSecretKeyring,
   type WebhookSigningSecretKeyring,
 } from '@watchrail/webhook-security';
+import { loadAuthEmailKeyring, type AuthEmailKeyring } from '@watchrail/db';

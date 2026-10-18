@@ -26,6 +26,7 @@
     "@watchrail/webhook-delivery": "workspace:*",
     "@watchrail/webhook-security": "workspace:*",
     "dotenv": "18.0.1",
+    "nodemailer": "^10.1.2",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2"
   },
@@ -35,6 +36,7 @@
     "@testcontainers/redis": "12.1.0",
     "bullmq": "6.3.8",
     "drizzle-orm": "0.45.2",
+    "@types/nodemailer": "^8.0.2",
     "redis": "6.2.1",
     "testcontainers": "12.1.0",
     "tsx": "4.23.13",

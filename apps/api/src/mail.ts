@@ -17,7 +17,6 @@ import nodemailer from 'nodemailer';
 export interface MailConfig {
   provider: 'console' | 'smtp';
   from: string;
-  showConsoleOtp?: boolean;
   smtp?: {
     host: string;
     port: number;
@@ -34,14 +33,8 @@ export interface MailTransport {
 export function createMailTransport(config: MailConfig): MailTransport {
   if (config.provider === 'console') {
     return {
-      sendOTP({ to, otp }) {
-        if (config.showConsoleOtp) {
-          console.log(`[mail] Development OTP for ${to}: ${otp}`);
-        } else {
-          console.log(
-            `[mail] OTP delivery suppressed for ${to}; configure SMTP or enable MAIL_CONSOLE_SHOW_OTP outside production.`,
-          );
-        }
+      sendOTP() {
+        console.log('[mail] OTP delivery suppressed; configure the asynchronous SMTP worker.');
         return Promise.resolve();
       },
     };
@@ -86,11 +79,6 @@ export function createMailTransport(config: MailConfig): MailTransport {
 export function loadMailConfig(env: NodeJS.ProcessEnv = process.env): MailConfig {
   const provider = (env.MAIL_PROVIDER ?? 'console') as MailConfig['provider'];
   const from = env.MAIL_FROM ?? 'Watchrail <noreply@watchrail.dev>';
-  const showConsoleOtp = parseBoolean(env.MAIL_CONSOLE_SHOW_OTP, 'MAIL_CONSOLE_SHOW_OTP');
-
-  if (showConsoleOtp && env.NODE_ENV === 'production') {
-    throw new Error('MAIL_CONSOLE_SHOW_OTP cannot be true in production.');
-  }
   if (provider === 'console' && env.NODE_ENV === 'production') {
     throw new Error('MAIL_PROVIDER=console cannot be used in production.');
   }
@@ -116,11 +104,5 @@ export function loadMailConfig(env: NodeJS.ProcessEnv = process.env): MailConfig
     throw new Error('MAIL_PROVIDER must be console or smtp.');
   }
 
-  return { provider, from, showConsoleOtp };
-}
-
-function parseBoolean(value: string | undefined, name: string): boolean {
-  if (value === undefined || value === 'false') return false;
-  if (value === 'true') return true;
-  throw new Error(`${name} must be true or false.`);
+  return { provider, from };
 }

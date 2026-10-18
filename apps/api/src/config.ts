@@ -11,6 +11,7 @@ import {
   type WebhookSigningSecretKeyring,
 } from '@watchrail/webhook-security';
 import { loadMailConfig, type MailConfig } from './mail.js';
+import { loadAuthEmailKeyring, type AuthEmailKeyring } from '@watchrail/db';
 
 export const APP_CONFIG = Symbol('APP_CONFIG');
 
@@ -42,6 +43,7 @@ export interface AppConfig {
   multiLocationExecutionEnabled: boolean;
   betterAuth: BetterAuthConfig;
   mail: MailConfig;
+  authEmailKeyring: AuthEmailKeyring;
   frontendOrigins: string[];
 }
 
@@ -126,6 +128,17 @@ export function loadAppConfig(environment: NodeJS.ProcessEnv = process.env): App
       ...(google ? { google } : {}),
     },
     mail: loadMailConfig(environment),
+    authEmailKeyring: loadAuthEmailKeyring(
+      nodeEnv === 'production'
+        ? environment
+        : {
+            ...environment,
+            AUTH_EMAIL_ACTIVE_KEY_ID: environment.AUTH_EMAIL_ACTIVE_KEY_ID ?? 'development',
+            AUTH_EMAIL_ENCRYPTION_KEYS:
+              environment.AUTH_EMAIL_ENCRYPTION_KEYS ??
+              JSON.stringify({ development: Buffer.alloc(32, 7).toString('base64') }),
+          },
+    ),
     frontendOrigins,
   };
 }

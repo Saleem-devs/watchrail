@@ -1623,9 +1623,42 @@ export const authApiKey = pgTable(
   ],
 );
 
+export const authEmailOutbox = pgTable(
+  'auth_email_outbox',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    kind: text('kind').notNull(),
+    recipientHash: text('recipient_hash').notNull(),
+    supersessionKey: text('supersession_key').notNull(),
+    encryptedPayload: jsonb('encrypted_payload').notNull(),
+    expiresAt: timestamp('expires_at').notNull(),
+    availableAt: timestamp('available_at').notNull().defaultNow(),
+    claimToken: uuid('claim_token'),
+    leaseExpiresAt: timestamp('lease_expires_at'),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    publishedAt: timestamp('published_at'),
+    deliveredAt: timestamp('delivered_at'),
+    supersededAt: timestamp('superseded_at'),
+    failedAt: timestamp('failed_at'),
+    lastErrorCode: text('last_error_code'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('auth_email_outbox_eligible_idx')
+      .on(table.availableAt, table.id)
+      .where(
+        sql`${table.publishedAt} IS NULL AND ${table.supersededAt} IS NULL AND ${table.failedAt} IS NULL`,
+      ),
+    index('auth_email_outbox_supersession_idx').on(table.supersessionKey, table.createdAt),
+    check('auth_email_outbox_kind_valid', sql`${table.kind} IN ('OTP', 'INVITATION')`),
+    check('auth_email_outbox_attempt_non_negative', sql`${table.attemptCount} >= 0`),
+  ],
+);
+
 export type AuthUserRecord = typeof authUser.$inferSelect;
 export type AuthSessionRecord = typeof authSession.$inferSelect;
 export type AuthOrganizationRecord = typeof authOrganization.$inferSelect;
 export type AuthMemberRecord = typeof authMember.$inferSelect;
 export type AuthInvitationRecord = typeof authInvitation.$inferSelect;
 export type AuthApiKeyRecord = typeof authApiKey.$inferSelect;
+export type AuthEmailOutboxRecord = typeof authEmailOutbox.$inferSelect;

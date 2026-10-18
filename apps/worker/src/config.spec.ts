@@ -44,7 +44,27 @@ describe('loadWorkerConfig', () => {
       webhookDeliveryRetryMaxMs: 300_000,
       webhookDeliveryConcurrency: 5,
       webhookDeliveryIdlePollIntervalMs: 500,
+      authEmailKeyring: { activeKeyId: 'development' },
+      smtp: {
+        host: 'localhost',
+        port: 587,
+        secure: false,
+        from: 'Watchrail <noreply@watchrail.dev>',
+      },
     });
+  });
+
+  it('requires SMTP and the dedicated email keyring in production', () => {
+    expect(() => loadWorkerConfig({ ...requiredEnvironment, NODE_ENV: 'production' })).toThrow(
+      'SMTP_HOST is required in production.',
+    );
+    expect(() =>
+      loadWorkerConfig({
+        ...requiredEnvironment,
+        NODE_ENV: 'production',
+        SMTP_HOST: 'smtp.example.test',
+      }),
+    ).toThrow('Auth email encryption keyring is required.');
   });
 
   it('requires an explicit boolean multi-location readiness gate', () => {

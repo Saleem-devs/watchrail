@@ -19,6 +19,7 @@ export class ApiCredentialsService {
   ) {}
 
   async create(context: RequestContext, input: unknown) {
+    requireHumanSession(context);
     const candidate = parseCreateInput(input);
     const role = await this.memberships.roleForUser(context.actorId, context.organizationId);
     if (!role) throw new ForbiddenException('Organization membership is required.');
@@ -48,9 +49,16 @@ export class ApiCredentialsService {
   }
 
   async revoke(context: RequestContext, id: string): Promise<void> {
+    requireHumanSession(context);
     if (!(await this.credentials.revoke(context.organizationId, id))) {
       throw new NotFoundException('API credential not found.');
     }
+  }
+}
+
+function requireHumanSession(context: RequestContext): void {
+  if (context.authenticationType === 'API_KEY') {
+    throw new ForbiddenException('API credentials cannot manage API credentials.');
   }
 }
 

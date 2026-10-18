@@ -31,6 +31,7 @@ const authProvider: FactoryProvider<WatchrailAuth> = {
       trustedOrigins: config.betterAuth.trustedOrigins,
       otpExpiresInSeconds: config.betterAuth.otpExpiresInSeconds,
       mail: config.mail,
+      authEmailKeyring: config.authEmailKeyring,
       ...(config.betterAuth.github ? { github: config.betterAuth.github } : {}),
       ...(config.betterAuth.gitlab ? { gitlab: config.betterAuth.gitlab } : {}),
       ...(config.betterAuth.google ? { google: config.betterAuth.google } : {}),

@@ -26,6 +26,8 @@ import {
   authMember,
   authInvitation,
   eq,
+  AuthEmailOutboxRepository,
+  type AuthEmailKeyring,
 } from '@watchrail/db';
 import { createMailTransport, type MailConfig, type MailTransport } from './mail.js';
 import { organizationAccessControl, organizationRoles } from './permissions.js';
@@ -40,12 +42,14 @@ export interface AuthConfig {
   google?: { clientId: string; clientSecret: string } | undefined;
   otpExpiresInSeconds: number;
   mailTransport?: MailTransport;
+  authEmailKeyring?: AuthEmailKeyring;
 }
 
 export type WatchrailAuth = ReturnType<typeof createAuth>;
 
 export function createAuth(db: NodePgDatabase<Record<string, unknown>>, config: AuthConfig) {
   const mailer = config.mailTransport ?? createMailTransport(config.mail);
+  const emailOutbox = config.authEmailKeyring ? new AuthEmailOutboxRepository(db as never) : null;
 
   const socialProviders: Record<string, { clientId: string; clientSecret: string }> = {};
   if (config.github) socialProviders['github'] = config.github;
@@ -91,7 +95,25 @@ export function createAuth(db: NodePgDatabase<Record<string, unknown>>, config: 
 
         sendVerificationOTP: async ({ email, otp, type }) => {
           if (type === 'sign-in') {
-            await mailer.sendOTP({ to: email, otp });
+            if (emailOutbox && config.authEmailKeyring) {
+              try {
+                await emailOutbox.stage({
+                  kind: 'OTP',
+                  recipient: email,
+                  supersessionKey: `otp:sign-in:${email.toLowerCase()}`,
+                  payload: { type: 'OTP', to: email, otp },
+                  expiresAt: new Date(Date.now() + config.otpExpiresInSeconds * 1000),
+                  keyring: config.authEmailKeyring,
+                });
+              } catch (error) {
+                await db
+                  .delete(authVerification)
+                  .where(eq(authVerification.identifier, `sign-in-otp-${email.toLowerCase()}`));
+                throw error;
+              }
+            } else {
+              await mailer.sendOTP({ to: email, otp });
+            }
           }
         },
       }),
@@ -101,6 +123,31 @@ export function createAuth(db: NodePgDatabase<Record<string, unknown>>, config: 
         creatorRole: 'owner',
         ac: organizationAccessControl,
         roles: organizationRoles,
+        sendInvitationEmail: async (invitation) => {
+          if (!emailOutbox || !config.authEmailKeyring) {
+            throw new Error('Durable invitation email delivery is unavailable.');
+          }
+          try {
+            await emailOutbox.stage({
+              kind: 'INVITATION',
+              recipient: invitation.email,
+              supersessionKey: `invitation:${invitation.id}`,
+              payload: {
+                type: 'INVITATION',
+                to: invitation.email,
+                invitationId: invitation.id,
+                organizationName: invitation.organization.name,
+                inviterName: invitation.inviter.user.name,
+                frontendOrigin: config.trustedOrigins[0],
+              },
+              expiresAt: new Date(invitation.invitation.expiresAt),
+              keyring: config.authEmailKeyring,
+            });
+          } catch (error) {
+            await db.delete(authInvitation).where(eq(authInvitation.id, invitation.id));
+            throw error;
+          }
+        },
       }),
 
       // Converts Authorization: Bearer <token> to a session cookie,

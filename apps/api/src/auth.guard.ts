@@ -122,6 +122,7 @@ export class WatchrailAuthGuard implements CanActivate {
       request.watchrailContext = {
         actorId: identity.userId,
         organizationId: identity.organizationId,
+        authenticationType: 'API_KEY',
       };
       return true;
     }
@@ -168,6 +169,7 @@ export class WatchrailAuthGuard implements CanActivate {
     request.watchrailContext = {
       actorId: session.user.id,
       organizationId: activeOrganizationId,
+      authenticationType: 'SESSION',
     };
 
     return true;
