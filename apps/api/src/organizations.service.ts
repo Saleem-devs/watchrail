@@ -14,7 +14,11 @@ import {
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
-import { AuthMembershipInvariantError, AuthMembershipRepository, AuthEmailOutboxRepository } from '@watchrail/db';
+import {
+  AuthMembershipInvariantError,
+  AuthMembershipRepository,
+  AuthEmailOutboxRepository,
+} from '@watchrail/db';
 import { WATCHRAIL_AUTH } from './auth.tokens.js';
 import type { WatchrailAuth } from './auth.js';
 import type { RequestContext } from './request-context.js';
@@ -47,7 +51,8 @@ export interface InvitationResponse {
 export class OrganizationsService {
   constructor(
     @Inject(WATCHRAIL_AUTH) private readonly auth: WatchrailAuth,
-    private readonly memberships: AuthMembershipRepository,
+    @Inject(AuthMembershipRepository) private readonly memberships: AuthMembershipRepository,
+    @Inject(AuthEmailOutboxRepository)
     private readonly authEmailOutbox: AuthEmailOutboxRepository,
   ) {}
 
@@ -103,8 +108,8 @@ export class OrganizationsService {
       query: { organizationId: ctx.organizationId },
       headers: requestHeaders,
     });
-    if (!Array.isArray(result)) return [];
-    return result.map(formatMember);
+    const members = Array.isArray(result) ? result : result.members;
+    return members.map(formatMember);
   }
 
   async removeMember(

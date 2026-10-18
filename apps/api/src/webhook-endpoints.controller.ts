@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Inject,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -21,7 +22,9 @@ import { PERMISSIONS } from './permissions.js';
 
 @Controller('webhook-endpoints')
 export class WebhookEndpointsController {
-  constructor(private readonly endpoints: WebhookEndpointsService) {}
+  constructor(
+    @Inject(WebhookEndpointsService) private readonly endpoints: WebhookEndpointsService,
+  ) {}
 
   @Post()
   @RequirePermission(PERMISSIONS.WEBHOOK_MANAGE)

@@ -15,6 +15,9 @@ const existingPausedMonitorId = '55555555-5555-4555-8555-555555555555';
 const existingArchivedMonitorId = '66666666-6666-4666-8666-666666666666';
 const legacyRemoteLocationId = 'abcdefab-cdef-4abc-8def-abcdefabcdef';
 const legacyUppercaseRemoteLocationId = legacyRemoteLocationId.toUpperCase();
+const legacyAuthUserId = '77777777-7777-4777-8777-777777777777';
+const legacyAuthOrganizationId = '88888888-8888-4888-8888-888888888888';
+const legacyAuthApiKeyId = '99999999-9999-4999-8999-999999999999';
 
 const existingRound = {
   id: '22222222-2222-4222-8222-222222222222',
@@ -152,9 +155,66 @@ describe('database migrations', () => {
       where id = ${existingRound.assignmentId}
     `);
 
-    for (let index = multiLocationMigrationIndex; index < migrations.length; index += 1) {
+    const identityRepairMigrationIndex = migrations.findIndex((migration) =>
+      migration.sql.some((statement) => statement.includes('Legacy API credentials')),
+    );
+    expect(identityRepairMigrationIndex).toBeGreaterThan(multiLocationMigrationIndex);
+    for (
+      let index = multiLocationMigrationIndex;
+      index < identityRepairMigrationIndex;
+      index += 1
+    ) {
       await applyMigration(migrations, index);
     }
+
+    // Recreate the original 0029 identity shape to prove the additive repair
+    // migration upgrades databases that applied it before the follow-up edits.
+    await connection.db.execute(sql`
+      drop index if exists api_key_organization_idx;
+      alter table api_key drop constraint if exists api_key_organization_id_organization_id_fk;
+      alter table api_key drop column if exists organization_id;
+
+      drop index if exists account_provider_account_unique;
+      create index account_provider_idx on account (provider_id, account_id);
+
+      alter table member drop constraint member_role_valid;
+      alter table member alter column role set default 'member';
+      alter table member add constraint member_role_valid
+        check (role in ('owner', 'admin', 'editor', 'viewer', 'member'));
+    `);
+    await connection.db.execute(sql`
+      insert into "user" (id, name, email)
+      values (${legacyAuthUserId}, '', 'legacy-auth@example.test');
+    `);
+    await connection.db.execute(sql`
+      insert into organization (id, name, slug)
+      values (${legacyAuthOrganizationId}, 'Legacy auth', 'legacy-auth');
+    `);
+    await connection.db.execute(sql`
+      insert into member (organization_id, user_id, role)
+      values (${legacyAuthOrganizationId}, ${legacyAuthUserId}, 'member');
+    `);
+    await connection.db.execute(sql`
+      insert into api_key (id, key, user_id)
+      values (${legacyAuthApiKeyId}, 'legacy-api-key-hash', ${legacyAuthUserId});
+    `);
+
+    for (let index = identityRepairMigrationIndex; index < migrations.length; index += 1) {
+      await applyMigration(migrations, index);
+    }
+
+    const repairedIdentity = await connection.db.execute<{
+      organization_id: string;
+      role: string;
+    }>(sql`
+      select api_key.organization_id, member.role
+      from api_key
+      inner join member on member.user_id = api_key.user_id
+      where api_key.id = ${legacyAuthApiKeyId}
+    `);
+    expect(repairedIdentity.rows).toEqual([
+      { organization_id: legacyAuthOrganizationId, role: 'viewer' },
+    ]);
 
     const result = await connection.db.execute<{
       table_name: string;

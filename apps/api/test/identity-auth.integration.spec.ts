@@ -84,7 +84,7 @@ describe('passwordless identity provisioning', () => {
     expect(memberships).toHaveLength(1);
     expect(memberships[0]).toMatchObject({
       role: 'owner',
-      organizationName: expect.stringContaining('Workspace'),
+      organizationName: `${email.split('@')[0]}'s Workspace`,
     });
     expect(memberships[0]?.organizationId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu,
@@ -209,7 +209,11 @@ describe('passwordless identity provisioning', () => {
           kind: 'OTP',
           recipient: 'parallel@example.test',
           supersessionKey,
-          payload: { type: 'OTP', to: 'parallel@example.test', otp: String(index).padStart(6, '0') },
+          payload: {
+            type: 'OTP',
+            to: 'parallel@example.test',
+            otp: String(index).padStart(6, '0'),
+          },
           expiresAt: new Date(Date.now() + 60_000),
           keyring,
         }),
@@ -218,16 +222,24 @@ describe('passwordless identity provisioning', () => {
     const staged = await database
       .select()
       .from(authEmailOutbox)
-      .where(eq(authEmailOutbox.supersessionKey, createHash('sha256').update(supersessionKey).digest('hex')));
+      .where(
+        eq(
+          authEmailOutbox.supersessionKey,
+          createHash('sha256').update(supersessionKey).digest('hex'),
+        ),
+      );
     expect(staged).toHaveLength(8);
     expect(staged.filter((row) => row.supersededAt === null).map((row) => row.id)).toHaveLength(1);
 
     const publishedId = ids[0]!;
-    await database.update(authEmailOutbox)
+    await database
+      .update(authEmailOutbox)
       .set({ publishedAt: new Date(), supersededAt: null, expiresAt: new Date(Date.now() - 1) })
       .where(eq(authEmailOutbox.id, publishedId));
     expect(await outbox.forDelivery(publishedId)).toBeNull();
-    const [expired] = await database.select().from(authEmailOutbox)
+    const [expired] = await database
+      .select()
+      .from(authEmailOutbox)
       .where(eq(authEmailOutbox.id, publishedId));
     expect(expired?.lastErrorCode).toBe('EXPIRED');
     expect(expired?.failedAt).toBeInstanceOf(Date);
@@ -396,6 +408,26 @@ describe('passwordless identity provisioning', () => {
     app.setGlobalPrefix('api');
     await app.init();
     try {
+      await request(app.getHttpServer())
+        .get('/api/organizations/current')
+        .set('Authorization', `Bearer ${signedIn.token}`)
+        .expect(200);
+      const memberPage = await request(app.getHttpServer())
+        .get('/api/organizations/current/members')
+        .set('Authorization', `Bearer ${signedIn.token}`)
+        .expect(200);
+      expect(memberPage.body.data).toEqual([
+        expect.objectContaining({ userId: signedIn.user.id, role: 'owner' }),
+      ]);
+      await request(app.getHttpServer())
+        .get('/api/organizations/current/invitations')
+        .set('Authorization', `Bearer ${signedIn.token}`)
+        .expect(200);
+      await request(app.getHttpServer())
+        .get('/api/api-credentials')
+        .set('Authorization', `Bearer ${signedIn.token}`)
+        .expect(200);
+
       const createdCredential = await request(app.getHttpServer())
         .post('/api/api-credentials')
         .set('Authorization', `Bearer ${signedIn.token}`)

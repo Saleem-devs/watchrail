@@ -1,4 +1,15 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Put, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Inject,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Put,
+  Req,
+} from '@nestjs/common';
 import type { StatusPageRecord } from '@watchrail/db';
 import type { RequestWithContext } from './request-context.js';
 import { StatusPagesService } from './status-pages.service.js';
@@ -7,7 +18,7 @@ import { PERMISSIONS } from './permissions.js';
 
 @Controller('status-pages')
 export class StatusPagesController {
-  constructor(private readonly pages: StatusPagesService) {}
+  constructor(@Inject(StatusPagesService) private readonly pages: StatusPagesService) {}
 
   @Post()
   @RequirePermission(PERMISSIONS.STATUS_PAGE_MANAGE)

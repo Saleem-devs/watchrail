@@ -168,7 +168,7 @@ export function createAuth(db: NodePgDatabase<Record<string, unknown>>, config: 
       user: {
         create: {
           after: async (user) => {
-            await ensurePersonalWorkspace(user.id, user.name);
+            await ensurePersonalWorkspace(user.id, user.name, user.email);
           },
         },
       },
@@ -176,11 +176,11 @@ export function createAuth(db: NodePgDatabase<Record<string, unknown>>, config: 
         create: {
           after: async (session) => {
             const [user] = await db
-              .select({ name: authUser.name })
+              .select({ name: authUser.name, email: authUser.email })
               .from(authUser)
               .where(eq(authUser.id, session.userId))
               .limit(1);
-            if (user) await ensurePersonalWorkspace(session.userId, user.name);
+            if (user) await ensurePersonalWorkspace(session.userId, user.name, user.email);
           },
         },
       },
@@ -201,19 +201,41 @@ export function createAuth(db: NodePgDatabase<Record<string, unknown>>, config: 
     },
   });
 
-  async function ensurePersonalWorkspace(userId: string, userName: string): Promise<void> {
+  async function ensurePersonalWorkspace(
+    userId: string,
+    userName: string,
+    userEmail: string,
+  ): Promise<void> {
+    const slug = `personal-${userId.slice(0, 8)}`;
+    const fallbackName = userEmail.split('@')[0]?.trim() || 'Personal';
+    const workspaceName = `${userName.trim() || fallbackName}'s Workspace`;
     const [existing] = await db
-      .select({ id: authMember.id })
+      .select({
+        id: authMember.id,
+        organizationId: authOrganization.id,
+        organizationName: authOrganization.name,
+        organizationSlug: authOrganization.slug,
+      })
       .from(authMember)
+      .innerJoin(authOrganization, eq(authOrganization.id, authMember.organizationId))
       .where(eq(authMember.userId, userId))
       .limit(1);
-    if (existing) return;
+    if (existing) {
+      // Repair only the malformed name produced by the original passwordless
+      // onboarding path. Never overwrite a name chosen by an operator.
+      if (existing.organizationSlug === slug && existing.organizationName === "'s Workspace") {
+        await db
+          .update(authOrganization)
+          .set({ name: workspaceName })
+          .where(eq(authOrganization.id, existing.organizationId));
+      }
+      return;
+    }
 
-    const slug = `personal-${userId.slice(0, 8)}`;
     try {
       await instance.api.createOrganization({
         body: {
-          name: `${userName}'s Workspace`,
+          name: workspaceName,
           slug,
           userId,
         },

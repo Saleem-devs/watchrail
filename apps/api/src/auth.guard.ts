@@ -62,9 +62,11 @@ export const RequirePermission = (permission: Permission) =>
 export class WatchrailAuthGuard implements CanActivate {
   constructor(
     @Inject(WATCHRAIL_AUTH) private readonly auth: WatchrailAuth,
+    @Inject(AuthMembershipRepository)
     private readonly memberships: AuthMembershipRepository,
+    @Inject(AuthApiKeyRepository)
     private readonly apiKeys: AuthApiKeyRepository,
-    private readonly reflector: Reflector,
+    @Inject(Reflector) private readonly reflector: Reflector,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {

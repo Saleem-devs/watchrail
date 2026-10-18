@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   HttpCode,
+  Inject,
   Param,
   ParseUUIDPipe,
   Post,
@@ -16,7 +17,7 @@ import type { RequestWithContext } from './request-context.js';
 
 @Controller('api-credentials')
 export class ApiCredentialsController {
-  constructor(private readonly credentials: ApiCredentialsService) {}
+  constructor(@Inject(ApiCredentialsService) private readonly credentials: ApiCredentialsService) {}
 
   @Post()
   @RequirePermission(PERMISSIONS.API_KEY_MANAGE)

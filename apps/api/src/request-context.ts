@@ -23,7 +23,14 @@ export class DevelopmentIdentityMiddleware implements NestMiddleware {
   constructor(@Inject(APP_CONFIG) private readonly config: AppConfig) {}
 
   use(request: RequestWithContext, _response: Response, next: NextFunction): void {
-    if (!this.config.developmentIdentityEnabled) {
+    // Real credentials always take precedence. This lets developers exercise
+    // production authentication locally while retaining the credential-free
+    // development identity used by integration tests.
+    if (
+      !this.config.developmentIdentityEnabled ||
+      request.headers.cookie !== undefined ||
+      request.headers.authorization !== undefined
+    ) {
       next();
       return;
     }

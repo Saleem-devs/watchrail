@@ -1,6 +1,7 @@
 import { ForbiddenException } from '@nestjs/common';
 import type { ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { AuthApiKeyRepository, AuthMembershipRepository } from '@watchrail/db';
 import { describe, expect, it, vi } from 'vitest';
 import { Public, WatchrailAuthGuard } from './auth.guard.js';
 import { PERMISSIONS } from './permissions.js';
@@ -23,6 +24,22 @@ describe('WatchrailAuthGuard authorization policy', () => {
     apiKeys as never,
     new Reflector(),
   );
+
+  it('declares every runtime dependency explicitly for tsx execution', () => {
+    const dependencies = (
+      Reflect.getMetadata('self:paramtypes', WatchrailAuthGuard) as Array<{
+        index: number;
+        param: unknown;
+      }>
+    ).toSorted((left, right) => left.index - right.index);
+
+    expect(dependencies).toEqual([
+      { index: 0, param: expect.any(Symbol) },
+      { index: 1, param: AuthMembershipRepository },
+      { index: 2, param: AuthApiKeyRepository },
+      { index: 3, param: Reflector },
+    ]);
+  });
 
   it('fails closed when a protected endpoint has no permission metadata', async () => {
     class ProtectedController {}

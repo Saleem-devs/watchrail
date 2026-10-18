@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import {
   BadRequestException,
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -14,8 +15,8 @@ const ALL_PERMISSIONS = new Set<string>(Object.values(PERMISSIONS));
 @Injectable()
 export class ApiCredentialsService {
   constructor(
-    private readonly credentials: AuthApiKeyRepository,
-    private readonly memberships: AuthMembershipRepository,
+    @Inject(AuthApiKeyRepository) private readonly credentials: AuthApiKeyRepository,
+    @Inject(AuthMembershipRepository) private readonly memberships: AuthMembershipRepository,
   ) {}
 
   async create(context: RequestContext, input: unknown) {

@@ -6,7 +6,9 @@ describe('DevelopmentIdentityMiddleware', () => {
     const middleware = new DevelopmentIdentityMiddleware({
       developmentIdentityEnabled: false,
     } as never);
-    const request: { watchrailContext?: unknown } = {};
+    const request: { headers: Record<string, string>; watchrailContext?: unknown } = {
+      headers: {},
+    };
     const next = vi.fn();
 
     middleware.use(request as never, {} as never, next);
@@ -19,12 +21,30 @@ describe('DevelopmentIdentityMiddleware', () => {
     const middleware = new DevelopmentIdentityMiddleware({
       developmentIdentityEnabled: true,
     } as never);
-    const request: { watchrailContext?: unknown } = {};
+    const request: { headers: Record<string, string>; watchrailContext?: unknown } = {
+      headers: {},
+    };
     const next = vi.fn();
 
     middleware.use(request as never, {} as never, next);
 
     expect(request.watchrailContext).toEqual(DEVELOPMENT_REQUEST_CONTEXT);
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['session cookie', { cookie: 'better-auth.session_token=token' }],
+    ['authorization header', { authorization: 'Bearer token' }],
+  ])('does not override a real %s', (_label, headers) => {
+    const middleware = new DevelopmentIdentityMiddleware({
+      developmentIdentityEnabled: true,
+    } as never);
+    const request: { headers: typeof headers; watchrailContext?: unknown } = { headers };
+    const next = vi.fn();
+
+    middleware.use(request as never, {} as never, next);
+
+    expect(request.watchrailContext).toBeUndefined();
     expect(next).toHaveBeenCalledOnce();
   });
 });
