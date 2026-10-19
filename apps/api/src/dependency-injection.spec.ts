@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { ApiCredentialsController } from './api-credentials.controller.js';
-import { ApiCredentialsService } from './api-credentials.service.js';
+import { ApiCredentialsController } from './modules/api-credentials/api-credentials.controller.js';
+import { ApiCredentialsService } from './modules/api-credentials/api-credentials.service.js';
 import { OrganizationsService } from './organizations.service.js';
 import { StatusPagesController } from './modules/status-pages/status-pages.controller.js';
 import { WebhookEndpointsController } from './modules/webhook-endpoints/webhook-endpoints.controller.js';
