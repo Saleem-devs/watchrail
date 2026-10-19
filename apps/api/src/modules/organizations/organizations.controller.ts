@@ -40,9 +40,9 @@ export class OrganizationsController {
   @RequirePermission(PERMISSIONS.ORGANIZATION_READ)
   async listOrganizations(@Req() request: RequestWithContext) {
     return {
-      data: (await this.orgs.listOrganizations(request.watchrailContext, buildHeaders(request))).map(
-        presentOrganization,
-      ),
+      data: (
+        await this.orgs.listOrganizations(request.watchrailContext, buildHeaders(request))
+      ).map(presentOrganization),
     };
   }
 
@@ -92,7 +92,11 @@ export class OrganizationsController {
     @Body(new ZodValidationPipe(transferOwnershipSchema, 'body'))
     input: TransferOwnershipInput,
   ) {
-    await this.orgs.transferOwnership(request.watchrailContext, buildHeaders(request), input.userId);
+    await this.orgs.transferOwnership(
+      request.watchrailContext,
+      buildHeaders(request),
+      input.userId,
+    );
   }
 
   @Get('current/members')

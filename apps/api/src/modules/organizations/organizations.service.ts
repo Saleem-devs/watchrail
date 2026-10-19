@@ -15,7 +15,11 @@ import type { WatchrailAuth } from '../../auth.js';
 import { isOrganizationRole, type OrganizationRole } from '../../permissions.js';
 import type { RequestContext } from '../../request-context.js';
 import type { CreateInvitationInput, UpdateOrganizationInput } from './dto/organization-input.js';
-import type { InvitationRecord, MemberRecord, OrganizationRecord } from './organizations.presenter.js';
+import type {
+  InvitationRecord,
+  MemberRecord,
+  OrganizationRecord,
+} from './organizations.presenter.js';
 
 @Injectable()
 export class OrganizationsService {
@@ -35,10 +39,7 @@ export class OrganizationsService {
     return result;
   }
 
-  async getOrganization(
-    ctx: RequestContext,
-    requestHeaders: Headers,
-  ): Promise<OrganizationRecord> {
+  async getOrganization(ctx: RequestContext, requestHeaders: Headers): Promise<OrganizationRecord> {
     const org = await this.auth.api
       .getFullOrganization({
         query: { organizationId: ctx.organizationId },
@@ -116,10 +117,7 @@ export class OrganizationsService {
     return updated;
   }
 
-  async listInvitations(
-    ctx: RequestContext,
-    requestHeaders: Headers,
-  ): Promise<InvitationRecord[]> {
+  async listInvitations(ctx: RequestContext, requestHeaders: Headers): Promise<InvitationRecord[]> {
     const result = await this.auth.api.listInvitations({
       query: { organizationId: ctx.organizationId },
       headers: requestHeaders,
@@ -191,4 +189,3 @@ function requireAssignableRole(value: string): OrganizationRole {
   }
   return value;
 }
-
