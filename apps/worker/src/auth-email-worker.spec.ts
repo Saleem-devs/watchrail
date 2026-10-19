@@ -140,14 +140,17 @@ describe('AuthEmailJobHandler', () => {
     const handler = new AuthEmailJobHandler(
       outbox as unknown as AuthEmailOutboxRepository,
       keyring,
-      { host: 'smtp.example.test', port: 587, secure: false, from: 'Watchrail <noreply@example.test>' },
+      {
+        host: 'smtp.example.test',
+        port: 587,
+        secure: false,
+        from: 'Watchrail <noreply@example.test>',
+      },
     );
 
     await handler.handle(messageId);
 
-    expect(outbox.isInvitationPending).toHaveBeenCalledWith(
-      '72dc5a63-9ab0-4bf7-898d-778b2bb22af7',
-    );
+    expect(outbox.isInvitationPending).toHaveBeenCalledWith('72dc5a63-9ab0-4bf7-898d-778b2bb22af7');
     expect(sendMail).not.toHaveBeenCalled();
     expect(outbox.markFailed).toHaveBeenCalledWith(messageId, 'INVITATION_INACTIVE');
   });

@@ -100,12 +100,7 @@ export class CheckExecutionRepository {
           monitorConfigurationVersions,
           eq(monitorConfigurationVersions.id, checkRounds.monitorConfigurationVersionId),
         )
-        .where(
-          and(
-            eq(checkRounds.id, roundId),
-            eq(checkExecutionAssignments.location, 'local'),
-          ),
-        )
+        .where(and(eq(checkRounds.id, roundId), eq(checkExecutionAssignments.location, 'local')))
         .limit(1)
         .for('update', { of: checkExecutionAssignments });
 

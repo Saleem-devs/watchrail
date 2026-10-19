@@ -9,6 +9,10 @@ node_modules/
 
 # Documentation
 docs/
+!docs/
+docs/*
+!docs/architecture-audit.md
+!docs/backend-development.md
 
 # Build output
 .next/

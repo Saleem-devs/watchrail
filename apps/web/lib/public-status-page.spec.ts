@@ -5,25 +5,23 @@ describe('loadPublicStatusPage', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('uses the internal server token and disables the Next data cache', async () => {
-    const fetchMock = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            data: {
-              contractVersion: 1,
-              name: 'Acme',
-              slug: 'loader-success',
-              status: 'OPERATIONAL',
-              components: [],
-              activeIncidents: [],
-              resolvedIncidents: [],
-              generatedAt: '2026-10-10T00:00:00.000Z',
-            },
-          }),
-          { status: 200 },
-        ),
-      );
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: {
+            contractVersion: 1,
+            name: 'Acme',
+            slug: 'loader-success',
+            status: 'OPERATIONAL',
+            components: [],
+            activeIncidents: [],
+            resolvedIncidents: [],
+            generatedAt: '2026-10-10T00:00:00.000Z',
+          },
+        }),
+        { status: 200 },
+      ),
+    );
     await expect(loadPublicStatusPage('loader-success')).resolves.toMatchObject({ name: 'Acme' });
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/api/internal/status-pages/loader-success'),
