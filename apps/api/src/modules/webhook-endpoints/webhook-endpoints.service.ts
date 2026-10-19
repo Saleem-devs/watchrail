@@ -6,12 +6,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
-  WebhookEndpointInputError,
-  WebhookEndpointNotFoundError,
-  WebhookEndpointRepository,
   WebhookDeliveryEndpointNotFoundError,
   WebhookDeliveryHistoryQueryError,
   WebhookDeliveryReadRepository,
+  WebhookEndpointInputError,
+  WebhookEndpointNotFoundError,
+  WebhookEndpointRepository,
   parseWebhookDeliveryHistoryQuery,
   type WebhookDeliveryDetail,
   type WebhookDeliveryPage,
@@ -41,7 +41,10 @@ export class WebhookEndpointsService {
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
-  async create(context: RequestContext, input: CreateWebhookEndpointInput): Promise<WebhookEndpointRecord> {
+  async create(
+    context: RequestContext,
+    input: CreateWebhookEndpointInput,
+  ): Promise<WebhookEndpointRecord> {
     try {
       return await this.endpoints.create(
         context.organizationId,

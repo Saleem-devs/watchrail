@@ -338,7 +338,11 @@ describe('webhook endpoint API', () => {
 
     const invalidDomain = await request(app.getHttpServer())
       .post('/api/webhook-endpoints')
-      .send({ name: '', url: 'https://hooks.example.com', signingSecret: sentinel })
+      .send({
+        name: '',
+        url: 'https://hooks.example.com',
+        signingSecret: sentinel,
+      })
       .expect(400);
     expect(invalidDomain.body).toMatchObject({
       code: 'VALIDATION_FAILED',
