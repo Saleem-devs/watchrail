@@ -321,6 +321,54 @@ describe('webhook endpoint API', () => {
     expect(JSON.stringify(await versions(created.id))).not.toContain(sentinel);
   });
 
+  it('keeps transport validation, domain validation, and redacted errors compatible', async () => {
+    const invalidTransport = await request(app.getHttpServer())
+      .post('/api/webhook-endpoints')
+      .send({
+        name: 'Operations',
+        url: 'https://hooks.example.com',
+        signingSecret: sentinel,
+        extra: true,
+      })
+      .expect(400);
+    expect(invalidTransport.body).toMatchObject({
+      code: 'VALIDATION_FAILED',
+      fields: { body: [expect.any(String)] },
+    });
+
+    const invalidDomain = await request(app.getHttpServer())
+      .post('/api/webhook-endpoints')
+      .send({ name: '', url: 'https://hooks.example.com', signingSecret: sentinel })
+      .expect(400);
+    expect(invalidDomain.body).toMatchObject({
+      code: 'VALIDATION_FAILED',
+      fields: { name: [expect.any(String)] },
+    });
+
+    const endpoint = await createEndpoint();
+    const invalidSecret = await request(app.getHttpServer())
+      .patch(`/api/webhook-endpoints/${endpoint.id}/settings`)
+      .send({ name: endpoint.name, url: endpoint.url, signingSecret: { retain: false } })
+      .expect(400);
+    expect(invalidSecret.body).toMatchObject({
+      code: 'VALIDATION_FAILED',
+      fields: { body: [expect.any(String)] },
+    });
+
+    const invalidEnabled = await request(app.getHttpServer())
+      .patch(`/api/webhook-endpoints/${endpoint.id}/enabled`)
+      .send({ enabled: 'false' })
+      .expect(400);
+    expect(invalidEnabled.body).toMatchObject({
+      code: 'VALIDATION_FAILED',
+      fields: { enabled: [expect.any(String)] },
+    });
+    for (const response of [invalidTransport, invalidDomain, invalidSecret, invalidEnabled]) {
+      expect(JSON.stringify(response.body)).not.toContain(sentinel);
+    }
+    expect(await versions(endpoint.id)).toHaveLength(1);
+  });
+
   it('reads paginated delivery history with immutable target context and no durable secrets', async () => {
     const endpoint = await createEndpoint();
     const monitor = await new MonitorRepository(database).create(

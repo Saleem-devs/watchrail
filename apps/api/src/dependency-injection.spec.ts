@@ -3,7 +3,8 @@ import { ApiCredentialsController } from './api-credentials.controller.js';
 import { ApiCredentialsService } from './api-credentials.service.js';
 import { OrganizationsService } from './organizations.service.js';
 import { StatusPagesController } from './modules/status-pages/status-pages.controller.js';
-import { WebhookEndpointsController } from './webhook-endpoints.controller.js';
+import { WebhookEndpointsController } from './modules/webhook-endpoints/webhook-endpoints.controller.js';
+import { WebhookEndpointsService } from './modules/webhook-endpoints/webhook-endpoints.service.js';
 
 describe('tsx dependency injection metadata', () => {
   it.each([
@@ -12,6 +13,7 @@ describe('tsx dependency injection metadata', () => {
     OrganizationsService,
     StatusPagesController,
     WebhookEndpointsController,
+    WebhookEndpointsService,
   ])('$name explicitly declares every constructor dependency', (dependency) => {
     const injectedIndexes = new Set(
       (
