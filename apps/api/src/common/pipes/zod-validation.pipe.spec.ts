@@ -27,4 +27,23 @@ describe('ZodValidationPipe', () => {
       });
     }
   });
+
+  it('can preserve feature-specific field keys', () => {
+    const featurePipe = new ZodValidationPipe(
+      z.object({ secret: z.string(), enabled: z.boolean() }).strict(),
+      'body',
+      (issue) => (issue.path[0] === 'secret' ? 'secret' : 'body'),
+    );
+
+    try {
+      featurePipe.transform({ secret: false, enabled: 'yes' });
+    } catch (error) {
+      expect((error as BadRequestException).getResponse()).toMatchObject({
+        fields: {
+          secret: [expect.stringMatching(/^secret: /u)],
+          body: [expect.stringMatching(/^enabled: /u)],
+        },
+      });
+    }
+  });
 });

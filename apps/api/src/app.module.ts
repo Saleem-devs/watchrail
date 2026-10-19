@@ -18,8 +18,8 @@ import { DevelopmentIdentityMiddleware } from './request-context.js';
 import { InternalStatusPagesController } from './internal-status-pages.controller.js';
 import { StatusPagesController } from './modules/status-pages/status-pages.controller.js';
 import { StatusPagesModule } from './modules/status-pages/status-pages.module.js';
-import { WebhookEndpointsController } from './webhook-endpoints.controller.js';
-import { WebhookEndpointsService } from './webhook-endpoints.service.js';
+import { WebhookEndpointsController } from './modules/webhook-endpoints/webhook-endpoints.controller.js';
+import { WebhookEndpointsModule } from './modules/webhook-endpoints/webhook-endpoints.module.js';
 import {
   ProbeAgentsController,
   ProbeEnrollmentsController,
@@ -39,7 +39,7 @@ import { ApiCredentialsController } from './api-credentials.controller.js';
 import { ApiCredentialsService } from './api-credentials.service.js';
 
 @Module({
-  imports: [ConfigModule, DatabaseModule, AuthModule, StatusPagesModule],
+  imports: [ConfigModule, DatabaseModule, AuthModule, StatusPagesModule, WebhookEndpointsModule],
   controllers: [
     ApiCredentialsController,
     InternalStatusPagesController,
@@ -50,7 +50,6 @@ import { ApiCredentialsService } from './api-credentials.service.js';
     ProbeLocationsController,
     ProbeMachineController,
     PublicStatusPagesController,
-    WebhookEndpointsController,
   ],
   providers: [
     DevelopmentIdentityMiddleware,
@@ -75,7 +74,6 @@ import { ApiCredentialsService } from './api-credentials.service.js';
       useFactory: () => new InternalStatusPageRateLimiter(),
     },
     PublicStatusPagesService,
-    WebhookEndpointsService,
 
     Reflector,
     {
