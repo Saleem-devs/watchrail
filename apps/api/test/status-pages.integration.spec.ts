@@ -175,6 +175,34 @@ describe('status page settings API', () => {
     expect(current.components).toEqual(created.components);
   });
 
+  it('keeps transport and domain validation fields compatible', async () => {
+    const transportError = await request(app.getHttpServer())
+      .post('/api/status-pages')
+      .send({ name: 42, slug: 'acme', components: [] })
+      .expect(400);
+
+    expect(transportError.body).toMatchObject({
+      code: 'VALIDATION_FAILED',
+      fields: { statusPage: [expect.any(String)] },
+    });
+    expect(transportError.body.fields.statusPage).toEqual(
+      expect.not.arrayContaining([expect.any(Object)]),
+    );
+
+    const domainError = await request(app.getHttpServer())
+      .post('/api/status-pages')
+      .send({ name: 'Acme', slug: 'Invalid Slug', components: [] })
+      .expect(400);
+
+    expect(domainError.body).toMatchObject({
+      code: 'VALIDATION_FAILED',
+      fields: { statusPage: [expect.any(String)] },
+    });
+    expect(domainError.body.fields.statusPage).toEqual(
+      expect.not.arrayContaining([expect.any(Object)]),
+    );
+  });
+
   async function createMonitorFor(organizationId: string, name: string) {
     return monitors.create(
       organizationId,

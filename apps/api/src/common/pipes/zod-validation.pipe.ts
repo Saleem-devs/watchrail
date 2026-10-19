@@ -18,10 +18,10 @@ export class ZodValidationPipe<TSchema extends z.ZodType> implements PipeTransfo
       code: 'VALIDATION_FAILED',
       message: 'Request validation failed.',
       fields: {
-        [this.field]: result.error.issues.map((issue) => ({
-          path: issue.path.join('.'),
-          message: issue.message,
-        })),
+        [this.field]: result.error.issues.map((issue) => {
+          const path = issue.path.join('.');
+          return path ? `${path}: ${issue.message}` : issue.message;
+        }),
       },
     });
   }

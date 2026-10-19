@@ -22,7 +22,7 @@ describe('ZodValidationPipe', () => {
         code: 'VALIDATION_FAILED',
         message: 'Request validation failed.',
         fields: {
-          example: [{ path: 'name', message: expect.any(String) }],
+          example: [expect.stringMatching(/^name: /u)],
         },
       });
     }
