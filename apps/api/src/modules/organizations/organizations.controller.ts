@@ -1,12 +1,3 @@
-/**
- * OrganizationsController — REST API for organization management.
- *
- * All endpoints require authentication (global WatchrailAuthGuard) and
- * specific permissions (via @RequirePermission). The requestHeaders
- * forwarded to OrganizationsService preserve the session cookie so that
- * Better Auth's organization plugin can validate the caller's session.
- */
-
 import {
   Body,
   Controller,
@@ -20,22 +11,38 @@ import {
   Req,
 } from '@nestjs/common';
 import type { Request } from 'express';
+import { RequirePermission } from '../../auth.guard.js';
+import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe.js';
+import { PERMISSIONS } from '../../permissions.js';
+import type { RequestWithContext } from '../../request-context.js';
+import {
+  createInvitationSchema,
+  transferOwnershipSchema,
+  updateMemberRoleSchema,
+  updateOrganizationSchema,
+  type CreateInvitationInput,
+  type TransferOwnershipInput,
+  type UpdateMemberRoleInput,
+  type UpdateOrganizationInput,
+} from './dto/organization-input.js';
+import {
+  presentInvitation,
+  presentMember,
+  presentOrganization,
+} from './organizations.presenter.js';
 import { OrganizationsService } from './organizations.service.js';
-import { RequirePermission } from './auth.guard.js';
-import { PERMISSIONS } from './permissions.js';
-import type { RequestWithContext } from './request-context.js';
 
 @Controller('organizations')
 export class OrganizationsController {
   constructor(@Inject(OrganizationsService) private readonly orgs: OrganizationsService) {}
 
-  // ─── Organization ─────────────────────────────────────────────────────────
-
   @Get()
   @RequirePermission(PERMISSIONS.ORGANIZATION_READ)
   async listOrganizations(@Req() request: RequestWithContext) {
     return {
-      data: await this.orgs.listOrganizations(request.watchrailContext, buildHeaders(request)),
+      data: (
+        await this.orgs.listOrganizations(request.watchrailContext, buildHeaders(request))
+      ).map(presentOrganization),
     };
   }
 
@@ -43,7 +50,9 @@ export class OrganizationsController {
   @RequirePermission(PERMISSIONS.ORGANIZATION_READ)
   async getOrganization(@Req() request: RequestWithContext) {
     return {
-      data: await this.orgs.getOrganization(request.watchrailContext, buildHeaders(request)),
+      data: presentOrganization(
+        await this.orgs.getOrganization(request.watchrailContext, buildHeaders(request)),
+      ),
     };
   }
 
@@ -51,13 +60,12 @@ export class OrganizationsController {
   @RequirePermission(PERMISSIONS.ORGANIZATION_UPDATE)
   async updateOrganization(
     @Req() request: RequestWithContext,
-    @Body() body: { name?: string; slug?: string },
+    @Body(new ZodValidationPipe(updateOrganizationSchema, 'body'))
+    input: UpdateOrganizationInput,
   ) {
     return {
-      data: await this.orgs.updateOrganization(
-        request.watchrailContext,
-        buildHeaders(request),
-        body,
+      data: presentOrganization(
+        await this.orgs.updateOrganization(request.watchrailContext, buildHeaders(request), input),
       ),
     };
   }
@@ -79,17 +87,25 @@ export class OrganizationsController {
   @Post('current/transfer-ownership')
   @HttpCode(204)
   @RequirePermission(PERMISSIONS.ORGANIZATION_TRANSFER)
-  async transferOwnership(@Req() request: RequestWithContext, @Body() body: { userId: string }) {
-    await this.orgs.transferOwnership(request.watchrailContext, buildHeaders(request), body.userId);
+  async transferOwnership(
+    @Req() request: RequestWithContext,
+    @Body(new ZodValidationPipe(transferOwnershipSchema, 'body'))
+    input: TransferOwnershipInput,
+  ) {
+    await this.orgs.transferOwnership(
+      request.watchrailContext,
+      buildHeaders(request),
+      input.userId,
+    );
   }
-
-  // ─── Members ──────────────────────────────────────────────────────────────
 
   @Get('current/members')
   @RequirePermission(PERMISSIONS.MEMBER_READ)
   async listMembers(@Req() request: RequestWithContext) {
     return {
-      data: await this.orgs.listMembers(request.watchrailContext, buildHeaders(request)),
+      data: (await this.orgs.listMembers(request.watchrailContext, buildHeaders(request))).map(
+        presentMember,
+      ),
     };
   }
 
@@ -98,14 +114,17 @@ export class OrganizationsController {
   async updateMemberRole(
     @Req() request: RequestWithContext,
     @Param('memberId') memberId: string,
-    @Body() body: { role: string },
+    @Body(new ZodValidationPipe(updateMemberRoleSchema, 'body'))
+    input: UpdateMemberRoleInput,
   ) {
     return {
-      data: await this.orgs.updateMemberRole(
-        request.watchrailContext,
-        buildHeaders(request),
-        memberId,
-        body.role,
+      data: presentMember(
+        await this.orgs.updateMemberRole(
+          request.watchrailContext,
+          buildHeaders(request),
+          memberId,
+          input.role,
+        ),
       ),
     };
   }
@@ -117,13 +136,13 @@ export class OrganizationsController {
     await this.orgs.removeMember(request.watchrailContext, buildHeaders(request), memberId);
   }
 
-  // ─── Invitations ──────────────────────────────────────────────────────────
-
   @Get('current/invitations')
   @RequirePermission(PERMISSIONS.MEMBER_READ)
   async listInvitations(@Req() request: RequestWithContext) {
     return {
-      data: await this.orgs.listInvitations(request.watchrailContext, buildHeaders(request)),
+      data: (await this.orgs.listInvitations(request.watchrailContext, buildHeaders(request))).map(
+        presentInvitation,
+      ),
     };
   }
 
@@ -131,10 +150,13 @@ export class OrganizationsController {
   @RequirePermission(PERMISSIONS.MEMBER_INVITE)
   async createInvitation(
     @Req() request: RequestWithContext,
-    @Body() body: { email: string; role: string },
+    @Body(new ZodValidationPipe(createInvitationSchema, 'body'))
+    input: CreateInvitationInput,
   ) {
     return {
-      data: await this.orgs.createInvitation(request.watchrailContext, buildHeaders(request), body),
+      data: presentInvitation(
+        await this.orgs.createInvitation(request.watchrailContext, buildHeaders(request), input),
+      ),
     };
   }
 
@@ -148,8 +170,6 @@ export class OrganizationsController {
     await this.orgs.revokeInvitation(request.watchrailContext, buildHeaders(request), invitationId);
   }
 }
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function buildHeaders(request: Request): Headers {
   const headers = new Headers();

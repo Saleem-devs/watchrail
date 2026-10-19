@@ -33,8 +33,8 @@ import {
   ProbeMachineNoStoreMiddleware,
   ProbeMachineRateLimiter,
 } from './probe-machine-auth.js';
-import { OrganizationsController } from './organizations.controller.js';
-import { OrganizationsService } from './organizations.service.js';
+import { OrganizationsController } from './modules/organizations/organizations.controller.js';
+import { OrganizationsModule } from './modules/organizations/organizations.module.js';
 import { ApiCredentialsController } from './modules/api-credentials/api-credentials.controller.js';
 import { ApiCredentialsModule } from './modules/api-credentials/api-credentials.module.js';
 
@@ -44,13 +44,13 @@ import { ApiCredentialsModule } from './modules/api-credentials/api-credentials.
     DatabaseModule,
     AuthModule,
     ApiCredentialsModule,
+    OrganizationsModule,
     StatusPagesModule,
     WebhookEndpointsModule,
   ],
   controllers: [
     InternalStatusPagesController,
     MonitorsController,
-    OrganizationsController,
     ProbeAgentsController,
     ProbeEnrollmentsController,
     ProbeLocationsController,
@@ -69,7 +69,6 @@ import { ApiCredentialsModule } from './modules/api-credentials/api-credentials.
     },
 
     MonitorsService,
-    OrganizationsService,
     {
       provide: PublicStatusPageRateLimiter,
       useFactory: () => new PublicStatusPageRateLimiter(),
