@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { ApiCredentialsController } from './modules/api-credentials/api-credentials.controller.js';
 import { ApiCredentialsService } from './modules/api-credentials/api-credentials.service.js';
-import { OrganizationsService } from './organizations.service.js';
+import { OrganizationsController } from './modules/organizations/organizations.controller.js';
+import { OrganizationsService } from './modules/organizations/organizations.service.js';
 import { StatusPagesController } from './modules/status-pages/status-pages.controller.js';
 import { WebhookEndpointsController } from './modules/webhook-endpoints/webhook-endpoints.controller.js';
 import { WebhookEndpointsService } from './modules/webhook-endpoints/webhook-endpoints.service.js';
@@ -10,6 +11,7 @@ describe('tsx dependency injection metadata', () => {
   it.each([
     ApiCredentialsController,
     ApiCredentialsService,
+    OrganizationsController,
     OrganizationsService,
     StatusPagesController,
     WebhookEndpointsController,

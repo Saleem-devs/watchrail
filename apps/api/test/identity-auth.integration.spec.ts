@@ -423,6 +423,37 @@ describe('passwordless identity provisioning', () => {
         .get('/api/organizations/current/invitations')
         .set('Authorization', `Bearer ${signedIn.token}`)
         .expect(200);
+
+      const invalidSettings = await request(app.getHttpServer())
+        .patch('/api/organizations/current')
+        .set('Authorization', `Bearer ${signedIn.token}`)
+        .send({ name: 'Updated', organizationId: membership!.organizationId })
+        .expect(400);
+      expect(invalidSettings.body).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        fields: { body: [expect.any(String)] },
+      });
+
+      const invalidInvitation = await request(app.getHttpServer())
+        .post('/api/organizations/current/invitations')
+        .set('Authorization', `Bearer ${signedIn.token}`)
+        .send({ email: 'person@example.test', role: ['viewer'] })
+        .expect(400);
+      expect(invalidInvitation.body).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        fields: { body: [expect.any(String)] },
+      });
+
+      const invalidTransfer = await request(app.getHttpServer())
+        .post('/api/organizations/current/transfer-ownership')
+        .set('Authorization', `Bearer ${signedIn.token}`)
+        .send({ userId: 123 })
+        .expect(400);
+      expect(invalidTransfer.body).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        fields: { body: [expect.any(String)] },
+      });
+
       await request(app.getHttpServer())
         .get('/api/api-credentials')
         .set('Authorization', `Bearer ${signedIn.token}`)
@@ -498,6 +529,11 @@ describe('passwordless identity provisioning', () => {
         .post('/api/monitors')
         .set('Authorization', `Bearer ${signedIn.token}`)
         .send({ name: 'Forbidden write', url: 'https://example.test' })
+        .expect(403);
+      await request(app.getHttpServer())
+        .patch('/api/organizations/current')
+        .set('Authorization', `Bearer ${signedIn.token}`)
+        .send({ name: 'Viewer cannot edit organizations' })
         .expect(403);
       await request(app.getHttpServer())
         .post('/api/api-credentials')
