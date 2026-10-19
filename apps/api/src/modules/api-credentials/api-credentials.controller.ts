@@ -15,10 +15,7 @@ import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe.js';
 import { PERMISSIONS } from '../../permissions.js';
 import type { RequestWithContext } from '../../request-context.js';
 import { ApiCredentialsService } from './api-credentials.service.js';
-import {
-  presentApiCredential,
-  presentCreatedApiCredential,
-} from './api-credentials.presenter.js';
+import { presentApiCredential, presentCreatedApiCredential } from './api-credentials.presenter.js';
 import {
   createApiCredentialSchema,
   type CreateApiCredentialInput,
@@ -42,7 +39,9 @@ export class ApiCredentialsController {
   @Get()
   @RequirePermission(PERMISSIONS.API_KEY_READ)
   async list(@Req() request: RequestWithContext) {
-    return { data: (await this.credentials.list(request.watchrailContext)).map(presentApiCredential) };
+    return {
+      data: (await this.credentials.list(request.watchrailContext)).map(presentApiCredential),
+    };
   }
 
   @Delete(':credentialId')
@@ -55,4 +54,3 @@ export class ApiCredentialsController {
     await this.credentials.revoke(request.watchrailContext, credentialId);
   }
 }
-

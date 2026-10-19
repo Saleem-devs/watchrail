@@ -19,7 +19,10 @@ export function presentApiCredential(record: ApiCredentialPresentationRecord) {
   };
 }
 
-export function presentCreatedApiCredential(record: ApiCredentialPresentationRecord, token: string) {
+export function presentCreatedApiCredential(
+  record: ApiCredentialPresentationRecord,
+  token: string,
+) {
   return {
     ...presentApiCredential(record),
     token,
