@@ -26,7 +26,7 @@ import type { WatchrailAuth } from './auth.js';
 import { WATCHRAIL_AUTH } from './auth.tokens.js';
 import { hasPermission, type Permission } from './permissions.js';
 import type { RequestWithContext } from './request-context.js';
-import { hashApiKey, parseApiKeyPermissions } from './api-credentials.service.js';
+import { hashApiKey, parseApiKeyPermissions } from './modules/api-credentials/api-key-auth.js';
 
 // ─── Decorators ───────────────────────────────────────────────────────────────
 

@@ -428,6 +428,30 @@ describe('passwordless identity provisioning', () => {
         .set('Authorization', `Bearer ${signedIn.token}`)
         .expect(200);
 
+      const invalidInput = await request(app.getHttpServer())
+        .post('/api/api-credentials')
+        .set('Authorization', `Bearer ${signedIn.token}`)
+        .send({
+          name: 'Untrusted',
+          permissions: ['monitor:read'],
+          organizationId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        })
+        .expect(400);
+      expect(invalidInput.body).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        fields: { body: [expect.any(String)] },
+      });
+
+      const expiredInput = await request(app.getHttpServer())
+        .post('/api/api-credentials')
+        .set('Authorization', `Bearer ${signedIn.token}`)
+        .send({ name: 'Expired', permissions: ['monitor:read'], expiresAt: '2020-01-01' })
+        .expect(400);
+      expect(expiredInput.body).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        fields: { expiresAt: [expect.any(String)] },
+      });
+
       const createdCredential = await request(app.getHttpServer())
         .post('/api/api-credentials')
         .set('Authorization', `Bearer ${signedIn.token}`)
@@ -437,6 +461,24 @@ describe('passwordless identity provisioning', () => {
         })
         .expect(201);
       expect(createdCredential.body.data.token).toMatch(/^wrk_[A-Za-z0-9_-]{43}$/u);
+      const listedCredentials = await request(app.getHttpServer())
+        .get('/api/api-credentials')
+        .set('Authorization', `Bearer ${signedIn.token}`)
+        .expect(200);
+      expect(listedCredentials.body.data).toEqual([
+        expect.objectContaining({
+          id: createdCredential.body.data.id,
+          permissions: ['monitor:read', 'apiKey:manage'],
+        }),
+      ]);
+      expect(listedCredentials.body.data[0]).not.toHaveProperty('token');
+      expect(listedCredentials.body.data[0]).not.toHaveProperty('key');
+      expect(listedCredentials.body.data[0]).not.toHaveProperty('keyHash');
+      expect(listedCredentials.body.data[0]).not.toHaveProperty('organizationId');
+      await request(app.getHttpServer())
+        .delete(`/api/api-credentials/${createdCredential.body.data.id as string}`)
+        .set('Authorization', `Bearer ${createdCredential.body.data.token as string}`)
+        .expect(403);
       await request(app.getHttpServer())
         .post('/api/api-credentials')
         .set('Authorization', `Bearer ${createdCredential.body.data.token as string}`)
@@ -456,6 +498,11 @@ describe('passwordless identity provisioning', () => {
         .post('/api/monitors')
         .set('Authorization', `Bearer ${signedIn.token}`)
         .send({ name: 'Forbidden write', url: 'https://example.test' })
+        .expect(403);
+      await request(app.getHttpServer())
+        .post('/api/api-credentials')
+        .set('Authorization', `Bearer ${signedIn.token}`)
+        .send({ name: 'Viewer may not create keys', permissions: ['monitor:read'] })
         .expect(403);
       await request(app.getHttpServer())
         .get('/api/monitors')

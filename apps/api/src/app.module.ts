@@ -35,13 +35,19 @@ import {
 } from './probe-machine-auth.js';
 import { OrganizationsController } from './organizations.controller.js';
 import { OrganizationsService } from './organizations.service.js';
-import { ApiCredentialsController } from './api-credentials.controller.js';
-import { ApiCredentialsService } from './api-credentials.service.js';
+import { ApiCredentialsController } from './modules/api-credentials/api-credentials.controller.js';
+import { ApiCredentialsModule } from './modules/api-credentials/api-credentials.module.js';
 
 @Module({
-  imports: [ConfigModule, DatabaseModule, AuthModule, StatusPagesModule, WebhookEndpointsModule],
+  imports: [
+    ConfigModule,
+    DatabaseModule,
+    AuthModule,
+    ApiCredentialsModule,
+    StatusPagesModule,
+    WebhookEndpointsModule,
+  ],
   controllers: [
-    ApiCredentialsController,
     InternalStatusPagesController,
     MonitorsController,
     OrganizationsController,
@@ -63,7 +69,6 @@ import { ApiCredentialsService } from './api-credentials.service.js';
     },
 
     MonitorsService,
-    ApiCredentialsService,
     OrganizationsService,
     {
       provide: PublicStatusPageRateLimiter,
