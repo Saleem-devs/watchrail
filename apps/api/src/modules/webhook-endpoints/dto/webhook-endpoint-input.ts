@@ -25,5 +25,7 @@ export const updateWebhookEndpointSettingsSchema = z
 export const setWebhookEndpointEnabledSchema = z.object({ enabled: z.boolean() }).strict();
 
 export type CreateWebhookEndpointInput = z.infer<typeof createWebhookEndpointSchema>;
-export type UpdateWebhookEndpointSettingsInput = z.infer<typeof updateWebhookEndpointSettingsSchema>;
+export type UpdateWebhookEndpointSettingsInput = z.infer<
+  typeof updateWebhookEndpointSettingsSchema
+>;
 export type SetWebhookEndpointEnabledInput = z.infer<typeof setWebhookEndpointEnabledSchema>;

@@ -29,6 +29,12 @@ import {
 } from './webhook-endpoints.presenter.js';
 import { WebhookEndpointsService } from './webhook-endpoints.service.js';
 
+const updateSettingsValidation = new ZodValidationPipe(
+  updateWebhookEndpointSettingsSchema,
+  'body',
+  (issue) => (issue.path[0] === 'signingSecret' ? 'signingSecret' : 'body'),
+);
+
 @Controller('webhook-endpoints')
 export class WebhookEndpointsController {
   constructor(
@@ -99,7 +105,7 @@ export class WebhookEndpointsController {
   async updateSettings(
     @Req() request: RequestWithContext,
     @Param('endpointId', ParseUUIDPipe) endpointId: string,
-    @Body(new ZodValidationPipe(updateWebhookEndpointSettingsSchema, 'body'))
+    @Body(updateSettingsValidation)
     input: UpdateWebhookEndpointSettingsInput,
   ) {
     return {
@@ -124,4 +130,3 @@ export class WebhookEndpointsController {
     };
   }
 }
-

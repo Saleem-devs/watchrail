@@ -356,7 +356,7 @@ describe('webhook endpoint API', () => {
       .expect(400);
     expect(invalidSecret.body).toMatchObject({
       code: 'VALIDATION_FAILED',
-      fields: { body: [expect.any(String)] },
+      fields: { signingSecret: [expect.any(String)] },
     });
 
     const invalidEnabled = await request(app.getHttpServer())
