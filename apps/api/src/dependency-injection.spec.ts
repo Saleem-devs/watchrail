@@ -4,6 +4,9 @@ import { ApiCredentialsService } from './modules/api-credentials/api-credentials
 import { OrganizationsController } from './modules/organizations/organizations.controller.js';
 import { OrganizationsService } from './modules/organizations/organizations.service.js';
 import { MonitorsController } from './modules/monitors/monitors.controller.js';
+import { ProbeLocationsController, ProbeMachineController } from './modules/probes/probe-identity.controller.js';
+import { ProbeIdentityService } from './probe-identity.service.js';
+import { ProbeCoordinatorService } from './probe-coordinator.service.js';
 import { MonitorsService } from './monitors.service.js';
 import { StatusPagesController } from './modules/status-pages/status-pages.controller.js';
 import { WebhookEndpointsController } from './modules/webhook-endpoints/webhook-endpoints.controller.js';
@@ -17,6 +20,10 @@ describe('tsx dependency injection metadata', () => {
     OrganizationsService,
     MonitorsController,
     MonitorsService,
+    ProbeLocationsController,
+    ProbeMachineController,
+    ProbeIdentityService,
+    ProbeCoordinatorService,
     StatusPagesController,
     WebhookEndpointsController,
     WebhookEndpointsService,

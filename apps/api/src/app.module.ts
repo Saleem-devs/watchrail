@@ -25,14 +25,9 @@ import {
   ProbeEnrollmentsController,
   ProbeLocationsController,
   ProbeMachineController,
-} from './probe-identity.controller.js';
-import { ProbeIdentityService } from './probe-identity.service.js';
-import { ProbeCoordinatorService } from './probe-coordinator.service.js';
-import {
-  ProbeMachineAuthGuard,
-  ProbeMachineNoStoreMiddleware,
-  ProbeMachineRateLimiter,
-} from './probe-machine-auth.js';
+} from './modules/probes/probe-identity.controller.js';
+import { ProbesModule } from './modules/probes/probes.module.js';
+import { ProbeMachineNoStoreMiddleware, ProbeMachineRateLimiter } from './probe-machine-auth.js';
 import { OrganizationsController } from './modules/organizations/organizations.controller.js';
 import { OrganizationsModule } from './modules/organizations/organizations.module.js';
 import { ApiCredentialsController } from './modules/api-credentials/api-credentials.controller.js';
@@ -46,22 +41,16 @@ import { ApiCredentialsModule } from './modules/api-credentials/api-credentials.
     ApiCredentialsModule,
     OrganizationsModule,
     MonitorsModule,
+    ProbesModule,
     StatusPagesModule,
     WebhookEndpointsModule,
   ],
   controllers: [
     InternalStatusPagesController,
-    ProbeAgentsController,
-    ProbeEnrollmentsController,
-    ProbeLocationsController,
-    ProbeMachineController,
     PublicStatusPagesController,
   ],
   providers: [
     DevelopmentIdentityMiddleware,
-    ProbeIdentityService,
-    ProbeCoordinatorService,
-    ProbeMachineAuthGuard,
     ProbeMachineNoStoreMiddleware,
     {
       provide: ProbeMachineRateLimiter,
