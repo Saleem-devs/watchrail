@@ -1,32 +1,11 @@
-import {
-  Body,
-  Controller,
-  Get,
-  HttpCode,
-  Inject,
-  Param,
-  ParseUUIDPipe,
-  Patch,
-  Post,
-  Query,
-  Req,
-} from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, ParseUUIDPipe, Patch, Post, Req } from '@nestjs/common';
 import type { MonitorRecord } from '@watchrail/db';
 import type { CreateMonitorCommand } from '@watchrail/domain';
 import { MonitorsService } from '../../monitors.service.js';
-import type { RequestWithContext } from '../../request-context.js';
 import { RequirePermission } from '../../auth.guard.js';
 import { PERMISSIONS } from '../../permissions.js';
-import {
-  type CheckRoundResponse,
-  type MonitorResponse,
-  toResponse,
-  toPendingRoundResponse,
-  toCheckRoundResponse,
-  toHistoryListItem,
-  toIncidentHistoryResponse,
-  toIncidentDetailResponse,
-} from './monitors.presenter.js';
+import type { RequestWithContext } from '../../request-context.js';
+import { type MonitorResponse, toResponse } from './monitors.presenter.js';
 
 @Controller('monitors')
 export class MonitorsController {
@@ -51,26 +30,6 @@ export class MonitorsController {
         toResponse(monitor, currentCheck, incidentState, uptime),
       ),
     };
-  }
-
-  @Get(':monitorId/uptime')
-  @RequirePermission(PERMISSIONS.AVAILABILITY_READ)
-  async getUptime(
-    @Req() request: RequestWithContext,
-    @Param('monitorId', new ParseUUIDPipe()) monitorId: string,
-    @Query() query: Record<string, unknown>,
-  ) {
-    return { data: await this.monitors.uptime(request.watchrailContext, monitorId, query) };
-  }
-
-  @Get(':monitorId/uptime/daily')
-  @RequirePermission(PERMISSIONS.AVAILABILITY_READ)
-  async getDailyUptime(
-    @Req() request: RequestWithContext,
-    @Param('monitorId', new ParseUUIDPipe()) monitorId: string,
-    @Query() query: Record<string, unknown>,
-  ) {
-    return { data: await this.monitors.dailyUptime(request.watchrailContext, monitorId, query) };
   }
 
   @Patch(':monitorId/status-policy')
@@ -166,81 +125,6 @@ export class MonitorsController {
     return { data: await this.toMonitorResponse(request, monitor) };
   }
 
-  @Post(':monitorId/check-rounds')
-  @RequirePermission(PERMISSIONS.MONITOR_EXECUTE)
-  @HttpCode(202)
-  async runNow(
-    @Req() request: RequestWithContext,
-    @Param('monitorId') monitorId: string,
-  ): Promise<{ data: CheckRoundResponse }> {
-    const round = await this.monitors.runNow(request.watchrailContext, monitorId);
-    return { data: toPendingRoundResponse(round) };
-  }
-
-  @Get(':monitorId/check-rounds')
-  @RequirePermission(PERMISSIONS.CHECK_READ)
-  async listCheckHistory(
-    @Req() request: RequestWithContext,
-    @Param('monitorId') monitorId: string,
-    @Query() query: Record<string, unknown>,
-  ): Promise<{
-    data: ReturnType<typeof toHistoryListItem>[];
-    page: { nextCursor: string | null };
-  }> {
-    const history = await this.monitors.listCheckHistory(
-      request.watchrailContext,
-      monitorId,
-      query,
-    );
-    return {
-      data: history.items.map(toHistoryListItem),
-      page: { nextCursor: history.nextCursor },
-    };
-  }
-
-  @Get(':monitorId/check-rounds/:roundId')
-  @RequirePermission(PERMISSIONS.CHECK_READ)
-  async getCheckRound(
-    @Req() request: RequestWithContext,
-    @Param('monitorId') monitorId: string,
-    @Param('roundId') roundId: string,
-  ): Promise<{ data: CheckRoundResponse }> {
-    const round = await this.monitors.getCheckRound(request.watchrailContext, monitorId, roundId);
-    return { data: toCheckRoundResponse(round) };
-  }
-
-  @Get(':monitorId/incidents')
-  @RequirePermission(PERMISSIONS.INCIDENT_READ)
-  async listIncidents(
-    @Req() request: RequestWithContext,
-    @Param('monitorId') monitorId: string,
-    @Query() query: Record<string, unknown>,
-  ) {
-    const page = await this.monitors.listIncidentHistory(
-      request.watchrailContext,
-      monitorId,
-      query,
-    );
-    return {
-      data: page.items.map(toIncidentHistoryResponse),
-      page: { nextCursor: page.nextCursor },
-    };
-  }
-
-  @Get(':monitorId/incidents/:incidentId')
-  @RequirePermission(PERMISSIONS.INCIDENT_READ)
-  async getIncident(
-    @Req() request: RequestWithContext,
-    @Param('monitorId') monitorId: string,
-    @Param('incidentId') incidentId: string,
-  ) {
-    return {
-      data: toIncidentDetailResponse(
-        await this.monitors.getIncident(request.watchrailContext, monitorId, incidentId),
-      ),
-    };
-  }
-
   private async toMonitorResponse(
     request: RequestWithContext,
     monitor: MonitorRecord,
@@ -253,4 +137,3 @@ export class MonitorsController {
     return toResponse(monitor, currentCheck, incidentState, uptime);
   }
 }
-
