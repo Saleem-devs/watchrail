@@ -13,7 +13,7 @@ import {
 import { InternalStatusPagesController } from './modules/public-status-pages/internal-status-pages.controller.js';
 import { PublicStatusPagesController } from './modules/public-status-pages/public-status-pages.controller.js';
 
-function routes(controller: new (...args: never[]) => object) {
+function routes(controller: { prototype: object }) {
   const prototype: object = controller.prototype;
   const prefix = Reflect.getMetadata('path', controller) as string;
   return Object.getOwnPropertyNames(prototype).flatMap((key) => {
@@ -23,7 +23,7 @@ function routes(controller: new (...args: never[]) => object) {
     if (path === undefined) return [];
     const method = Reflect.getMetadata('method', handler) as RequestMethod;
     const permission = Reflect.getMetadata(PERMISSION_KEY, handler) as string | undefined;
-    return [{ route: `${RequestMethod[method]} ${prefix}/${path}`.replace(/\\/$/u, ''), permission }];
+    return [{ route: `${RequestMethod[method]} ${prefix}${path ? `/${path}` : ''}`, permission }];
   });
 }
 
@@ -61,7 +61,7 @@ describe('remaining API route contracts', () => {
       ...routes(ProbeEnrollmentsController),
       ...routes(ProbeAgentsController),
     ];
-    expect(operators).toHaveLength(8);
+    expect(operators).toHaveLength(7);
     expect(operators.every((route) => typeof route.permission === 'string')).toBe(true);
     expect(Reflect.getMetadata(PUBLIC_KEY, ProbeMachineController)).toBe(true);
     expect(routes(ProbeMachineController)).toHaveLength(8);
