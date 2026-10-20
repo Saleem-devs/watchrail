@@ -407,6 +407,7 @@ describe('passwordless identity provisioning', () => {
     const app = testingModule.createNestApplication({ bodyParser: false });
     app.setGlobalPrefix('api');
     await app.init();
+    await app.listen(0, '127.0.0.1');
     try {
       await request(app.getHttpServer())
         .get('/api/organizations/current')

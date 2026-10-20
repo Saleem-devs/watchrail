@@ -6,16 +6,12 @@ import { DatabaseModule } from './database.module.js';
 import { AuthModule } from './auth.module.js';
 import { BetterAuthMiddleware } from './auth.middleware.js';
 import { WatchrailAuthGuard } from './auth.guard.js';
-import { MonitorsController } from './monitors.controller.js';
-import { MonitorsService } from './monitors.service.js';
-import { PublicStatusPagesController } from './public-status-pages.controller.js';
-import {
-  InternalStatusPageRateLimiter,
-  PublicStatusPageRateLimiter,
-} from './public-status-page-rate-limiter.js';
-import { PublicStatusPagesService } from './public-status-pages.service.js';
+import { MonitorsController } from './modules/monitors/monitors.controller.js';
+import { MonitorUptimeController } from './modules/monitors/monitor-uptime.controller.js';
+import { MonitorHistoryController } from './modules/monitors/monitor-history.controller.js';
+import { MonitorsModule } from './modules/monitors/monitors.module.js';
+import { PublicStatusPagesModule } from './modules/public-status-pages/public-status-pages.module.js';
 import { DevelopmentIdentityMiddleware } from './request-context.js';
-import { InternalStatusPagesController } from './internal-status-pages.controller.js';
 import { StatusPagesController } from './modules/status-pages/status-pages.controller.js';
 import { StatusPagesModule } from './modules/status-pages/status-pages.module.js';
 import { WebhookEndpointsController } from './modules/webhook-endpoints/webhook-endpoints.controller.js';
@@ -25,14 +21,9 @@ import {
   ProbeEnrollmentsController,
   ProbeLocationsController,
   ProbeMachineController,
-} from './probe-identity.controller.js';
-import { ProbeIdentityService } from './probe-identity.service.js';
-import { ProbeCoordinatorService } from './probe-coordinator.service.js';
-import {
-  ProbeMachineAuthGuard,
-  ProbeMachineNoStoreMiddleware,
-  ProbeMachineRateLimiter,
-} from './probe-machine-auth.js';
+} from './modules/probes/probe-identity.controller.js';
+import { ProbesModule } from './modules/probes/probes.module.js';
+import { ProbeMachineNoStoreMiddleware, ProbeMachineRateLimiter } from './probe-machine-auth.js';
 import { OrganizationsController } from './modules/organizations/organizations.controller.js';
 import { OrganizationsModule } from './modules/organizations/organizations.module.js';
 import { ApiCredentialsController } from './modules/api-credentials/api-credentials.controller.js';
@@ -45,39 +36,19 @@ import { ApiCredentialsModule } from './modules/api-credentials/api-credentials.
     AuthModule,
     ApiCredentialsModule,
     OrganizationsModule,
+    MonitorsModule,
+    ProbesModule,
+    PublicStatusPagesModule,
     StatusPagesModule,
     WebhookEndpointsModule,
   ],
-  controllers: [
-    InternalStatusPagesController,
-    MonitorsController,
-    ProbeAgentsController,
-    ProbeEnrollmentsController,
-    ProbeLocationsController,
-    ProbeMachineController,
-    PublicStatusPagesController,
-  ],
   providers: [
     DevelopmentIdentityMiddleware,
-    ProbeIdentityService,
-    ProbeCoordinatorService,
-    ProbeMachineAuthGuard,
     ProbeMachineNoStoreMiddleware,
     {
       provide: ProbeMachineRateLimiter,
       useFactory: () => new ProbeMachineRateLimiter(),
     },
-
-    MonitorsService,
-    {
-      provide: PublicStatusPageRateLimiter,
-      useFactory: () => new PublicStatusPageRateLimiter(),
-    },
-    {
-      provide: InternalStatusPageRateLimiter,
-      useFactory: () => new InternalStatusPageRateLimiter(),
-    },
-    PublicStatusPagesService,
 
     Reflector,
     {
@@ -102,6 +73,8 @@ export class AppModule implements NestModule {
       .apply(DevelopmentIdentityMiddleware)
       .forRoutes(
         MonitorsController,
+        MonitorUptimeController,
+        MonitorHistoryController,
         ProbeAgentsController,
         ProbeEnrollmentsController,
         ProbeLocationsController,

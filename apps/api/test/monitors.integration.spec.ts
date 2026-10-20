@@ -53,6 +53,7 @@ describe('monitor API', () => {
     app = testingModule.createNestApplication();
     app.setGlobalPrefix('api');
     await app.init();
+    await app.listen(0, '127.0.0.1');
   }, 60_000);
 
   beforeEach(async () => {

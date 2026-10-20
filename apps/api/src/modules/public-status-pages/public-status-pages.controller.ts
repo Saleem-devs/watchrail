@@ -15,10 +15,10 @@ import {
   PUBLIC_STATUS_PAGE_NO_STORE,
   createPublicStatusPageEtag,
   ifNoneMatchMatches,
-} from './public-status-page-http.js';
-import { PublicStatusPageRateLimiter } from './public-status-page-rate-limiter.js';
-import { PublicStatusPagesService } from './public-status-pages.service.js';
-import { Public } from './auth.guard.js';
+} from '../../public-status-page-http.js';
+import { PublicStatusPageRateLimiter } from '../../public-status-page-rate-limiter.js';
+import { PublicStatusPagesService } from '../../public-status-pages.service.js';
+import { Public } from '../../auth.guard.js';
 
 @Public()
 @Controller('public/status-pages')

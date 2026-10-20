@@ -14,19 +14,15 @@ import {
   Res,
   UseGuards,
 } from '@nestjs/common';
-import type {
-  ProbeAgentHealthRecord,
-  ProbeLocationHealthRecord,
-  ProbeLocationRecord,
-} from '@watchrail/db';
 import type { Response } from 'express';
-import { ProbeCoordinatorService } from './probe-coordinator.service.js';
-import type { ProbeMachineRequest } from './probe-machine-auth.js';
-import { ProbeMachineAuthGuard } from './probe-machine-auth.js';
-import { ProbeIdentityService } from './probe-identity.service.js';
-import type { RequestWithContext } from './request-context.js';
-import { Public, RequirePermission } from './auth.guard.js';
-import { PERMISSIONS } from './permissions.js';
+import { ProbeCoordinatorService } from '../../probe-coordinator.service.js';
+import type { ProbeMachineRequest } from '../../probe-machine-auth.js';
+import { ProbeMachineAuthGuard } from '../../probe-machine-auth.js';
+import { ProbeIdentityService } from '../../probe-identity.service.js';
+import type { RequestWithContext } from '../../request-context.js';
+import { Public, RequirePermission } from '../../auth.guard.js';
+import { PERMISSIONS } from '../../permissions.js';
+import { agentResponse, locationResponse, machineResponse } from './probes.presenter.js';
 
 @Controller('probe-locations')
 export class ProbeLocationsController {
@@ -218,43 +214,4 @@ export class ProbeMachineController {
     const receivedAt = await this.coordinator.heartbeat(request.probeMachineIdentity, body);
     return { data: { receivedAt: receivedAt.toISOString() } };
   }
-}
-
-function locationResponse(location: ProbeLocationRecord | ProbeLocationHealthRecord) {
-  return {
-    id: location.id,
-    name: location.name,
-    slug: location.slug,
-    status: location.status,
-    ...('health' in location
-      ? { health: location.health, activeAgentCount: location.activeAgentCount }
-      : {}),
-    createdAt: location.createdAt.toISOString(),
-    updatedAt: location.updatedAt.toISOString(),
-  };
-}
-
-function agentResponse(agent: ProbeAgentHealthRecord) {
-  return {
-    id: agent.id,
-    locationId: agent.locationId,
-    name: agent.name,
-    status: agent.status,
-    lastHeartbeatAt: agent.lastHeartbeatAt?.toISOString() ?? null,
-    engineVersion: agent.engineVersion,
-    heartbeatIntervalMs: agent.heartbeatIntervalMs,
-    health: agent.health,
-    engineCompatible: agent.engineCompatible,
-    createdAt: agent.createdAt.toISOString(),
-    updatedAt: agent.updatedAt.toISOString(),
-  };
-}
-
-function machineResponse(identity: ProbeMachineRequest['probeMachineIdentity']) {
-  return {
-    agentId: identity.agentId,
-    organizationId: identity.organizationId,
-    locationId: identity.locationId,
-    credentialVersion: identity.credentialVersion,
-  };
 }
