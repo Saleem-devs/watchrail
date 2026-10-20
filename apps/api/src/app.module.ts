@@ -6,8 +6,8 @@ import { DatabaseModule } from './database.module.js';
 import { AuthModule } from './auth.module.js';
 import { BetterAuthMiddleware } from './auth.middleware.js';
 import { WatchrailAuthGuard } from './auth.guard.js';
-import { MonitorsController } from './monitors.controller.js';
-import { MonitorsService } from './monitors.service.js';
+import { MonitorsController } from './modules/monitors/monitors.controller.js';
+import { MonitorsModule } from './modules/monitors/monitors.module.js';
 import { PublicStatusPagesController } from './public-status-pages.controller.js';
 import {
   InternalStatusPageRateLimiter,
@@ -45,12 +45,12 @@ import { ApiCredentialsModule } from './modules/api-credentials/api-credentials.
     AuthModule,
     ApiCredentialsModule,
     OrganizationsModule,
+    MonitorsModule,
     StatusPagesModule,
     WebhookEndpointsModule,
   ],
   controllers: [
     InternalStatusPagesController,
-    MonitorsController,
     ProbeAgentsController,
     ProbeEnrollmentsController,
     ProbeLocationsController,
@@ -68,7 +68,6 @@ import { ApiCredentialsModule } from './modules/api-credentials/api-credentials.
       useFactory: () => new ProbeMachineRateLimiter(),
     },
 
-    MonitorsService,
     {
       provide: PublicStatusPageRateLimiter,
       useFactory: () => new PublicStatusPageRateLimiter(),
