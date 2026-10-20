@@ -8,14 +8,9 @@ import { BetterAuthMiddleware } from './auth.middleware.js';
 import { WatchrailAuthGuard } from './auth.guard.js';
 import { MonitorsController } from './modules/monitors/monitors.controller.js';
 import { MonitorsModule } from './modules/monitors/monitors.module.js';
-import { PublicStatusPagesController } from './public-status-pages.controller.js';
-import {
-  InternalStatusPageRateLimiter,
-  PublicStatusPageRateLimiter,
-} from './public-status-page-rate-limiter.js';
-import { PublicStatusPagesService } from './public-status-pages.service.js';
+import { PublicStatusPagesModule } from './modules/public-status-pages/public-status-pages.module.js';
 import { DevelopmentIdentityMiddleware } from './request-context.js';
-import { InternalStatusPagesController } from './internal-status-pages.controller.js';
+
 import { StatusPagesController } from './modules/status-pages/status-pages.controller.js';
 import { StatusPagesModule } from './modules/status-pages/status-pages.module.js';
 import { WebhookEndpointsController } from './modules/webhook-endpoints/webhook-endpoints.controller.js';
@@ -42,12 +37,11 @@ import { ApiCredentialsModule } from './modules/api-credentials/api-credentials.
     OrganizationsModule,
     MonitorsModule,
     ProbesModule,
+    PublicStatusPagesModule,
     StatusPagesModule,
     WebhookEndpointsModule,
   ],
   controllers: [
-    InternalStatusPagesController,
-    PublicStatusPagesController,
   ],
   providers: [
     DevelopmentIdentityMiddleware,
@@ -56,16 +50,6 @@ import { ApiCredentialsModule } from './modules/api-credentials/api-credentials.
       provide: ProbeMachineRateLimiter,
       useFactory: () => new ProbeMachineRateLimiter(),
     },
-
-    {
-      provide: PublicStatusPageRateLimiter,
-      useFactory: () => new PublicStatusPageRateLimiter(),
-    },
-    {
-      provide: InternalStatusPageRateLimiter,
-      useFactory: () => new InternalStatusPageRateLimiter(),
-    },
-    PublicStatusPagesService,
 
     Reflector,
     {
