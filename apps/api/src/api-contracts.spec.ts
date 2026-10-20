@@ -23,7 +23,7 @@ function routes(controller: { prototype: object }) {
     if (path === undefined) return [];
     const method = Reflect.getMetadata('method', handler) as RequestMethod;
     const permission = Reflect.getMetadata(PERMISSION_KEY, handler) as string | undefined;
-    return [{ route: `${RequestMethod[method]} ${prefix}${path ? `/${path}` : ''}`, permission }];
+    return [{ route: `${RequestMethod[method]} ${prefix}${path && path !== '/' ? `/${path}` : ''}`, permission }];
   });
 }
 
