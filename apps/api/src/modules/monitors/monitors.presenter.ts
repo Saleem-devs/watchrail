@@ -99,7 +99,6 @@ export interface CheckRoundResponse {
     | null;
 }
 
-
 export function toResponse(
   monitor: MonitorRecord,
   currentCheck: CurrentCheck | null = null,

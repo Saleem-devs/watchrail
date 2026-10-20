@@ -17,13 +17,19 @@ function routes(controller: { prototype: object }) {
   const prototype: object = controller.prototype;
   const prefix = Reflect.getMetadata('path', controller) as string;
   return Object.getOwnPropertyNames(prototype).flatMap((key) => {
+    if (key === 'constructor') return [];
     const handler: unknown = Reflect.get(prototype, key);
     if (typeof handler !== 'function') return [];
     const path = Reflect.getMetadata('path', handler) as string | undefined;
-    if (path === undefined) return [];
-    const method = Reflect.getMetadata('method', handler) as RequestMethod;
+    const method = Reflect.getMetadata('method', handler) as RequestMethod | undefined;
+    if (path === undefined || method === undefined) return [];
     const permission = Reflect.getMetadata(PERMISSION_KEY, handler) as string | undefined;
-    return [{ route: `${RequestMethod[method]} ${prefix}${path && path !== '/' ? `/${path}` : ''}`, permission }];
+    return [
+      {
+        route: `${RequestMethod[method]} ${prefix}${path && path !== '/' ? `/${path}` : ''}`,
+        permission,
+      },
+    ];
   });
 }
 

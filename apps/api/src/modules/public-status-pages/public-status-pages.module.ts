@@ -14,7 +14,10 @@ import { PublicStatusPagesController } from './public-status-pages.controller.js
   providers: [
     PublicStatusPagesService,
     { provide: PublicStatusPageRateLimiter, useFactory: () => new PublicStatusPageRateLimiter() },
-    { provide: InternalStatusPageRateLimiter, useFactory: () => new InternalStatusPageRateLimiter() },
+    {
+      provide: InternalStatusPageRateLimiter,
+      useFactory: () => new InternalStatusPageRateLimiter(),
+    },
   ],
 })
 export class PublicStatusPagesModule {}

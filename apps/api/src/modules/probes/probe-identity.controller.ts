@@ -215,4 +215,3 @@ export class ProbeMachineController {
     return { data: { receivedAt: receivedAt.toISOString() } };
   }
 }
-
