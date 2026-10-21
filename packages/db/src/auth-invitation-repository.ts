@@ -14,10 +14,7 @@ export class AuthInvitationRepository {
       .select({ id: authInvitation.id })
       .from(authInvitation)
       .where(
-        and(
-          eq(authInvitation.organizationId, organizationId),
-          eq(authInvitation.id, invitationId),
-        ),
+        and(eq(authInvitation.organizationId, organizationId), eq(authInvitation.id, invitationId)),
       )
       .limit(1);
     return invitation !== undefined;
