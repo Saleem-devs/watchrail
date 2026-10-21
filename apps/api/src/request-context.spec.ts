@@ -28,7 +28,7 @@ describe('DevelopmentIdentityMiddleware', () => {
 
     middleware.use(request as never, {} as never, next);
 
-    expect(request.watchrailContext).toEqual(DEVELOPMENT_REQUEST_CONTEXT);
+    expect(request.watchrailContext).toBe(DEVELOPMENT_REQUEST_CONTEXT);
     expect(next).toHaveBeenCalledOnce();
   });
 

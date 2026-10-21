@@ -25,7 +25,7 @@ import { AuthApiKeyRepository, AuthMembershipRepository } from '@watchrail/db';
 import type { WatchrailAuth } from './auth.js';
 import { WATCHRAIL_AUTH } from './auth.tokens.js';
 import { hasPermission, type Permission } from './permissions.js';
-import type { RequestWithContext } from './request-context.js';
+import { DEVELOPMENT_REQUEST_CONTEXT, type RequestWithContext } from './request-context.js';
 import { hashApiKey, parseApiKeyPermissions } from './modules/api-credentials/api-key-auth.js';
 
 // ─── Decorators ───────────────────────────────────────────────────────────────
@@ -96,8 +96,10 @@ export class WatchrailAuthGuard implements CanActivate {
     }
 
     if (request.watchrailContext) {
-      // Context was set by DevelopmentIdentityMiddleware.
-      // Still check permission if required.
+      // Only the middleware's fixed context is a valid development bypass.
+      if (request.watchrailContext !== DEVELOPMENT_REQUEST_CONTEXT) {
+        throw new UnauthorizedException('Authentication is required.');
+      }
       if (!hasPermission('owner', requiredPermission)) {
         throw new ForbiddenException(
           `Permission denied: '${requiredPermission}' is required for this operation.`,
