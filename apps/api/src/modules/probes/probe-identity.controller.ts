@@ -15,13 +15,13 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import { ProbeCoordinatorService } from '../../probe-coordinator.service.js';
-import type { ProbeMachineRequest } from '../../probe-machine-auth.js';
-import { ProbeMachineAuthGuard } from '../../probe-machine-auth.js';
-import { ProbeIdentityService } from '../../probe-identity.service.js';
-import type { RequestWithContext } from '../../request-context.js';
-import { Public, RequirePermission } from '../../auth.guard.js';
-import { PERMISSIONS } from '../../permissions.js';
+import { ProbeCoordinatorService } from './probe-coordinator.service.js';
+import type { ProbeMachineRequest } from './probe-machine-auth.js';
+import { ProbeMachineAuthGuard } from './probe-machine-auth.js';
+import { ProbeIdentityService } from './probe-identity.service.js';
+import type { RequestWithContext } from '../../auth/request-context.js';
+import { Public, RequirePermission } from '../../auth/auth.guard.js';
+import { PERMISSIONS } from '../../auth/permissions.js';
 import { agentResponse, locationResponse, machineResponse } from './probes.presenter.js';
 
 @Controller('probe-locations')
