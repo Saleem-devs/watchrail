@@ -13,7 +13,7 @@ import {
   type StatusPageRecord,
 } from '@watchrail/db';
 import { StatusPageInputError } from '@watchrail/domain';
-import type { RequestContext } from '../../request-context.js';
+import type { RequestContext } from '../../auth/request-context.js';
 import type {
   CreateStatusPageInput,
   ReplaceStatusPageComponentsInput,
