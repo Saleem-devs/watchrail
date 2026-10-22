@@ -11,10 +11,10 @@ import {
   AuthMembershipRepository,
   AuthEmailOutboxRepository,
 } from '@watchrail/db';
-import { WATCHRAIL_AUTH } from '../../auth.tokens.js';
-import type { WatchrailAuth } from '../../auth.js';
-import { isOrganizationRole, type OrganizationRole } from '../../permissions.js';
-import type { RequestContext } from '../../request-context.js';
+import { WATCHRAIL_AUTH } from '../../auth/auth.tokens.js';
+import type { WatchrailAuth } from '../../auth/auth.js';
+import { isOrganizationRole, type OrganizationRole } from '../../auth/permissions.js';
+import type { RequestContext } from '../../auth/request-context.js';
 import type { CreateInvitationInput, UpdateOrganizationInput } from './dto/organization-input.js';
 import type {
   InvitationRecord,
