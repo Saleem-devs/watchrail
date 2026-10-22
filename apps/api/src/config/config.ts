@@ -10,7 +10,7 @@ import {
   loadWebhookSigningSecretKeyring,
   type WebhookSigningSecretKeyring,
 } from '@watchrail/webhook-security';
-import { loadMailConfig, type MailConfig } from './mail.js';
+import { loadMailConfig, type MailConfig } from '../infrastructure/mail/mail.js';
 import { loadAuthEmailKeyring, type AuthEmailKeyring } from '@watchrail/db';
 
 export const APP_CONFIG = Symbol('APP_CONFIG');

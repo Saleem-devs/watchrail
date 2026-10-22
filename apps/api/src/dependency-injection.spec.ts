@@ -14,9 +14,9 @@ import {
 } from './modules/probes/probe-identity.controller.js';
 import { PublicStatusPagesController } from './modules/public-status-pages/public-status-pages.controller.js';
 import { InternalStatusPagesController } from './modules/public-status-pages/internal-status-pages.controller.js';
-import { ProbeIdentityService } from './probe-identity.service.js';
-import { ProbeCoordinatorService } from './probe-coordinator.service.js';
-import { MonitorsService } from './monitors.service.js';
+import { ProbeIdentityService } from './modules/probes/probe-identity.service.js';
+import { ProbeCoordinatorService } from './modules/probes/probe-coordinator.service.js';
+import { MonitorsService } from './modules/monitors/monitors.service.js';
 import { StatusPagesController } from './modules/status-pages/status-pages.controller.js';
 import { WebhookEndpointsController } from './modules/webhook-endpoints/webhook-endpoints.controller.js';
 import { WebhookEndpointsService } from './modules/webhook-endpoints/webhook-endpoints.service.js';
