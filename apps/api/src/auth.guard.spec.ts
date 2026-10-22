@@ -1,10 +1,11 @@
-import { ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import type { ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { AuthApiKeyRepository, AuthMembershipRepository } from '@watchrail/db';
 import { describe, expect, it, vi } from 'vitest';
 import { Public, WatchrailAuthGuard } from './auth.guard.js';
 import { PERMISSIONS } from './permissions.js';
+import { DEVELOPMENT_REQUEST_CONTEXT } from './request-context.js';
 
 function executionContext(handler: () => void, controller: object, request: object) {
   return {
@@ -67,12 +68,19 @@ describe('WatchrailAuthGuard authorization policy', () => {
     const handler = () => undefined;
     Reflect.defineMetadata('watchrail:permission', PERMISSIONS.MONITOR_READ, handler);
     const context = executionContext(handler, ProtectedController, {
-      watchrailContext: {
-        actorId: '00000000-0000-4000-8000-000000000001',
-        organizationId: '00000000-0000-4000-8000-000000000002',
-      },
+      watchrailContext: DEVELOPMENT_REQUEST_CONTEXT,
     });
 
     await expect(guard.canActivate(context)).resolves.toBe(true);
+  });
+  it('rejects an injected context that did not come from the development middleware', async () => {
+    class ProtectedController {}
+    const handler = () => undefined;
+    Reflect.defineMetadata('watchrail:permission', PERMISSIONS.MONITOR_READ, handler);
+    const context = executionContext(handler, ProtectedController, {
+      watchrailContext: { ...DEVELOPMENT_REQUEST_CONTEXT },
+    });
+
+    await expect(guard.canActivate(context)).rejects.toBeInstanceOf(UnauthorizedException);
   });
 });

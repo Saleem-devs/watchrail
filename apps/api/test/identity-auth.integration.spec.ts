@@ -10,6 +10,7 @@ import {
   authApiKey,
   authInvitation,
   AuthEmailOutboxRepository,
+  AuthInvitationRepository,
   decryptAuthEmail,
   createDatabaseConnection,
   createWatchrailDatabase,
@@ -311,6 +312,16 @@ describe('passwordless identity provisioning', () => {
     });
     await auth.api.cancelInvitation({ body: { invitationId: revoked.id }, headers: owner.headers });
     const outbox = new AuthEmailOutboxRepository(database);
+    const invitationLookup = new AuthInvitationRepository(database);
+    expect(
+      await invitationLookup.belongsToOrganization(owner.personalOrganizationId, revoked.id),
+    ).toBe(true);
+    expect(
+      await invitationLookup.belongsToOrganization(invitee.personalOrganizationId, revoked.id),
+    ).toBe(false);
+    expect(
+      await invitationLookup.belongsToOrganization(owner.personalOrganizationId, randomUUID()),
+    ).toBe(false);
     expect(await outbox.isInvitationPending(revoked.id)).toBe(false);
     const [revokedRecord] = await database
       .select({ status: authInvitation.status })

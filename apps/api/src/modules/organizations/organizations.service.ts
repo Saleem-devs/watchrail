@@ -6,6 +6,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import {
+  AuthInvitationRepository,
   AuthMembershipInvariantError,
   AuthMembershipRepository,
   AuthEmailOutboxRepository,
@@ -28,6 +29,8 @@ export class OrganizationsService {
     @Inject(AuthMembershipRepository) private readonly memberships: AuthMembershipRepository,
     @Inject(AuthEmailOutboxRepository)
     private readonly authEmailOutbox: AuthEmailOutboxRepository,
+    @Inject(AuthInvitationRepository)
+    private readonly invitations: AuthInvitationRepository,
   ) {}
 
   async listOrganizations(
@@ -149,6 +152,12 @@ export class OrganizationsService {
     requestHeaders: Headers,
     invitationId: string,
   ): Promise<void> {
+    if (!(await this.invitations.belongsToOrganization(ctx.organizationId, invitationId))) {
+      throw new NotFoundException({
+        code: 'INVITATION_NOT_FOUND',
+        message: 'Invitation not found.',
+      });
+    }
     await this.auth.api.cancelInvitation({
       body: { invitationId },
       headers: requestHeaders,

@@ -14,6 +14,7 @@ import {
   WebhookDeliveryReadRepository,
   WebhookEndpointRepository,
   AuthMembershipRepository,
+  AuthInvitationRepository,
   AuthApiKeyRepository,
   AuthEmailOutboxRepository,
 } from '@watchrail/db';
@@ -46,6 +47,11 @@ import { APP_CONFIG, type AppConfig } from './config.js';
       provide: AuthMembershipRepository,
       inject: [getDrizzleToken()],
       useFactory: (db: WatchrailDatabase) => new AuthMembershipRepository(db),
+    },
+    {
+      provide: AuthInvitationRepository,
+      inject: [getDrizzleToken()],
+      useFactory: (db: WatchrailDatabase) => new AuthInvitationRepository(db),
     },
     {
       provide: ProbeCoordinatorRepository,
@@ -109,6 +115,7 @@ import { APP_CONFIG, type AppConfig } from './config.js';
     AuthEmailOutboxRepository,
     AuthApiKeyRepository,
     AuthMembershipRepository,
+    AuthInvitationRepository,
     UptimeReadRepository,
     CheckHistoryRepository,
     IncidentReadRepository,
