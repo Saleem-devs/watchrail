@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PublicStatusPageRateLimiter } from './public-status-page-rate-limiter.js';
+import { PublicStatusPageRateLimiter } from '../../common/rate-limiting/public-status-page-rate-limiter.js';
 import { ProbeMachineRateLimiter } from './probe-machine-auth.js';
 
 describe('probe machine rate limiting', () => {

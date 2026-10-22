@@ -11,7 +11,7 @@ import {
 import type { ProbeMachineIdentity } from '@watchrail/db';
 import type { NextFunction, Request, Response } from 'express';
 import { ProbeIdentityService } from './probe-identity.service.js';
-import { PublicStatusPageRateLimiter } from './public-status-page-rate-limiter.js';
+import { PublicStatusPageRateLimiter } from '../../common/rate-limiting/public-status-page-rate-limiter.js';
 
 export interface ProbeMachineRequest extends Request {
   probeMachineIdentity: ProbeMachineIdentity;
