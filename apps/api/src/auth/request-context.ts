@@ -1,6 +1,6 @@
 import { Inject, Injectable, type NestMiddleware } from '@nestjs/common';
 import type { NextFunction, Request, Response } from 'express';
-import { APP_CONFIG, type AppConfig } from './config.js';
+import { APP_CONFIG, type AppConfig } from '../config/config.js';
 
 export interface RequestContext {
   actorId: string;

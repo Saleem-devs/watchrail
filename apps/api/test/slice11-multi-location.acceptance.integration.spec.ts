@@ -18,7 +18,7 @@ import {
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module.js';
-import { ProbeMachineRateLimiter } from '../src/probe-machine-auth.js';
+import { ProbeMachineRateLimiter } from '../src/modules/probes/probe-machine-auth.js';
 
 interface AgentProcess {
   child: ChildProcess;

@@ -19,7 +19,7 @@ import { AppModule } from '../src/app.module.js';
 import {
   InternalStatusPageRateLimiter,
   PUBLIC_STATUS_PAGE_RATE_LIMIT_DEFAULTS,
-} from '../src/public-status-page-rate-limiter.js';
+} from '../src/common/rate-limiting/public-status-page-rate-limiter.js';
 
 const organizationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 

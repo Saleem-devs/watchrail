@@ -19,10 +19,10 @@ import {
 } from '@watchrail/db';
 import { eq } from '@watchrail/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createAuth } from '../src/auth.js';
+import { createAuth } from '../src/auth/auth.js';
 import { AppModule } from '../src/app.module.js';
-import { WATCHRAIL_AUTH } from '../src/auth.tokens.js';
-import { APP_CONFIG, loadAppConfig } from '../src/config.js';
+import { WATCHRAIL_AUTH } from '../src/auth/auth.tokens.js';
+import { APP_CONFIG, loadAppConfig } from '../src/config/config.js';
 
 describe('passwordless identity provisioning', () => {
   let container: StartedPostgreSqlContainer;
