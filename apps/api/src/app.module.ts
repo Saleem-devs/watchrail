@@ -23,7 +23,10 @@ import {
   ProbeMachineController,
 } from './modules/probes/probe-identity.controller.js';
 import { ProbesModule } from './modules/probes/probes.module.js';
-import { ProbeMachineNoStoreMiddleware, ProbeMachineRateLimiter } from './modules/probes/probe-machine-auth.js';
+import {
+  ProbeMachineNoStoreMiddleware,
+  ProbeMachineRateLimiter,
+} from './modules/probes/probe-machine-auth.js';
 import { OrganizationsController } from './modules/organizations/organizations.controller.js';
 import { OrganizationsModule } from './modules/organizations/organizations.module.js';
 import { ApiCredentialsController } from './modules/api-credentials/api-credentials.controller.js';
