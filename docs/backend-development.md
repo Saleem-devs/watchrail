@@ -16,6 +16,24 @@ apps/api/src/modules/<feature>/
 Add files only when the responsibility exists. A small feature does not need every directory or an
 interface for every class.
 
+## Source organization
+
+`apps/api/src/app.module.ts` and `main.ts` remain at the application root.
+Common NestJS infrastructure is grouped under `auth/`, `config/`,
+`infrastructure/database/` and `infrastructure/mail/`. Shared reusable
+rate-limiting implementation lives in `common/rate-limiting/`.
+
+Feature-specific controllers, application services, presenters, transport schemas,
+and their colocated unit tests live under `modules/<feature>/`. In particular,
+monitor services belong with monitor HTTP endpoints; probe machine authentication,
+identity, and coordination services belong with probe endpoints; and the
+public/internal status-page API owns its read service and HTTP cache utilities.
+
+These paths express ownership, not an additional application layer. Keep explicit
+NestJS injection tokens and the existing root middleware/global-guard registrations.
+Do not move the distributed probe engine, transactions, workers, or database
+repositories merely to mirror the HTTP directory structure.
+
 ## Responsibilities
 
 ### Controller
