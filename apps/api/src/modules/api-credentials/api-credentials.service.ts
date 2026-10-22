@@ -7,8 +7,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { AuthApiKeyRepository, AuthMembershipRepository } from '@watchrail/db';
-import { hasPermission } from '../../permissions.js';
-import type { RequestContext } from '../../request-context.js';
+import { hasPermission } from '../../auth/permissions.js';
+import type { RequestContext } from '../../auth/request-context.js';
 import { hashApiKey } from './api-key-auth.js';
 import type { CreateApiCredentialInput } from './dto/create-api-credential.input.js';
 

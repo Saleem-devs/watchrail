@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { NestFactory } from '@nestjs/core';
 import { config as loadEnvironment } from 'dotenv';
 import { AppModule } from './app.module.js';
-import { APP_CONFIG, type AppConfig } from './config.js';
+import { APP_CONFIG, type AppConfig } from './config/config.js';
 
 loadEnvironment({ path: resolve(process.cwd(), '../../.env') });
 
