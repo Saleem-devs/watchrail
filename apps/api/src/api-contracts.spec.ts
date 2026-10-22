@@ -1,6 +1,6 @@
 import { RequestMethod } from '@nestjs/common';
 import { describe, expect, it } from 'vitest';
-import { PERMISSION_KEY, PUBLIC_KEY } from './auth.guard.js';
+import { PERMISSION_KEY, PUBLIC_KEY } from './auth/auth.guard.js';
 import { MonitorHistoryController } from './modules/monitors/monitor-history.controller.js';
 import { MonitorUptimeController } from './modules/monitors/monitor-uptime.controller.js';
 import { MonitorsController } from './modules/monitors/monitors.controller.js';
