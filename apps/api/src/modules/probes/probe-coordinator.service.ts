@@ -25,7 +25,7 @@ import {
   type AuthoritativeCheckResult,
   type ProbeMachineIdentity,
 } from '@watchrail/db';
-import { APP_CONFIG, type AppConfig } from './config.js';
+import { APP_CONFIG, type AppConfig } from '../../config/config.js';
 
 @Injectable()
 export class ProbeCoordinatorService {
