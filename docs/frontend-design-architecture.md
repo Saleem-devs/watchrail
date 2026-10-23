@@ -1,70 +1,41 @@
 # Frontend Design and Architecture
 
-## Product intent
+## Decisions
 
-Watchrail is an open-source monitoring control plane. The interface should make it easy to
-answer three questions immediately: **What is being monitored? What needs attention? What
-evidence explains the last check?** Monitoring configuration and diagnostics remain available
-without requiring an artificial marketing-style landing page.
+Watchrail uses Next.js 16, React 19, TypeScript and Tailwind CSS v4.3.3. New UI uses
+Tailwind utilities and CSS-first `@theme` tokens in `apps/web/app/tailwind.css`. Do not
+introduce CSS Modules or new vanilla CSS feature stylesheets. The existing `styles.css`
+is temporarily retained to avoid breaking sign-in, dashboard, organization settings and
+public status pages. Tailwind Preflight is deliberately omitted until those screens have
+been migrated and visually regression-tested.
 
 ## Information architecture
 
-The authenticated operator workspace has a shared `AppShell`:
-- **Overview** (`/`): status summary computed from the current organization's monitors.
-- **Monitors** (`/#monitor-inventory`): monitor inventory, current health, diagnostics and history.
-- **New monitor** (`/#create-monitor`): monitor creation, preserving the existing API contract.
-- **Organization** (`/settings/organization`): workspace membership, invitations, API
-  credentials and ownership controls.
+The authenticated workspace uses `components/app-shell.tsx` for responsive navigation.
+Overview (`/`) displays genuine active-organization monitoring data, including explicit
+unknown states. Monitors (`/#monitor-inventory`) and New monitor (`/#create-monitor`)
+point to implemented sections of the existing dashboard, not speculative routes.
+Organization (`/settings/organization`) retains its current settings route. Sign-in
+and public status pages remain outside the authenticated shell.
 
-The overview and monitor deep links intentionally share a route until the existing monitor
-component can be split into dedicated feature screens. Do not add navigation to routes that
-do not exist yet.
+## Architecture and safety
 
-Public status pages (`/status/[slug]`) and authentication routes use their separate
-layouts and must not inherit the authenticated workspace shell.
+`lib/monitor-summary.ts` remains a pure tested summary function.
+`components/monitor-overview.tsx` renders those derived values.
+`app/dashboard.tsx` still owns monitor network operations until feature extraction.
+The frontend never authorizes memberships or tenant access; enforce permissions, tenant
+boundaries, data projection and credential scope at the NestJS API.
+Keep original API paths, versioned response shapes, error codes, manual check polling,
+feature-gated multiple locations, and the Better Auth session flow.
 
-## Visual system
+Next: extract feature-based monitor components and a typed HTTP boundary, migrate every
+screen to Tailwind, enable a deliberate global reset, remove legacy CSS, and add robust
+responsive and accessibility coverage. Maintain the existing visual palette provisionally,
+subject to UI/UX design review.
 
-- Dark neutral surfaces with a clear hierarchy; use mint-green sparingly as the primary
-  interactive accent and for operational health. Amber means caution, red means unavailable.
-- Sidebar and compact workspace header on desktop; on smaller screens use a horizontal,
-  scrollable section navigation without hiding core actions.
-- Summary metrics are derived from **actual API responses**. Missing checks are pending,
-  not healthy. Degraded or down aggregate checks require attention even if one location passed.
-- Typography uses system fonts. No external fonts or icons are needed to render the shell.
-- Controls must have visible keyboard focus, semantic labels, responsive touch targets and
-  reduced-motion behavior.
+## Verification
 
-## Implementation ownership
-
-| Concern | Ownership |
-| --- | --- |
-| Shared workspace navigation and brand | `components/app-shell.tsx` and its CSS module |
-| Summary derivation | Pure `lib/monitor-summary.ts` with unit tests |
-| Overview visualization | `components/monitor-overview.tsx` and its CSS module |
-| Monitor workflows (temporarily) | `app/dashboard.tsx`, preserving current API calls |
-| Organization settings | Existing settings page, wrapped by its route layout |
-| Authentication/session | `lib/auth-client.ts`, `components/org-switcher.tsx` |
-| Public status pages | Their existing route, components and scoped CSS module |
-
-## Migration plan
-
-1. **Foundation (this PR):** workspace shell, navigation, overview, scoped styles,
-   accessibility and unit coverage. Keep existing behavioral flows stable.
-2. **Feature extraction:** split monitor settings, diagnostics, history and incidents into
-   feature-owned components; introduce a typed transport client preserving the existing
-   `{ data }`, pagination and error shapes.
-3. **Operational screens:** dedicated monitors, incident detail, probe locations and public
-   status-page administration using actual supported backend APIs.
-4. **Polish:** loading/empty/error states, responsive interaction, keyboard and screen-reader
-   testing, and page-level visual regression coverage.
-
-Do not conflate a UI foundation with completion of all frontend functionality. Preserve
-server-derived tenant isolation, existing authentication redirects, monitor status semantics,
-manual check polling, feature-gated multi-location controls and accessible error handling.
-
-## Verification gate
-
-Run formatting, lint, typecheck, web unit tests and production build. Then run the repository
-unit suite and exact root integration gate to ensure changes do not affect existing behavior.
-Keep the PR draft until verification and visual review at desktop and mobile viewport widths.
+Run `pnpm install --frozen-lockfile`, `pnpm format:check`, `pnpm lint`,
+`pnpm typecheck`, `pnpm test`, `pnpm --filter @watchrail/web build` and the
+integration suite. Confirm mobile/desktop rendering, auth, organization switches and
+public status pages before marking this PR ready.

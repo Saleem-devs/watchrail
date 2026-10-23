@@ -1,0 +1,21 @@
+/* Preflight is omitted until legacy dashboard and auth surfaces are migrated. */
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities);
+
+@theme {
+  --color-rail-workspace: #0f171b;
+  --color-rail-sidebar: #0b1217;
+  --color-rail-header: #111a1e;
+  --color-rail-raised: #172126;
+  --color-rail-border: #263238;
+  --color-rail-hover: #182329;
+  --color-rail-selected: #173127;
+  --color-rail-selected-border: #285940;
+  --color-rail-text: #eef4f2;
+  --color-rail-subtle: #9dabb1;
+  --color-rail-muted: #8a999e;
+  --color-rail-accent: #63f5af;
+  --color-rail-accent-light: #dcf9ea;
+  --color-rail-success: #71d6a4;
+  --color-rail-danger: #f08b8b;
+}

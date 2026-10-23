@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { OrgSwitcher } from '../components/org-switcher';
+import { AppShell } from '../components/app-shell';
+import { MonitorOverview } from '../components/monitor-overview';
 
 const multiLocationUiEnabled = process.env.NEXT_PUBLIC_MULTI_LOCATION_EXECUTION_ENABLED === 'true';
 
@@ -587,17 +588,8 @@ export function Dashboard() {
   }
 
   return (
-    <main>
-      <header className="site-header">
-        <a className="brand" href="#top" aria-label="Watchrail dashboard">
-          <span className="brand-mark" aria-hidden="true">
-            W
-          </span>
-          <span>Watchrail</span>
-        </a>
-        <OrgSwitcher />
-      </header>
-
+    <AppShell page="overview">
+      <main>
       <section className="hero" id="top">
         <div>
           <p className="eyebrow">MONITORING CONTROL PLANE</p>
@@ -613,6 +605,8 @@ export function Dashboard() {
         </div>
       </section>
 
+      {!isLoading && !pageError && <MonitorOverview monitors={monitors} />}
+
       {pageError ? (
         <div className="alert" role="alert">
           <span>{pageError}</span>
@@ -623,7 +617,7 @@ export function Dashboard() {
       ) : null}
 
       <div className="dashboard-grid">
-        <section className="panel form-panel" aria-labelledby="create-heading">
+        <section id="create-monitor" className="panel form-panel" aria-labelledby="create-heading">
           <div className="panel-heading">
             <div>
               <p className="eyebrow">NEW MONITOR</p>
@@ -710,7 +704,7 @@ export function Dashboard() {
           </form>
         </section>
 
-        <section className="panel monitors-panel" aria-labelledby="monitors-heading">
+        <section id="monitor-inventory" className="panel monitors-panel" aria-labelledby="monitors-heading">
           <div className="panel-heading">
             <div>
               <p className="eyebrow">INVENTORY</p>
@@ -955,7 +949,8 @@ export function Dashboard() {
           )}
         </section>
       </div>
-    </main>
+      </main>
+    </AppShell>
   );
 }
 
