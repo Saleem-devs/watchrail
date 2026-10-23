@@ -12,15 +12,16 @@ export function MonitorOverview({ monitors }: { monitors: readonly MonitorSummar
     { label: 'Total monitors', value: summary.total, tone: 'neutral' },
     { label: 'Operational', value: summary.operational, tone: 'positive' },
     { label: 'Needs attention', value: summary.needsAttention, tone: 'negative' },
+    { label: 'Paused', value: summary.paused, tone: 'neutral' },
     { label: 'Awaiting evidence', value: summary.pending, tone: 'neutral' },
   ] as const;
   return (
     <section className="my-7" aria-label="Monitor overview">
       <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="m-0 text-lg font-semibold tracking-tight text-rail-text">At a glance</h2>
-        <span className="text-xs text-rail-muted">Based on the latest reported checks</span>
+        <span className="text-xs text-rail-muted">Current state and latest reported checks</span>
       </div>
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-5">
         {stats.map((stat) => (
           <div
             key={stat.label}

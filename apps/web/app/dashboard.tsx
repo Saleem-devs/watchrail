@@ -11,7 +11,7 @@ interface Monitor {
   name: string;
   url: string;
   method: string;
-  lifecycleState: string;
+  lifecycleState: 'ENABLED' | 'PAUSED';
   timeoutMs: number;
   followRedirects: boolean;
   statusPolicy: { type: 'ANY_2XX' } | { type: 'EXACT'; statusCodes: number[] };

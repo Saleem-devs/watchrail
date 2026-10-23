@@ -7,6 +7,7 @@ describe('summarizeMonitors', () => {
       total: 0,
       operational: 0,
       needsAttention: 0,
+      paused: 0,
       pending: 0,
       openIncidents: 0,
     });
@@ -15,20 +16,35 @@ describe('summarizeMonitors', () => {
   it('separates operational, degraded, unavailable and unknown evidence', () => {
     expect(
       summarizeMonitors([
-        { currentCheck: { availability: 'AVAILABLE' }, incidentState: { currentIncident: null } },
         {
+          lifecycleState: 'ENABLED',
+          currentCheck: { availability: 'AVAILABLE' },
+          incidentState: { currentIncident: null },
+        },
+        {
+          lifecycleState: 'ENABLED',
           currentCheck: { availability: 'AVAILABLE', aggregateOutcome: 'DEGRADED' },
           incidentState: { currentIncident: { id: 'incident-a' } },
         },
-        { currentCheck: { availability: 'UNAVAILABLE', aggregateOutcome: 'DOWN' } },
-        { currentCheck: { availability: 'UNKNOWN', aggregateOutcome: 'UNKNOWN' } },
-        { currentCheck: null },
-        { currentCheck: { availability: 'AVAILABLE', aggregateOutcome: 'UP' } },
+        {
+          lifecycleState: 'ENABLED',
+          currentCheck: { availability: 'UNAVAILABLE', aggregateOutcome: 'DOWN' },
+        },
+        {
+          lifecycleState: 'ENABLED',
+          currentCheck: { availability: 'UNKNOWN', aggregateOutcome: 'UNKNOWN' },
+        },
+        { lifecycleState: 'ENABLED', currentCheck: null },
+        {
+          lifecycleState: 'ENABLED',
+          currentCheck: { availability: 'AVAILABLE', aggregateOutcome: 'UP' },
+        },
       ]),
     ).toEqual({
       total: 6,
       operational: 2,
       needsAttention: 2,
+      paused: 0,
       pending: 2,
       openIncidents: 1,
     });
@@ -38,10 +54,29 @@ describe('summarizeMonitors', () => {
     expect(
       summarizeMonitors([
         {
+          lifecycleState: 'ENABLED',
           currentCheck: { availability: 'AVAILABLE' },
           incidentState: { currentIncident: { id: 'incident-a' } },
         },
       ]),
     ).toMatchObject({ operational: 1, needsAttention: 0, openIncidents: 1 });
+  });
+
+  it('keeps a paused monitor separate when its retained historical check passed', () => {
+    expect(
+      summarizeMonitors([
+        {
+          lifecycleState: 'PAUSED',
+          currentCheck: { availability: 'AVAILABLE', aggregateOutcome: 'UP' },
+        },
+      ]),
+    ).toEqual({
+      total: 1,
+      operational: 0,
+      needsAttention: 0,
+      paused: 1,
+      pending: 0,
+      openIncidents: 0,
+    });
   });
 });

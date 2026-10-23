@@ -7,20 +7,26 @@ describe('MonitorOverview', () => {
     render(
       <MonitorOverview
         monitors={[
-          { currentCheck: { availability: 'AVAILABLE' } },
+          { lifecycleState: 'ENABLED', currentCheck: { availability: 'AVAILABLE' } },
           {
+            lifecycleState: 'ENABLED',
             currentCheck: { availability: 'AVAILABLE', aggregateOutcome: 'DEGRADED' },
             incidentState: { currentIncident: { id: 'incident' } },
           },
-          { currentCheck: null },
+          { lifecycleState: 'ENABLED', currentCheck: null },
+          {
+            lifecycleState: 'PAUSED',
+            currentCheck: { availability: 'AVAILABLE', aggregateOutcome: 'UP' },
+          },
         ]}
       />,
     );
     const region = screen.getByRole('region', { name: 'Monitor overview' });
     for (const [label, count] of [
-      ['Total monitors', '3'],
+      ['Total monitors', '4'],
       ['Operational', '1'],
       ['Needs attention', '1'],
+      ['Paused', '1'],
       ['Awaiting evidence', '1'],
     ] as const) {
       expect(within(region).getByText(label).parentElement?.parentElement).toHaveTextContent(count);
