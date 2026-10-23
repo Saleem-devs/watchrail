@@ -590,365 +590,373 @@ export function Dashboard() {
   return (
     <AppShell page="overview">
       <main>
-      <section className="hero" id="top">
-        <div>
-          <p className="eyebrow">MONITORING CONTROL PLANE</p>
-          <h1>Know what is reachable.</h1>
-          <p className="hero-copy">
-            Create an endpoint, run a durable diagnostic check, and inspect the evidence without
-            tying network work to the API request.
-          </p>
-        </div>
-        <div className="hero-stat" aria-label={`${monitors.length} monitors configured`}>
-          <span>{monitors.length}</span>
-          <small>{monitors.length === 1 ? 'monitor' : 'monitors'}</small>
-        </div>
-      </section>
-
-      {!isLoading && !pageError && <MonitorOverview monitors={monitors} />}
-
-      {pageError ? (
-        <div className="alert" role="alert">
-          <span>{pageError}</span>
-          <button type="button" onClick={() => void loadMonitors()}>
-            Retry
-          </button>
-        </div>
-      ) : null}
-
-      <div className="dashboard-grid">
-        <section id="create-monitor" className="panel form-panel" aria-labelledby="create-heading">
-          <div className="panel-heading">
-            <div>
-              <p className="eyebrow">NEW MONITOR</p>
-              <h2 id="create-heading">Add an endpoint</h2>
-            </div>
-
-            <fieldset className="field">
-              <legend>Expected status</legend>
-              <label>
-                <input name="statusPolicyMode" type="radio" value="ANY_2XX" defaultChecked />
-                Any 2xx response
-              </label>
-              <label>
-                <input name="statusPolicyMode" type="radio" value="EXACT" />
-                Specific status codes
-              </label>
-              <input
-                name="statusCodes"
-                type="text"
-                inputMode="numeric"
-                placeholder="200, 204"
-                aria-describedby={fieldErrors.statusPolicy ? 'status-policy-error' : undefined}
-                aria-invalid={Boolean(fieldErrors.statusPolicy)}
-              />
-              {fieldErrors.statusPolicy ? (
-                <p className="field-error" id="status-policy-error">
-                  {fieldErrors.statusPolicy[0]}
-                </p>
-              ) : null}
-            </fieldset>
-            <span className="step">01</span>
+        <section className="hero" id="top">
+          <div>
+            <p className="eyebrow">MONITORING CONTROL PLANE</p>
+            <h1>Know what is reachable.</h1>
+            <p className="hero-copy">
+              Create an endpoint, run a durable diagnostic check, and inspect the evidence without
+              tying network work to the API request.
+            </p>
           </div>
-
-          <form onSubmit={(event) => void createMonitor(event)} noValidate>
-            <div className="field">
-              <label htmlFor="name">Monitor name</label>
-              <input
-                id="name"
-                name="name"
-                type="text"
-                placeholder="Production API"
-                maxLength={120}
-                aria-describedby={fieldErrors.name ? 'name-error' : undefined}
-                aria-invalid={Boolean(fieldErrors.name)}
-              />
-              {fieldErrors.name ? (
-                <p className="field-error" id="name-error">
-                  {fieldErrors.name[0]}
-                </p>
-              ) : null}
-            </div>
-
-            <div className="field">
-              <label htmlFor="url">HTTP(S) URL</label>
-              <input
-                id="url"
-                name="url"
-                type="url"
-                placeholder="https://api.example.com/health"
-                aria-describedby={fieldErrors.url ? 'url-error' : 'url-help'}
-                aria-invalid={Boolean(fieldErrors.url)}
-              />
-              {fieldErrors.url ? (
-                <p className="field-error" id="url-error">
-                  {fieldErrors.url[0]}
-                </p>
-              ) : (
-                <p className="field-help" id="url-help">
-                  Watchrail stores this configuration but does not call it during creation.
-                </p>
-              )}
-            </div>
-
-            <div className="defaults" aria-label="Initial monitor defaults">
-              <Default label="Method" value="GET" />
-              <Default label="Timeout" value="10 seconds" />
-              <Default label="Location" value="Local" />
-              <Default label="Lifecycle" value="Enabled" />
-            </div>
-
-            <button className="primary-button" type="submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Creating…' : 'Create monitor'}
-            </button>
-          </form>
+          <div className="hero-stat" aria-label={`${monitors.length} monitors configured`}>
+            <span>{monitors.length}</span>
+            <small>{monitors.length === 1 ? 'monitor' : 'monitors'}</small>
+          </div>
         </section>
 
-        <section id="monitor-inventory" className="panel monitors-panel" aria-labelledby="monitors-heading">
-          <div className="panel-heading">
-            <div>
-              <p className="eyebrow">INVENTORY</p>
-              <h2 id="monitors-heading">Configured monitors</h2>
-            </div>
-            <button className="quiet-button" type="button" onClick={() => void loadMonitors()}>
-              Refresh
+        {!isLoading && !pageError && <MonitorOverview monitors={monitors} />}
+
+        {pageError ? (
+          <div className="alert" role="alert">
+            <span>{pageError}</span>
+            <button type="button" onClick={() => void loadMonitors()}>
+              Retry
             </button>
           </div>
+        ) : null}
 
-          {isLoading ? (
-            <div className="state" role="status">
-              <span className="spinner" aria-hidden="true" />
-              Loading monitors…
+        <div className="dashboard-grid">
+          <section
+            id="create-monitor"
+            className="panel form-panel"
+            aria-labelledby="create-heading"
+          >
+            <div className="panel-heading">
+              <div>
+                <p className="eyebrow">NEW MONITOR</p>
+                <h2 id="create-heading">Add an endpoint</h2>
+              </div>
+
+              <fieldset className="field">
+                <legend>Expected status</legend>
+                <label>
+                  <input name="statusPolicyMode" type="radio" value="ANY_2XX" defaultChecked />
+                  Any 2xx response
+                </label>
+                <label>
+                  <input name="statusPolicyMode" type="radio" value="EXACT" />
+                  Specific status codes
+                </label>
+                <input
+                  name="statusCodes"
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="200, 204"
+                  aria-describedby={fieldErrors.statusPolicy ? 'status-policy-error' : undefined}
+                  aria-invalid={Boolean(fieldErrors.statusPolicy)}
+                />
+                {fieldErrors.statusPolicy ? (
+                  <p className="field-error" id="status-policy-error">
+                    {fieldErrors.statusPolicy[0]}
+                  </p>
+                ) : null}
+              </fieldset>
+              <span className="step">01</span>
             </div>
-          ) : monitors.length === 0 ? (
-            <div className="empty-state">
-              <span className="empty-glyph" aria-hidden="true">
-                +
-              </span>
-              <h3>No monitors yet</h3>
-              <p>Create the first endpoint record with the form.</p>
+
+            <form onSubmit={(event) => void createMonitor(event)} noValidate>
+              <div className="field">
+                <label htmlFor="name">Monitor name</label>
+                <input
+                  id="name"
+                  name="name"
+                  type="text"
+                  placeholder="Production API"
+                  maxLength={120}
+                  aria-describedby={fieldErrors.name ? 'name-error' : undefined}
+                  aria-invalid={Boolean(fieldErrors.name)}
+                />
+                {fieldErrors.name ? (
+                  <p className="field-error" id="name-error">
+                    {fieldErrors.name[0]}
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="field">
+                <label htmlFor="url">HTTP(S) URL</label>
+                <input
+                  id="url"
+                  name="url"
+                  type="url"
+                  placeholder="https://api.example.com/health"
+                  aria-describedby={fieldErrors.url ? 'url-error' : 'url-help'}
+                  aria-invalid={Boolean(fieldErrors.url)}
+                />
+                {fieldErrors.url ? (
+                  <p className="field-error" id="url-error">
+                    {fieldErrors.url[0]}
+                  </p>
+                ) : (
+                  <p className="field-help" id="url-help">
+                    Watchrail stores this configuration but does not call it during creation.
+                  </p>
+                )}
+              </div>
+
+              <div className="defaults" aria-label="Initial monitor defaults">
+                <Default label="Method" value="GET" />
+                <Default label="Timeout" value="10 seconds" />
+                <Default label="Location" value="Local" />
+                <Default label="Lifecycle" value="Enabled" />
+              </div>
+
+              <button className="primary-button" type="submit" disabled={isSubmitting}>
+                {isSubmitting ? 'Creating…' : 'Create monitor'}
+              </button>
+            </form>
+          </section>
+
+          <section
+            id="monitor-inventory"
+            className="panel monitors-panel"
+            aria-labelledby="monitors-heading"
+          >
+            <div className="panel-heading">
+              <div>
+                <p className="eyebrow">INVENTORY</p>
+                <h2 id="monitors-heading">Configured monitors</h2>
+              </div>
+              <button className="quiet-button" type="button" onClick={() => void loadMonitors()}>
+                Refresh
+              </button>
             </div>
-          ) : (
-            <ul className="monitor-list">
-              {monitors.map((monitor) => (
-                <li key={monitor.id} className="monitor-card">
-                  <div
-                    className={`monitor-status monitor-status-${monitorState(monitor.currentCheck)}`}
-                    aria-label={monitorStateLabel(monitor.currentCheck)}
-                  >
-                    <span aria-hidden="true" />
-                  </div>
-                  <div className="monitor-main">
-                    <div className="monitor-title-row">
-                      <h3>{monitor.name}</h3>
-                      <button
-                        className="run-button"
-                        type="button"
-                        disabled={runningMonitorIds.has(monitor.id)}
-                        onClick={() => void runNow(monitor.id)}
+
+            {isLoading ? (
+              <div className="state" role="status">
+                <span className="spinner" aria-hidden="true" />
+                Loading monitors…
+              </div>
+            ) : monitors.length === 0 ? (
+              <div className="empty-state">
+                <span className="empty-glyph" aria-hidden="true">
+                  +
+                </span>
+                <h3>No monitors yet</h3>
+                <p>Create the first endpoint record with the form.</p>
+              </div>
+            ) : (
+              <ul className="monitor-list">
+                {monitors.map((monitor) => (
+                  <li key={monitor.id} className="monitor-card">
+                    <div
+                      className={`monitor-status monitor-status-${monitorState(monitor.currentCheck)}`}
+                      aria-label={monitorStateLabel(monitor.currentCheck)}
+                    >
+                      <span aria-hidden="true" />
+                    </div>
+                    <div className="monitor-main">
+                      <div className="monitor-title-row">
+                        <h3>{monitor.name}</h3>
+                        <button
+                          className="run-button"
+                          type="button"
+                          disabled={runningMonitorIds.has(monitor.id)}
+                          onClick={() => void runNow(monitor.id)}
+                        >
+                          {runningMonitorIds.has(monitor.id) ? 'Checking…' : 'Run now'}
+                        </button>
+                      </div>
+                      <a href={monitor.url} target="_blank" rel="noreferrer">
+                        {monitor.url}
+                      </a>
+                      <div className="monitor-meta">
+                        <span>{monitor.method}</span>
+                        <span>{monitor.timeoutMs / 1000}s timeout</span>
+                        <span>
+                          {monitor.followRedirects ? 'follow redirects' : 'redirects final'}
+                        </span>
+                        <span>{statusPolicyLabel(monitor.statusPolicy)}</span>
+                        <span>{monitor.locations.join(', ')}</span>
+                        <span>{monitor.lifecycleState.toLowerCase()}</span>
+                      </div>
+                      {monitor.currentCheck?.kind === 'MULTI_LOCATION' ? (
+                        <dl
+                          className="uptime-summary"
+                          aria-label={`Latest regional aggregate for ${monitor.name}`}
+                        >
+                          <div>
+                            <dt>Aggregate</dt>
+                            <dd>{monitor.currentCheck.aggregateOutcome}</dd>
+                          </div>
+                          <div>
+                            <dt>Evidence coverage</dt>
+                            <dd>{formatRatio(monitor.currentCheck.coverage)}</dd>
+                          </div>
+                          <div>
+                            <dt>Reachability</dt>
+                            <dd>{formatRatio(monitor.currentCheck.reachability)}</dd>
+                          </div>
+                        </dl>
+                      ) : null}
+                      <form
+                        className="status-policy-form"
+                        onSubmit={(event) => void updateLocation(monitor.id, event)}
                       >
-                        {runningMonitorIds.has(monitor.id) ? 'Checking…' : 'Run now'}
-                      </button>
-                    </div>
-                    <a href={monitor.url} target="_blank" rel="noreferrer">
-                      {monitor.url}
-                    </a>
-                    <div className="monitor-meta">
-                      <span>{monitor.method}</span>
-                      <span>{monitor.timeoutMs / 1000}s timeout</span>
-                      <span>
-                        {monitor.followRedirects ? 'follow redirects' : 'redirects final'}
-                      </span>
-                      <span>{statusPolicyLabel(monitor.statusPolicy)}</span>
-                      <span>{monitor.locations.join(', ')}</span>
-                      <span>{monitor.lifecycleState.toLowerCase()}</span>
-                    </div>
-                    {monitor.currentCheck?.kind === 'MULTI_LOCATION' ? (
+                        <label>
+                          Execution {multiLocationUiEnabled ? 'locations' : 'location'}
+                          <select
+                            name="location"
+                            multiple={multiLocationUiEnabled}
+                            defaultValue={
+                              multiLocationUiEnabled
+                                ? monitor.locations
+                                : (monitor.locations[0] ?? 'local')
+                            }
+                            onFocus={() => void loadProbeLocations()}
+                          >
+                            <option value="local">Local</option>
+                            {probeLocations.map((location) => (
+                              <option
+                                key={location.id}
+                                value={location.id}
+                                disabled={location.status !== 'ACTIVE'}
+                              >
+                                {location.name} — {location.health.toLowerCase()}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <button type="submit" disabled={updatingSettingsIds.has(monitor.id)}>
+                          Save location
+                        </button>
+                      </form>
+                      <form
+                        className="status-policy-form"
+                        onSubmit={(event) => void updateHttpSettings(monitor.id, event)}
+                      >
+                        <label>
+                          URL
+                          <input name="url" type="url" defaultValue={monitor.url} required />
+                        </label>
+                        <label>
+                          Method
+                          <select name="method" defaultValue={monitor.method}>
+                            <option value="GET">GET</option>
+                            <option value="HEAD">HEAD</option>
+                          </select>
+                        </label>
+                        <label>
+                          Timeout (seconds)
+                          <input
+                            name="timeoutSeconds"
+                            type="number"
+                            min="1"
+                            max="30"
+                            step="1"
+                            defaultValue={monitor.timeoutMs / 1_000}
+                          />
+                        </label>
+                        <label>
+                          <input
+                            name="followRedirects"
+                            type="checkbox"
+                            defaultChecked={monitor.followRedirects}
+                          />
+                          Follow redirects
+                        </label>
+                        <button
+                          className="quiet-button"
+                          type="submit"
+                          disabled={updatingSettingsIds.has(monitor.id)}
+                        >
+                          {updatingSettingsIds.has(monitor.id) ? 'Saving…' : 'Save HTTP settings'}
+                        </button>
+                      </form>
+                      <form
+                        className="status-policy-form"
+                        onSubmit={(event) => void updateStatusPolicy(monitor.id, event)}
+                      >
+                        <label>
+                          Expected status
+                          <select name="statusPolicyMode" defaultValue={monitor.statusPolicy.type}>
+                            <option value="ANY_2XX">Any 2xx response</option>
+                            <option value="EXACT">Specific status codes</option>
+                          </select>
+                        </label>
+                        <input
+                          name="statusCodes"
+                          type="text"
+                          inputMode="numeric"
+                          placeholder="200, 204"
+                          defaultValue={
+                            monitor.statusPolicy.type === 'EXACT'
+                              ? monitor.statusPolicy.statusCodes.join(', ')
+                              : ''
+                          }
+                          aria-label={`Specific status codes for ${monitor.name}`}
+                        />
+                        <button
+                          className="quiet-button"
+                          type="submit"
+                          disabled={updatingPolicyIds.has(monitor.id)}
+                        >
+                          {updatingPolicyIds.has(monitor.id) ? 'Saving…' : 'Save policy'}
+                        </button>
+                      </form>
+                      <ManualDiagnostic
+                        round={manualRounds[monitor.id]}
+                        error={runErrors[monitor.id]}
+                      />
+                      <IncidentSummary state={monitor.incidentState} />
                       <dl
                         className="uptime-summary"
-                        aria-label={`Latest regional aggregate for ${monitor.name}`}
+                        aria-label={`Uptime metrics for ${monitor.name}`}
+                        title="Today and the previous six UTC calendar days, starting no earlier than availability tracking."
                       >
                         <div>
-                          <dt>Aggregate</dt>
-                          <dd>{monitor.currentCheck.aggregateOutcome}</dd>
+                          <dt>7-day uptime</dt>
+                          <dd>{formatPercent(monitor.uptime?.uptimePercent)}</dd>
                         </div>
                         <div>
-                          <dt>Evidence coverage</dt>
-                          <dd>{formatRatio(monitor.currentCheck.coverage)}</dd>
-                        </div>
-                        <div>
-                          <dt>Reachability</dt>
-                          <dd>{formatRatio(monitor.currentCheck.reachability)}</dd>
+                          <dt>Coverage</dt>
+                          <dd>{formatPercent(monitor.uptime?.coveragePercent)}</dd>
                         </div>
                       </dl>
-                    ) : null}
-                    <form
-                      className="status-policy-form"
-                      onSubmit={(event) => void updateLocation(monitor.id, event)}
-                    >
-                      <label>
-                        Execution {multiLocationUiEnabled ? 'locations' : 'location'}
-                        <select
-                          name="location"
-                          multiple={multiLocationUiEnabled}
-                          defaultValue={
-                            multiLocationUiEnabled
-                              ? monitor.locations
-                              : (monitor.locations[0] ?? 'local')
-                          }
-                          onFocus={() => void loadProbeLocations()}
-                        >
-                          <option value="local">Local</option>
-                          {probeLocations.map((location) => (
-                            <option
-                              key={location.id}
-                              value={location.id}
-                              disabled={location.status !== 'ACTIVE'}
-                            >
-                              {location.name} — {location.health.toLowerCase()}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <button type="submit" disabled={updatingSettingsIds.has(monitor.id)}>
-                        Save location
-                      </button>
-                    </form>
-                    <form
-                      className="status-policy-form"
-                      onSubmit={(event) => void updateHttpSettings(monitor.id, event)}
-                    >
-                      <label>
-                        URL
-                        <input name="url" type="url" defaultValue={monitor.url} required />
-                      </label>
-                      <label>
-                        Method
-                        <select name="method" defaultValue={monitor.method}>
-                          <option value="GET">GET</option>
-                          <option value="HEAD">HEAD</option>
-                        </select>
-                      </label>
-                      <label>
-                        Timeout (seconds)
-                        <input
-                          name="timeoutSeconds"
-                          type="number"
-                          min="1"
-                          max="30"
-                          step="1"
-                          defaultValue={monitor.timeoutMs / 1_000}
-                        />
-                      </label>
-                      <label>
-                        <input
-                          name="followRedirects"
-                          type="checkbox"
-                          defaultChecked={monitor.followRedirects}
-                        />
-                        Follow redirects
-                      </label>
                       <button
                         className="quiet-button"
-                        type="submit"
-                        disabled={updatingSettingsIds.has(monitor.id)}
+                        type="button"
+                        onClick={() => void toggleIncidentHistory(monitor.id)}
                       >
-                        {updatingSettingsIds.has(monitor.id) ? 'Saving…' : 'Save HTTP settings'}
+                        {visibleIncidentIds.has(monitor.id)
+                          ? 'Hide incident history'
+                          : 'Show incident history'}
                       </button>
-                    </form>
-                    <form
-                      className="status-policy-form"
-                      onSubmit={(event) => void updateStatusPolicy(monitor.id, event)}
-                    >
-                      <label>
-                        Expected status
-                        <select name="statusPolicyMode" defaultValue={monitor.statusPolicy.type}>
-                          <option value="ANY_2XX">Any 2xx response</option>
-                          <option value="EXACT">Specific status codes</option>
-                        </select>
-                      </label>
-                      <input
-                        name="statusCodes"
-                        type="text"
-                        inputMode="numeric"
-                        placeholder="200, 204"
-                        defaultValue={
-                          monitor.statusPolicy.type === 'EXACT'
-                            ? monitor.statusPolicy.statusCodes.join(', ')
-                            : ''
-                        }
-                        aria-label={`Specific status codes for ${monitor.name}`}
-                      />
+                      {visibleIncidentIds.has(monitor.id) ? (
+                        <IncidentHistory
+                          page={incidentHistory[monitor.id]}
+                          loading={loadingIncidentHistoryIds.has(monitor.id)}
+                          error={incidentHistoryErrors[monitor.id]}
+                          onRetry={() => void loadIncidentHistory(monitor.id)}
+                          onLoadMore={() => void loadIncidentHistory(monitor.id, true)}
+                        />
+                      ) : null}
                       <button
                         className="quiet-button"
-                        type="submit"
-                        disabled={updatingPolicyIds.has(monitor.id)}
+                        type="button"
+                        onClick={() => void toggleHistory(monitor.id)}
                       >
-                        {updatingPolicyIds.has(monitor.id) ? 'Saving…' : 'Save policy'}
+                        {visibleHistoryIds.has(monitor.id) ? 'Hide history' : 'Show history'}
                       </button>
-                    </form>
-                    <ManualDiagnostic
-                      round={manualRounds[monitor.id]}
-                      error={runErrors[monitor.id]}
-                    />
-                    <IncidentSummary state={monitor.incidentState} />
-                    <dl
-                      className="uptime-summary"
-                      aria-label={`Uptime metrics for ${monitor.name}`}
-                      title="Today and the previous six UTC calendar days, starting no earlier than availability tracking."
-                    >
-                      <div>
-                        <dt>7-day uptime</dt>
-                        <dd>{formatPercent(monitor.uptime?.uptimePercent)}</dd>
-                      </div>
-                      <div>
-                        <dt>Coverage</dt>
-                        <dd>{formatPercent(monitor.uptime?.coveragePercent)}</dd>
-                      </div>
-                    </dl>
-                    <button
-                      className="quiet-button"
-                      type="button"
-                      onClick={() => void toggleIncidentHistory(monitor.id)}
-                    >
-                      {visibleIncidentIds.has(monitor.id)
-                        ? 'Hide incident history'
-                        : 'Show incident history'}
-                    </button>
-                    {visibleIncidentIds.has(monitor.id) ? (
-                      <IncidentHistory
-                        page={incidentHistory[monitor.id]}
-                        loading={loadingIncidentHistoryIds.has(monitor.id)}
-                        error={incidentHistoryErrors[monitor.id]}
-                        onRetry={() => void loadIncidentHistory(monitor.id)}
-                        onLoadMore={() => void loadIncidentHistory(monitor.id, true)}
-                      />
-                    ) : null}
-                    <button
-                      className="quiet-button"
-                      type="button"
-                      onClick={() => void toggleHistory(monitor.id)}
-                    >
-                      {visibleHistoryIds.has(monitor.id) ? 'Hide history' : 'Show history'}
-                    </button>
-                    {visibleHistoryIds.has(monitor.id) ? (
-                      <CheckHistory
-                        page={history[monitor.id]}
-                        loading={loadingHistoryIds.has(monitor.id)}
-                        onLoadMore={() => void loadHistory(monitor.id, true)}
-                        details={historyDetails}
-                        expandedRoundIds={expandedHistoryRoundIds}
-                        loadingRoundIds={loadingHistoryRoundIds}
-                        onToggleRound={(roundId) => void toggleHistoryRound(monitor.id, roundId)}
-                      />
-                    ) : null}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      </div>
+                      {visibleHistoryIds.has(monitor.id) ? (
+                        <CheckHistory
+                          page={history[monitor.id]}
+                          loading={loadingHistoryIds.has(monitor.id)}
+                          onLoadMore={() => void loadHistory(monitor.id, true)}
+                          details={historyDetails}
+                          expandedRoundIds={expandedHistoryRoundIds}
+                          loadingRoundIds={loadingHistoryRoundIds}
+                          onToggleRound={(roundId) => void toggleHistoryRound(monitor.id, roundId)}
+                        />
+                      ) : null}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
       </main>
     </AppShell>
   );
