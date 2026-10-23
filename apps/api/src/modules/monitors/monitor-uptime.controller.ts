@@ -1,8 +1,8 @@
 import { Controller, Get, Inject, Param, ParseUUIDPipe, Query, Req } from '@nestjs/common';
-import { RequirePermission } from '../../auth.guard.js';
-import { MonitorsService } from '../../monitors.service.js';
-import { PERMISSIONS } from '../../permissions.js';
-import type { RequestWithContext } from '../../request-context.js';
+import { RequirePermission } from '../../auth/auth.guard.js';
+import { MonitorsService } from './monitors.service.js';
+import { PERMISSIONS } from '../../auth/permissions.js';
+import type { RequestWithContext } from '../../auth/request-context.js';
 
 @Controller('monitors')
 export class MonitorUptimeController {

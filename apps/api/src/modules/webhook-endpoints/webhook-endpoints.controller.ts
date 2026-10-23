@@ -10,10 +10,10 @@ import {
   Query,
   Req,
 } from '@nestjs/common';
-import { RequirePermission } from '../../auth.guard.js';
+import { RequirePermission } from '../../auth/auth.guard.js';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe.js';
-import { PERMISSIONS } from '../../permissions.js';
-import type { RequestWithContext } from '../../request-context.js';
+import { PERMISSIONS } from '../../auth/permissions.js';
+import type { RequestWithContext } from '../../auth/request-context.js';
 import {
   createWebhookEndpointSchema,
   setWebhookEndpointEnabledSchema,

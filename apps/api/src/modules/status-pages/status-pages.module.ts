@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { DatabaseModule } from '../../database.module.js';
+import { DatabaseModule } from '../../infrastructure/database/database.module.js';
 import { StatusPagesController } from './status-pages.controller.js';
 import { StatusPagesService } from './status-pages.service.js';
 

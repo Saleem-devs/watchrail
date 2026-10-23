@@ -23,8 +23,8 @@ import {
   StoredWebhookSigningSecretResolutionError,
   WebhookSigningSecretInputError,
 } from '@watchrail/webhook-security';
-import { APP_CONFIG, type AppConfig } from '../../config.js';
-import type { RequestContext } from '../../request-context.js';
+import { APP_CONFIG, type AppConfig } from '../../config/config.js';
+import type { RequestContext } from '../../auth/request-context.js';
 import type {
   CreateWebhookEndpointInput,
   SetWebhookEndpointEnabledInput,

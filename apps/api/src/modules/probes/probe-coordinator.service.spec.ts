@@ -1,7 +1,7 @@
 import { ConflictException, Logger } from '@nestjs/common';
 import type { ProbeCoordinatorRepository, ProbeMachineIdentity } from '@watchrail/db';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppConfig } from './config.js';
+import type { AppConfig } from '../../config/config.js';
 import { ProbeCoordinatorService } from './probe-coordinator.service.js';
 
 describe('ProbeCoordinatorService submission audit', () => {

@@ -28,8 +28,8 @@ import {
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppModule } from '../src/app.module.js';
-import { APP_CONFIG, type AppConfig } from '../src/config.js';
-import { DEVELOPMENT_REQUEST_CONTEXT } from '../src/request-context.js';
+import { APP_CONFIG, type AppConfig } from '../src/config/config.js';
+import { DEVELOPMENT_REQUEST_CONTEXT } from '../src/auth/request-context.js';
 
 const sentinel = 'WATCHRAIL_WEBHOOK_SENTINEL_SECRET_123456789';
 

@@ -15,7 +15,7 @@ import { createMonitor } from '@watchrail/domain';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module.js';
-import { DEVELOPMENT_REQUEST_CONTEXT } from '../src/request-context.js';
+import { DEVELOPMENT_REQUEST_CONTEXT } from '../src/auth/request-context.js';
 
 const organizationB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 

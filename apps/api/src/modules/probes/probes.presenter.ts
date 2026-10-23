@@ -3,7 +3,7 @@ import type {
   ProbeLocationHealthRecord,
   ProbeLocationRecord,
 } from '@watchrail/db';
-import type { ProbeMachineRequest } from '../../probe-machine-auth.js';
+import type { ProbeMachineRequest } from './probe-machine-auth.js';
 
 export function locationResponse(location: ProbeLocationRecord | ProbeLocationHealthRecord) {
   return {

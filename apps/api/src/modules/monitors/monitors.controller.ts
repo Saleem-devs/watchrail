@@ -1,10 +1,10 @@
 import { Body, Controller, Get, Inject, Param, Patch, Post, Req } from '@nestjs/common';
 import type { MonitorRecord } from '@watchrail/db';
 import type { CreateMonitorCommand } from '@watchrail/domain';
-import { MonitorsService } from '../../monitors.service.js';
-import { RequirePermission } from '../../auth.guard.js';
-import { PERMISSIONS } from '../../permissions.js';
-import type { RequestWithContext } from '../../request-context.js';
+import { MonitorsService } from './monitors.service.js';
+import { RequirePermission } from '../../auth/auth.guard.js';
+import { PERMISSIONS } from '../../auth/permissions.js';
+import type { RequestWithContext } from '../../auth/request-context.js';
 import { type MonitorResponse, toResponse } from './monitors.presenter.js';
 
 @Controller('monitors')

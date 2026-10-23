@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { PERMISSIONS, type Permission } from '../../../permissions.js';
+import { PERMISSIONS, type Permission } from '../../../auth/permissions.js';
 
 const permissionValues = Object.values(PERMISSIONS) as [Permission, ...Permission[]];
 

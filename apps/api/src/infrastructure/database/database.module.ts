@@ -19,8 +19,8 @@ import {
   AuthEmailOutboxRepository,
 } from '@watchrail/db';
 import type { WatchrailDatabase } from '@watchrail/db';
-import { ConfigModule } from './config.module.js';
-import { APP_CONFIG, type AppConfig } from './config.js';
+import { ConfigModule } from '../../config/config.module.js';
+import { APP_CONFIG, type AppConfig } from '../../config/config.js';
 
 @Module({
   imports: [

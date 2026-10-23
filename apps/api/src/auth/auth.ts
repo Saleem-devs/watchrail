@@ -29,7 +29,11 @@ import {
   AuthEmailOutboxRepository,
   type AuthEmailKeyring,
 } from '@watchrail/db';
-import { createMailTransport, type MailConfig, type MailTransport } from './mail.js';
+import {
+  createMailTransport,
+  type MailConfig,
+  type MailTransport,
+} from '../infrastructure/mail/mail.js';
 import { organizationAccessControl, organizationRoles } from './permissions.js';
 
 export interface AuthConfig {

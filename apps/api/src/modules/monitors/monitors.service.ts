@@ -51,8 +51,8 @@ import {
 import type { CreateMonitorCommand } from '@watchrail/domain';
 import { storeRequestHeaders } from '@watchrail/http-header-security';
 import { AssertionRetentionError, storeResponseAssertions } from '@watchrail/assertion-security';
-import { APP_CONFIG, type AppConfig } from './config.js';
-import type { RequestContext } from './request-context.js';
+import { APP_CONFIG, type AppConfig } from '../../config/config.js';
+import type { RequestContext } from '../../auth/request-context.js';
 
 @Injectable()
 export class MonitorsService {

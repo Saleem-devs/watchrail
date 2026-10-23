@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { PERMISSIONS, type Permission } from '../../permissions.js';
+import { PERMISSIONS, type Permission } from '../../auth/permissions.js';
 
 const ALL_PERMISSIONS = new Set<string>(Object.values(PERMISSIONS));
 

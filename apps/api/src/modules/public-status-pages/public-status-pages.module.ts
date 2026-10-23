@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common';
-import { DatabaseModule } from '../../database.module.js';
-import { PublicStatusPagesService } from '../../public-status-pages.service.js';
+import { DatabaseModule } from '../../infrastructure/database/database.module.js';
+import { PublicStatusPagesService } from './public-status-pages.service.js';
 import {
   InternalStatusPageRateLimiter,
   PublicStatusPageRateLimiter,
-} from '../../public-status-page-rate-limiter.js';
+} from '../../common/rate-limiting/public-status-page-rate-limiter.js';
 import { InternalStatusPagesController } from './internal-status-pages.controller.js';
 import { PublicStatusPagesController } from './public-status-pages.controller.js';
 
