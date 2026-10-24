@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { AppShell } from '../components/app-shell';
 import { MonitorOverview } from '../components/monitor-overview';
-import { MonitorInventory, type MonitorFilter } from '../features/monitors/monitor-inventory';
+import type { MonitorFilter } from '../features/monitors/filter-monitors';
 import { DashboardHeader } from '../features/monitors/dashboard-header';
 import { formatPercent, formatRatio, monitorState, monitorStateLabel, statusPolicyLabel, statusPolicyFromForm } from '../features/monitors/formatting';
 import { ManualDiagnostic, IncidentSummary, IncidentHistory, CheckHistory } from '../features/monitors/monitor-evidence';
@@ -760,6 +760,11 @@ export function Dashboard() {
                 <h2 id="create-heading">Add an endpoint</h2>
               </div>
 
+
+              <span className="step">01</span>
+            </div>
+
+            <form onSubmit={(event) => void createMonitor(event)} noValidate>
               <fieldset className="field">
                 <legend>Expected status</legend>
                 <label>
@@ -784,10 +789,6 @@ export function Dashboard() {
                   </p>
                 ) : null}
               </fieldset>
-              <span className="step">01</span>
-            </div>
-
-            <form onSubmit={(event) => void createMonitor(event)} noValidate>
               <div className="field">
                 <label htmlFor="name">Monitor name</label>
                 <input
@@ -852,4 +853,12 @@ function omitKey<T>(record: Record<string, T>, key: string): Record<string, T> {
   const next = { ...record };
   delete next[key];
   return next;
+}
+function Default({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
 }

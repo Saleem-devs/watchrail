@@ -1183,3 +1183,8 @@ form {
     flex-wrap: wrap;
   }
 }
+
+/* Transitional bridge: new Tailwind-first dashboard bypasses legacy global main sizing. */
+[data-watchrail-dashboard] .monitor-card:last-child {
+  border-bottom: 1px solid var(--border);
+}
