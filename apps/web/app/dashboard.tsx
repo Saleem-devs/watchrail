@@ -5,9 +5,29 @@ import { AppShell } from '../components/app-shell';
 import { MonitorOverview } from '../components/monitor-overview';
 import type { MonitorFilter } from '../features/monitors/filter-monitors';
 import { DashboardHeader } from '../features/monitors/dashboard-header';
-import { formatPercent, formatRatio, monitorState, monitorStateLabel, statusPolicyLabel, statusPolicyFromForm } from '../features/monitors/formatting';
-import { ManualDiagnostic, IncidentSummary, IncidentHistory, CheckHistory } from '../features/monitors/monitor-evidence';
-import type { ApiError, FieldErrors, Monitor, ProbeLocation, ManualRound, HistoryPage, IncidentHistoryPage } from '../features/monitors/types';
+import {
+  formatPercent,
+  formatRatio,
+  monitorState,
+  monitorStateLabel,
+  statusPolicyLabel,
+  statusPolicyFromForm,
+} from '../features/monitors/formatting';
+import {
+  ManualDiagnostic,
+  IncidentSummary,
+  IncidentHistory,
+  CheckHistory,
+} from '../features/monitors/monitor-evidence';
+import type {
+  ApiError,
+  FieldErrors,
+  Monitor,
+  ProbeLocation,
+  ManualRound,
+  HistoryPage,
+  IncidentHistoryPage,
+} from '../features/monitors/types';
 import { filterMonitors } from '../features/monitors/filter-monitors';
 
 const multiLocationUiEnabled = process.env.NEXT_PUBLIC_MULTI_LOCATION_EXECUTION_ENABLED === 'true';
@@ -472,7 +492,11 @@ export function Dashboard() {
                 <p className="eyebrow">INVENTORY</p>
                 <h2 id="monitors-heading">Configured monitors</h2>
               </div>
-              <button className="min-h-10 rounded-lg border border-rail-border px-4 text-sm text-rail-text hover:bg-rail-hover" type="button" onClick={() => void loadMonitors()}>
+              <button
+                className="min-h-10 rounded-lg border border-rail-border px-4 text-sm text-rail-text hover:bg-rail-hover"
+                type="button"
+                onClick={() => void loadMonitors()}
+              >
                 Refresh
               </button>
             </div>
@@ -522,12 +546,24 @@ export function Dashboard() {
             ) : filterMonitors(monitors, monitorQuery, monitorFilter).length === 0 ? (
               <div className="flex min-h-40 flex-col items-center justify-center gap-3 p-6 text-center">
                 <p className="text-sm text-rail-subtle">No monitors match your filters.</p>
-                <button type="button" onClick={() => { setMonitorQuery(''); setMonitorFilter('all'); }} className="min-h-10 rounded-lg border border-rail-border px-4 text-sm text-rail-accent">Clear filters</button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMonitorQuery('');
+                    setMonitorFilter('all');
+                  }}
+                  className="min-h-10 rounded-lg border border-rail-border px-4 text-sm text-rail-accent"
+                >
+                  Clear filters
+                </button>
               </div>
             ) : (
               <ul className="monitor-list p-3 sm:p-4">
                 {filterMonitors(monitors, monitorQuery, monitorFilter).map((monitor) => (
-                  <li key={monitor.id} className="monitor-card rounded-xl border border-rail-border bg-rail-raised">
+                  <li
+                    key={monitor.id}
+                    className="monitor-card rounded-xl border border-rail-border bg-rail-raised"
+                  >
                     <div
                       className={`monitor-status monitor-status-${monitorState(monitor.currentCheck)}`}
                       aria-label={monitorStateLabel(monitor.currentCheck)}
@@ -579,113 +615,120 @@ export function Dashboard() {
                         </dl>
                       ) : null}
                       <details className="mt-5 rounded-xl border border-rail-border bg-rail-sidebar/50">
-                        <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-rail-text">Configure monitor</summary>
+                        <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-rail-text">
+                          Configure monitor
+                        </summary>
                         <div className="border-t border-rail-border p-4">
-                      <form
-                        className="status-policy-form"
-                        onSubmit={(event) => void updateLocation(monitor.id, event)}
-                      >
-                        <label>
-                          Execution {multiLocationUiEnabled ? 'locations' : 'location'}
-                          <select
-                            name="location"
-                            multiple={multiLocationUiEnabled}
-                            defaultValue={
-                              multiLocationUiEnabled
-                                ? monitor.locations
-                                : (monitor.locations[0] ?? 'local')
-                            }
-                            onFocus={() => void loadProbeLocations()}
+                          <form
+                            className="status-policy-form"
+                            onSubmit={(event) => void updateLocation(monitor.id, event)}
                           >
-                            <option value="local">Local</option>
-                            {probeLocations.map((location) => (
-                              <option
-                                key={location.id}
-                                value={location.id}
-                                disabled={location.status !== 'ACTIVE'}
+                            <label>
+                              Execution {multiLocationUiEnabled ? 'locations' : 'location'}
+                              <select
+                                name="location"
+                                multiple={multiLocationUiEnabled}
+                                defaultValue={
+                                  multiLocationUiEnabled
+                                    ? monitor.locations
+                                    : (monitor.locations[0] ?? 'local')
+                                }
+                                onFocus={() => void loadProbeLocations()}
                               >
-                                {location.name} — {location.health.toLowerCase()}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <button type="submit" disabled={updatingSettingsIds.has(monitor.id)}>
-                          Save location
-                        </button>
-                      </form>
-                      <form
-                        className="status-policy-form"
-                        onSubmit={(event) => void updateHttpSettings(monitor.id, event)}
-                      >
-                        <label>
-                          URL
-                          <input name="url" type="url" defaultValue={monitor.url} required />
-                        </label>
-                        <label>
-                          Method
-                          <select name="method" defaultValue={monitor.method}>
-                            <option value="GET">GET</option>
-                            <option value="HEAD">HEAD</option>
-                          </select>
-                        </label>
-                        <label>
-                          Timeout (seconds)
-                          <input
-                            name="timeoutSeconds"
-                            type="number"
-                            min="1"
-                            max="30"
-                            step="1"
-                            defaultValue={monitor.timeoutMs / 1_000}
-                          />
-                        </label>
-                        <label>
-                          <input
-                            name="followRedirects"
-                            type="checkbox"
-                            defaultChecked={monitor.followRedirects}
-                          />
-                          Follow redirects
-                        </label>
-                        <button
-                          className="quiet-button"
-                          type="submit"
-                          disabled={updatingSettingsIds.has(monitor.id)}
-                        >
-                          {updatingSettingsIds.has(monitor.id) ? 'Saving…' : 'Save HTTP settings'}
-                        </button>
-                      </form>
-                      <form
-                        className="status-policy-form"
-                        onSubmit={(event) => void updateStatusPolicy(monitor.id, event)}
-                      >
-                        <label>
-                          Expected status
-                          <select name="statusPolicyMode" defaultValue={monitor.statusPolicy.type}>
-                            <option value="ANY_2XX">Any 2xx response</option>
-                            <option value="EXACT">Specific status codes</option>
-                          </select>
-                        </label>
-                        <input
-                          name="statusCodes"
-                          type="text"
-                          inputMode="numeric"
-                          placeholder="200, 204"
-                          defaultValue={
-                            monitor.statusPolicy.type === 'EXACT'
-                              ? monitor.statusPolicy.statusCodes.join(', ')
-                              : ''
-                          }
-                          aria-label={`Specific status codes for ${monitor.name}`}
-                        />
-                        <button
-                          className="quiet-button"
-                          type="submit"
-                          disabled={updatingPolicyIds.has(monitor.id)}
-                        >
-                          {updatingPolicyIds.has(monitor.id) ? 'Saving…' : 'Save policy'}
-                        </button>
-                      </form>
+                                <option value="local">Local</option>
+                                {probeLocations.map((location) => (
+                                  <option
+                                    key={location.id}
+                                    value={location.id}
+                                    disabled={location.status !== 'ACTIVE'}
+                                  >
+                                    {location.name} — {location.health.toLowerCase()}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <button type="submit" disabled={updatingSettingsIds.has(monitor.id)}>
+                              Save location
+                            </button>
+                          </form>
+                          <form
+                            className="status-policy-form"
+                            onSubmit={(event) => void updateHttpSettings(monitor.id, event)}
+                          >
+                            <label>
+                              URL
+                              <input name="url" type="url" defaultValue={monitor.url} required />
+                            </label>
+                            <label>
+                              Method
+                              <select name="method" defaultValue={monitor.method}>
+                                <option value="GET">GET</option>
+                                <option value="HEAD">HEAD</option>
+                              </select>
+                            </label>
+                            <label>
+                              Timeout (seconds)
+                              <input
+                                name="timeoutSeconds"
+                                type="number"
+                                min="1"
+                                max="30"
+                                step="1"
+                                defaultValue={monitor.timeoutMs / 1_000}
+                              />
+                            </label>
+                            <label>
+                              <input
+                                name="followRedirects"
+                                type="checkbox"
+                                defaultChecked={monitor.followRedirects}
+                              />
+                              Follow redirects
+                            </label>
+                            <button
+                              className="quiet-button"
+                              type="submit"
+                              disabled={updatingSettingsIds.has(monitor.id)}
+                            >
+                              {updatingSettingsIds.has(monitor.id)
+                                ? 'Saving…'
+                                : 'Save HTTP settings'}
+                            </button>
+                          </form>
+                          <form
+                            className="status-policy-form"
+                            onSubmit={(event) => void updateStatusPolicy(monitor.id, event)}
+                          >
+                            <label>
+                              Expected status
+                              <select
+                                name="statusPolicyMode"
+                                defaultValue={monitor.statusPolicy.type}
+                              >
+                                <option value="ANY_2XX">Any 2xx response</option>
+                                <option value="EXACT">Specific status codes</option>
+                              </select>
+                            </label>
+                            <input
+                              name="statusCodes"
+                              type="text"
+                              inputMode="numeric"
+                              placeholder="200, 204"
+                              defaultValue={
+                                monitor.statusPolicy.type === 'EXACT'
+                                  ? monitor.statusPolicy.statusCodes.join(', ')
+                                  : ''
+                              }
+                              aria-label={`Specific status codes for ${monitor.name}`}
+                            />
+                            <button
+                              className="quiet-button"
+                              type="submit"
+                              disabled={updatingPolicyIds.has(monitor.id)}
+                            >
+                              {updatingPolicyIds.has(monitor.id) ? 'Saving…' : 'Save policy'}
+                            </button>
+                          </form>
                         </div>
                       </details>
                       <ManualDiagnostic
@@ -759,7 +802,6 @@ export function Dashboard() {
                 <p className="eyebrow">NEW MONITOR</p>
                 <h2 id="create-heading">Add an endpoint</h2>
               </div>
-
 
               <span className="step">01</span>
             </div>
@@ -840,14 +882,11 @@ export function Dashboard() {
               </button>
             </form>
           </section>
-
-
         </div>
       </main>
     </AppShell>
   );
 }
-
 
 function omitKey<T>(record: Record<string, T>, key: string): Record<string, T> {
   const next = { ...record };

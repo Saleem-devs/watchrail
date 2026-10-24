@@ -4,7 +4,6 @@ export function formatPercent(value: number | null | undefined): string {
   return value == null ? '—' : `${value.toFixed(2)}%`;
 }
 
-
 export function statusPolicyLabel(policy: Monitor['statusPolicy']): string {
   return policy.type === 'ANY_2XX' ? 'any 2xx' : `status ${policy.statusCodes.join(', ')}`;
 }
@@ -19,7 +18,6 @@ export function statusPolicyFromForm(formData: FormData): Monitor['statusPolicy'
     statusCodes: codes.split(',').map((value) => Number(value.trim())),
   };
 }
-
 
 export function formatRatio(value: { numerator: number; denominator: number } | null): string {
   if (!value || value.denominator === 0) return '—';
@@ -47,4 +45,3 @@ export function monitorStateLabel(check: CurrentCheck | null): string {
     return `Current aggregate health: ${check.aggregateOutcome.toLowerCase()}`;
   return `Current availability: ${check.availability.toLowerCase()}`;
 }
-

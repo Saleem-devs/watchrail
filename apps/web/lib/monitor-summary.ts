@@ -8,11 +8,13 @@ export function monitorCondition(monitor: MonitorSummaryInput): MonitorCondition
     check?.availability === 'UNAVAILABLE' ||
     check?.aggregateOutcome === 'DEGRADED' ||
     check?.aggregateOutcome === 'DOWN'
-  ) return 'attention';
+  )
+    return 'attention';
   if (
     check?.availability === 'AVAILABLE' &&
     (check.aggregateOutcome == null || check.aggregateOutcome === 'UP')
-  ) return 'operational';
+  )
+    return 'operational';
   return 'pending';
 }
 

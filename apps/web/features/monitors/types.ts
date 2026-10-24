@@ -144,4 +144,3 @@ export interface IncidentHistoryPage {
   }>;
   nextCursor: string | null;
 }
-

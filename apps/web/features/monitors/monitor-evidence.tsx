@@ -292,4 +292,3 @@ export function IncidentHistory({
     </section>
   );
 }
-

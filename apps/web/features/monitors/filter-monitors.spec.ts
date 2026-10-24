@@ -48,15 +48,24 @@ describe('filterMonitors', () => {
 
   it('searches by name or URL case-insensitively without mutating source data', () => {
     expect(filterMonitors(monitors, ' API ', 'all').map((m) => m.name)).toEqual([
-      'Production API', 'Staging API', 'Legacy API',
+      'Production API',
+      'Staging API',
+      'Legacy API',
     ]);
-    expect(filterMonitors(monitors, 'edge-region.example.com', 'all').map((m) => m.name)).toEqual(['Edge Region']);
+    expect(filterMonitors(monitors, 'edge-region.example.com', 'all').map((m) => m.name)).toEqual([
+      'Edge Region',
+    ]);
     expect(monitors).toHaveLength(5);
   });
 
   it('shares lifecycle-aware health classification with the overview', () => {
-    expect(filterMonitors(monitors, '', 'operational').map((m) => m.name)).toEqual(['Production API']);
-    expect(filterMonitors(monitors, '', 'attention').map((m) => m.name)).toEqual(['Staging API', 'Edge Region']);
+    expect(filterMonitors(monitors, '', 'operational').map((m) => m.name)).toEqual([
+      'Production API',
+    ]);
+    expect(filterMonitors(monitors, '', 'attention').map((m) => m.name)).toEqual([
+      'Staging API',
+      'Edge Region',
+    ]);
     expect(filterMonitors(monitors, '', 'paused').map((m) => m.name)).toEqual(['Legacy API']);
     expect(filterMonitors(monitors, '', 'pending').map((m) => m.name)).toEqual(['No Checks']);
   });
