@@ -115,6 +115,8 @@ describe('Dashboard', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: [offline] }), { status: 200 }));
 
     render(<Dashboard />);
+    await screen.findByRole('heading', { name: monitor.name });
+    await userEvent.click(screen.getByText('Configure monitor'));
     const selector = await screen.findByRole('combobox', { name: 'Execution location' });
     await userEvent.click(selector);
     expect(await screen.findByRole('option', { name: 'Lagos — online' })).toBeInTheDocument();
@@ -583,6 +585,7 @@ describe('Dashboard', () => {
 
     render(<Dashboard />);
     await screen.findByRole('heading', { name: monitor.name });
+    await userEvent.click(screen.getByText('Configure monitor'));
 
     await userEvent.selectOptions(
       screen.getByRole('combobox', { name: 'Expected status' }),
@@ -652,6 +655,7 @@ describe('Dashboard', () => {
 
     render(<Dashboard />);
     await screen.findByRole('heading', { name: monitor.name });
+    await userEvent.click(screen.getByText('Configure monitor'));
 
     const url = screen.getByRole('textbox', { name: 'URL' });
     await userEvent.clear(url);

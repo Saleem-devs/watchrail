@@ -3,161 +3,19 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { AppShell } from '../components/app-shell';
 import { MonitorOverview } from '../components/monitor-overview';
+import { MonitorInventory, type MonitorFilter } from '../features/monitors/monitor-inventory';
+import { DashboardHeader } from '../features/monitors/dashboard-header';
+import { formatPercent, formatRatio, monitorState, monitorStateLabel, statusPolicyLabel, statusPolicyFromForm } from '../features/monitors/formatting';
+import { ManualDiagnostic, IncidentSummary, IncidentHistory, CheckHistory } from '../features/monitors/monitor-evidence';
+import type { ApiError, FieldErrors, Monitor, ProbeLocation, ManualRound, HistoryPage, IncidentHistoryPage } from '../features/monitors/types';
+import { filterMonitors } from '../features/monitors/filter-monitors';
 
 const multiLocationUiEnabled = process.env.NEXT_PUBLIC_MULTI_LOCATION_EXECUTION_ENABLED === 'true';
 
-interface Monitor {
-  id: string;
-  name: string;
-  url: string;
-  method: string;
-  lifecycleState: 'ENABLED' | 'PAUSED';
-  timeoutMs: number;
-  followRedirects: boolean;
-  statusPolicy: { type: 'ANY_2XX' } | { type: 'EXACT'; statusCodes: number[] };
-  locations: string[];
-  createdAt: string;
-  currentCheck: CurrentCheck | null;
-  incidentState: IncidentState;
-  uptime: { uptimePercent: number | null; coveragePercent: number | null };
-}
-
-interface ProbeLocation {
-  id: string;
-  name: string;
-  status: 'ACTIVE' | 'DISABLED';
-  health: 'NOT_CONNECTED' | 'ONLINE' | 'STALE' | 'OFFLINE' | 'DISABLED';
-  activeAgentCount: number;
-}
-
-interface IncidentState {
-  failureStreak: {
-    count: number;
-    threshold: number;
-    startedAt: string;
-    startedByRoundId: string;
-  } | null;
-  currentIncident: {
-    id: string;
-    status: 'OPEN';
-    startedAt: string;
-    openedAt: string;
-    startedByRoundId: string;
-    openedByRoundId: string;
-  } | null;
-  multiLocationIncident?: {
-    severity: 'DEGRADED' | 'DOWN';
-    healthyRecoveryStreak: 0 | 1;
-    healthyRecoveryThreshold: 2;
-  } | null;
-}
-
-interface CurrentCheck {
-  kind: 'SINGLE_LOCATION' | 'MULTI_LOCATION';
-  availability: 'AVAILABLE' | 'UNAVAILABLE' | 'UNKNOWN';
-  responseTimeMs: number | null;
-  checkedAt: string;
-  roundId: string;
-  trigger: 'MANUAL' | 'SCHEDULED';
-  aggregateOutcome: 'UP' | 'DEGRADED' | 'DOWN' | 'UNKNOWN' | null;
-  coverage: { numerator: number; denominator: number } | null;
-  reachability: { numerator: number; denominator: number } | null;
-}
-
-interface FieldErrors {
-  name?: string[];
-  url?: string[];
-  statusPolicy?: string[];
-}
-
-interface ApiError {
-  message?: string;
-  fields?: FieldErrors;
-}
-
-interface ManualRound {
-  id: string;
-  monitorId: string;
-  trigger: 'MANUAL' | 'SCHEDULED';
-  status: 'PENDING' | 'COMPLETED';
-  assignmentStatus: 'PENDING' | 'RUNNING' | 'COMPLETED' | null;
-  createdAt: string;
-  result:
-    | {
-        kind?: 'SINGLE_LOCATION';
-        outcome: 'PASS' | 'FAIL' | 'UNKNOWN';
-        stage: 'DNS' | 'CONNECT' | 'TLS' | 'HTTP' | 'PROBE';
-        reason: string;
-        statusCode: number | null;
-        responseTimeMs: number | null;
-        attemptDurationMs: number;
-        redirects: Array<{
-          sequence: number;
-          statusCode: 301 | 302 | 303 | 307 | 308;
-          source: { targetId: number; origin: string };
-          destination: { targetId: number; origin: string } | null;
-          responseTimeMs: number;
-          headers: 'PRESERVED' | 'STRIPPED' | 'NOT_SENT';
-        }>;
-        checkedAt: string;
-      }
-    | {
-        kind: 'MULTI_LOCATION';
-        outcome: 'UP' | 'DEGRADED' | 'DOWN' | 'UNKNOWN';
-        counts: {
-          selected: number;
-          pass: number;
-          confirmedFail: number;
-          unknown: number;
-          conclusive: number;
-        };
-        coverage: { numerator: number; denominator: number };
-        reachability: { numerator: number; denominator: number } | null;
-        finalizedAt: string;
-        regions?: Array<{
-          location: string;
-          phase: string;
-          outcome: 'PASS' | 'CONFIRMED_FAIL' | 'UNKNOWN' | null;
-          terminalReason: string | null;
-          executions: Array<{
-            id: string;
-            role: 'PRIMARY' | 'CONFIRMATION';
-            diagnosticSummary: {
-              stage: string;
-              reason: string;
-              statusCode: number | null;
-              responseTimeMs: number | null;
-              attemptDurationMs: number;
-              checkedAt: string;
-            } | null;
-          }>;
-        }>;
-      }
-    | null;
-}
-
-interface HistoryPage {
-  items: ManualRound[];
-  nextCursor: string | null;
-}
-
-interface IncidentHistoryPage {
-  items: Array<{
-    id: string;
-    status: 'OPEN' | 'RESOLVED';
-    startedAt: string;
-    openedAt: string;
-    resolvedAt: string | null;
-  }>;
-  nextCursor: string | null;
-}
-
-function formatPercent(value: number | null | undefined): string {
-  return value == null ? '—' : `${value.toFixed(2)}%`;
-}
-
 export function Dashboard() {
   const [monitors, setMonitors] = useState<Monitor[]>([]);
+  const [monitorQuery, setMonitorQuery] = useState('');
+  const [monitorFilter, setMonitorFilter] = useState<MonitorFilter>('all');
   const [probeLocations, setProbeLocations] = useState<ProbeLocation[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -589,21 +447,8 @@ export function Dashboard() {
 
   return (
     <AppShell page="overview">
-      <main>
-        <section className="hero" id="top">
-          <div>
-            <p className="eyebrow">MONITORING CONTROL PLANE</p>
-            <h1>Know what is reachable.</h1>
-            <p className="hero-copy">
-              Create an endpoint, run a durable diagnostic check, and inspect the evidence without
-              tying network work to the API request.
-            </p>
-          </div>
-          <div className="hero-stat" aria-label={`${monitors.length} monitors configured`}>
-            <span>{monitors.length}</span>
-            <small>{monitors.length === 1 ? 'monitor' : 'monitors'}</small>
-          </div>
-        </section>
+      <main data-watchrail-dashboard className="w-full min-w-0 pb-16">
+        <DashboardHeader />
 
         {!isLoading && !pageError && <MonitorOverview monitors={monitors} />}
 
@@ -616,112 +461,50 @@ export function Dashboard() {
           </div>
         ) : null}
 
-        <div className="dashboard-grid">
-          <section
-            id="create-monitor"
-            className="panel form-panel"
-            aria-labelledby="create-heading"
-          >
-            <div className="panel-heading">
-              <div>
-                <p className="eyebrow">NEW MONITOR</p>
-                <h2 id="create-heading">Add an endpoint</h2>
-              </div>
-
-              <fieldset className="field">
-                <legend>Expected status</legend>
-                <label>
-                  <input name="statusPolicyMode" type="radio" value="ANY_2XX" defaultChecked />
-                  Any 2xx response
-                </label>
-                <label>
-                  <input name="statusPolicyMode" type="radio" value="EXACT" />
-                  Specific status codes
-                </label>
-                <input
-                  name="statusCodes"
-                  type="text"
-                  inputMode="numeric"
-                  placeholder="200, 204"
-                  aria-describedby={fieldErrors.statusPolicy ? 'status-policy-error' : undefined}
-                  aria-invalid={Boolean(fieldErrors.statusPolicy)}
-                />
-                {fieldErrors.statusPolicy ? (
-                  <p className="field-error" id="status-policy-error">
-                    {fieldErrors.statusPolicy[0]}
-                  </p>
-                ) : null}
-              </fieldset>
-              <span className="step">01</span>
-            </div>
-
-            <form onSubmit={(event) => void createMonitor(event)} noValidate>
-              <div className="field">
-                <label htmlFor="name">Monitor name</label>
-                <input
-                  id="name"
-                  name="name"
-                  type="text"
-                  placeholder="Production API"
-                  maxLength={120}
-                  aria-describedby={fieldErrors.name ? 'name-error' : undefined}
-                  aria-invalid={Boolean(fieldErrors.name)}
-                />
-                {fieldErrors.name ? (
-                  <p className="field-error" id="name-error">
-                    {fieldErrors.name[0]}
-                  </p>
-                ) : null}
-              </div>
-
-              <div className="field">
-                <label htmlFor="url">HTTP(S) URL</label>
-                <input
-                  id="url"
-                  name="url"
-                  type="url"
-                  placeholder="https://api.example.com/health"
-                  aria-describedby={fieldErrors.url ? 'url-error' : 'url-help'}
-                  aria-invalid={Boolean(fieldErrors.url)}
-                />
-                {fieldErrors.url ? (
-                  <p className="field-error" id="url-error">
-                    {fieldErrors.url[0]}
-                  </p>
-                ) : (
-                  <p className="field-help" id="url-help">
-                    Watchrail stores this configuration but does not call it during creation.
-                  </p>
-                )}
-              </div>
-
-              <div className="defaults" aria-label="Initial monitor defaults">
-                <Default label="Method" value="GET" />
-                <Default label="Timeout" value="10 seconds" />
-                <Default label="Location" value="Local" />
-                <Default label="Lifecycle" value="Enabled" />
-              </div>
-
-              <button className="primary-button" type="submit" disabled={isSubmitting}>
-                {isSubmitting ? 'Creating…' : 'Create monitor'}
-              </button>
-            </form>
-          </section>
-
+        <div className="mt-6 grid min-w-0 items-start gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.9fr)]">
           <section
             id="monitor-inventory"
-            className="panel monitors-panel"
+            className="min-w-0 overflow-hidden rounded-xl border border-rail-border bg-rail-header"
             aria-labelledby="monitors-heading"
           >
-            <div className="panel-heading">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rail-border p-5 sm:p-6">
               <div>
                 <p className="eyebrow">INVENTORY</p>
                 <h2 id="monitors-heading">Configured monitors</h2>
               </div>
-              <button className="quiet-button" type="button" onClick={() => void loadMonitors()}>
+              <button className="min-h-10 rounded-lg border border-rail-border px-4 text-sm text-rail-text hover:bg-rail-hover" type="button" onClick={() => void loadMonitors()}>
                 Refresh
               </button>
             </div>
+
+            {monitors.length > 0 ? (
+              <div className="flex flex-col gap-3 border-b border-rail-border px-5 py-4 sm:flex-row sm:px-6">
+                <label className="flex flex-1 flex-col gap-1.5 text-xs text-rail-subtle">
+                  Search monitors
+                  <input
+                    type="search"
+                    placeholder="Name or URL"
+                    value={monitorQuery}
+                    onChange={(event) => setMonitorQuery(event.target.value)}
+                    className="min-h-11 w-full rounded-lg border border-rail-border bg-rail-sidebar px-3 text-sm text-rail-text placeholder:text-rail-muted"
+                  />
+                </label>
+                <label className="flex flex-col gap-1.5 text-xs text-rail-subtle">
+                  Health
+                  <select
+                    value={monitorFilter}
+                    onChange={(event) => setMonitorFilter(event.target.value as MonitorFilter)}
+                    className="min-h-11 rounded-lg border border-rail-border bg-rail-sidebar px-3 text-sm text-rail-text"
+                  >
+                    <option value="all">All monitors</option>
+                    <option value="operational">Operational</option>
+                    <option value="attention">Needs attention</option>
+                    <option value="paused">Paused</option>
+                    <option value="pending">Awaiting evidence</option>
+                  </select>
+                </label>
+              </div>
+            ) : null}
 
             {isLoading ? (
               <div className="state" role="status">
@@ -736,10 +519,15 @@ export function Dashboard() {
                 <h3>No monitors yet</h3>
                 <p>Create the first endpoint record with the form.</p>
               </div>
+            ) : filterMonitors(monitors, monitorQuery, monitorFilter).length === 0 ? (
+              <div className="flex min-h-40 flex-col items-center justify-center gap-3 p-6 text-center">
+                <p className="text-sm text-rail-subtle">No monitors match your filters.</p>
+                <button type="button" onClick={() => { setMonitorQuery(''); setMonitorFilter('all'); }} className="min-h-10 rounded-lg border border-rail-border px-4 text-sm text-rail-accent">Clear filters</button>
+              </div>
             ) : (
-              <ul className="monitor-list">
-                {monitors.map((monitor) => (
-                  <li key={monitor.id} className="monitor-card">
+              <ul className="monitor-list p-3 sm:p-4">
+                {filterMonitors(monitors, monitorQuery, monitorFilter).map((monitor) => (
+                  <li key={monitor.id} className="monitor-card rounded-xl border border-rail-border bg-rail-raised">
                     <div
                       className={`monitor-status monitor-status-${monitorState(monitor.currentCheck)}`}
                       aria-label={monitorStateLabel(monitor.currentCheck)}
@@ -790,6 +578,9 @@ export function Dashboard() {
                           </div>
                         </dl>
                       ) : null}
+                      <details className="mt-5 rounded-xl border border-rail-border bg-rail-sidebar/50">
+                        <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-rail-text">Configure monitor</summary>
+                        <div className="border-t border-rail-border p-4">
                       <form
                         className="status-policy-form"
                         onSubmit={(event) => void updateLocation(monitor.id, event)}
@@ -895,6 +686,8 @@ export function Dashboard() {
                           {updatingPolicyIds.has(monitor.id) ? 'Saving…' : 'Save policy'}
                         </button>
                       </form>
+                        </div>
+                      </details>
                       <ManualDiagnostic
                         round={manualRounds[monitor.id]}
                         error={runErrors[monitor.id]}
@@ -956,357 +749,107 @@ export function Dashboard() {
               </ul>
             )}
           </section>
+          <section
+            id="create-monitor"
+            className="panel form-panel overflow-hidden rounded-xl"
+            aria-labelledby="create-heading"
+          >
+            <div className="panel-heading">
+              <div>
+                <p className="eyebrow">NEW MONITOR</p>
+                <h2 id="create-heading">Add an endpoint</h2>
+              </div>
+
+              <fieldset className="field">
+                <legend>Expected status</legend>
+                <label>
+                  <input name="statusPolicyMode" type="radio" value="ANY_2XX" defaultChecked />
+                  Any 2xx response
+                </label>
+                <label>
+                  <input name="statusPolicyMode" type="radio" value="EXACT" />
+                  Specific status codes
+                </label>
+                <input
+                  name="statusCodes"
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="200, 204"
+                  aria-describedby={fieldErrors.statusPolicy ? 'status-policy-error' : undefined}
+                  aria-invalid={Boolean(fieldErrors.statusPolicy)}
+                />
+                {fieldErrors.statusPolicy ? (
+                  <p className="field-error" id="status-policy-error">
+                    {fieldErrors.statusPolicy[0]}
+                  </p>
+                ) : null}
+              </fieldset>
+              <span className="step">01</span>
+            </div>
+
+            <form onSubmit={(event) => void createMonitor(event)} noValidate>
+              <div className="field">
+                <label htmlFor="name">Monitor name</label>
+                <input
+                  id="name"
+                  name="name"
+                  type="text"
+                  placeholder="Production API"
+                  maxLength={120}
+                  aria-describedby={fieldErrors.name ? 'name-error' : undefined}
+                  aria-invalid={Boolean(fieldErrors.name)}
+                />
+                {fieldErrors.name ? (
+                  <p className="field-error" id="name-error">
+                    {fieldErrors.name[0]}
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="field">
+                <label htmlFor="url">HTTP(S) URL</label>
+                <input
+                  id="url"
+                  name="url"
+                  type="url"
+                  placeholder="https://api.example.com/health"
+                  aria-describedby={fieldErrors.url ? 'url-error' : 'url-help'}
+                  aria-invalid={Boolean(fieldErrors.url)}
+                />
+                {fieldErrors.url ? (
+                  <p className="field-error" id="url-error">
+                    {fieldErrors.url[0]}
+                  </p>
+                ) : (
+                  <p className="field-help" id="url-help">
+                    Watchrail stores this configuration but does not call it during creation.
+                  </p>
+                )}
+              </div>
+
+              <div className="defaults" aria-label="Initial monitor defaults">
+                <Default label="Method" value="GET" />
+                <Default label="Timeout" value="10 seconds" />
+                <Default label="Location" value="Local" />
+                <Default label="Lifecycle" value="Enabled" />
+              </div>
+
+              <button className="primary-button" type="submit" disabled={isSubmitting}>
+                {isSubmitting ? 'Creating…' : 'Create monitor'}
+              </button>
+            </form>
+          </section>
+
+
         </div>
       </main>
     </AppShell>
   );
 }
 
-function statusPolicyLabel(policy: Monitor['statusPolicy']): string {
-  return policy.type === 'ANY_2XX' ? 'any 2xx' : `status ${policy.statusCodes.join(', ')}`;
-}
-
-function statusPolicyFromForm(formData: FormData): Monitor['statusPolicy'] {
-  if (formData.get('statusPolicyMode') !== 'EXACT') return { type: 'ANY_2XX' };
-
-  const rawCodes = formData.get('statusCodes');
-  const codes = typeof rawCodes === 'string' ? rawCodes : '';
-  return {
-    type: 'EXACT',
-    statusCodes: codes.split(',').map((value) => Number(value.trim())),
-  };
-}
-
-function ManualDiagnostic({
-  round,
-  error,
-}: {
-  round: ManualRound | undefined;
-  error: string | undefined;
-}) {
-  if (error) {
-    return (
-      <p className="diagnostic-error" role="alert">
-        {error}
-      </p>
-    );
-  }
-
-  if (!round) {
-    return <p className="diagnostic-empty">No manual diagnostic started.</p>;
-  }
-
-  if (!round.result) {
-    const pendingLabel = round.assignmentStatus === 'RUNNING' ? 'Executing check' : 'Queued';
-    return (
-      <div className="manual-diagnostic" aria-live="polite">
-        <span className="diagnostic-label">Latest manual diagnostic</span>
-        <strong className="diagnostic-pending">{pendingLabel}</strong>
-      </div>
-    );
-  }
-
-  const { result } = round;
-  if (result.kind === 'MULTI_LOCATION') {
-    return <MultiLocationDiagnostic result={result} label="Latest manual diagnostic" />;
-  }
-  return (
-    <div className="manual-diagnostic" aria-live="polite">
-      <div className="diagnostic-heading">
-        <span className="diagnostic-label">Latest manual diagnostic</span>
-        <strong className={`diagnostic-outcome diagnostic-${result.outcome.toLowerCase()}`}>
-          {result.outcome}
-        </strong>
-      </div>
-      <dl className="diagnostic-metrics">
-        <Metric label="HTTP" value={result.statusCode?.toString() ?? 'No response'} />
-        <Metric label="Response" value={formatMilliseconds(result.responseTimeMs)} />
-        <Metric label="Attempt" value={formatMilliseconds(result.attemptDurationMs)} />
-        <Metric label="Checked" value={new Date(result.checkedAt).toLocaleTimeString()} />
-      </dl>
-      <p className="diagnostic-reason">
-        {humanize(result.stage)} · {humanize(result.reason)}
-      </p>
-      {result.redirects.length > 0 ? (
-        <ol className="redirect-chain" aria-label="Redirect chain">
-          {result.redirects.map((hop) => (
-            <li key={hop.sequence}>
-              <code>
-                #{hop.source.targetId} {hop.source.origin}
-              </code>
-              <span aria-hidden="true"> → </span>
-              <code>
-                {hop.destination
-                  ? `#${hop.destination.targetId} ${hop.destination.origin}`
-                  : 'No valid destination'}
-              </code>
-              <small>
-                {hop.statusCode} · {formatMilliseconds(hop.responseTimeMs)} ·{' '}
-                {humanize(hop.headers)}
-              </small>
-            </li>
-          ))}
-        </ol>
-      ) : null}
-    </div>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <dt>{label}</dt>
-      <dd>{value}</dd>
-    </div>
-  );
-}
-
-function MultiLocationDiagnostic({
-  result,
-  label,
-}: {
-  result: Extract<NonNullable<ManualRound['result']>, { kind: 'MULTI_LOCATION' }>;
-  label: string;
-}) {
-  return (
-    <div className="manual-diagnostic" aria-live="polite">
-      <div className="diagnostic-heading">
-        <span className="diagnostic-label">{label}</span>
-        <strong className={`diagnostic-outcome diagnostic-${result.outcome.toLowerCase()}`}>
-          {result.outcome}
-        </strong>
-      </div>
-      <dl className="diagnostic-metrics">
-        <Metric label="Evidence coverage" value={formatRatio(result.coverage)} />
-        <Metric label="Reachability" value={formatRatio(result.reachability)} />
-        <Metric label="Regions" value={String(result.counts.selected)} />
-        <Metric label="Finalized" value={new Date(result.finalizedAt).toLocaleTimeString()} />
-      </dl>
-      {result.regions ? (
-        <ul aria-label="Regional evidence">
-          {result.regions.map((region) => (
-            <li key={region.location}>
-              <strong>{region.location}</strong> —{' '}
-              {region.outcome === 'CONFIRMED_FAIL'
-                ? 'Confirmed failure'
-                : region.outcome === 'PASS'
-                  ? 'Pass'
-                  : region.outcome === 'UNKNOWN'
-                    ? 'Unknown'
-                    : 'Pending'}
-              {region.executions.map((execution) =>
-                execution.diagnosticSummary ? (
-                  <small key={execution.id}>
-                    {' '}
-                    · {execution.role.toLowerCase()} ·{' '}
-                    {execution.diagnosticSummary.statusCode ?? 'no HTTP'} ·{' '}
-                    {formatMilliseconds(execution.diagnosticSummary.responseTimeMs)}
-                  </small>
-                ) : null,
-              )}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </div>
-  );
-}
-
-function formatRatio(value: { numerator: number; denominator: number } | null): string {
-  if (!value || value.denominator === 0) return '—';
-  return `${((value.numerator / value.denominator) * 100).toFixed(1)}%`;
-}
-
-function formatMilliseconds(value: number | null): string {
-  return value === null ? '—' : `${Math.round(value)} ms`;
-}
-
-function humanize(value: string): string {
-  return value.toLowerCase().replaceAll('_', ' ');
-}
-
-function monitorState(check: CurrentCheck | null): 'awaiting' | 'pass' | 'fail' | 'unknown' {
-  if (!check) return 'awaiting';
-  if (check.availability === 'AVAILABLE') return 'pass';
-  if (check.availability === 'UNAVAILABLE') return 'fail';
-  return 'unknown';
-}
-
-function monitorStateLabel(check: CurrentCheck | null): string {
-  if (!check) return 'No completed check';
-  if (check.aggregateOutcome)
-    return `Current aggregate health: ${check.aggregateOutcome.toLowerCase()}`;
-  return `Current availability: ${check.availability.toLowerCase()}`;
-}
-
-function CheckHistory({
-  page,
-  loading,
-  onLoadMore,
-  details,
-  expandedRoundIds,
-  loadingRoundIds,
-  onToggleRound,
-}: {
-  page: HistoryPage | undefined;
-  loading: boolean;
-  onLoadMore: () => void;
-  details: Record<string, ManualRound>;
-  expandedRoundIds: Set<string>;
-  loadingRoundIds: Set<string>;
-  onToggleRound: (roundId: string) => void;
-}) {
-  if (!page && loading) return <p role="status">Loading check history…</p>;
-  if (!page || page.items.length === 0) return <p>No checks recorded yet.</p>;
-  return (
-    <section aria-label="Check history">
-      <ol>
-        {page.items.map((round) => {
-          const regionalResult = round.result?.kind === 'MULTI_LOCATION' ? round.result : null;
-          const singleResult =
-            round.result && round.result.kind !== 'MULTI_LOCATION' ? round.result : null;
-          const isRegional = regionalResult !== null;
-          const isExpanded = expandedRoundIds.has(round.id);
-          const detail = details[round.id];
-          return (
-            <li key={round.id}>
-              <strong>{round.trigger}</strong>{' '}
-              {round.result
-                ? isRegional
-                  ? `${regionalResult.outcome} · ${formatRatio(regionalResult.coverage)}`
-                  : `${singleResult!.outcome} · ${singleResult!.reason}`
-                : round.assignmentStatus}
-              {' · '}
-              <time dateTime={round.createdAt}>{new Date(round.createdAt).toLocaleString()}</time>
-              {isRegional ? (
-                <>
-                  {' '}
-                  <button
-                    className="quiet-button"
-                    type="button"
-                    disabled={loadingRoundIds.has(round.id)}
-                    onClick={() => onToggleRound(round.id)}
-                  >
-                    {loadingRoundIds.has(round.id)
-                      ? 'Loading evidence…'
-                      : isExpanded
-                        ? 'Hide regional evidence'
-                        : 'Show regional evidence'}
-                  </button>
-                  {isExpanded && detail?.result?.kind === 'MULTI_LOCATION' ? (
-                    <MultiLocationDiagnostic
-                      result={detail.result}
-                      label="Historical regional evidence"
-                    />
-                  ) : null}
-                </>
-              ) : null}
-            </li>
-          );
-        })}
-      </ol>
-      {page.nextCursor ? (
-        <button className="quiet-button" type="button" disabled={loading} onClick={onLoadMore}>
-          {loading ? 'Loading…' : 'Load more'}
-        </button>
-      ) : null}
-    </section>
-  );
-}
-
-function IncidentSummary({ state }: { state: IncidentState | undefined }) {
-  if (state?.currentIncident) {
-    if (state.multiLocationIncident) {
-      const label =
-        state.multiLocationIncident.severity === 'DOWN' ? 'MAJOR OUTAGE' : 'PARTIAL OUTAGE';
-      return (
-        <p aria-label="Incident state">
-          <strong>Incident: {label}</strong> · Started{' '}
-          {new Date(state.currentIncident.startedAt).toLocaleString()} · detected{' '}
-          {new Date(state.currentIncident.openedAt).toLocaleString()}
-          {state.multiLocationIncident.healthyRecoveryStreak > 0
-            ? ` · Recovery ${state.multiLocationIncident.healthyRecoveryStreak}/${state.multiLocationIncident.healthyRecoveryThreshold} healthy rounds`
-            : ''}
-        </p>
-      );
-    }
-    return (
-      <p aria-label="Incident state">
-        <strong>Incident: OPEN</strong> · Started{' '}
-        {new Date(state.currentIncident.startedAt).toLocaleString()} · detected{' '}
-        {new Date(state.currentIncident.openedAt).toLocaleString()} ·{' '}
-        {state.failureStreak?.count ?? 0} consecutive failures
-      </p>
-    );
-  }
-  if (state?.failureStreak) {
-    return (
-      <p aria-label="Incident state">
-        Incident watch: Failure {state.failureStreak.count}/{state.failureStreak.threshold}
-      </p>
-    );
-  }
-  return <p aria-label="Incident state">Incident: No active incident</p>;
-}
-
-function IncidentHistory({
-  page,
-  loading,
-  error,
-  onRetry,
-  onLoadMore,
-}: {
-  page: IncidentHistoryPage | undefined;
-  loading: boolean;
-  error: string | undefined;
-  onRetry: () => void;
-  onLoadMore: () => void;
-}) {
-  if (error) {
-    return (
-      <p role="alert">
-        {error}{' '}
-        <button className="quiet-button" type="button" onClick={onRetry}>
-          Retry
-        </button>
-      </p>
-    );
-  }
-  if (!page) return <p role="status">Loading incident history…</p>;
-  if (page.items.length === 0) return <p>No incidents recorded yet.</p>;
-  return (
-    <section aria-label="Incident history">
-      <ol>
-        {page.items.map((incident) => (
-          <li key={incident.id}>
-            <strong>{incident.status}</strong> · Started{' '}
-            {new Date(incident.startedAt).toLocaleString()}
-            {incident.resolvedAt
-              ? ` · Resolved ${new Date(incident.resolvedAt).toLocaleString()}`
-              : ''}
-          </li>
-        ))}
-      </ol>
-      {page.nextCursor ? (
-        <button className="quiet-button" type="button" disabled={loading} onClick={onLoadMore}>
-          {loading ? 'Loading…' : 'Load more'}
-        </button>
-      ) : null}
-    </section>
-  );
-}
 
 function omitKey<T>(record: Record<string, T>, key: string): Record<string, T> {
   const next = { ...record };
   delete next[key];
   return next;
-}
-
-function Default({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
 }
