@@ -565,8 +565,8 @@ export function Dashboard() {
                     className="monitor-card rounded-xl border border-rail-border bg-rail-raised"
                   >
                     <div
-                      className={`monitor-status monitor-status-${monitorState(monitor.currentCheck)}`}
-                      aria-label={monitorStateLabel(monitor.currentCheck)}
+                      className={`monitor-status monitor-status-${monitorState(monitor.lifecycleState, monitor.currentCheck)}`}
+                      aria-label={monitorStateLabel(monitor.lifecycleState, monitor.currentCheck)}
                     >
                       <span aria-hidden="true" />
                     </div>

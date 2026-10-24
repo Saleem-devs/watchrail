@@ -32,14 +32,22 @@ export function humanize(value: string): string {
   return value.toLowerCase().replaceAll('_', ' ');
 }
 
-export function monitorState(check: CurrentCheck | null): 'awaiting' | 'pass' | 'fail' | 'unknown' {
+export function monitorState(
+  lifecycleState: Monitor['lifecycleState'],
+  check: CurrentCheck | null,
+): 'awaiting' | 'pass' | 'fail' | 'paused' | 'unknown' {
+  if (lifecycleState === 'PAUSED') return 'paused';
   if (!check) return 'awaiting';
   if (check.availability === 'AVAILABLE') return 'pass';
   if (check.availability === 'UNAVAILABLE') return 'fail';
   return 'unknown';
 }
 
-export function monitorStateLabel(check: CurrentCheck | null): string {
+export function monitorStateLabel(
+  lifecycleState: Monitor['lifecycleState'],
+  check: CurrentCheck | null,
+): string {
+  if (lifecycleState === 'PAUSED') return 'Monitoring paused';
   if (!check) return 'No completed check';
   if (check.aggregateOutcome)
     return `Current aggregate health: ${check.aggregateOutcome.toLowerCase()}`;

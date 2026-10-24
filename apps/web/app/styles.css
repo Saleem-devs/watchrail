@@ -422,6 +422,11 @@ form {
   box-shadow: 0 0 12px rgba(138, 153, 158, 0.25);
 }
 
+.monitor-status-paused span {
+  border-color: var(--muted);
+  box-shadow: none;
+}
+
 .monitor-main:not([data-watchrail-dashboard]) {
   min-width: 0;
   flex: 1;

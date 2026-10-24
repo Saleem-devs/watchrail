@@ -84,6 +84,39 @@ describe('Dashboard', () => {
     );
   });
 
+  it('presents a paused monitor neutrally despite a successful historical check', async () => {
+    const monitor = {
+      id: 'paused-monitor',
+      name: 'Paused API',
+      url: 'https://example.com/health',
+      method: 'GET',
+      lifecycleState: 'PAUSED',
+      timeoutMs: 10_000,
+      followRedirects: true,
+      statusPolicy: { type: 'ANY_2XX' },
+      locations: ['local'],
+      createdAt: new Date().toISOString(),
+      currentCheck: {
+        availability: 'AVAILABLE',
+        responseTimeMs: 42,
+        checkedAt: '2026-09-24T12:00:00.000Z',
+        roundId: 'round-1',
+        trigger: 'SCHEDULED',
+      },
+      incidentState: { failureStreak: null, currentIncident: null },
+      uptime: { uptimePercent: 100, coveragePercent: 100 },
+    };
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ data: [monitor] }), { status: 200 }),
+    );
+
+    render(<Dashboard />);
+
+    const status = await screen.findByLabelText('Monitoring paused');
+    expect(status).toHaveClass('monitor-status-paused');
+    expect(screen.queryByLabelText('Current availability: available')).not.toBeInTheDocument();
+  });
+
   it('refreshes time-sensitive probe health whenever the location selector is reopened', async () => {
     const monitor = {
       id: 'location-monitor',
