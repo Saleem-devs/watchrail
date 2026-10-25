@@ -1,3 +1,5 @@
+import { actionClassName } from '../../components/ui/button';
+
 export function DashboardHeader() {
   return (
     <section className="relative mt-8 overflow-hidden rounded-2xl border border-rail-border bg-rail-header px-6 py-9 sm:px-10 sm:py-11">
@@ -19,9 +21,20 @@ export function DashboardHeader() {
         </div>
         <a
           href="#create-monitor"
-          className="inline-flex min-h-11 items-center justify-center rounded-lg bg-rail-accent px-5 text-sm font-bold text-rail-sidebar no-underline hover:bg-rail-accent-light"
+          className={actionClassName({ variant: 'primary', className: 'px-5' })}
         >
-          + Add monitor
+          <svg
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            className="size-4"
+            aria-hidden="true"
+          >
+            <path d="M8 3v10M3 8h10" />
+          </svg>
+          Add monitor
         </a>
       </div>
     </section>

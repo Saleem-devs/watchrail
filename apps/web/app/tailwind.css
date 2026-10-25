@@ -3,19 +3,99 @@
 @import 'tailwindcss/utilities.css' layer(utilities);
 
 @theme {
-  --color-rail-workspace: #0f171b;
-  --color-rail-sidebar: #0b1217;
-  --color-rail-header: #111a1e;
-  --color-rail-raised: #172126;
-  --color-rail-border: #263238;
-  --color-rail-hover: #182329;
-  --color-rail-selected: #173127;
-  --color-rail-selected-border: #285940;
-  --color-rail-text: #eef4f2;
-  --color-rail-subtle: #9dabb1;
-  --color-rail-muted: #8a999e;
-  --color-rail-accent: #63f5af;
-  --color-rail-accent-light: #dcf9ea;
-  --color-rail-success: #71d6a4;
-  --color-rail-danger: #f08b8b;
+  --font-sans:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', Menlo, Monaco, Consolas, monospace;
+
+  --color-rail-canvas: #ffffff;
+  --color-rail-workspace: #ffffff;
+  --color-rail-sidebar: #f7f7f8;
+  --color-rail-surface: #ffffff;
+  --color-rail-header: #ffffff;
+  --color-rail-raised: #f7f7f8;
+  --color-rail-overlay: #ffffff;
+  --color-rail-input: #ffffff;
+  --color-rail-border: #e2e4e7;
+  --color-rail-border-strong: #c7cbd1;
+  --color-rail-hover: #f0f1f2;
+  --color-rail-selected: #eaf7f0;
+  --color-rail-selected-border: #9bcfb3;
+  --color-rail-text: #111315;
+  --color-rail-subtle: #4e565b;
+  --color-rail-muted: #687178;
+  --color-rail-accent: #087a45;
+  --color-rail-accent-hover: #06663a;
+  --color-rail-accent-light: #0d5b38;
+  --color-rail-on-accent: #ffffff;
+  --color-rail-success: #087a45;
+  --color-rail-warning: #835800;
+  --color-rail-danger: #b4232c;
+  --color-rail-impaired: #7656b9;
+  --color-rail-danger-surface: #fff1f2;
+  --color-rail-shadow: rgb(17 19 21 / 14%);
+
+  --radius-rail-control: 0.5rem;
+  --radius-rail-panel: 0.75rem;
+}
+
+@layer base {
+  :root {
+    color-scheme: light;
+    accent-color: var(--color-rail-accent);
+    caret-color: var(--color-rail-accent);
+    scrollbar-color: var(--color-rail-border-strong) var(--color-rail-canvas);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --color-rail-canvas: #181818;
+      --color-rail-workspace: #181818;
+      --color-rail-sidebar: #202020;
+      --color-rail-surface: #1d1d1d;
+      --color-rail-header: #1b1b1b;
+      --color-rail-raised: #242424;
+      --color-rail-overlay: #303030;
+      --color-rail-input: #222222;
+      --color-rail-border: #303030;
+      --color-rail-border-strong: #464646;
+      --color-rail-hover: #292929;
+      --color-rail-selected: #343434;
+      --color-rail-selected-border: #505050;
+      --color-rail-text: #f1f1f1;
+      --color-rail-subtle: #b7b7b7;
+      --color-rail-muted: #8d8d8d;
+      --color-rail-accent: #63f5af;
+      --color-rail-accent-hover: #8affc4;
+      --color-rail-accent-light: #dcf9ea;
+      --color-rail-on-accent: #05120b;
+      --color-rail-success: #71d6a4;
+      --color-rail-warning: #f8c765;
+      --color-rail-danger: #ff9298;
+      --color-rail-impaired: #b8a7ff;
+      --color-rail-danger-surface: #241313;
+      --color-rail-shadow: rgb(0 0 0 / 45%);
+    }
+  }
+
+  ::selection {
+    color: var(--color-rail-accent-light);
+    background: var(--color-rail-selected-border);
+  }
+
+  :where(button, a, input, select, textarea, summary):focus-visible {
+    outline: 2px solid var(--color-rail-accent);
+    outline-offset: 3px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      scroll-behavior: auto !important;
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
 }

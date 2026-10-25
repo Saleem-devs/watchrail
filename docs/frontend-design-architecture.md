@@ -33,6 +33,35 @@ screen to Tailwind, enable a deliberate global reset, remove legacy CSS, and add
 responsive and accessibility coverage. Maintain the existing visual palette provisionally,
 subject to UI/UX design review.
 
+## Visual system
+
+Watchrail uses a restrained operational-console direction. Dense monitoring surfaces prioritize
+incidents, evidence and actions over decorative presentation. The recurring signal-rail pattern may
+connect genuine execution stages, regions or incident transitions, but must not become decorative
+circuitry or imply monitoring evidence that does not exist.
+
+The interface follows the operating system color preference. Light mode uses a true white canvas.
+Dark mode uses a neutral charcoal workspace with a slightly lighter sidebar and raised surfaces.
+Neutral surfaces create hierarchy without tinting the entire workspace, while monitoring state
+colors retain consistent meaning and sufficient contrast in both modes. Browser chrome receives
+matching light and dark theme colors through Next.js viewport metadata.
+
+`apps/web/app/tailwind.css` is the visual source of truth. Its semantic tokens cover canvas and
+surface elevation, borders, text hierarchy, the mint interaction accent and explicit monitoring
+states. Legacy custom properties in `styles.css` are compatibility aliases to those tokens while
+existing screens migrate. Product accent and monitoring health are separate concepts even when
+their colors are related.
+
+The shared `components/ui` primitives establish interaction and status semantics. Monitoring status
+must use visible text and an icon in addition to color, and callers must pass an authoritative
+`UP`, `DOWN`, `DEGRADED`, `UNKNOWN` or `PAUSED` state. Technical values may use the mono font token;
+ordinary interface labels and prose use the sans token.
+
+Use sentence case, a four-pixel spacing rhythm, restrained radii and visible keyboard focus. Avoid
+eyebrow labels, decorative section numbering, Unicode glyphs as icons, nested cards and motion that
+does not explain a state change. Honor `prefers-reduced-motion` and keep primary interaction targets
+at least 44 CSS pixels high.
+
 ## Verification
 
 Run `pnpm install --frozen-lockfile`, `pnpm format:check`, `pnpm lint`,

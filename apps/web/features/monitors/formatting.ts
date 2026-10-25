@@ -1,4 +1,5 @@
 import type { Monitor, CurrentCheck } from './types';
+import type { MonitoringStatus } from '../../components/ui/status-badge';
 
 export function formatPercent(value: number | null | undefined): string {
   return value == null ? '—' : `${value.toFixed(2)}%`;
@@ -32,17 +33,6 @@ export function humanize(value: string): string {
   return value.toLowerCase().replaceAll('_', ' ');
 }
 
-export function monitorState(
-  lifecycleState: Monitor['lifecycleState'],
-  check: CurrentCheck | null,
-): 'awaiting' | 'pass' | 'fail' | 'paused' | 'unknown' {
-  if (lifecycleState === 'PAUSED') return 'paused';
-  if (!check) return 'awaiting';
-  if (check.availability === 'AVAILABLE') return 'pass';
-  if (check.availability === 'UNAVAILABLE') return 'fail';
-  return 'unknown';
-}
-
 export function monitorStateLabel(
   lifecycleState: Monitor['lifecycleState'],
   check: CurrentCheck | null,
@@ -52,4 +42,16 @@ export function monitorStateLabel(
   if (check.aggregateOutcome)
     return `Current aggregate health: ${check.aggregateOutcome.toLowerCase()}`;
   return `Current availability: ${check.availability.toLowerCase()}`;
+}
+
+export function monitorStatus(
+  lifecycleState: Monitor['lifecycleState'],
+  check: CurrentCheck | null,
+): MonitoringStatus {
+  if (lifecycleState === 'PAUSED') return 'PAUSED';
+  if (!check) return 'UNKNOWN';
+  if (check.aggregateOutcome) return check.aggregateOutcome;
+  if (check.availability === 'AVAILABLE') return 'UP';
+  if (check.availability === 'UNAVAILABLE') return 'DOWN';
+  return 'UNKNOWN';
 }

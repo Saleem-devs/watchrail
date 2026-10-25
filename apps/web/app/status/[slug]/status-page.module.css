@@ -24,7 +24,7 @@
   place-items: center;
   width: 30px;
   height: 30px;
-  color: #06100b;
+  color: var(--color-rail-on-accent);
   background: var(--accent);
   border-radius: 8px;
   font-size: 12px;
@@ -42,7 +42,7 @@
   margin: 56px 0 28px;
   padding: 32px;
   border: 1px solid currentColor;
-  background: rgba(13, 19, 21, 0.92);
+  background: var(--surface);
 }
 .banner h1 {
   margin: 0;
@@ -68,7 +68,7 @@
 .section {
   margin-top: 20px;
   border: 1px solid var(--border);
-  background: rgba(13, 19, 21, 0.92);
+  background: var(--surface);
 }
 .sectionHeading {
   min-height: 92px;
@@ -155,7 +155,7 @@
   color: var(--danger);
 }
 .impaired {
-  color: #b8a7ff;
+  color: var(--color-rail-impaired);
 }
 .refresh {
   position: fixed;
@@ -163,10 +163,10 @@
   bottom: 24px;
   z-index: 2;
   padding: 12px 16px;
-  border: 1px solid #365348;
+  border: 1px solid var(--color-rail-selected-border);
   border-radius: 8px;
   color: var(--accent);
-  background: #0b2118;
+  background: var(--color-rail-selected);
   cursor: pointer;
   font-weight: 700;
 }
