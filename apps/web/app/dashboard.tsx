@@ -3,13 +3,15 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { AppShell } from '../components/app-shell';
 import { MonitorOverview } from '../components/monitor-overview';
+import { Button } from '../components/ui/button';
+import { StatusBadge } from '../components/ui/status-badge';
 import type { MonitorFilter } from '../features/monitors/filter-monitors';
 import { DashboardHeader } from '../features/monitors/dashboard-header';
 import {
   formatPercent,
   formatRatio,
-  monitorState,
   monitorStateLabel,
+  monitorStatus,
   statusPolicyLabel,
   statusPolicyFromForm,
 } from '../features/monitors/formatting';
@@ -546,16 +548,15 @@ export function Dashboard() {
             ) : filterMonitors(monitors, monitorQuery, monitorFilter).length === 0 ? (
               <div className="flex min-h-40 flex-col items-center justify-center gap-3 p-6 text-center">
                 <p className="text-sm text-rail-subtle">No monitors match your filters.</p>
-                <button
-                  type="button"
+                <Button
                   onClick={() => {
                     setMonitorQuery('');
                     setMonitorFilter('all');
                   }}
-                  className="min-h-10 rounded-lg border border-rail-border px-4 text-sm text-rail-accent"
+                  size="compact"
                 >
                   Clear filters
-                </button>
+                </Button>
               </div>
             ) : (
               <ul className="monitor-list p-3 sm:p-4">
@@ -564,23 +565,21 @@ export function Dashboard() {
                     key={monitor.id}
                     className="monitor-card rounded-xl border border-rail-border bg-rail-raised"
                   >
-                    <div
-                      className={`monitor-status monitor-status-${monitorState(monitor.lifecycleState, monitor.currentCheck)}`}
-                      aria-label={monitorStateLabel(monitor.lifecycleState, monitor.currentCheck)}
-                    >
-                      <span aria-hidden="true" />
-                    </div>
+                    <StatusBadge
+                      status={monitorStatus(monitor.lifecycleState, monitor.currentCheck)}
+                      label={monitorStateLabel(monitor.lifecycleState, monitor.currentCheck)}
+                    />
                     <div className="monitor-main">
                       <div className="monitor-title-row">
                         <h3>{monitor.name}</h3>
-                        <button
-                          className="run-button"
-                          type="button"
+                        <Button
+                          variant="secondary"
+                          size="compact"
                           disabled={runningMonitorIds.has(monitor.id)}
                           onClick={() => void runNow(monitor.id)}
                         >
                           {runningMonitorIds.has(monitor.id) ? 'Checking…' : 'Run now'}
-                        </button>
+                        </Button>
                       </div>
                       <a href={monitor.url} target="_blank" rel="noreferrer">
                         {monitor.url}

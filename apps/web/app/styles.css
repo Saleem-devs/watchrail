@@ -1,15 +1,15 @@
 :root {
-  color-scheme: dark;
-  --background: #070b0c;
-  --surface: #0d1315;
-  --surface-raised: #11191c;
-  --border: #263236;
-  --muted: #8a999e;
-  --text: #eef4f2;
-  --accent: #63f5af;
-  --accent-dark: #092719;
-  --danger: #ff8a8a;
-  --warning: #f8c765;
+  /* Compatibility aliases while legacy surfaces move to Tailwind utilities. */
+  --background: var(--color-rail-canvas);
+  --surface: var(--color-rail-surface);
+  --surface-raised: var(--color-rail-header);
+  --border: var(--color-rail-border);
+  --muted: var(--color-rail-muted);
+  --text: var(--color-rail-text);
+  --accent: var(--color-rail-accent);
+  --accent-dark: var(--color-rail-selected);
+  --danger: var(--color-rail-danger);
+  --warning: var(--color-rail-warning);
 }
 
 * {
@@ -23,18 +23,8 @@ html {
 body {
   margin: 0;
   color: var(--text);
-  background:
-    linear-gradient(rgba(99, 245, 175, 0.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(99, 245, 175, 0.025) 1px, transparent 1px), var(--background);
-  background-size: 32px 32px;
-  font-family:
-    Inter,
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    sans-serif;
+  background: var(--background);
+  font-family: var(--font-sans);
   min-height: 100vh;
 }
 
@@ -90,7 +80,7 @@ main:not([data-watchrail-dashboard]) {
   place-items: center;
   width: 34px;
   height: 34px;
-  color: #06100b;
+  color: var(--color-rail-on-accent);
   background: var(--accent);
   border-radius: 8px;
   font-size: 14px;
@@ -149,7 +139,7 @@ main:not([data-watchrail-dashboard]) h1 {
   min-width: 148px;
   padding: 20px;
   border: 1px solid var(--border);
-  background: rgba(13, 19, 21, 0.8);
+  background: var(--surface);
 }
 
 .hero-stat span,
@@ -175,9 +165,9 @@ main:not([data-watchrail-dashboard]) h1 {
   gap: 24px;
   margin-bottom: 20px;
   padding: 14px 16px;
-  border: 1px solid #5d3434;
-  background: #241313;
-  color: #ffd2d2;
+  border: 1px solid var(--danger);
+  background: var(--color-rail-danger-surface);
+  color: var(--danger);
 }
 
 .alert button,
@@ -199,7 +189,7 @@ main:not([data-watchrail-dashboard]) h1 {
 
 .panel {
   border: 1px solid var(--border);
-  background: rgba(13, 19, 21, 0.94);
+  background: var(--surface);
 }
 
 .panel-heading {
@@ -217,7 +207,7 @@ main:not([data-watchrail-dashboard]) h1 {
 }
 
 .step {
-  color: #536166;
+  color: var(--muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 13px;
 }
@@ -233,7 +223,7 @@ form {
 .field label {
   display: block;
   margin-bottom: 9px;
-  color: #cad4d1;
+  color: var(--color-rail-subtle);
   font-size: 13px;
   font-weight: 650;
 }
@@ -242,14 +232,14 @@ form {
   width: 100%;
   height: 46px;
   padding: 0 13px;
-  border: 1px solid #344247;
+  border: 1px solid var(--color-rail-border-strong);
   border-radius: 5px;
   color: var(--text);
-  background: #091012;
+  background: var(--color-rail-input);
 }
 
 .field input::placeholder {
-  color: #59676c;
+  color: var(--muted);
 }
 
 .field input[aria-invalid='true'] {
@@ -282,7 +272,7 @@ form {
 
 .defaults div {
   padding: 12px;
-  background: #0a1012;
+  background: var(--surface);
 }
 
 .defaults span,
@@ -308,14 +298,14 @@ form {
   min-height: 48px;
   border: 0;
   border-radius: 5px;
-  color: #05120b;
+  color: var(--color-rail-on-accent);
   background: var(--accent);
   font-weight: 780;
   cursor: pointer;
 }
 
 .primary-button:hover {
-  background: #8affc4;
+  background: var(--color-rail-accent-hover);
 }
 
 .primary-button:disabled {
@@ -339,7 +329,7 @@ form {
 .spinner {
   width: 16px;
   height: 16px;
-  border: 2px solid #314045;
+  border: 2px solid var(--color-rail-border-strong);
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
@@ -362,7 +352,7 @@ form {
   width: 52px;
   height: 52px;
   margin-bottom: 18px;
-  border: 1px dashed #415157;
+  border: 1px dashed var(--color-rail-border-strong);
   border-radius: 50%;
   color: var(--accent);
   font-size: 26px;
@@ -392,39 +382,6 @@ form {
 
 .monitor-card:last-child {
   border-bottom: 0;
-}
-
-.monitor-status {
-  padding-top: 5px;
-}
-
-.monitor-status span {
-  display: block;
-  width: 10px;
-  height: 10px;
-  border: 2px solid var(--warning);
-  border-radius: 50%;
-  box-shadow: 0 0 12px rgba(248, 199, 101, 0.35);
-}
-
-.monitor-status-pass span {
-  border-color: var(--accent);
-  box-shadow: 0 0 12px rgba(99, 245, 175, 0.35);
-}
-
-.monitor-status-fail span {
-  border-color: var(--danger);
-  box-shadow: 0 0 12px rgba(255, 138, 138, 0.35);
-}
-
-.monitor-status-unknown span {
-  border-color: var(--muted);
-  box-shadow: 0 0 12px rgba(138, 153, 158, 0.25);
-}
-
-.monitor-status-paused span {
-  border-color: var(--muted);
-  box-shadow: none;
 }
 
 .monitor-main:not([data-watchrail-dashboard]) {
@@ -464,29 +421,6 @@ form {
   font-size: 16px;
 }
 
-.run-button {
-  min-width: 88px;
-  padding: 7px 11px;
-  border: 1px solid #3d5a4c;
-  border-radius: 5px;
-  color: var(--accent);
-  background: var(--accent-dark);
-  font-size: 12px;
-  font-weight: 720;
-  cursor: pointer;
-}
-
-.run-button:hover {
-  border-color: var(--accent);
-}
-
-.run-button:disabled {
-  color: var(--muted);
-  border-color: var(--border);
-  background: #0a1012;
-  cursor: wait;
-}
-
 .monitor-main > a {
   display: block;
   overflow: hidden;
@@ -506,9 +440,9 @@ form {
 
 .monitor-meta span {
   padding: 5px 8px;
-  border: 1px solid #273439;
-  color: #9dacb0;
-  background: #0a1012;
+  border: 1px solid var(--border);
+  color: var(--color-rail-subtle);
+  background: var(--surface);
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -533,10 +467,10 @@ form {
 .status-policy-form select,
 .status-policy-form input {
   min-height: 34px;
-  border: 1px solid #344247;
+  border: 1px solid var(--color-rail-border-strong);
   border-radius: 4px;
   color: var(--text);
-  background: #091012;
+  background: var(--color-rail-input);
 }
 
 .status-policy-form input {
@@ -553,7 +487,7 @@ form {
 }
 
 .diagnostic-empty {
-  color: #6f7e82;
+  color: var(--muted);
 }
 
 .diagnostic-error {
@@ -563,8 +497,8 @@ form {
 .manual-diagnostic {
   margin-top: 16px;
   padding: 14px;
-  border: 1px solid #273439;
-  background: #091012;
+  border: 1px solid var(--border);
+  background: var(--color-rail-input);
 }
 
 .diagnostic-heading {
@@ -792,8 +726,8 @@ form {
 }
 
 .sign-in-social-btn:hover:not(:disabled) {
-  background: #192125;
-  border-color: #3a4e55;
+  background: var(--color-rail-hover);
+  border-color: var(--color-rail-border-strong);
 }
 
 .sign-in-social-btn:disabled {
@@ -870,8 +804,8 @@ form {
 .sign-in-error {
   margin: 8px 0 0;
   padding: 8px 10px;
-  background: rgba(255, 138, 138, 0.08);
-  border: 1px solid rgba(255, 138, 138, 0.25);
+  background: var(--color-rail-danger-surface);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
   color: var(--danger);
   font-size: 12px;
   line-height: 1.5;
@@ -884,7 +818,7 @@ form {
   padding: 10px 16px;
   background: var(--accent);
   border: none;
-  color: #050f0a;
+  color: var(--color-rail-on-accent);
   font-size: 14px;
   font-weight: 680;
   cursor: pointer;
@@ -989,7 +923,7 @@ form {
 }
 
 .org-switcher:hover {
-  border-color: #3a4e55;
+  border-color: var(--color-rail-border-strong);
 }
 
 .org-switcher-name {
@@ -1013,7 +947,7 @@ form {
   padding: 6px 0;
   background: var(--surface);
   border: 1px solid var(--border);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 8px 24px var(--color-rail-shadow);
 }
 
 .org-dropdown-item {
@@ -1089,13 +1023,13 @@ form {
   margin: 4px 0;
 }
 .eyebrow {
-  color: var(--muted, #91a1a6);
+  color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.1em;
 }
 .settings-card {
-  border: 1px solid #26383d;
-  background: #0d1518;
+  border: 1px solid var(--border);
+  background: var(--surface);
   padding: 24px;
   margin: 18px 0;
 }
@@ -1117,15 +1051,16 @@ form {
 .settings-form input,
 .settings-form select,
 .settings-row select {
-  background: #142126;
+  background: var(--color-rail-input);
   color: inherit;
-  border: 1px solid #365057;
+  border: 1px solid var(--color-rail-border-strong);
   padding: 10px;
 }
 .settings-form button,
 .credential-secret button {
   padding: 11px 16px;
-  background: #63f5af;
+  color: var(--color-rail-on-accent);
+  background: var(--accent);
   border: 0;
   font-weight: 700;
 }
@@ -1139,26 +1074,26 @@ form {
   gap: 14px;
   justify-content: space-between;
   padding: 14px 0;
-  border-top: 1px solid #25363b;
+  border-top: 1px solid var(--border);
 }
 .settings-row div {
   display: grid;
   gap: 4px;
 }
 .settings-row small {
-  color: #91a1a6;
+  color: var(--muted);
 }
 .danger {
-  color: #ff8585;
+  color: var(--danger);
   background: transparent;
-  border: 1px solid #7c3d42;
+  border: 1px solid var(--danger);
   padding: 8px 12px;
 }
 .settings-notice,
 .credential-secret {
-  border: 1px solid #365057;
+  border: 1px solid var(--color-rail-border-strong);
   padding: 14px;
-  background: #122026;
+  background: var(--surface-raised);
 }
 .credential-secret {
   display: grid;

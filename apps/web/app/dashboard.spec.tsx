@@ -113,7 +113,7 @@ describe('Dashboard', () => {
     render(<Dashboard />);
 
     const status = await screen.findByLabelText('Monitoring paused');
-    expect(status).toHaveClass('monitor-status-paused');
+    expect(status).toHaveAttribute('data-monitor-status', 'PAUSED');
     expect(screen.queryByLabelText('Current availability: available')).not.toBeInTheDocument();
   });
 
