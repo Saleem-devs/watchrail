@@ -68,4 +68,34 @@ describe('OrgSwitcher', () => {
     expect(screen.queryByRole('group', { name: 'Organization switcher' })).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
   });
+
+  it('reloads only after Better Auth confirms the organization switch', async () => {
+    const user = userEvent.setup();
+    const reload = vi.fn();
+    setActive.mockResolvedValue({ data: {}, error: null });
+    render(<OrgSwitcher reload={reload} />);
+
+    await user.click(await screen.findByRole('button', { name: /Watchrail/i }));
+    await user.click(screen.getByRole('button', { name: 'Operations' }));
+
+    expect(setActive).toHaveBeenCalledWith({ organizationId: 'org-2' });
+    expect(reload).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('group', { name: 'Organization switcher' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the switcher open and announces a failed organization switch', async () => {
+    const user = userEvent.setup();
+    const reload = vi.fn();
+    setActive.mockResolvedValue({ data: null, error: { message: 'Forbidden' } });
+    render(<OrgSwitcher reload={reload} />);
+
+    await user.click(await screen.findByRole('button', { name: /Watchrail/i }));
+    await user.click(screen.getByRole('button', { name: 'Operations' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Could not switch organizations. Try again.',
+    );
+    expect(screen.getByRole('group', { name: 'Organization switcher' })).toBeInTheDocument();
+    expect(reload).not.toHaveBeenCalled();
+  });
 });

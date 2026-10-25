@@ -41,24 +41,31 @@ function CheckIcon() {
   );
 }
 
-export function OrgSwitcher() {
+function reloadWindow() {
+  window.location.reload();
+}
+
+export function OrgSwitcher({ reload = reloadWindow }: { reload?: () => void } = {}) {
   const { data: session } = authClient.useSession();
 
   if (!session?.user) return null;
-  return <AuthenticatedOrgSwitcher session={session} />;
+  return <AuthenticatedOrgSwitcher session={session} reload={reload} />;
 }
 
 function AuthenticatedOrgSwitcher({
   session,
+  reload,
 }: {
   session: {
     user: { name: string };
     session: { activeOrganizationId?: string | null | undefined };
   };
+  reload: () => void;
 }) {
   const router = useRouter();
   const [orgs, setOrgs] = useState<Org[]>([]);
   const [open, setOpen] = useState(false);
+  const [switchError, setSwitchError] = useState<string>();
   const wrapperRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
@@ -98,12 +105,17 @@ function AuthenticatedOrgSwitcher({
   const activeOrg = orgs.find((org) => org.id === session.session.activeOrganizationId) ?? orgs[0];
 
   async function switchOrg(org: Org) {
-    setOpen(false);
+    setSwitchError(undefined);
     try {
-      await authClient.organization.setActive({ organizationId: org.id });
-      window.location.reload();
+      const result = await authClient.organization.setActive({ organizationId: org.id });
+      if (result.error) {
+        setSwitchError('Could not switch organizations. Try again.');
+        return;
+      }
+      setOpen(false);
+      reload();
     } catch {
-      triggerRef.current?.focus();
+      setSwitchError('Could not switch organizations. Try again.');
     }
   }
 
@@ -159,6 +171,12 @@ function AuthenticatedOrgSwitcher({
               )}
             </button>
           ))}
+
+          {switchError && (
+            <p role="alert" className="mx-2 my-2 text-xs leading-5 text-rail-danger">
+              {switchError}
+            </p>
+          )}
 
           <div className="my-2 h-px bg-rail-border" />
 

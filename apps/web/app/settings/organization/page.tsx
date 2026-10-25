@@ -163,7 +163,7 @@ export default function OrganizationSettingsPage() {
   }
 
   return (
-    <main className="settings-shell">
+    <main id="main-content" className="settings-shell">
       <header className="settings-header">
         <div>
           <p className="eyebrow">Workspace administration</p>

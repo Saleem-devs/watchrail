@@ -241,12 +241,9 @@ export function AppShell({ children, page }: { children: ReactNode; page: Page }
           </div>
         </header>
 
-        <main
-          id="main-content"
-          className="mx-auto max-w-[1700px] min-w-0 px-4 pb-16 sm:px-6 lg:px-10 xl:px-16"
-        >
+        <div className="mx-auto max-w-[1700px] min-w-0 px-4 pb-16 sm:px-6 lg:px-10 xl:px-16">
           {children}
-        </main>
+        </div>
       </div>
     </div>
   );

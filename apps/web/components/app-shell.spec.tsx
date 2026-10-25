@@ -11,7 +11,9 @@ describe('AppShell', () => {
   it('marks the current workspace page and keeps creation separate from navigation', () => {
     render(
       <AppShell page="overview">
-        <h1>Dashboard</h1>
+        <main id="main-content">
+          <h1>Dashboard</h1>
+        </main>
       </AppShell>,
     );
 
@@ -27,13 +29,16 @@ describe('AppShell', () => {
     expect(screen.getByRole('main')).toContainElement(
       screen.getByRole('heading', { name: 'Dashboard' }),
     );
+    expect(screen.getAllByRole('main')).toHaveLength(1);
   });
 
   it('provides a compact mobile navigation disclosure that closes after navigation', async () => {
     const user = userEvent.setup();
     render(
       <AppShell page="organization">
-        <p>Settings</p>
+        <main id="main-content">
+          <p>Settings</p>
+        </main>
       </AppShell>,
     );
 
