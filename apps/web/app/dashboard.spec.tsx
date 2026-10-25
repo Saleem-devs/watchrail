@@ -6,6 +6,18 @@ import { Dashboard } from './dashboard';
 describe('Dashboard', () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it('does not present a failed monitor load as an empty workspace', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('API unavailable'));
+
+    render(<Dashboard />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Watchrail could not load your monitors',
+    );
+    expect(screen.getByText('Monitor inventory is unavailable.')).toBeInTheDocument();
+    expect(screen.queryByText('No monitors yet')).not.toBeInTheDocument();
+  });
+
   it.each([
     [99.94, 98.7, '99.94%', '98.70%'],
     [null, 0, '—', '0.00%'],
