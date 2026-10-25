@@ -29,7 +29,7 @@ describe('MonitorOverview', () => {
       ['Paused', '1'],
       ['Awaiting evidence', '1'],
     ] as const) {
-      expect(within(region).getByText(label).parentElement?.parentElement).toHaveTextContent(count);
+      expect(within(region).getByText(label).closest('div')).toHaveTextContent(count);
     }
     expect(within(region).getByRole('status')).toHaveTextContent('1 monitor has an open incident');
   });
