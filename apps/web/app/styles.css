@@ -902,101 +902,6 @@ form {
   color: var(--text);
 }
 
-/* ─── Org switcher (header) ──────────────────────────────────────────────────── */
-
-.org-switcher-wrapper {
-  position: relative;
-}
-
-.org-switcher {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 10px;
-  background: var(--surface-raised);
-  border: 1px solid var(--border);
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 550;
-  cursor: pointer;
-  transition: border-color 0.12s;
-}
-
-.org-switcher:hover {
-  border-color: var(--color-rail-border-strong);
-}
-
-.org-switcher-name {
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.org-switcher-caret {
-  color: var(--muted);
-  flex-shrink: 0;
-}
-
-.org-dropdown {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: 50;
-  min-width: 220px;
-  padding: 6px 0;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  box-shadow: 0 8px 24px var(--color-rail-shadow);
-}
-
-.org-dropdown-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 14px;
-  font-size: 13px;
-  color: var(--text);
-  cursor: pointer;
-  background: none;
-  border: none;
-  width: 100%;
-  text-align: left;
-  transition: background 0.1s;
-}
-
-.org-dropdown-item:hover {
-  background: var(--surface-raised);
-}
-
-.org-dropdown-item.active {
-  color: var(--accent);
-}
-
-.org-dropdown-divider {
-  height: 1px;
-  background: var(--border);
-  margin: 6px 0;
-}
-
-.org-dropdown-action {
-  display: block;
-  padding: 8px 14px;
-  font-size: 12px;
-  color: var(--muted);
-  background: none;
-  border: none;
-  width: 100%;
-  text-align: left;
-  cursor: pointer;
-  transition: color 0.1s;
-}
-
-.org-dropdown-action:hover {
-  color: var(--text);
-}
-
 /* ─── Sign-in responsive ─────────────────────────────────────────────────────── */
 
 @media (max-width: 460px) {
@@ -1109,10 +1014,6 @@ form {
 }
 .scope-option input {
   width: auto;
-}
-.org-dropdown-action {
-  text-decoration: none;
-  display: block;
 }
 @media (max-width: 700px) {
   .settings-form.inline {

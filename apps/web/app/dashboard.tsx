@@ -469,7 +469,7 @@ export function Dashboard() {
 
   return (
     <AppShell page="overview">
-      <main data-watchrail-dashboard className="w-full min-w-0 pb-16">
+      <main id="main-content" data-watchrail-dashboard className="w-full min-w-0 pb-16">
         <DashboardHeader />
 
         {!isLoading && !pageError && <MonitorOverview monitors={monitors} />}

@@ -1,16 +1,9 @@
 'use client';
 
-/**
- * OrgSwitcher — shows the active organization name and lets the user switch
- * to another organization or sign out.
- *
- * Rendered client-side so it can use Better Auth's reactive session hook.
- */
-
+import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { authClient } from '../lib/auth-client';
-import Link from 'next/link';
 
 interface Org {
   id: string;
@@ -18,60 +11,111 @@ interface Org {
   slug: string;
 }
 
-export function OrgSwitcher() {
+function ChevronIcon({ open }: { open: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      className={`size-4 transition-transform ${open ? 'rotate-180' : ''}`}
+      aria-hidden="true"
+    >
+      <path d="m6 8 4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      className="size-4"
+      aria-hidden="true"
+    >
+      <path d="m5 10 3 3 7-7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function reloadWindow() {
+  window.location.reload();
+}
+
+export function OrgSwitcher({ reload = reloadWindow }: { reload?: () => void } = {}) {
   const { data: session } = authClient.useSession();
 
   if (!session?.user) return null;
-  return <AuthenticatedOrgSwitcher session={session} />;
+  return <AuthenticatedOrgSwitcher session={session} reload={reload} />;
 }
 
 function AuthenticatedOrgSwitcher({
   session,
+  reload,
 }: {
   session: {
     user: { name: string };
     session: { activeOrganizationId?: string | null | undefined };
   };
+  reload: () => void;
 }) {
   const router = useRouter();
   const [orgs, setOrgs] = useState<Org[]>([]);
   const [open, setOpen] = useState(false);
+  const [switchError, setSwitchError] = useState<string>();
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
-  // Fetch the user's organizations once they're authenticated.
   useEffect(() => {
-    if (!session?.user) return;
     authClient.organization
       .list()
       .then((result) => {
         if (result.data) setOrgs(result.data);
       })
-      .catch(() => {
-        // Non-critical — org list failing shouldn't break the page.
-      });
-  }, [session?.user]);
+      .catch(() => undefined);
+  }, []);
 
-  // Close dropdown on outside click.
   useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
+    if (!open) return;
+
+    function handlePointerDown(event: MouseEvent) {
       if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
         setOpen(false);
       }
     }
-    if (open) document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    }
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
   }, [open]);
 
-  const activeOrg = orgs.find((o) => o.id === session.session.activeOrganizationId) ?? orgs[0];
+  const activeOrg = orgs.find((org) => org.id === session.session.activeOrganizationId) ?? orgs[0];
 
   async function switchOrg(org: Org) {
-    setOpen(false);
+    setSwitchError(undefined);
     try {
-      await authClient.organization.setActive({ organizationId: org.id });
-      // Refresh the page so the dashboard reloads with the new org context.
-      window.location.reload();
+      const result = await authClient.organization.setActive({ organizationId: org.id });
+      if (result.error) {
+        setSwitchError('Could not switch organizations. Try again.');
+        return;
+      }
+      setOpen(false);
+      reload();
     } catch {
-      // Silently ignore — the user can try again.
+      setSwitchError('Could not switch organizations. Try again.');
     }
   }
 
@@ -82,54 +126,70 @@ function AuthenticatedOrgSwitcher({
     router.refresh();
   }
 
+  const displayName = activeOrg?.name ?? session.user.name;
+
   return (
-    <div className="org-switcher-wrapper" ref={wrapperRef}>
+    <div className="relative min-w-0" ref={wrapperRef}>
       <button
+        ref={triggerRef}
         type="button"
-        className="org-switcher"
-        aria-haspopup="listbox"
+        className="flex min-h-11 max-w-56 min-w-0 items-center gap-2 rounded-lg border border-rail-border bg-rail-raised px-3 text-[13px] font-medium text-rail-text transition-colors hover:border-rail-border-strong hover:bg-rail-hover"
         aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
+        aria-controls="organization-menu"
+        onClick={() => setOpen((current) => !current)}
       >
-        <span className="org-switcher-name">{activeOrg?.name ?? session.user.name}</span>
-        <span className="org-switcher-caret" aria-hidden="true">
-          {open ? '▲' : '▼'}
+        <span className="grid size-6 shrink-0 place-items-center rounded-md bg-rail-selected text-xs font-semibold text-rail-accent">
+          {displayName.trim().charAt(0).toUpperCase()}
+        </span>
+        <span className="truncate">{displayName}</span>
+        <span className="shrink-0 text-rail-muted">
+          <ChevronIcon open={open} />
         </span>
       </button>
 
       {open && (
-        <div className="org-dropdown" role="listbox" aria-label="Organizations">
+        <div
+          id="organization-menu"
+          role="group"
+          aria-label="Organization switcher"
+          className="absolute top-[calc(100%+0.5rem)] right-0 z-50 w-64 rounded-xl border border-rail-border bg-rail-overlay p-2 shadow-[0_18px_50px_var(--color-rail-shadow)]"
+        >
+          <p className="px-2 pt-1 pb-2 text-xs font-medium text-rail-muted">Organizations</p>
           {orgs.map((org) => (
             <button
               key={org.id}
               type="button"
-              role="option"
-              aria-selected={org.id === activeOrg?.id}
-              className={`org-dropdown-item${org.id === activeOrg?.id ? ' active' : ''}`}
+              aria-pressed={org.id === activeOrg?.id}
+              className="flex min-h-11 w-full items-center justify-between gap-3 rounded-lg px-2 text-left text-[13px] text-rail-text transition-colors hover:bg-rail-hover"
               onClick={() => void switchOrg(org)}
             >
-              <span>{org.name}</span>
+              <span className="truncate">{org.name}</span>
               {org.id === activeOrg?.id && (
-                <span aria-hidden="true" style={{ fontSize: 10 }}>
-                  ✓
+                <span className="shrink-0 text-rail-accent">
+                  <CheckIcon />
                 </span>
               )}
             </button>
           ))}
 
-          <div className="org-dropdown-divider" />
+          {switchError && (
+            <p role="alert" className="mx-2 my-2 text-xs leading-5 text-rail-danger">
+              {switchError}
+            </p>
+          )}
+
+          <div className="my-2 h-px bg-rail-border" />
 
           <Link
-            className="org-dropdown-action"
+            className="flex min-h-11 items-center rounded-lg px-2 text-[13px] text-rail-subtle no-underline transition-colors hover:bg-rail-hover hover:text-rail-text"
             href="/settings/organization"
             onClick={() => setOpen(false)}
           >
             Organization settings
           </Link>
-
           <button
             type="button"
-            className="org-dropdown-action"
+            className="flex min-h-11 w-full items-center rounded-lg px-2 text-left text-[13px] text-rail-subtle transition-colors hover:bg-rail-hover hover:text-rail-text"
             onClick={() => void handleSignOut()}
           >
             Sign out
