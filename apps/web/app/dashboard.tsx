@@ -43,7 +43,8 @@ export function Dashboard() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [updatingPolicyIds, setUpdatingPolicyIds] = useState<Set<string>>(() => new Set());
   const [updatingSettingsIds, setUpdatingSettingsIds] = useState<Set<string>>(() => new Set());
-  const [pageError, setPageError] = useState<string>();
+  const [loadError, setLoadError] = useState<string>();
+  const [actionError, setActionError] = useState<string>();
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [manualRounds, setManualRounds] = useState<Record<string, ManualRound>>({});
   const [runningMonitorIds, setRunningMonitorIds] = useState<Set<string>>(() => new Set());
@@ -80,7 +81,7 @@ export function Dashboard() {
 
   async function loadMonitors(): Promise<void> {
     setIsLoading(true);
-    setPageError(undefined);
+    setLoadError(undefined);
 
     try {
       const response = await fetch('/api/monitors', { headers: { Accept: 'application/json' } });
@@ -88,7 +89,7 @@ export function Dashboard() {
       const body = (await response.json()) as { data: Monitor[] };
       setMonitors(body.data);
     } catch {
-      setPageError(
+      setLoadError(
         'Watchrail could not load your monitors. Check that the API and database are running.',
       );
     } finally {
@@ -99,7 +100,7 @@ export function Dashboard() {
   async function createMonitor(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     setIsSubmitting(true);
-    setPageError(undefined);
+    setActionError(undefined);
     setFieldErrors({});
 
     const form = event.currentTarget;
@@ -120,7 +121,7 @@ export function Dashboard() {
       const body = (await response.json()) as { data?: Monitor } & ApiError;
       if (!response.ok) {
         if (response.status === 400 && body.fields) setFieldErrors(body.fields);
-        else setPageError('Watchrail could not save this monitor. Try again.');
+        else setActionError('Watchrail could not save this monitor. Try again.');
         return;
       }
 
@@ -128,7 +129,7 @@ export function Dashboard() {
       setMonitors((current) => [body.data as Monitor, ...current]);
       form.reset();
     } catch {
-      setPageError('Watchrail could not reach the API. Check the local services and try again.');
+      setActionError('Watchrail could not reach the API. Check the local services and try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -168,7 +169,7 @@ export function Dashboard() {
     const statusPolicy = statusPolicyFromForm(formData);
 
     setUpdatingPolicyIds((current) => new Set(current).add(monitorId));
-    setPageError(undefined);
+    setActionError(undefined);
 
     try {
       const response = await fetch(`/api/monitors/${monitorId}/status-policy`, {
@@ -184,7 +185,7 @@ export function Dashboard() {
         current.map((monitor) => (monitor.id === monitorId ? (body.data as Monitor) : monitor)),
       );
     } catch (error) {
-      setPageError(error instanceof Error ? error.message : 'Could not update status policy.');
+      setActionError(error instanceof Error ? error.message : 'Could not update status policy.');
     } finally {
       setUpdatingPolicyIds((current) => {
         const next = new Set(current);
@@ -203,7 +204,7 @@ export function Dashboard() {
     const timeoutSeconds = Number(formData.get('timeoutSeconds'));
 
     setUpdatingSettingsIds((current) => new Set(current).add(monitorId));
-    setPageError(undefined);
+    setActionError(undefined);
 
     try {
       const response = await fetch(`/api/monitors/${monitorId}/http-settings`, {
@@ -224,7 +225,7 @@ export function Dashboard() {
         current.map((monitor) => (monitor.id === monitorId ? (body.data as Monitor) : monitor)),
       );
     } catch (error) {
-      setPageError(error instanceof Error ? error.message : 'Could not update HTTP settings.');
+      setActionError(error instanceof Error ? error.message : 'Could not update HTTP settings.');
     } finally {
       setUpdatingSettingsIds((current) => {
         const next = new Set(current);
@@ -243,9 +244,10 @@ export function Dashboard() {
       .getAll('location')
       .filter((value): value is string => typeof value === 'string');
     if (locations.length === 0 || (locations.includes('local') && locations.length > 1)) {
-      setPageError('Select local only, or one or more remote locations.');
+      setActionError('Select local only, or one or more remote locations.');
       return;
     }
+    setActionError(undefined);
     setUpdatingSettingsIds((current) => new Set(current).add(monitorId));
     try {
       const response = await fetch(`/api/monitors/${monitorId}/locations`, {
@@ -259,7 +261,9 @@ export function Dashboard() {
         current.map((monitor) => (monitor.id === monitorId ? (body.data as Monitor) : monitor)),
       );
     } catch (error) {
-      setPageError(error instanceof Error ? error.message : 'Could not update execution location.');
+      setActionError(
+        error instanceof Error ? error.message : 'Could not update execution location.',
+      );
     } finally {
       setUpdatingSettingsIds((current) => {
         const next = new Set(current);
@@ -472,13 +476,22 @@ export function Dashboard() {
       <main id="main-content" data-watchrail-dashboard className="w-full min-w-0 pb-16">
         <DashboardHeader />
 
-        {!isLoading && !pageError && <MonitorOverview monitors={monitors} />}
+        {!isLoading && !loadError && <MonitorOverview monitors={monitors} />}
 
-        {pageError ? (
+        {loadError ? (
           <div className="alert" role="alert">
-            <span>{pageError}</span>
+            <span>{loadError}</span>
             <button type="button" onClick={() => void loadMonitors()}>
               Retry
+            </button>
+          </div>
+        ) : null}
+
+        {actionError ? (
+          <div className="alert" role="alert">
+            <span>{actionError}</span>
+            <button type="button" onClick={() => setActionError(undefined)}>
+              Dismiss
             </button>
           </div>
         ) : null}
@@ -498,7 +511,7 @@ export function Dashboard() {
                   Monitors
                 </h2>
                 <p className="mt-1 mb-0 text-xs text-rail-muted">
-                  Live state and recent evidence for every configured endpoint.
+                  Latest reported state and evidence for every configured endpoint.
                 </p>
               </div>
               <button
@@ -544,7 +557,7 @@ export function Dashboard() {
                 <span className="spinner" aria-hidden="true" />
                 Loading monitors…
               </div>
-            ) : pageError ? (
+            ) : loadError ? (
               <div className="flex min-h-40 items-center p-6 text-sm text-rail-muted sm:px-8">
                 Monitor inventory is unavailable.
               </div>
@@ -834,7 +847,7 @@ export function Dashboard() {
           </section>
           <section
             id="create-monitor"
-            className="panel form-panel overflow-hidden rounded-xl xl:sticky xl:top-6"
+            className="panel form-panel overflow-hidden rounded-xl xl:sticky xl:top-24"
             aria-labelledby="create-heading"
           >
             <div className="panel-heading">

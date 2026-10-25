@@ -24,9 +24,12 @@ export function MonitorOverview({ monitors }: { monitors: readonly MonitorSummar
         <h2 className="m-0 text-sm font-semibold text-rail-text">Workspace health</h2>
         <span className="text-xs text-rail-muted">Latest authoritative state</span>
       </div>
-      <dl className="grid grid-cols-2 divide-x divide-y divide-rail-border sm:grid-cols-3 xl:grid-cols-5 xl:divide-y-0">
+      <dl className="grid grid-cols-2 gap-px bg-rail-border sm:grid-cols-3 xl:grid-cols-5">
         {stats.map((stat) => (
-          <div key={stat.label} className="flex min-h-24 flex-col justify-between gap-3 px-5 py-4">
+          <div
+            key={stat.label}
+            className="flex min-h-24 flex-col justify-between gap-3 bg-rail-header px-5 py-4"
+          >
             <dt className="text-xs font-medium text-rail-subtle">{stat.label}</dt>
             <dd
               className={`m-0 text-2xl font-semibold tracking-tight tabular-nums ${tones[stat.tone]}`}

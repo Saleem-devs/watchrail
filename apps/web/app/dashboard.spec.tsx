@@ -650,6 +650,37 @@ describe('Dashboard', () => {
     );
   });
 
+  it('keeps loaded monitors visible when a configuration update fails', async () => {
+    const monitor = {
+      id: 'monitor-1',
+      name: 'Production API',
+      url: 'https://example.com/health',
+      method: 'GET',
+      lifecycleState: 'ENABLED',
+      timeoutMs: 10_000,
+      followRedirects: true,
+      statusPolicy: { type: 'ANY_2XX' },
+      locations: ['local'],
+      createdAt: new Date().toISOString(),
+      currentCheck: null,
+      incidentState: { failureStreak: null, currentIncident: null },
+      uptime: { uptimePercent: null, coveragePercent: null },
+    };
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [monitor] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({}), { status: 500 }));
+
+    render(<Dashboard />);
+    await screen.findByRole('heading', { name: monitor.name });
+    await userEvent.click(screen.getByText('Configure monitor'));
+    await userEvent.click(screen.getByRole('button', { name: 'Save policy' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not update status policy.');
+    expect(screen.getByRole('heading', { name: monitor.name })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Monitor overview' })).toBeInTheDocument();
+    expect(screen.queryByText('Monitor inventory is unavailable.')).not.toBeInTheDocument();
+  });
+
   it('updates the complete HTTP settings object', async () => {
     const monitor = {
       id: 'monitor-1',
