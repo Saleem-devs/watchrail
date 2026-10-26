@@ -22,14 +22,36 @@ describe('AppShell', () => {
       'aria-current',
       'page',
     );
-    expect(screen.getAllByRole('link', { name: 'Add monitor' })[0]).toHaveAttribute(
+    expect(screen.getAllByRole('link', { name: 'New monitor' })[0]).toHaveAttribute(
       'href',
-      '/#create-monitor',
+      '/monitors/new',
+    );
+    expect(screen.getAllByRole('link', { name: 'Monitors' })[0]).toHaveAttribute(
+      'href',
+      '/monitors',
     );
     expect(screen.getByRole('main')).toContainElement(
       screen.getByRole('heading', { name: 'Dashboard' }),
     );
     expect(screen.getAllByRole('main')).toHaveLength(1);
+  });
+
+  it('collapses the sidebar directly without removing accessible link names', async () => {
+    const user = userEvent.setup();
+    render(
+      <AppShell page="overview">
+        <main id="main-content">Overview</main>
+      </AppShell>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Collapse sidebar' }));
+
+    expect(screen.getByRole('button', { name: 'Expand sidebar' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    expect(screen.getAllByRole('link', { name: 'Monitors' })[0]).toBeInTheDocument();
+    expect(window.localStorage.getItem('watchrail.sidebar-collapsed')).toBe('true');
   });
 
   it('provides a compact mobile navigation disclosure that closes after navigation', async () => {
@@ -54,5 +76,22 @@ describe('AppShell', () => {
       'aria-expanded',
       'false',
     );
+  });
+
+  it('opens the UI-only workspace search without presenting invented results', async () => {
+    const user = userEvent.setup();
+    render(
+      <AppShell page="overview">
+        <main id="main-content">Overview</main>
+      </AppShell>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Search Watchrail' }));
+    expect(screen.getByRole('dialog', { name: 'Search Watchrail' })).toBeInTheDocument();
+    expect(screen.getByText('Workspace-wide search is coming soon.')).toBeInTheDocument();
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Close search' }));
+    expect(screen.queryByRole('dialog', { name: 'Search Watchrail' })).not.toBeInTheDocument();
   });
 });

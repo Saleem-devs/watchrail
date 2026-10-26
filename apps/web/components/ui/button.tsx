@@ -15,8 +15,8 @@ const variants: Record<ButtonVariant, string> = {
 };
 
 const sizes: Record<ButtonSize, string> = {
-  default: 'min-h-11 px-4 py-2.5 text-sm',
-  compact: 'min-h-10 px-3 py-2 text-xs',
+  default: 'min-h-10 px-3 py-1.5 text-sm sm:min-h-9',
+  compact: 'min-h-9 px-2.5 py-1 text-xs sm:min-h-8',
 };
 
 export function actionClassName({
@@ -28,7 +28,7 @@ export function actionClassName({
   size?: ButtonSize;
   className?: string | undefined;
 } = {}): string {
-  return `inline-flex items-center justify-center gap-2 rounded-rail-control border font-semibold no-underline transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rail-accent disabled:cursor-not-allowed disabled:opacity-50 ${variants[variant]} ${sizes[size]} ${className}`.trim();
+  return `inline-flex items-center justify-center gap-2 rounded-rail-control border font-medium no-underline transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rail-accent disabled:cursor-not-allowed disabled:opacity-50 ${variants[variant]} ${sizes[size]} ${className}`.trim();
 }
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {

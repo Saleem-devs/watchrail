@@ -19,6 +19,9 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 ### Design direction
 
+- Use the Supabase dashboard as Watchrail's primary application-interface benchmark for neutral
+  light and dark surfaces, compact typography, control sizing, subtle borders, and information
+  density. Preserve Watchrail's own brand, monitoring semantics, navigation, and product structure.
 - Build a polished, distinctive developer-tools interface.
 - Prefer a restrained dark theme, strong typography, thoughtful spacing, clear hierarchy, and
   subtle interactive details.

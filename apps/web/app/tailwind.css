@@ -9,23 +9,23 @@
 
   --color-rail-canvas: #ffffff;
   --color-rail-workspace: #ffffff;
-  --color-rail-sidebar: #f7f7f8;
+  --color-rail-sidebar: #fcfcfc;
   --color-rail-surface: #ffffff;
   --color-rail-header: #ffffff;
-  --color-rail-raised: #f7f7f8;
+  --color-rail-raised: #ffffff;
   --color-rail-overlay: #ffffff;
   --color-rail-input: #ffffff;
-  --color-rail-border: #e2e4e7;
-  --color-rail-border-strong: #c7cbd1;
-  --color-rail-hover: #f0f1f2;
-  --color-rail-selected: #eaf7f0;
-  --color-rail-selected-border: #9bcfb3;
-  --color-rail-text: #111315;
-  --color-rail-subtle: #4e565b;
-  --color-rail-muted: #687178;
-  --color-rail-accent: #087a45;
-  --color-rail-accent-hover: #06663a;
-  --color-rail-accent-light: #0d5b38;
+  --color-rail-border: #e5e5e5;
+  --color-rail-border-strong: #cfcfcf;
+  --color-rail-hover: #f5f5f5;
+  --color-rail-selected: #f0f0f0;
+  --color-rail-selected-border: #d6d6d6;
+  --color-rail-text: #1c1c1c;
+  --color-rail-subtle: #5f5f5f;
+  --color-rail-muted: #737373;
+  --color-rail-accent: #218a5b;
+  --color-rail-accent-hover: #197449;
+  --color-rail-accent-light: #176b45;
   --color-rail-on-accent: #ffffff;
   --color-rail-success: #087a45;
   --color-rail-warning: #835800;
@@ -34,8 +34,8 @@
   --color-rail-danger-surface: #fff1f2;
   --color-rail-shadow: rgb(17 19 21 / 14%);
 
-  --radius-rail-control: 0.5rem;
-  --radius-rail-panel: 0.75rem;
+  --radius-rail-control: 0.375rem;
+  --radius-rail-panel: 0.5rem;
 }
 
 @layer base {
@@ -49,32 +49,32 @@
   @media (prefers-color-scheme: dark) {
     :root {
       color-scheme: dark;
-      --color-rail-canvas: #181818;
-      --color-rail-workspace: #181818;
-      --color-rail-sidebar: #202020;
-      --color-rail-surface: #1d1d1d;
-      --color-rail-header: #1b1b1b;
-      --color-rail-raised: #242424;
-      --color-rail-overlay: #303030;
-      --color-rail-input: #222222;
-      --color-rail-border: #303030;
-      --color-rail-border-strong: #464646;
-      --color-rail-hover: #292929;
-      --color-rail-selected: #343434;
-      --color-rail-selected-border: #505050;
-      --color-rail-text: #f1f1f1;
-      --color-rail-subtle: #b7b7b7;
-      --color-rail-muted: #8d8d8d;
-      --color-rail-accent: #63f5af;
-      --color-rail-accent-hover: #8affc4;
-      --color-rail-accent-light: #dcf9ea;
-      --color-rail-on-accent: #05120b;
-      --color-rail-success: #71d6a4;
+      --color-rail-canvas: #121212;
+      --color-rail-workspace: #121212;
+      --color-rail-sidebar: #141414;
+      --color-rail-surface: #181818;
+      --color-rail-header: #121212;
+      --color-rail-raised: #1a1a1a;
+      --color-rail-overlay: #1f1f1f;
+      --color-rail-input: #171717;
+      --color-rail-border: #2a2a2a;
+      --color-rail-border-strong: #3a3a3a;
+      --color-rail-hover: #222222;
+      --color-rail-selected: #242424;
+      --color-rail-selected-border: #383838;
+      --color-rail-text: #ededed;
+      --color-rail-subtle: #b4b4b4;
+      --color-rail-muted: #858585;
+      --color-rail-accent: #3ecf8e;
+      --color-rail-accent-hover: #56d9a0;
+      --color-rail-accent-light: #a7f3d0;
+      --color-rail-on-accent: #052e1d;
+      --color-rail-success: #3ecf8e;
       --color-rail-warning: #f8c765;
       --color-rail-danger: #ff9298;
       --color-rail-impaired: #b8a7ff;
       --color-rail-danger-surface: #241313;
-      --color-rail-shadow: rgb(0 0 0 / 45%);
+      --color-rail-shadow: rgb(0 0 0 / 55%);
     }
   }
 

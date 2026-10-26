@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { AppShell } from '../components/app-shell';
 import { MonitorOverview } from '../components/monitor-overview';
@@ -34,7 +35,15 @@ import { filterMonitors } from '../features/monitors/filter-monitors';
 
 const multiLocationUiEnabled = process.env.NEXT_PUBLIC_MULTI_LOCATION_EXECUTION_ENABLED === 'true';
 
-export function Dashboard() {
+type DashboardView = 'legacy' | 'overview' | 'monitors' | 'create' | 'detail';
+
+export function Dashboard({
+  view = 'legacy',
+  monitorId,
+}: {
+  view?: DashboardView;
+  monitorId?: string;
+}) {
   const [monitors, setMonitors] = useState<Monitor[]>([]);
   const [monitorQuery, setMonitorQuery] = useState('');
   const [monitorFilter, setMonitorFilter] = useState<MonitorFilter>('all');
@@ -46,6 +55,7 @@ export function Dashboard() {
   const [loadError, setLoadError] = useState<string>();
   const [actionError, setActionError] = useState<string>();
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [createdMonitor, setCreatedMonitor] = useState<Monitor>();
   const [manualRounds, setManualRounds] = useState<Record<string, ManualRound>>({});
   const [runningMonitorIds, setRunningMonitorIds] = useState<Set<string>>(() => new Set());
   const [runErrors, setRunErrors] = useState<Record<string, string>>({});
@@ -127,6 +137,7 @@ export function Dashboard() {
 
       if (!body.data) throw new Error('The API returned no monitor.');
       setMonitors((current) => [body.data as Monitor, ...current]);
+      setCreatedMonitor(body.data);
       form.reset();
     } catch {
       setActionError('Watchrail could not reach the API. Check the local services and try again.');
@@ -471,12 +482,33 @@ export function Dashboard() {
     });
   }
 
-  return (
-    <AppShell page="overview">
-      <main id="main-content" data-watchrail-dashboard className="w-full min-w-0 pb-16">
-        <DashboardHeader />
+  const visibleMonitors =
+    view === 'detail'
+      ? monitors.filter((monitor) => monitor.id === monitorId)
+      : filterMonitors(monitors, monitorQuery, monitorFilter);
+  const shellPage =
+    view === 'overview'
+      ? 'overview'
+      : view === 'create'
+        ? 'new-monitor'
+        : view === 'detail'
+          ? 'monitor-detail'
+          : view === 'legacy'
+            ? 'overview'
+            : 'monitors';
 
-        {!isLoading && !loadError && <MonitorOverview monitors={monitors} />}
+  return (
+    <AppShell page={shellPage}>
+      <main id="main-content" data-watchrail-dashboard className="w-full min-w-0 pb-16">
+        {view !== 'detail' ? (
+          <DashboardHeader
+            view={view === 'create' ? 'create' : view === 'monitors' ? 'monitors' : 'overview'}
+          />
+        ) : null}
+
+        {!isLoading && !loadError && (view === 'overview' || view === 'legacy') ? (
+          <MonitorOverview monitors={monitors} />
+        ) : null}
 
         {loadError ? (
           <div className="alert" role="alert">
@@ -496,446 +528,507 @@ export function Dashboard() {
           </div>
         ) : null}
 
-        <div className="mt-6 grid min-w-0 items-start gap-6 xl:grid-cols-[minmax(0,1.75fr)_minmax(320px,0.75fr)]">
-          <section
-            id="monitor-inventory"
-            className="min-w-0 overflow-hidden rounded-xl border border-rail-border bg-rail-header"
-            aria-labelledby="monitors-heading"
+        {view === 'create' && createdMonitor ? (
+          <div
+            className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-rail-panel border border-rail-success/30 bg-rail-success/5 px-4 py-3 text-sm text-rail-success"
+            role="status"
           >
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rail-border p-5 sm:px-6">
-              <div>
-                <h2
-                  id="monitors-heading"
-                  className="m-0 text-lg font-semibold tracking-tight text-rail-text"
-                >
-                  Monitors
-                </h2>
-                <p className="mt-1 mb-0 text-xs text-rail-muted">
-                  Latest reported state and evidence for every configured endpoint.
-                </p>
-              </div>
-              <button
-                className="min-h-10 rounded-lg border border-rail-border px-4 text-sm text-rail-text hover:bg-rail-hover"
-                type="button"
-                onClick={() => void loadMonitors()}
-              >
-                Refresh
-              </button>
-            </div>
+            <span>{createdMonitor.name} is ready for its first check.</span>
+            <Link
+              href={`/monitors/${createdMonitor.id}`}
+              className="inline-flex min-h-9 items-center rounded-rail-control px-3 font-medium text-rail-success no-underline hover:bg-rail-hover"
+            >
+              View monitor
+            </Link>
+          </div>
+        ) : null}
 
-            {monitors.length > 0 ? (
-              <div className="flex flex-col gap-3 border-b border-rail-border px-5 py-4 sm:flex-row sm:px-6">
-                <label className="flex flex-1 flex-col gap-1.5 text-xs text-rail-subtle">
-                  Search monitors
-                  <input
-                    type="search"
-                    placeholder="Name or URL"
-                    value={monitorQuery}
-                    onChange={(event) => setMonitorQuery(event.target.value)}
-                    className="min-h-11 w-full rounded-lg border border-rail-border bg-rail-sidebar px-3 text-sm text-rail-text placeholder:text-rail-muted"
-                  />
-                </label>
-                <label className="flex flex-col gap-1.5 text-xs text-rail-subtle">
-                  Health
-                  <select
-                    value={monitorFilter}
-                    onChange={(event) => setMonitorFilter(event.target.value as MonitorFilter)}
-                    className="min-h-11 rounded-lg border border-rail-border bg-rail-sidebar px-3 text-sm text-rail-text"
-                  >
-                    <option value="all">All monitors</option>
-                    <option value="operational">Operational</option>
-                    <option value="attention">Needs attention</option>
-                    <option value="paused">Paused</option>
-                    <option value="pending">Awaiting evidence</option>
-                  </select>
-                </label>
-              </div>
-            ) : null}
+        {view === 'overview' && !isLoading && !loadError ? (
+          <OverviewMonitorTable monitors={monitors} />
+        ) : null}
 
-            {isLoading ? (
-              <div className="state" role="status">
-                <span className="spinner" aria-hidden="true" />
-                Loading monitors…
-              </div>
-            ) : loadError ? (
-              <div className="flex min-h-40 items-center p-6 text-sm text-rail-muted sm:px-8">
-                Monitor inventory is unavailable.
-              </div>
-            ) : monitors.length === 0 ? (
-              <div className="flex min-h-56 flex-col items-start justify-center p-6 sm:p-8">
-                <div className="mb-4 grid size-10 place-items-center rounded-lg border border-rail-border bg-rail-surface text-rail-muted">
-                  <svg
-                    viewBox="0 0 20 20"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    aria-hidden="true"
-                    className="size-5"
+        <div
+          className={`mt-6 grid min-w-0 items-start gap-6 ${view === 'legacy' ? 'xl:grid-cols-[minmax(0,1.75fr)_minmax(320px,0.75fr)]' : ''}`}
+        >
+          {view === 'legacy' || view === 'monitors' || view === 'detail' ? (
+            <section
+              id="monitor-inventory"
+              className="min-w-0 overflow-hidden rounded-rail-panel border border-rail-border bg-rail-header"
+              aria-labelledby="monitors-heading"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rail-border p-5 sm:px-6">
+                <div>
+                  <h2
+                    id="monitors-heading"
+                    className="m-0 text-lg font-semibold tracking-tight text-rail-text"
                   >
-                    <path d="M3 10h3l2-5 4 10 2-5h3" />
-                  </svg>
+                    {view === 'detail' ? (visibleMonitors[0]?.name ?? 'Monitor') : 'Monitors'}
+                  </h2>
+                  <p className="mt-1 mb-0 text-xs text-rail-muted">
+                    {view === 'detail'
+                      ? 'Authoritative health, incidents, evidence, and configuration.'
+                      : 'Latest reported state for every configured endpoint.'}
+                  </p>
                 </div>
-                <h3 className="m-0 text-base font-semibold text-rail-text">No monitors yet</h3>
-                <p className="mt-1 mb-0 max-w-sm text-sm leading-6 text-rail-subtle">
-                  Add an HTTP endpoint to begin collecting availability and diagnostic evidence.
-                </p>
-              </div>
-            ) : filterMonitors(monitors, monitorQuery, monitorFilter).length === 0 ? (
-              <div className="flex min-h-40 flex-col items-center justify-center gap-3 p-6 text-center">
-                <p className="text-sm text-rail-subtle">No monitors match your filters.</p>
-                <Button
-                  onClick={() => {
-                    setMonitorQuery('');
-                    setMonitorFilter('all');
-                  }}
-                  size="compact"
-                >
-                  Clear filters
-                </Button>
-              </div>
-            ) : (
-              <ul className="m-0 grid list-none gap-3 p-3 sm:p-4">
-                {filterMonitors(monitors, monitorQuery, monitorFilter).map((monitor) => (
-                  <li
-                    key={monitor.id}
-                    className="overflow-hidden rounded-xl border border-rail-border bg-rail-raised"
+                <div className="flex flex-wrap items-center gap-2">
+                  {view === 'detail' ? (
+                    <Link
+                      href="/monitors"
+                      className="inline-flex min-h-9 items-center rounded-rail-control px-3 text-sm text-rail-subtle no-underline hover:bg-rail-hover hover:text-rail-text"
+                    >
+                      Back to monitors
+                    </Link>
+                  ) : null}
+                  <button
+                    className="min-h-9 rounded-rail-control border border-rail-border px-3 text-sm text-rail-text hover:bg-rail-hover"
+                    type="button"
+                    onClick={() => void loadMonitors()}
                   >
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-rail-border px-5 py-4">
-                        <div className="min-w-0">
-                          <div className="mb-1.5 flex flex-wrap items-center gap-2.5">
-                            <h3 className="m-0 text-base font-semibold text-rail-text">
-                              {monitor.name}
-                            </h3>
-                            <StatusBadge
-                              status={monitorStatus(monitor.lifecycleState, monitor.currentCheck)}
-                              label={monitorStateLabel(
-                                monitor.lifecycleState,
-                                monitor.currentCheck,
-                              )}
+                    Refresh
+                  </button>
+                </div>
+              </div>
+
+              {view === 'monitors' && monitors.length > 0 ? (
+                <div className="flex flex-col gap-3 border-b border-rail-border px-5 py-4 sm:flex-row sm:px-6">
+                  <label className="flex flex-1 flex-col gap-1.5 text-xs text-rail-subtle">
+                    Search monitors
+                    <input
+                      type="search"
+                      placeholder="Name or URL"
+                      value={monitorQuery}
+                      onChange={(event) => setMonitorQuery(event.target.value)}
+                      className="min-h-9 w-full rounded-rail-control border border-rail-border bg-rail-input px-3 text-sm text-rail-text placeholder:text-rail-muted"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1.5 text-xs text-rail-subtle">
+                    Health
+                    <select
+                      value={monitorFilter}
+                      onChange={(event) => setMonitorFilter(event.target.value as MonitorFilter)}
+                      className="min-h-9 rounded-rail-control border border-rail-border bg-rail-input px-3 text-sm text-rail-text"
+                    >
+                      <option value="all">All monitors</option>
+                      <option value="operational">Operational</option>
+                      <option value="attention">Needs attention</option>
+                      <option value="paused">Paused</option>
+                      <option value="pending">Awaiting evidence</option>
+                    </select>
+                  </label>
+                </div>
+              ) : null}
+
+              {isLoading ? (
+                <div className="state" role="status">
+                  <span className="spinner" aria-hidden="true" />
+                  Loading monitors…
+                </div>
+              ) : loadError ? (
+                <div className="flex min-h-40 items-center p-6 text-sm text-rail-muted sm:px-8">
+                  Monitor inventory is unavailable.
+                </div>
+              ) : monitors.length === 0 ? (
+                <div className="flex min-h-56 flex-col items-start justify-center p-6 sm:p-8">
+                  <div className="mb-4 grid size-10 place-items-center rounded-lg border border-rail-border bg-rail-surface text-rail-muted">
+                    <svg
+                      viewBox="0 0 20 20"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      aria-hidden="true"
+                      className="size-5"
+                    >
+                      <path d="M3 10h3l2-5 4 10 2-5h3" />
+                    </svg>
+                  </div>
+                  <h3 className="m-0 text-base font-semibold text-rail-text">No monitors yet</h3>
+                  <p className="mt-1 mb-0 max-w-sm text-sm leading-6 text-rail-subtle">
+                    Add an HTTP endpoint to begin collecting availability and diagnostic evidence.
+                  </p>
+                </div>
+              ) : visibleMonitors.length === 0 ? (
+                <div className="flex min-h-40 flex-col items-center justify-center gap-3 p-6 text-center">
+                  <p className="text-sm text-rail-subtle">
+                    {view === 'detail'
+                      ? 'This monitor could not be found.'
+                      : 'No monitors match your filters.'}
+                  </p>
+                  {view === 'monitors' ? (
+                    <Button
+                      onClick={() => {
+                        setMonitorQuery('');
+                        setMonitorFilter('all');
+                      }}
+                      size="compact"
+                    >
+                      Clear filters
+                    </Button>
+                  ) : null}
+                </div>
+              ) : (
+                <ul className="m-0 grid list-none gap-3 p-3 sm:p-4">
+                  {visibleMonitors.map((monitor) => (
+                    <li
+                      key={monitor.id}
+                      className="overflow-hidden rounded-rail-panel border border-rail-border bg-rail-raised"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-rail-border px-5 py-4">
+                          <div className="min-w-0">
+                            <div className="mb-1.5 flex flex-wrap items-center gap-2.5">
+                              <h3 className="m-0 text-base font-semibold text-rail-text">
+                                {monitor.name}
+                              </h3>
+                              <StatusBadge
+                                status={monitorStatus(monitor.lifecycleState, monitor.currentCheck)}
+                                label={monitorStateLabel(
+                                  monitor.lifecycleState,
+                                  monitor.currentCheck,
+                                )}
+                              />
+                            </div>
+                            <a
+                              href={monitor.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="block max-w-full truncate text-sm text-rail-subtle underline decoration-rail-border-strong underline-offset-4 hover:text-rail-text"
+                            >
+                              {monitor.url}
+                            </a>
+                          </div>
+                          <Button
+                            variant="secondary"
+                            size="compact"
+                            disabled={runningMonitorIds.has(monitor.id)}
+                            onClick={() => void runNow(monitor.id)}
+                          >
+                            {runningMonitorIds.has(monitor.id) ? 'Checking…' : 'Run now'}
+                          </Button>
+                          {view === 'monitors' ? (
+                            <Link
+                              href={`/monitors/${monitor.id}`}
+                              className="inline-flex min-h-9 items-center rounded-rail-control px-3 text-xs font-medium text-rail-accent no-underline hover:bg-rail-hover"
+                            >
+                              View monitor
+                            </Link>
+                          ) : null}
+                        </div>
+                        <div className="flex flex-wrap gap-x-4 gap-y-2 border-b border-rail-border px-5 py-3 text-xs text-rail-muted">
+                          <span className="font-medium text-rail-subtle">{monitor.method}</span>
+                          <span>{monitor.timeoutMs / 1000}s timeout</span>
+                          <span>
+                            {monitor.followRedirects ? 'follow redirects' : 'redirects final'}
+                          </span>
+                          <span>{statusPolicyLabel(monitor.statusPolicy)}</span>
+                          <span>{monitor.locations.join(', ')}</span>
+                        </div>
+                        {view !== 'monitors' ? (
+                          <div className="p-5">
+                            {monitor.currentCheck?.kind === 'MULTI_LOCATION' ? (
+                              <dl
+                                className="mb-4 grid grid-cols-2 gap-px overflow-hidden rounded-rail-panel border border-rail-border bg-rail-border sm:grid-cols-3"
+                                aria-label={`Latest regional aggregate for ${monitor.name}`}
+                              >
+                                <div className="bg-rail-sidebar/60 px-4 py-3">
+                                  <dt className="text-xs text-rail-muted">Aggregate</dt>
+                                  <dd className="mt-1 mb-0 text-base font-semibold text-rail-text">
+                                    {monitor.currentCheck.aggregateOutcome}
+                                  </dd>
+                                </div>
+                                <div className="bg-rail-sidebar/60 px-4 py-3">
+                                  <dt className="text-xs text-rail-muted">Evidence coverage</dt>
+                                  <dd className="mt-1 mb-0 text-base font-semibold text-rail-text tabular-nums">
+                                    {formatRatio(monitor.currentCheck.coverage)}
+                                  </dd>
+                                </div>
+                                <div className="bg-rail-sidebar/60 px-4 py-3">
+                                  <dt className="text-xs text-rail-muted">Reachability</dt>
+                                  <dd className="mt-1 mb-0 text-base font-semibold text-rail-text tabular-nums">
+                                    {formatRatio(monitor.currentCheck.reachability)}
+                                  </dd>
+                                </div>
+                              </dl>
+                            ) : null}
+                            <ManualDiagnostic
+                              round={manualRounds[monitor.id]}
+                              error={runErrors[monitor.id]}
+                            />
+                            <IncidentSummary state={monitor.incidentState} />
+                            <dl
+                              className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-rail-panel border border-rail-border bg-rail-border"
+                              aria-label={`Uptime metrics for ${monitor.name}`}
+                              title="Today and the previous six UTC calendar days, starting no earlier than availability tracking."
+                            >
+                              <div className="bg-rail-sidebar/60 px-4 py-3">
+                                <dt className="text-xs text-rail-muted">7-day uptime</dt>
+                                <dd className="mt-1 mb-0 text-lg font-semibold text-rail-text tabular-nums">
+                                  {formatPercent(monitor.uptime?.uptimePercent)}
+                                </dd>
+                              </div>
+                              <div className="bg-rail-sidebar/60 px-4 py-3">
+                                <dt className="text-xs text-rail-muted">Evidence coverage</dt>
+                                <dd className="mt-1 mb-0 text-lg font-semibold text-rail-text tabular-nums">
+                                  {formatPercent(monitor.uptime?.coveragePercent)}
+                                </dd>
+                              </div>
+                            </dl>
+                            <div className="mt-4 flex flex-wrap items-center gap-1 border-t border-rail-border pt-3">
+                              <Button
+                                variant="quiet"
+                                size="compact"
+                                onClick={() => void toggleIncidentHistory(monitor.id)}
+                              >
+                                {visibleIncidentIds.has(monitor.id)
+                                  ? 'Hide incident history'
+                                  : 'Show incident history'}
+                              </Button>
+                              <Button
+                                variant="quiet"
+                                size="compact"
+                                onClick={() => void toggleHistory(monitor.id)}
+                              >
+                                {visibleHistoryIds.has(monitor.id)
+                                  ? 'Hide history'
+                                  : 'Show history'}
+                              </Button>
+                            </div>
+                            {visibleIncidentIds.has(monitor.id) ? (
+                              <IncidentHistory
+                                page={incidentHistory[monitor.id]}
+                                loading={loadingIncidentHistoryIds.has(monitor.id)}
+                                error={incidentHistoryErrors[monitor.id]}
+                                onRetry={() => void loadIncidentHistory(monitor.id)}
+                                onLoadMore={() => void loadIncidentHistory(monitor.id, true)}
+                              />
+                            ) : null}
+                            {visibleHistoryIds.has(monitor.id) ? (
+                              <CheckHistory
+                                page={history[monitor.id]}
+                                loading={loadingHistoryIds.has(monitor.id)}
+                                onLoadMore={() => void loadHistory(monitor.id, true)}
+                                details={historyDetails}
+                                expandedRoundIds={expandedHistoryRoundIds}
+                                loadingRoundIds={loadingHistoryRoundIds}
+                                onToggleRound={(roundId) =>
+                                  void toggleHistoryRound(monitor.id, roundId)
+                                }
+                              />
+                            ) : null}
+                            <MonitorConfiguration
+                              monitor={monitor}
+                              probeLocations={probeLocations}
+                              updatingSettings={updatingSettingsIds.has(monitor.id)}
+                              updatingPolicy={updatingPolicyIds.has(monitor.id)}
+                              onLoadProbeLocations={() => void loadProbeLocations()}
+                              onUpdateLocation={(event) => void updateLocation(monitor.id, event)}
+                              onUpdateHttpSettings={(event) =>
+                                void updateHttpSettings(monitor.id, event)
+                              }
+                              onUpdateStatusPolicy={(event) =>
+                                void updateStatusPolicy(monitor.id, event)
+                              }
                             />
                           </div>
-                          <a
-                            href={monitor.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="block max-w-full truncate text-sm text-rail-subtle underline decoration-rail-border-strong underline-offset-4 hover:text-rail-text"
-                          >
-                            {monitor.url}
-                          </a>
-                        </div>
-                        <Button
-                          variant="secondary"
-                          size="compact"
-                          disabled={runningMonitorIds.has(monitor.id)}
-                          onClick={() => void runNow(monitor.id)}
-                        >
-                          {runningMonitorIds.has(monitor.id) ? 'Checking…' : 'Run now'}
-                        </Button>
-                      </div>
-                      <div className="flex flex-wrap gap-x-4 gap-y-2 border-b border-rail-border px-5 py-3 text-xs text-rail-muted">
-                        <span className="font-medium text-rail-subtle">{monitor.method}</span>
-                        <span>{monitor.timeoutMs / 1000}s timeout</span>
-                        <span>
-                          {monitor.followRedirects ? 'follow redirects' : 'redirects final'}
-                        </span>
-                        <span>{statusPolicyLabel(monitor.statusPolicy)}</span>
-                        <span>{monitor.locations.join(', ')}</span>
-                      </div>
-                      <div className="p-5">
-                        {monitor.currentCheck?.kind === 'MULTI_LOCATION' ? (
-                          <dl
-                            className="uptime-summary"
-                            aria-label={`Latest regional aggregate for ${monitor.name}`}
-                          >
-                            <div>
-                              <dt>Aggregate</dt>
-                              <dd>{monitor.currentCheck.aggregateOutcome}</dd>
-                            </div>
-                            <div>
-                              <dt>Evidence coverage</dt>
-                              <dd>{formatRatio(monitor.currentCheck.coverage)}</dd>
-                            </div>
-                            <div>
-                              <dt>Reachability</dt>
-                              <dd>{formatRatio(monitor.currentCheck.reachability)}</dd>
-                            </div>
-                          </dl>
-                        ) : null}
-                        <details className="mt-5 rounded-xl border border-rail-border bg-rail-sidebar/50">
-                          <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-rail-text">
-                            Configure monitor
-                          </summary>
-                          <div className="border-t border-rail-border p-4">
-                            <form
-                              className="status-policy-form"
-                              onSubmit={(event) => void updateLocation(monitor.id, event)}
-                            >
-                              <label>
-                                Execution {multiLocationUiEnabled ? 'locations' : 'location'}
-                                <select
-                                  name="location"
-                                  multiple={multiLocationUiEnabled}
-                                  defaultValue={
-                                    multiLocationUiEnabled
-                                      ? monitor.locations
-                                      : (monitor.locations[0] ?? 'local')
-                                  }
-                                  onFocus={() => void loadProbeLocations()}
-                                >
-                                  <option value="local">Local</option>
-                                  {probeLocations.map((location) => (
-                                    <option
-                                      key={location.id}
-                                      value={location.id}
-                                      disabled={location.status !== 'ACTIVE'}
-                                    >
-                                      {location.name} — {location.health.toLowerCase()}
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
-                              <button type="submit" disabled={updatingSettingsIds.has(monitor.id)}>
-                                Save location
-                              </button>
-                            </form>
-                            <form
-                              className="status-policy-form"
-                              onSubmit={(event) => void updateHttpSettings(monitor.id, event)}
-                            >
-                              <label>
-                                URL
-                                <input name="url" type="url" defaultValue={monitor.url} required />
-                              </label>
-                              <label>
-                                Method
-                                <select name="method" defaultValue={monitor.method}>
-                                  <option value="GET">GET</option>
-                                  <option value="HEAD">HEAD</option>
-                                </select>
-                              </label>
-                              <label>
-                                Timeout (seconds)
-                                <input
-                                  name="timeoutSeconds"
-                                  type="number"
-                                  min="1"
-                                  max="30"
-                                  step="1"
-                                  defaultValue={monitor.timeoutMs / 1_000}
-                                />
-                              </label>
-                              <label>
-                                <input
-                                  name="followRedirects"
-                                  type="checkbox"
-                                  defaultChecked={monitor.followRedirects}
-                                />
-                                Follow redirects
-                              </label>
-                              <button
-                                className="quiet-button"
-                                type="submit"
-                                disabled={updatingSettingsIds.has(monitor.id)}
-                              >
-                                {updatingSettingsIds.has(monitor.id)
-                                  ? 'Saving…'
-                                  : 'Save HTTP settings'}
-                              </button>
-                            </form>
-                            <form
-                              className="status-policy-form"
-                              onSubmit={(event) => void updateStatusPolicy(monitor.id, event)}
-                            >
-                              <label>
-                                Expected status
-                                <select
-                                  name="statusPolicyMode"
-                                  defaultValue={monitor.statusPolicy.type}
-                                >
-                                  <option value="ANY_2XX">Any 2xx response</option>
-                                  <option value="EXACT">Specific status codes</option>
-                                </select>
-                              </label>
-                              <input
-                                name="statusCodes"
-                                type="text"
-                                inputMode="numeric"
-                                placeholder="200, 204"
-                                defaultValue={
-                                  monitor.statusPolicy.type === 'EXACT'
-                                    ? monitor.statusPolicy.statusCodes.join(', ')
-                                    : ''
-                                }
-                                aria-label={`Specific status codes for ${monitor.name}`}
-                              />
-                              <button
-                                className="quiet-button"
-                                type="submit"
-                                disabled={updatingPolicyIds.has(monitor.id)}
-                              >
-                                {updatingPolicyIds.has(monitor.id) ? 'Saving…' : 'Save policy'}
-                              </button>
-                            </form>
-                          </div>
-                        </details>
-                        <ManualDiagnostic
-                          round={manualRounds[monitor.id]}
-                          error={runErrors[monitor.id]}
-                        />
-                        <IncidentSummary state={monitor.incidentState} />
-                        <dl
-                          className="uptime-summary"
-                          aria-label={`Uptime metrics for ${monitor.name}`}
-                          title="Today and the previous six UTC calendar days, starting no earlier than availability tracking."
-                        >
-                          <div>
-                            <dt>7-day uptime</dt>
-                            <dd>{formatPercent(monitor.uptime?.uptimePercent)}</dd>
-                          </div>
-                          <div>
-                            <dt>Coverage</dt>
-                            <dd>{formatPercent(monitor.uptime?.coveragePercent)}</dd>
-                          </div>
-                        </dl>
-                        <div className="mt-4 flex flex-wrap items-center gap-1 border-t border-rail-border pt-3">
-                          <Button
-                            variant="quiet"
-                            size="compact"
-                            onClick={() => void toggleIncidentHistory(monitor.id)}
-                          >
-                            {visibleIncidentIds.has(monitor.id)
-                              ? 'Hide incident history'
-                              : 'Show incident history'}
-                          </Button>
-                          <Button
-                            variant="quiet"
-                            size="compact"
-                            onClick={() => void toggleHistory(monitor.id)}
-                          >
-                            {visibleHistoryIds.has(monitor.id) ? 'Hide history' : 'Show history'}
-                          </Button>
-                        </div>
-                        {visibleIncidentIds.has(monitor.id) ? (
-                          <IncidentHistory
-                            page={incidentHistory[monitor.id]}
-                            loading={loadingIncidentHistoryIds.has(monitor.id)}
-                            error={incidentHistoryErrors[monitor.id]}
-                            onRetry={() => void loadIncidentHistory(monitor.id)}
-                            onLoadMore={() => void loadIncidentHistory(monitor.id, true)}
-                          />
-                        ) : null}
-                        {visibleHistoryIds.has(monitor.id) ? (
-                          <CheckHistory
-                            page={history[monitor.id]}
-                            loading={loadingHistoryIds.has(monitor.id)}
-                            onLoadMore={() => void loadHistory(monitor.id, true)}
-                            details={historyDetails}
-                            expandedRoundIds={expandedHistoryRoundIds}
-                            loadingRoundIds={loadingHistoryRoundIds}
-                            onToggleRound={(roundId) =>
-                              void toggleHistoryRound(monitor.id, roundId)
-                            }
-                          />
                         ) : null}
                       </div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-          <section
-            id="create-monitor"
-            className="panel form-panel overflow-hidden rounded-xl xl:sticky xl:top-24"
-            aria-labelledby="create-heading"
-          >
-            <div className="panel-heading">
-              <div>
-                <h2 id="create-heading">Add an endpoint</h2>
-                <p className="mt-1 mb-0 text-xs text-rail-muted">Create a local HTTP monitor.</p>
-              </div>
-            </div>
-
-            <form onSubmit={(event) => void createMonitor(event)} noValidate>
-              <fieldset className="field">
-                <legend>Expected status</legend>
-                <label>
-                  <input name="statusPolicyMode" type="radio" value="ANY_2XX" defaultChecked />
-                  Any 2xx response
-                </label>
-                <label>
-                  <input name="statusPolicyMode" type="radio" value="EXACT" />
-                  Specific status codes
-                </label>
-                <input
-                  name="statusCodes"
-                  type="text"
-                  inputMode="numeric"
-                  placeholder="200, 204"
-                  aria-describedby={fieldErrors.statusPolicy ? 'status-policy-error' : undefined}
-                  aria-invalid={Boolean(fieldErrors.statusPolicy)}
-                />
-                {fieldErrors.statusPolicy ? (
-                  <p className="field-error" id="status-policy-error">
-                    {fieldErrors.statusPolicy[0]}
-                  </p>
-                ) : null}
-              </fieldset>
-              <div className="field">
-                <label htmlFor="name">Monitor name</label>
-                <input
-                  id="name"
-                  name="name"
-                  type="text"
-                  placeholder="Production API"
-                  maxLength={120}
-                  aria-describedby={fieldErrors.name ? 'name-error' : undefined}
-                  aria-invalid={Boolean(fieldErrors.name)}
-                />
-                {fieldErrors.name ? (
-                  <p className="field-error" id="name-error">
-                    {fieldErrors.name[0]}
-                  </p>
-                ) : null}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          ) : null}
+          {view === 'legacy' || view === 'create' ? (
+            <section
+              id="create-monitor"
+              className="panel form-panel overflow-hidden rounded-rail-panel xl:sticky xl:top-20"
+              aria-labelledby="create-heading"
+            >
+              <div className="panel-heading">
+                <div>
+                  <h2 id="create-heading">Add an endpoint</h2>
+                  <p className="mt-1 mb-0 text-xs text-rail-muted">Create a local HTTP monitor.</p>
+                </div>
               </div>
 
-              <div className="field">
-                <label htmlFor="url">HTTP(S) URL</label>
-                <input
-                  id="url"
-                  name="url"
-                  type="url"
-                  placeholder="https://api.example.com/health"
-                  aria-describedby={fieldErrors.url ? 'url-error' : 'url-help'}
-                  aria-invalid={Boolean(fieldErrors.url)}
-                />
-                {fieldErrors.url ? (
-                  <p className="field-error" id="url-error">
-                    {fieldErrors.url[0]}
-                  </p>
-                ) : (
-                  <p className="field-help" id="url-help">
-                    Watchrail stores this configuration but does not call it during creation.
-                  </p>
-                )}
-              </div>
+              <form onSubmit={(event) => void createMonitor(event)} noValidate>
+                <fieldset className="field">
+                  <legend>Expected status</legend>
+                  <label>
+                    <input name="statusPolicyMode" type="radio" value="ANY_2XX" defaultChecked />
+                    Any 2xx response
+                  </label>
+                  <label>
+                    <input name="statusPolicyMode" type="radio" value="EXACT" />
+                    Specific status codes
+                  </label>
+                  <input
+                    name="statusCodes"
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="200, 204"
+                    aria-describedby={fieldErrors.statusPolicy ? 'status-policy-error' : undefined}
+                    aria-invalid={Boolean(fieldErrors.statusPolicy)}
+                  />
+                  {fieldErrors.statusPolicy ? (
+                    <p className="field-error" id="status-policy-error">
+                      {fieldErrors.statusPolicy[0]}
+                    </p>
+                  ) : null}
+                </fieldset>
+                <div className="field">
+                  <label htmlFor="name">Monitor name</label>
+                  <input
+                    id="name"
+                    name="name"
+                    type="text"
+                    placeholder="Production API"
+                    maxLength={120}
+                    aria-describedby={fieldErrors.name ? 'name-error' : undefined}
+                    aria-invalid={Boolean(fieldErrors.name)}
+                  />
+                  {fieldErrors.name ? (
+                    <p className="field-error" id="name-error">
+                      {fieldErrors.name[0]}
+                    </p>
+                  ) : null}
+                </div>
 
-              <div className="defaults" aria-label="Initial monitor defaults">
-                <Default label="Method" value="GET" />
-                <Default label="Timeout" value="10 seconds" />
-                <Default label="Location" value="Local" />
-                <Default label="Lifecycle" value="Enabled" />
-              </div>
+                <div className="field">
+                  <label htmlFor="url">HTTP(S) URL</label>
+                  <input
+                    id="url"
+                    name="url"
+                    type="url"
+                    placeholder="https://api.example.com/health"
+                    aria-describedby={fieldErrors.url ? 'url-error' : 'url-help'}
+                    aria-invalid={Boolean(fieldErrors.url)}
+                  />
+                  {fieldErrors.url ? (
+                    <p className="field-error" id="url-error">
+                      {fieldErrors.url[0]}
+                    </p>
+                  ) : (
+                    <p className="field-help" id="url-help">
+                      Watchrail stores this configuration but does not call it during creation.
+                    </p>
+                  )}
+                </div>
 
-              <button className="primary-button" type="submit" disabled={isSubmitting}>
-                {isSubmitting ? 'Creating…' : 'Create monitor'}
-              </button>
-            </form>
-          </section>
+                <div className="defaults" aria-label="Initial monitor defaults">
+                  <Default label="Method" value="GET" />
+                  <Default label="Timeout" value="10 seconds" />
+                  <Default label="Location" value="Local" />
+                  <Default label="Lifecycle" value="Enabled" />
+                </div>
+
+                <button className="primary-button" type="submit" disabled={isSubmitting}>
+                  {isSubmitting ? 'Creating…' : 'Create monitor'}
+                </button>
+              </form>
+            </section>
+          ) : null}
         </div>
       </main>
     </AppShell>
+  );
+}
+
+function OverviewMonitorTable({ monitors }: { monitors: Monitor[] }) {
+  const visible = monitors.slice(0, 6);
+
+  return (
+    <section
+      className="overflow-hidden rounded-rail-panel border border-rail-border bg-rail-header"
+      aria-labelledby="overview-monitors-heading"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rail-border px-5 py-4 sm:px-6">
+        <div>
+          <h2 id="overview-monitors-heading" className="m-0 text-sm font-semibold text-rail-text">
+            Monitor snapshot
+          </h2>
+          <p className="mt-1 mb-0 text-xs text-rail-muted">Latest authoritative state</p>
+        </div>
+        <Link
+          href="/monitors"
+          className="inline-flex min-h-9 items-center rounded-rail-control px-3 text-sm font-medium text-rail-accent no-underline hover:bg-rail-hover"
+        >
+          View all monitors
+        </Link>
+      </div>
+      {visible.length === 0 ? (
+        <div className="flex min-h-40 flex-col items-start justify-center px-5 py-6 sm:px-6">
+          <p className="m-0 text-sm font-medium text-rail-text">No monitors yet</p>
+          <p className="mt-1 mb-4 text-sm text-rail-muted">
+            Create a monitor to begin collecting availability evidence.
+          </p>
+          <Link
+            href="/monitors/new"
+            className="inline-flex min-h-9 items-center rounded-rail-control bg-rail-accent px-3 text-sm font-medium text-rail-on-accent no-underline hover:bg-rail-accent-hover"
+          >
+            Create monitor
+          </Link>
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px] border-collapse text-left text-sm">
+            <thead className="bg-rail-sidebar/45 text-xs text-rail-muted">
+              <tr>
+                <th className="px-5 py-3 font-medium sm:px-6" scope="col">
+                  Monitor
+                </th>
+                <th className="px-4 py-3 font-medium" scope="col">
+                  Status
+                </th>
+                <th className="px-4 py-3 font-medium" scope="col">
+                  Response
+                </th>
+                <th className="px-4 py-3 font-medium" scope="col">
+                  7-day uptime
+                </th>
+                <th className="px-5 py-3 text-right font-medium sm:px-6" scope="col">
+                  <span className="sr-only">Open</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-rail-border">
+              {visible.map((monitor) => (
+                <tr key={monitor.id} className="hover:bg-rail-hover/50">
+                  <td className="px-5 py-3 sm:px-6">
+                    <div className="font-medium text-rail-text">{monitor.name}</div>
+                    <div className="mt-0.5 max-w-xs truncate text-xs text-rail-muted">
+                      {monitor.url}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <StatusBadge
+                      status={monitorStatus(monitor.lifecycleState, monitor.currentCheck)}
+                      label={monitorStateLabel(monitor.lifecycleState, monitor.currentCheck)}
+                    />
+                  </td>
+                  <td className="px-4 py-3 text-rail-subtle tabular-nums">
+                    {monitor.currentCheck?.responseTimeMs === null || !monitor.currentCheck
+                      ? '—'
+                      : `${monitor.currentCheck.responseTimeMs} ms`}
+                  </td>
+                  <td className="px-4 py-3 text-rail-subtle tabular-nums">
+                    {formatPercent(monitor.uptime?.uptimePercent)}
+                  </td>
+                  <td className="px-5 py-3 text-right sm:px-6">
+                    <Link
+                      href={`/monitors/${monitor.id}`}
+                      className="inline-flex min-h-8 items-center rounded-rail-control px-2.5 text-xs font-medium text-rail-accent no-underline hover:bg-rail-hover"
+                      aria-label={`View ${monitor.name}`}
+                    >
+                      View
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -944,6 +1037,123 @@ function omitKey<T>(record: Record<string, T>, key: string): Record<string, T> {
   delete next[key];
   return next;
 }
+
+function MonitorConfiguration({
+  monitor,
+  probeLocations,
+  updatingSettings,
+  updatingPolicy,
+  onLoadProbeLocations,
+  onUpdateLocation,
+  onUpdateHttpSettings,
+  onUpdateStatusPolicy,
+}: {
+  monitor: Monitor;
+  probeLocations: ProbeLocation[];
+  updatingSettings: boolean;
+  updatingPolicy: boolean;
+  onLoadProbeLocations: () => void;
+  onUpdateLocation: (event: FormEvent<HTMLFormElement>) => void;
+  onUpdateHttpSettings: (event: FormEvent<HTMLFormElement>) => void;
+  onUpdateStatusPolicy: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <details className="mt-4 rounded-rail-panel border border-rail-border bg-rail-sidebar/50">
+      <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-rail-text">
+        Configure monitor
+      </summary>
+      <div className="border-t border-rail-border p-4">
+        <form className="status-policy-form" onSubmit={onUpdateLocation}>
+          <label>
+            Execution {multiLocationUiEnabled ? 'locations' : 'location'}
+            <select
+              name="location"
+              multiple={multiLocationUiEnabled}
+              defaultValue={
+                multiLocationUiEnabled ? monitor.locations : (monitor.locations[0] ?? 'local')
+              }
+              onFocus={onLoadProbeLocations}
+            >
+              <option value="local">Local</option>
+              {probeLocations.map((location) => (
+                <option
+                  key={location.id}
+                  value={location.id}
+                  disabled={location.status !== 'ACTIVE'}
+                >
+                  {location.name} — {location.health.toLowerCase()}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="submit" disabled={updatingSettings}>
+            Save location
+          </button>
+        </form>
+        <form className="status-policy-form" onSubmit={onUpdateHttpSettings}>
+          <label>
+            URL
+            <input name="url" type="url" defaultValue={monitor.url} required />
+          </label>
+          <label>
+            Method
+            <select name="method" defaultValue={monitor.method}>
+              <option value="GET">GET</option>
+              <option value="HEAD">HEAD</option>
+            </select>
+          </label>
+          <label>
+            Timeout (seconds)
+            <input
+              name="timeoutSeconds"
+              type="number"
+              min="1"
+              max="30"
+              step="1"
+              defaultValue={monitor.timeoutMs / 1_000}
+            />
+          </label>
+          <label>
+            <input
+              name="followRedirects"
+              type="checkbox"
+              defaultChecked={monitor.followRedirects}
+            />
+            Follow redirects
+          </label>
+          <button className="quiet-button" type="submit" disabled={updatingSettings}>
+            {updatingSettings ? 'Saving…' : 'Save HTTP settings'}
+          </button>
+        </form>
+        <form className="status-policy-form" onSubmit={onUpdateStatusPolicy}>
+          <label>
+            Expected status
+            <select name="statusPolicyMode" defaultValue={monitor.statusPolicy.type}>
+              <option value="ANY_2XX">Any 2xx response</option>
+              <option value="EXACT">Specific status codes</option>
+            </select>
+          </label>
+          <input
+            name="statusCodes"
+            type="text"
+            inputMode="numeric"
+            placeholder="200, 204"
+            defaultValue={
+              monitor.statusPolicy.type === 'EXACT'
+                ? monitor.statusPolicy.statusCodes.join(', ')
+                : ''
+            }
+            aria-label={`Specific status codes for ${monitor.name}`}
+          />
+          <button className="quiet-button" type="submit" disabled={updatingPolicy}>
+            {updatingPolicy ? 'Saving…' : 'Save policy'}
+          </button>
+        </form>
+      </div>
+    </details>
+  );
+}
+
 function Default({ label, value }: { label: string; value: string }) {
   return (
     <div>
