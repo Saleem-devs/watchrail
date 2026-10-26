@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="12 12 76 76" role="img" aria-label="Watchrail">
-  <rect x="12" y="12" width="76" height="76" fill="#000"/>
-  <path fill="#fff" d="M20 42.7H37.4L50 21.5 61.3 48.7 66.4 42.8H80V49.6H69.6L58.3 63.1 49 37.6 41.5 49.6H20ZM20 55.8H42.4L47.7 47.7 56.4 71.4 51.6 78.5 44.8 62.5H20ZM64.4 62.5H80V55.8H70.1Z"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Watchrail">
+  <rect x="2" y="2" width="96" height="96" rx="10" fill="#0f0f0f"/>
+  <path fill="#3ecf8e" d="M20 42.7H37.4L50 21.5 61.3 48.7 66.4 42.8H80V49.6H69.6L58.3 63.1 49 37.6 41.5 49.6H20ZM20 55.8H42.4L47.7 47.7 56.4 71.4 51.6 78.5 44.8 62.5H20ZM64.4 62.5H80V55.8H70.1Z"/>
 </svg>

@@ -177,7 +177,7 @@ export default function OrganizationSettingsPage() {
         </p>
       )}
 
-      <section className="settings-card">
+      <section id="general" className="settings-card scroll-mt-16">
         <h2>General</h2>
         {organization && (
           <form onSubmit={saveOrganization} className="settings-form">
@@ -194,7 +194,7 @@ export default function OrganizationSettingsPage() {
         )}
       </section>
 
-      <section className="settings-card">
+      <section id="members" className="settings-card scroll-mt-16">
         <h2>Members</h2>
         <div className="settings-list">
           {members.map((member) => (
@@ -232,7 +232,7 @@ export default function OrganizationSettingsPage() {
         </div>
       </section>
 
-      <section className="settings-card">
+      <section id="invitations" className="settings-card scroll-mt-16">
         <h2>Invitations</h2>
         <form onSubmit={invite} className="settings-form inline">
           <label>
@@ -274,7 +274,7 @@ export default function OrganizationSettingsPage() {
         </div>
       </section>
 
-      <section className="settings-card">
+      <section id="api-credentials" className="settings-card scroll-mt-16">
         <h2>API credentials</h2>
         <form onSubmit={createCredential} className="settings-form">
           <label>

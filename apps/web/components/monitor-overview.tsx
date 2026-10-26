@@ -17,10 +17,10 @@ export function MonitorOverview({ monitors }: { monitors: readonly MonitorSummar
   ] as const;
   return (
     <section
-      className="my-6 overflow-hidden rounded-xl border border-rail-border bg-rail-header"
+      className="my-6 overflow-hidden rounded-rail-panel border border-rail-border bg-rail-header"
       aria-label="Monitor overview"
     >
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-rail-border px-5 py-3.5">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-rail-border px-4 py-3">
         <h2 className="m-0 text-sm font-semibold text-rail-text">Workspace health</h2>
         <span className="text-xs text-rail-muted">Latest authoritative state</span>
       </div>
@@ -28,7 +28,7 @@ export function MonitorOverview({ monitors }: { monitors: readonly MonitorSummar
         {stats.map((stat) => (
           <div
             key={stat.label}
-            className="flex min-h-24 flex-col justify-between gap-3 bg-rail-header px-5 py-4"
+            className="flex min-h-20 flex-col justify-between gap-2 bg-rail-header px-4 py-3"
           >
             <dt className="text-xs font-medium text-rail-subtle">{stat.label}</dt>
             <dd
@@ -41,7 +41,7 @@ export function MonitorOverview({ monitors }: { monitors: readonly MonitorSummar
       </dl>
       {summary.openIncidents > 0 && (
         <p
-          className="m-0 border-t border-rail-danger/25 bg-rail-danger/5 px-5 py-3 text-xs font-medium text-rail-danger"
+          className="m-0 border-t border-rail-danger/25 bg-rail-danger/5 px-4 py-3 text-xs font-medium text-rail-danger"
           role="status"
         >
           {summary.openIncidents} {summary.openIncidents === 1 ? 'monitor has' : 'monitors have'} an

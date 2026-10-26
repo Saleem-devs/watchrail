@@ -1,5 +1,27 @@
+import { Button } from '../../components/ui/button';
 import type { HistoryPage, IncidentHistoryPage, IncidentState, ManualRound } from './types';
 import { formatMilliseconds, formatRatio, humanize } from './formatting';
+
+type DiagnosticOutcome = 'PASS' | 'FAIL' | 'UNKNOWN' | 'UP' | 'DEGRADED' | 'DOWN';
+
+const outcomeTone: Record<DiagnosticOutcome, string> = {
+  PASS: 'border-rail-success/35 bg-rail-success/10 text-rail-success',
+  UP: 'border-rail-success/35 bg-rail-success/10 text-rail-success',
+  FAIL: 'border-rail-danger/35 bg-rail-danger/10 text-rail-danger',
+  DOWN: 'border-rail-danger/35 bg-rail-danger/10 text-rail-danger',
+  DEGRADED: 'border-rail-warning/35 bg-rail-warning/10 text-rail-warning',
+  UNKNOWN: 'border-rail-border-strong bg-rail-surface text-rail-subtle',
+};
+
+function OutcomeBadge({ outcome }: { outcome: DiagnosticOutcome }) {
+  return (
+    <span
+      className={`inline-flex min-h-7 items-center rounded-rail-control border px-2 py-1 text-xs font-semibold ${outcomeTone[outcome]}`}
+    >
+      {outcome}
+    </span>
+  );
+}
 
 export function ManualDiagnostic({
   round,
@@ -10,23 +32,38 @@ export function ManualDiagnostic({
 }) {
   if (error) {
     return (
-      <p className="diagnostic-error" role="alert">
+      <p
+        className="mt-4 mb-0 rounded-lg border border-rail-danger/30 bg-rail-danger/5 px-4 py-3 text-sm text-rail-danger"
+        role="alert"
+      >
         {error}
       </p>
     );
   }
 
   if (!round) {
-    return <p className="diagnostic-empty">No manual diagnostic started.</p>;
+    return (
+      <p className="mt-4 mb-0 border-t border-rail-border pt-4 text-xs text-rail-muted">
+        No manual diagnostic started.
+      </p>
+    );
   }
 
   if (!round.result) {
     const pendingLabel = round.assignmentStatus === 'RUNNING' ? 'Executing check' : 'Queued';
     return (
-      <div className="manual-diagnostic" aria-live="polite">
-        <span className="diagnostic-label">Latest manual diagnostic</span>
-        <strong className="diagnostic-pending">{pendingLabel}</strong>
-      </div>
+      <section
+        className="manual-diagnostic mt-4 rounded-rail-panel border border-rail-border bg-rail-sidebar/45 p-4"
+        aria-live="polite"
+        aria-label="Latest manual diagnostic"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h4 className="m-0 text-sm font-semibold text-rail-text">Latest manual diagnostic</h4>
+          <span className="inline-flex min-h-7 items-center rounded-rail-control border border-rail-warning/35 bg-rail-warning/10 px-2 py-1 text-xs font-semibold text-rail-warning">
+            {pendingLabel}
+          </span>
+        </div>
+      </section>
     );
   }
 
@@ -34,53 +71,73 @@ export function ManualDiagnostic({
   if (result.kind === 'MULTI_LOCATION') {
     return <MultiLocationDiagnostic result={result} label="Latest manual diagnostic" />;
   }
+
   return (
-    <div className="manual-diagnostic" aria-live="polite">
-      <div className="diagnostic-heading">
-        <span className="diagnostic-label">Latest manual diagnostic</span>
-        <strong className={`diagnostic-outcome diagnostic-${result.outcome.toLowerCase()}`}>
-          {result.outcome}
-        </strong>
+    <section
+      className="manual-diagnostic mt-4 overflow-hidden rounded-rail-panel border border-rail-border bg-rail-sidebar/45"
+      aria-live="polite"
+      aria-label="Latest manual diagnostic"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rail-border px-4 py-3">
+        <h4 className="m-0 text-sm font-semibold text-rail-text">Latest manual diagnostic</h4>
+        <OutcomeBadge outcome={result.outcome} />
       </div>
-      <dl className="diagnostic-metrics">
+      <dl className="grid grid-cols-2 gap-px bg-rail-border sm:grid-cols-4">
         <Metric label="HTTP" value={result.statusCode?.toString() ?? 'No response'} />
         <Metric label="Response" value={formatMilliseconds(result.responseTimeMs)} />
         <Metric label="Attempt" value={formatMilliseconds(result.attemptDurationMs)} />
         <Metric label="Checked" value={new Date(result.checkedAt).toLocaleTimeString()} />
       </dl>
-      <p className="diagnostic-reason">
+      <p className="m-0 border-t border-rail-border px-4 py-3 text-xs text-rail-subtle">
         {humanize(result.stage)} · {humanize(result.reason)}
       </p>
       {result.redirects.length > 0 ? (
-        <ol className="redirect-chain" aria-label="Redirect chain">
-          {result.redirects.map((hop) => (
-            <li key={hop.sequence}>
-              <code>
-                #{hop.source.targetId} {hop.source.origin}
-              </code>
-              <span aria-hidden="true"> → </span>
-              <code>
-                {hop.destination
-                  ? `#${hop.destination.targetId} ${hop.destination.origin}`
-                  : 'No valid destination'}
-              </code>
-              <small>
-                {hop.statusCode} · {formatMilliseconds(hop.responseTimeMs)} ·{' '}
-                {humanize(hop.headers)}
-              </small>
-            </li>
-          ))}
-        </ol>
+        <div className="border-t border-rail-border px-4 py-3">
+          <h5 className="m-0 text-xs font-semibold text-rail-text">Redirect path</h5>
+          <ol className="mt-3 mb-0 grid list-decimal gap-3 pl-5" aria-label="Redirect chain">
+            {result.redirects.map((hop) => (
+              <li key={hop.sequence} className="pl-1 text-xs text-rail-muted">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <code className="break-all text-rail-text">
+                    #{hop.source.targetId} {hop.source.origin}
+                  </code>
+                  <span className="sr-only"> → </span>
+                  <svg
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    className="size-3.5 shrink-0"
+                    aria-hidden="true"
+                  >
+                    <path d="M3 8h10m-3-3 3 3-3 3" />
+                  </svg>
+                  <code className="break-all text-rail-text">
+                    {hop.destination
+                      ? `#${hop.destination.targetId} ${hop.destination.origin}`
+                      : 'No valid destination'}
+                  </code>
+                </div>
+                <small className="mt-1 block text-xs text-rail-muted">
+                  {hop.statusCode} · {formatMilliseconds(hop.responseTimeMs)} ·{' '}
+                  {humanize(hop.headers)}
+                </small>
+              </li>
+            ))}
+          </ol>
+        </div>
       ) : null}
-    </div>
+    </section>
   );
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div>
-      <dt>{label}</dt>
-      <dd>{value}</dd>
+    <div className="min-w-0 bg-rail-header px-4 py-3">
+      <dt className="text-xs text-rail-muted">{label}</dt>
+      <dd className="mt-1 mb-0 truncate text-sm font-semibold text-rail-text tabular-nums">
+        {value}
+      </dd>
     </div>
   );
 }
@@ -93,36 +150,46 @@ function MultiLocationDiagnostic({
   label: string;
 }) {
   return (
-    <div className="manual-diagnostic" aria-live="polite">
-      <div className="diagnostic-heading">
-        <span className="diagnostic-label">{label}</span>
-        <strong className={`diagnostic-outcome diagnostic-${result.outcome.toLowerCase()}`}>
-          {result.outcome}
-        </strong>
+    <section
+      className="manual-diagnostic mt-4 overflow-hidden rounded-rail-panel border border-rail-border bg-rail-sidebar/45"
+      aria-live="polite"
+      aria-label={label}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rail-border px-4 py-3">
+        <h4 className="m-0 text-sm font-semibold text-rail-text">{label}</h4>
+        <OutcomeBadge outcome={result.outcome} />
       </div>
-      <dl className="diagnostic-metrics">
+      <dl className="grid grid-cols-2 gap-px bg-rail-border sm:grid-cols-4">
         <Metric label="Evidence coverage" value={formatRatio(result.coverage)} />
         <Metric label="Reachability" value={formatRatio(result.reachability)} />
         <Metric label="Regions" value={String(result.counts.selected)} />
         <Metric label="Finalized" value={new Date(result.finalizedAt).toLocaleTimeString()} />
       </dl>
       {result.regions ? (
-        <ul aria-label="Regional evidence">
+        <ul
+          className="m-0 grid list-none divide-y divide-rail-border p-0"
+          aria-label="Regional evidence"
+        >
           {result.regions.map((region) => (
-            <li key={region.location}>
-              <strong>{region.location}</strong> —{' '}
-              {region.outcome === 'CONFIRMED_FAIL'
-                ? 'Confirmed failure'
-                : region.outcome === 'PASS'
-                  ? 'Pass'
-                  : region.outcome === 'UNKNOWN'
-                    ? 'Unknown'
-                    : 'Pending'}
+            <li key={region.location} className="px-4 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <strong className="text-sm text-rail-text">{region.location}</strong>
+                <span className="sr-only"> — </span>
+                <span className="text-xs font-medium text-rail-subtle">
+                  {region.outcome === 'CONFIRMED_FAIL'
+                    ? 'Confirmed failure'
+                    : region.outcome === 'PASS'
+                      ? 'Pass'
+                      : region.outcome === 'UNKNOWN'
+                        ? 'Unknown'
+                        : 'Pending'}
+                </span>
+              </div>
               {region.executions.map((execution) =>
                 execution.diagnosticSummary ? (
-                  <small key={execution.id}>
-                    {' '}
-                    · {execution.role.toLowerCase()} ·{' '}
+                  <small key={execution.id} className="mt-1 block text-xs text-rail-muted">
+                    {' · '}
+                    {execution.role.toLowerCase()} ·{' '}
                     {execution.diagnosticSummary.statusCode ?? 'no HTTP'} ·{' '}
                     {formatMilliseconds(execution.diagnosticSummary.responseTimeMs)}
                   </small>
@@ -132,7 +199,7 @@ function MultiLocationDiagnostic({
           ))}
         </ul>
       ) : null}
-    </div>
+    </section>
   );
 }
 
@@ -153,11 +220,26 @@ export function CheckHistory({
   loadingRoundIds: Set<string>;
   onToggleRound: (roundId: string) => void;
 }) {
-  if (!page && loading) return <p role="status">Loading check history…</p>;
-  if (!page || page.items.length === 0) return <p>No checks recorded yet.</p>;
+  if (!page && loading) {
+    return (
+      <p className="mt-3 mb-0 text-xs text-rail-muted" role="status">
+        Loading check history…
+      </p>
+    );
+  }
+  if (!page || page.items.length === 0) {
+    return <p className="mt-3 mb-0 text-xs text-rail-muted">No checks recorded yet.</p>;
+  }
+
   return (
-    <section aria-label="Check history">
-      <ol>
+    <section
+      className="mt-3 overflow-hidden rounded-rail-panel border border-rail-border"
+      aria-label="Check history"
+    >
+      <div className="border-b border-rail-border bg-rail-sidebar/45 px-4 py-3">
+        <h4 className="m-0 text-sm font-semibold text-rail-text">Check history</h4>
+      </div>
+      <ol className="m-0 grid list-none divide-y divide-rail-border p-0">
         {page.items.map((round) => {
           const regionalResult = round.result?.kind === 'MULTI_LOCATION' ? round.result : null;
           const singleResult =
@@ -166,22 +248,27 @@ export function CheckHistory({
           const isExpanded = expandedRoundIds.has(round.id);
           const detail = details[round.id];
           return (
-            <li key={round.id}>
-              <strong>{round.trigger}</strong>{' '}
-              {round.result
-                ? isRegional
-                  ? `${regionalResult.outcome} · ${formatRatio(regionalResult.coverage)}`
-                  : `${singleResult!.outcome} · ${singleResult!.reason}`
-                : round.assignmentStatus}
-              {' · '}
-              <time dateTime={round.createdAt}>{new Date(round.createdAt).toLocaleString()}</time>
-              {isRegional ? (
-                <>
-                  {' '}
-                  <button
-                    className="quiet-button"
-                    type="button"
+            <li key={round.id} className="px-4 py-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="text-xs font-semibold text-rail-text">
+                    {round.trigger}{' '}
+                    {round.result
+                      ? isRegional
+                        ? `${regionalResult.outcome} · ${formatRatio(regionalResult.coverage)}`
+                        : `${singleResult!.outcome} · ${singleResult!.reason}`
+                      : round.assignmentStatus}
+                  </div>
+                  <time className="mt-1 block text-xs text-rail-muted" dateTime={round.createdAt}>
+                    {new Date(round.createdAt).toLocaleString()}
+                  </time>
+                </div>
+                {isRegional ? (
+                  <Button
+                    variant="quiet"
+                    size="compact"
                     disabled={loadingRoundIds.has(round.id)}
+                    aria-expanded={isExpanded}
                     onClick={() => onToggleRound(round.id)}
                   >
                     {loadingRoundIds.has(round.id)
@@ -189,23 +276,25 @@ export function CheckHistory({
                       : isExpanded
                         ? 'Hide regional evidence'
                         : 'Show regional evidence'}
-                  </button>
-                  {isExpanded && detail?.result?.kind === 'MULTI_LOCATION' ? (
-                    <MultiLocationDiagnostic
-                      result={detail.result}
-                      label="Historical regional evidence"
-                    />
-                  ) : null}
-                </>
+                  </Button>
+                ) : null}
+              </div>
+              {isExpanded && detail?.result?.kind === 'MULTI_LOCATION' ? (
+                <MultiLocationDiagnostic
+                  result={detail.result}
+                  label="Historical regional evidence"
+                />
               ) : null}
             </li>
           );
         })}
       </ol>
       {page.nextCursor ? (
-        <button className="quiet-button" type="button" disabled={loading} onClick={onLoadMore}>
-          {loading ? 'Loading…' : 'Load more'}
-        </button>
+        <div className="border-t border-rail-border px-4 py-3">
+          <Button variant="secondary" size="compact" disabled={loading} onClick={onLoadMore}>
+            {loading ? 'Loading…' : 'Load more'}
+          </Button>
+        </div>
       ) : null}
     </section>
   );
@@ -213,37 +302,51 @@ export function CheckHistory({
 
 export function IncidentSummary({ state }: { state: IncidentState | undefined }) {
   if (state?.currentIncident) {
-    if (state.multiLocationIncident) {
-      const label =
-        state.multiLocationIncident.severity === 'DOWN' ? 'MAJOR OUTAGE' : 'PARTIAL OUTAGE';
-      return (
-        <p aria-label="Incident state">
-          <strong>Incident: {label}</strong> · Started{' '}
-          {new Date(state.currentIncident.startedAt).toLocaleString()} · detected{' '}
-          {new Date(state.currentIncident.openedAt).toLocaleString()}
-          {state.multiLocationIncident.healthyRecoveryStreak > 0
-            ? ` · Recovery ${state.multiLocationIncident.healthyRecoveryStreak}/${state.multiLocationIncident.healthyRecoveryThreshold} healthy rounds`
-            : ''}
-        </p>
-      );
-    }
+    const isMultiLocation = Boolean(state.multiLocationIncident);
+    const label = isMultiLocation
+      ? state.multiLocationIncident!.severity === 'DOWN'
+        ? 'MAJOR OUTAGE'
+        : 'PARTIAL OUTAGE'
+      : 'OPEN';
     return (
-      <p aria-label="Incident state">
-        <strong>Incident: OPEN</strong> · Started{' '}
-        {new Date(state.currentIncident.startedAt).toLocaleString()} · detected{' '}
-        {new Date(state.currentIncident.openedAt).toLocaleString()} ·{' '}
-        {state.failureStreak?.count ?? 0} consecutive failures
-      </p>
+      <section
+        className="mt-4 rounded-rail-panel border border-rail-danger/30 bg-rail-danger/5 px-4 py-3"
+        aria-label="Incident state"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <strong className="text-sm text-rail-danger">Incident: {label}</strong>
+          {state.multiLocationIncident?.healthyRecoveryStreak ? (
+            <span className="text-xs font-medium text-rail-warning">
+              Recovery {state.multiLocationIncident.healthyRecoveryStreak}/
+              {state.multiLocationIncident.healthyRecoveryThreshold} healthy rounds
+            </span>
+          ) : null}
+        </div>
+        <p className="mt-1 mb-0 text-xs leading-5 text-rail-subtle">
+          Started {new Date(state.currentIncident.startedAt).toLocaleString()} · detected{' '}
+          {new Date(state.currentIncident.openedAt).toLocaleString()}
+          {!isMultiLocation ? ` · ${state.failureStreak?.count ?? 0} consecutive failures` : ''}
+        </p>
+      </section>
     );
   }
+
   if (state?.failureStreak) {
     return (
-      <p aria-label="Incident state">
+      <p
+        className="mt-4 mb-0 rounded-lg border border-rail-warning/30 bg-rail-warning/5 px-4 py-3 text-sm text-rail-warning"
+        aria-label="Incident state"
+      >
         Incident watch: Failure {state.failureStreak.count}/{state.failureStreak.threshold}
       </p>
     );
   }
-  return <p aria-label="Incident state">Incident: No active incident</p>;
+
+  return (
+    <p className="mt-4 mb-0 text-xs text-rail-muted" aria-label="Incident state">
+      Incident: No active incident
+    </p>
+  );
 }
 
 export function IncidentHistory({
@@ -261,33 +364,66 @@ export function IncidentHistory({
 }) {
   if (error) {
     return (
-      <p role="alert">
-        {error}{' '}
-        <button className="quiet-button" type="button" onClick={onRetry}>
+      <div
+        className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-rail-danger/30 bg-rail-danger/5 px-4 py-3 text-sm text-rail-danger"
+        role="alert"
+      >
+        <span>{error}</span>
+        <Button variant="quiet" size="compact" onClick={onRetry}>
           Retry
-        </button>
+        </Button>
+      </div>
+    );
+  }
+  if (!page) {
+    return (
+      <p className="mt-3 mb-0 text-xs text-rail-muted" role="status">
+        Loading incident history…
       </p>
     );
   }
-  if (!page) return <p role="status">Loading incident history…</p>;
-  if (page.items.length === 0) return <p>No incidents recorded yet.</p>;
+  if (page.items.length === 0) {
+    return <p className="mt-3 mb-0 text-xs text-rail-muted">No incidents recorded yet.</p>;
+  }
+
   return (
-    <section aria-label="Incident history">
-      <ol>
+    <section
+      className="mt-3 overflow-hidden rounded-rail-panel border border-rail-border"
+      aria-label="Incident history"
+    >
+      <div className="border-b border-rail-border bg-rail-sidebar/45 px-4 py-3">
+        <h4 className="m-0 text-sm font-semibold text-rail-text">Incident history</h4>
+      </div>
+      <ol className="m-0 grid list-none divide-y divide-rail-border p-0">
         {page.items.map((incident) => (
-          <li key={incident.id}>
-            <strong>{incident.status}</strong> · Started{' '}
-            {new Date(incident.startedAt).toLocaleString()}
-            {incident.resolvedAt
-              ? ` · Resolved ${new Date(incident.resolvedAt).toLocaleString()}`
-              : ''}
+          <li
+            key={incident.id}
+            className="flex flex-wrap items-start justify-between gap-3 px-4 py-3"
+          >
+            <strong
+              className={
+                incident.status === 'OPEN'
+                  ? 'text-xs text-rail-danger'
+                  : 'text-xs text-rail-success'
+              }
+            >
+              {incident.status}
+            </strong>
+            <p className="m-0 text-right text-xs leading-5 text-rail-muted">
+              Started {new Date(incident.startedAt).toLocaleString()}
+              {incident.resolvedAt
+                ? ` · Resolved ${new Date(incident.resolvedAt).toLocaleString()}`
+                : ''}
+            </p>
           </li>
         ))}
       </ol>
       {page.nextCursor ? (
-        <button className="quiet-button" type="button" disabled={loading} onClick={onLoadMore}>
-          {loading ? 'Loading…' : 'Load more'}
-        </button>
+        <div className="border-t border-rail-border px-4 py-3">
+          <Button variant="secondary" size="compact" disabled={loading} onClick={onLoadMore}>
+            {loading ? 'Loading…' : 'Load more'}
+          </Button>
+        </div>
       ) : null}
     </section>
   );

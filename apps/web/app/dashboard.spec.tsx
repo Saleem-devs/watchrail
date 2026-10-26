@@ -759,4 +759,51 @@ describe('Dashboard', () => {
       }),
     );
   });
+
+  it('keeps the overview focused on workspace health and a compact monitor snapshot', async () => {
+    const monitor = {
+      id: 'overview-monitor',
+      name: 'Production API',
+      url: 'https://example.com/health',
+      method: 'GET',
+      lifecycleState: 'ENABLED',
+      timeoutMs: 10_000,
+      followRedirects: true,
+      statusPolicy: { type: 'ANY_2XX' },
+      locations: ['local'],
+      createdAt: new Date().toISOString(),
+      currentCheck: null,
+      incidentState: { failureStreak: null, currentIncident: null },
+      uptime: { uptimePercent: null, coveragePercent: null },
+    };
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ data: [monitor] }), { status: 200 }),
+    );
+
+    render(<Dashboard view="overview" />);
+
+    expect(await screen.findByRole('heading', { name: 'Monitor snapshot' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'View Production API' })).toHaveAttribute(
+      'href',
+      '/monitors/overview-monitor',
+    );
+    expect(screen.queryByRole('textbox', { name: 'Monitor name' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Configure monitor')).not.toBeInTheDocument();
+  });
+
+  it('separates monitor inventory and creation into dedicated views', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ data: [] }), { status: 200 }),
+    );
+
+    const inventory = render(<Dashboard view="monitors" />);
+    expect(await screen.findByRole('heading', { name: 'No monitors yet' })).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Monitor name' })).not.toBeInTheDocument();
+    inventory.unmount();
+
+    render(<Dashboard view="create" />);
+    expect(await screen.findByRole('heading', { name: 'Create monitor' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Monitor name' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Monitors' })).not.toBeInTheDocument();
+  });
 });
