@@ -3,6 +3,9 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Dashboard } from './dashboard';
 
+const push = vi.fn();
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push, refresh: vi.fn() }) }));
+
 describe('Dashboard', () => {
   afterEach(() => vi.restoreAllMocks());
 
@@ -760,7 +763,7 @@ describe('Dashboard', () => {
     );
   });
 
-  it('keeps the overview focused on workspace health and a compact monitor snapshot', async () => {
+  it('keeps the overview focused on workspace health and a compact monitored-services table', async () => {
     const monitor = {
       id: 'overview-monitor',
       name: 'Production API',
@@ -776,19 +779,101 @@ describe('Dashboard', () => {
       incidentState: { failureStreak: null, currentIncident: null },
       uptime: { uptimePercent: null, coveragePercent: null },
     };
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ data: [monitor] }), { status: 200 }),
-    );
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url =
+        typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            data:
+              url === '/api/overview/response-times'
+                ? {
+                    range: {
+                      start: '2026-10-21T00:00:00.000Z',
+                      end: '2026-10-27T10:00:00.000Z',
+                      timezone: 'UTC',
+                    },
+                    series: [],
+                  }
+                : [monitor],
+          }),
+          { status: 200 },
+        ),
+      );
+    });
 
     render(<Dashboard view="overview" />);
 
-    expect(await screen.findByRole('heading', { name: 'Monitor snapshot' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Monitored services' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'View Production API' })).toHaveAttribute(
       'href',
       '/monitors/overview-monitor',
     );
     expect(screen.queryByRole('textbox', { name: 'Monitor name' })).not.toBeInTheDocument();
     expect(screen.queryByText('Configure monitor')).not.toBeInTheDocument();
+  });
+
+  it('deletes a monitor through the existing archived lifecycle transition', async () => {
+    const monitor = {
+      id: 'delete-monitor',
+      name: 'Retired API',
+      url: 'https://retired.example.com',
+      method: 'GET',
+      lifecycleState: 'ENABLED',
+      timeoutMs: 10_000,
+      followRedirects: true,
+      statusPolicy: { type: 'ANY_2XX' },
+      locations: ['local'],
+      createdAt: '2026-10-27T10:00:00.000Z',
+      currentCheck: null,
+      incidentState: { failureStreak: null, currentIncident: null },
+      uptime: { uptimePercent: null, coveragePercent: null },
+    };
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url =
+        typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url === `/api/monitors/${monitor.id}/lifecycle`) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ data: { ...monitor, lifecycleState: 'ARCHIVED' } }), {
+            status: 200,
+          }),
+        );
+      }
+      if (url === '/api/overview/response-times') {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              data: {
+                range: {
+                  start: '2026-10-21T00:00:00.000Z',
+                  end: '2026-10-27T10:00:00.000Z',
+                  timezone: 'UTC',
+                },
+                series: [],
+              },
+            }),
+            { status: 200 },
+          ),
+        );
+      }
+      expect(init?.method).toBeUndefined();
+      return Promise.resolve(new Response(JSON.stringify({ data: [monitor] }), { status: 200 }));
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    render(<Dashboard view="overview" />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Delete Retired API' }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/monitors/${monitor.id}/lifecycle`,
+        expect.objectContaining({
+          method: 'PATCH',
+          body: JSON.stringify({ lifecycleState: 'ARCHIVED' }),
+        }),
+      ),
+    );
+    expect(await screen.findByText('No monitors yet')).toBeInTheDocument();
   });
 
   it('separates monitor inventory and creation into dedicated views', async () => {

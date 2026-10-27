@@ -144,3 +144,16 @@ export interface IncidentHistoryPage {
   }>;
   nextCursor: string | null;
 }
+
+export interface ResponseTimeOverview {
+  range: { start: string; end: string; timezone: 'UTC' };
+  series: Array<{
+    monitorId: string;
+    monitorName: string;
+    points: Array<{
+      date: string;
+      averageResponseTimeMs: number;
+      sampleCount: number;
+    }>;
+  }>;
+}

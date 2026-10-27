@@ -16,6 +16,7 @@ are not part of the refactor.
 | --- | --- | --- | --- |
 | Monitor settings | `/api/monitors`, `/:monitorId/*-settings`, lifecycle, headers, assertions, locations | `@watchrail/domain` parsing and service error mapping | Operator auth, active organization, permission decorators |
 | Monitor history, uptime, incidents | `/api/monitors/:monitorId/check-rounds`, `/incidents`, `/uptime` | Strict existing query parsers in `@watchrail/db` | Operator auth and organization-scoped reads |
+| Overview response-time analytics | `/api/overview/response-times` | Fixed seven-day UTC window; completed scheduled evidence; up to four monitor series | Operator auth, `check:read`, organization-scoped read model |
 | Probe location, enrollment, agent administration | `/api/probe-locations`, `/probe-enrollments`, `/probe-agents` | Existing `ProbeIdentityService` strict parsers | Operator auth and scoped repositories |
 | Probe machine | `/api/probe-machine/*` | `@watchrail/contracts` versioned parsers and `ProbeCoordinatorService` | Separate probe-machine auth, lease tokens, no-store, rate limiting |
 | Public status pages | `/api/public/status-pages/:slug` | Published-page lookup, slug parser and public projection | Anonymous access, rate limiting, ETag, cache control |

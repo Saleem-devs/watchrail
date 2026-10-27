@@ -31,6 +31,10 @@
   --color-rail-warning: #835800;
   --color-rail-danger: #b4232c;
   --color-rail-impaired: #7656b9;
+  --color-rail-chart-1: #218a5b;
+  --color-rail-chart-2: #3478c9;
+  --color-rail-chart-3: #8055b8;
+  --color-rail-chart-4: #b76620;
   --color-rail-danger-surface: #fff1f2;
   --color-rail-shadow: rgb(17 19 21 / 14%);
 
@@ -73,6 +77,10 @@
       --color-rail-warning: #f8c765;
       --color-rail-danger: #ff9298;
       --color-rail-impaired: #b8a7ff;
+      --color-rail-chart-1: #3ecf8e;
+      --color-rail-chart-2: #55a7f3;
+      --color-rail-chart-3: #b58af5;
+      --color-rail-chart-4: #f19a4b;
       --color-rail-danger-surface: #241313;
       --color-rail-shadow: rgb(0 0 0 / 55%);
     }

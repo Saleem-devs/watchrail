@@ -12,6 +12,7 @@ import {
 } from './modules/probes/probe-identity.controller.js';
 import { InternalStatusPagesController } from './modules/public-status-pages/internal-status-pages.controller.js';
 import { PublicStatusPagesController } from './modules/public-status-pages/public-status-pages.controller.js';
+import { OverviewController } from './modules/overview/overview.controller.js';
 
 function routes(controller: { prototype: object }) {
   const prototype: object = controller.prototype;
@@ -34,6 +35,12 @@ function routes(controller: { prototype: object }) {
 }
 
 describe('remaining API route contracts', () => {
+  it('protects overview analytics with check-read permission', () => {
+    expect(routes(OverviewController)).toEqual([
+      { route: 'GET overview/response-times', permission: 'check:read' },
+    ]);
+  });
+
   it('preserves monitor settings, uptime, history, and incident paths and permissions', () => {
     const observed = [
       ...routes(MonitorsController),

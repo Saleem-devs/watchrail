@@ -117,6 +117,27 @@ export interface CheckHistoryPage {
   nextCursor: string | null;
 }
 
+export interface ResponseTimeOverview {
+  range: { start: Date; end: Date };
+  series: Array<{
+    monitorId: string;
+    monitorName: string;
+    points: Array<{
+      date: string;
+      averageResponseTimeMs: number;
+      sampleCount: number;
+    }>;
+  }>;
+}
+
+interface ResponseTimeOverviewRow extends Record<string, unknown> {
+  monitorId: string;
+  monitorName: string;
+  date: string;
+  averageResponseTimeMs: string | number;
+  sampleCount: string | number;
+}
+
 export interface CheckHistoryQuery {
   limit: number;
   cursor?: string;
@@ -151,6 +172,109 @@ interface HistoryRow {
 
 export class CheckHistoryRepository {
   constructor(private readonly db: WatchrailDatabase) {}
+
+  async responseTimeOverview(
+    organizationId: string,
+    now = new Date(),
+  ): Promise<ResponseTimeOverview> {
+    const end = new Date(now);
+    const start = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate() - 6));
+    const result = await this.db.execute<ResponseTimeOverviewRow>(sql`
+      with observations as (
+        select
+          ${checkRounds.monitorId} as monitor_id,
+          ${monitors.name} as monitor_name,
+          ${checkExecutionResults.checkedAt} as observed_at,
+          ${checkExecutionResults.responseTimeMs} as response_time_ms
+        from ${checkRounds}
+        inner join ${monitors}
+          on ${monitors.organizationId} = ${checkRounds.organizationId}
+         and ${monitors.id} = ${checkRounds.monitorId}
+        inner join ${checkExecutionAssignments}
+          on ${checkExecutionAssignments.organizationId} = ${checkRounds.organizationId}
+         and ${checkExecutionAssignments.roundId} = ${checkRounds.id}
+        inner join ${checkExecutionResults}
+          on ${checkExecutionResults.organizationId} = ${checkRounds.organizationId}
+         and ${checkExecutionResults.roundId} = ${checkRounds.id}
+         and ${checkExecutionResults.assignmentId} = ${checkExecutionAssignments.id}
+        where ${checkRounds.organizationId} = ${organizationId}
+          and ${monitors.lifecycleState} = 'ENABLED'
+          and ${checkRounds.trigger} = 'SCHEDULED'
+          and ${checkRounds.status} = 'COMPLETED'
+          and ${checkExecutionResults.checkedAt} >= ${start}
+          and ${checkExecutionResults.checkedAt} <= ${end}
+          and ${checkExecutionResults.responseTimeMs} is not null
+          and not exists (
+            select 1
+            from ${checkRoundAggregates}
+            where ${checkRoundAggregates.organizationId} = ${checkRounds.organizationId}
+              and ${checkRoundAggregates.roundId} = ${checkRounds.id}
+          )
+
+        union all
+
+        select
+          ${checkRounds.monitorId} as monitor_id,
+          ${monitors.name} as monitor_name,
+          ${checkRegionalExecutions.acceptedAt} as observed_at,
+          (${checkRegionalExecutions.diagnosticSummary} ->> 'responseTimeMs')::double precision
+            as response_time_ms
+        from ${checkRounds}
+        inner join ${monitors}
+          on ${monitors.organizationId} = ${checkRounds.organizationId}
+         and ${monitors.id} = ${checkRounds.monitorId}
+        inner join ${checkRoundAggregates}
+          on ${checkRoundAggregates.organizationId} = ${checkRounds.organizationId}
+         and ${checkRoundAggregates.roundId} = ${checkRounds.id}
+        inner join ${checkRegionalExecutions}
+          on ${checkRegionalExecutions.organizationId} = ${checkRounds.organizationId}
+         and ${checkRegionalExecutions.roundId} = ${checkRounds.id}
+        where ${checkRounds.organizationId} = ${organizationId}
+          and ${monitors.lifecycleState} = 'ENABLED'
+          and ${checkRounds.trigger} = 'SCHEDULED'
+          and ${checkRounds.status} = 'COMPLETED'
+          and ${checkRegionalExecutions.role} = 'PRIMARY'
+          and ${checkRegionalExecutions.acceptedAt} >= ${start}
+          and ${checkRegionalExecutions.acceptedAt} <= ${end}
+          and jsonb_typeof(${checkRegionalExecutions.diagnosticSummary} -> 'responseTimeMs') = 'number'
+      ), selected_monitors as (
+        select monitor_id, monitor_name
+        from observations
+        group by monitor_id, monitor_name
+        order by count(*) desc, monitor_name asc, monitor_id asc
+        limit 4
+      )
+      select
+        observations.monitor_id as "monitorId",
+        observations.monitor_name as "monitorName",
+        to_char(
+          date_trunc('day', observations.observed_at at time zone 'UTC'),
+          'YYYY-MM-DD'
+        ) as date,
+        avg(observations.response_time_ms) as "averageResponseTimeMs",
+        count(*) as "sampleCount"
+      from observations
+      inner join selected_monitors using (monitor_id, monitor_name)
+      group by observations.monitor_id, observations.monitor_name, date
+      order by observations.monitor_name asc, observations.monitor_id asc, date asc
+    `);
+
+    const series = new Map<string, ResponseTimeOverview['series'][number]>();
+    for (const row of result.rows) {
+      const item = series.get(row.monitorId) ?? {
+        monitorId: row.monitorId,
+        monitorName: row.monitorName,
+        points: [],
+      };
+      item.points.push({
+        date: row.date,
+        averageResponseTimeMs: Number(row.averageResponseTimeMs),
+        sampleCount: Number(row.sampleCount),
+      });
+      series.set(row.monitorId, item);
+    }
+    return { range: { start, end }, series: [...series.values()] };
+  }
 
   async currentForOrganization(organizationId: string): Promise<Map<string, CurrentCheck>> {
     const rows = await this.db
