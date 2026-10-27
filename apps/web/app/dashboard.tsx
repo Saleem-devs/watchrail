@@ -6,6 +6,7 @@ import { AppShell } from '../components/app-shell';
 import { MonitorOverview } from '../components/monitor-overview';
 import { Button } from '../components/ui/button';
 import { StatusBadge } from '../components/ui/status-badge';
+import { OverviewDashboard } from '../features/overview/overview-dashboard';
 import type { MonitorFilter } from '../features/monitors/filter-monitors';
 import { DashboardHeader } from '../features/monitors/dashboard-header';
 import {
@@ -30,6 +31,7 @@ import type {
   ManualRound,
   HistoryPage,
   IncidentHistoryPage,
+  ResponseTimeOverview,
 } from '../features/monitors/types';
 import { filterMonitors } from '../features/monitors/filter-monitors';
 
@@ -75,6 +77,9 @@ export function Dashboard({
     () => new Set(),
   );
   const [incidentHistoryErrors, setIncidentHistoryErrors] = useState<Record<string, string>>({});
+  const [responseTimeOverview, setResponseTimeOverview] = useState<ResponseTimeOverview>();
+  const [isOverviewAnalyticsLoading, setIsOverviewAnalyticsLoading] = useState(false);
+  const [overviewAnalyticsError, setOverviewAnalyticsError] = useState<string>();
   const pollTimeouts = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const incidentHistoryRequests = useRef(new Set<string>());
   const probeLocationsRequest = useRef(false);
@@ -88,6 +93,28 @@ export function Dashboard({
       timeouts.clear();
     };
   }, []);
+
+  useEffect(() => {
+    if (view === 'overview') void loadOverviewAnalytics();
+  }, [view]);
+
+  async function loadOverviewAnalytics(): Promise<void> {
+    setIsOverviewAnalyticsLoading(true);
+    setOverviewAnalyticsError(undefined);
+    try {
+      const response = await fetch('/api/overview/response-times', {
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) throw new Error('Could not load overview analytics.');
+      const body = (await response.json()) as { data?: ResponseTimeOverview };
+      if (!body.data) throw new Error('The API returned no overview analytics.');
+      setResponseTimeOverview(body.data);
+    } catch {
+      setOverviewAnalyticsError('Response-time history is temporarily unavailable.');
+    } finally {
+      setIsOverviewAnalyticsLoading(false);
+    }
+  }
 
   async function loadMonitors(): Promise<void> {
     setIsLoading(true);
@@ -104,6 +131,23 @@ export function Dashboard({
       );
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  async function deleteMonitor(monitor: Monitor): Promise<void> {
+    if (!window.confirm(`Delete ${monitor.name}? This cannot be undone.`)) return;
+    setActionError(undefined);
+    try {
+      const response = await fetch(`/api/monitors/${monitor.id}/lifecycle`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ lifecycleState: 'ARCHIVED' }),
+      });
+      if (!response.ok) throw new Error('Could not delete monitor.');
+      setMonitors((current) => current.filter((item) => item.id !== monitor.id));
+      if (view === 'overview') void loadOverviewAnalytics();
+    } catch {
+      setActionError(`Watchrail could not delete ${monitor.name}. Try again.`);
     }
   }
 
@@ -506,7 +550,7 @@ export function Dashboard({
           />
         ) : null}
 
-        {!isLoading && !loadError && (view === 'overview' || view === 'legacy') ? (
+        {!isLoading && !loadError && view === 'legacy' ? (
           <MonitorOverview monitors={monitors} />
         ) : null}
 
@@ -544,7 +588,14 @@ export function Dashboard({
         ) : null}
 
         {view === 'overview' && !isLoading && !loadError ? (
-          <OverviewMonitorTable monitors={monitors} />
+          <OverviewDashboard
+            monitors={monitors}
+            responseTimes={responseTimeOverview}
+            responseTimesLoading={isOverviewAnalyticsLoading}
+            responseTimesError={overviewAnalyticsError}
+            onRetryResponseTimes={() => void loadOverviewAnalytics()}
+            onDeleteMonitor={deleteMonitor}
+          />
         ) : null}
 
         <div
@@ -933,105 +984,6 @@ export function Dashboard({
   );
 }
 
-function OverviewMonitorTable({ monitors }: { monitors: Monitor[] }) {
-  const visible = monitors.slice(0, 6);
-
-  return (
-    <section
-      className="overflow-hidden rounded-rail-panel border border-rail-border bg-rail-header"
-      aria-labelledby="overview-monitors-heading"
-    >
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rail-border px-5 py-4 sm:px-6">
-        <div>
-          <h2 id="overview-monitors-heading" className="m-0 text-sm font-semibold text-rail-text">
-            Monitor snapshot
-          </h2>
-          <p className="mt-1 mb-0 text-xs text-rail-muted">Latest authoritative state</p>
-        </div>
-        <Link
-          href="/monitors"
-          className="inline-flex min-h-9 items-center rounded-rail-control px-3 text-sm font-medium text-rail-accent no-underline hover:bg-rail-hover"
-        >
-          View all monitors
-        </Link>
-      </div>
-      {visible.length === 0 ? (
-        <div className="flex min-h-40 flex-col items-start justify-center px-5 py-6 sm:px-6">
-          <p className="m-0 text-sm font-medium text-rail-text">No monitors yet</p>
-          <p className="mt-1 mb-4 text-sm text-rail-muted">
-            Create a monitor to begin collecting availability evidence.
-          </p>
-          <Link
-            href="/monitors/new"
-            className="inline-flex min-h-9 items-center rounded-rail-control bg-rail-accent px-3 text-sm font-medium text-rail-on-accent no-underline hover:bg-rail-accent-hover"
-          >
-            Create monitor
-          </Link>
-        </div>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] border-collapse text-left text-sm">
-            <thead className="bg-rail-sidebar/45 text-xs text-rail-muted">
-              <tr>
-                <th className="px-5 py-3 font-medium sm:px-6" scope="col">
-                  Monitor
-                </th>
-                <th className="px-4 py-3 font-medium" scope="col">
-                  Status
-                </th>
-                <th className="px-4 py-3 font-medium" scope="col">
-                  Response
-                </th>
-                <th className="px-4 py-3 font-medium" scope="col">
-                  7-day uptime
-                </th>
-                <th className="px-5 py-3 text-right font-medium sm:px-6" scope="col">
-                  <span className="sr-only">Open</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-rail-border">
-              {visible.map((monitor) => (
-                <tr key={monitor.id} className="hover:bg-rail-hover/50">
-                  <td className="px-5 py-3 sm:px-6">
-                    <div className="font-medium text-rail-text">{monitor.name}</div>
-                    <div className="mt-0.5 max-w-xs truncate text-xs text-rail-muted">
-                      {monitor.url}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <StatusBadge
-                      status={monitorStatus(monitor.lifecycleState, monitor.currentCheck)}
-                      label={monitorStateLabel(monitor.lifecycleState, monitor.currentCheck)}
-                    />
-                  </td>
-                  <td className="px-4 py-3 text-rail-subtle tabular-nums">
-                    {monitor.currentCheck?.responseTimeMs === null || !monitor.currentCheck
-                      ? '—'
-                      : `${monitor.currentCheck.responseTimeMs} ms`}
-                  </td>
-                  <td className="px-4 py-3 text-rail-subtle tabular-nums">
-                    {formatPercent(monitor.uptime?.uptimePercent)}
-                  </td>
-                  <td className="px-5 py-3 text-right sm:px-6">
-                    <Link
-                      href={`/monitors/${monitor.id}`}
-                      className="inline-flex min-h-8 items-center rounded-rail-control px-2.5 text-xs font-medium text-rail-accent no-underline hover:bg-rail-hover"
-                      aria-label={`View ${monitor.name}`}
-                    >
-                      View
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </section>
-  );
-}
-
 function omitKey<T>(record: Record<string, T>, key: string): Record<string, T> {
   const next = { ...record };
   delete next[key];
@@ -1057,8 +1009,19 @@ function MonitorConfiguration({
   onUpdateHttpSettings: (event: FormEvent<HTMLFormElement>) => void;
   onUpdateStatusPolicy: (event: FormEvent<HTMLFormElement>) => void;
 }) {
+  const configurationRef = useRef<HTMLDetailsElement>(null);
+
+  useEffect(() => {
+    if (window.location.hash === '#configuration')
+      configurationRef.current?.setAttribute('open', '');
+  }, []);
+
   return (
-    <details className="mt-4 rounded-rail-panel border border-rail-border bg-rail-sidebar/50">
+    <details
+      id="configuration"
+      ref={configurationRef}
+      className="mt-4 scroll-mt-20 rounded-rail-panel border border-rail-border bg-rail-sidebar/50"
+    >
       <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-rail-text">
         Configure monitor
       </summary>

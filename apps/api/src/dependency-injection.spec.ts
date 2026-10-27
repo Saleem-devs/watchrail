@@ -20,6 +20,8 @@ import { MonitorsService } from './modules/monitors/monitors.service.js';
 import { StatusPagesController } from './modules/status-pages/status-pages.controller.js';
 import { WebhookEndpointsController } from './modules/webhook-endpoints/webhook-endpoints.controller.js';
 import { WebhookEndpointsService } from './modules/webhook-endpoints/webhook-endpoints.service.js';
+import { OverviewController } from './modules/overview/overview.controller.js';
+import { OverviewService } from './modules/overview/overview.service.js';
 
 describe('tsx dependency injection metadata', () => {
   it.each([
@@ -31,6 +33,8 @@ describe('tsx dependency injection metadata', () => {
     MonitorUptimeController,
     MonitorHistoryController,
     MonitorsService,
+    OverviewController,
+    OverviewService,
     ProbeAgentsController,
     ProbeEnrollmentsController,
     ProbeLocationsController,

@@ -31,6 +31,8 @@ import { OrganizationsController } from './modules/organizations/organizations.c
 import { OrganizationsModule } from './modules/organizations/organizations.module.js';
 import { ApiCredentialsController } from './modules/api-credentials/api-credentials.controller.js';
 import { ApiCredentialsModule } from './modules/api-credentials/api-credentials.module.js';
+import { OverviewController } from './modules/overview/overview.controller.js';
+import { OverviewModule } from './modules/overview/overview.module.js';
 
 @Module({
   imports: [
@@ -40,6 +42,7 @@ import { ApiCredentialsModule } from './modules/api-credentials/api-credentials.
     ApiCredentialsModule,
     OrganizationsModule,
     MonitorsModule,
+    OverviewModule,
     ProbesModule,
     PublicStatusPagesModule,
     StatusPagesModule,
@@ -78,6 +81,7 @@ export class AppModule implements NestModule {
         MonitorsController,
         MonitorUptimeController,
         MonitorHistoryController,
+        OverviewController,
         ProbeAgentsController,
         ProbeEnrollmentsController,
         ProbeLocationsController,

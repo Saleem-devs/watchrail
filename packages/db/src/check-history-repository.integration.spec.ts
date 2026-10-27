@@ -295,6 +295,58 @@ describe('CheckHistoryRepository', () => {
     });
   });
 
+  it('builds seven-day scheduled response-time series with organization isolation', async () => {
+    const monitor = await createMonitorRecord(organizationId, 'Production API');
+    const first = await createScheduledAndComplete(
+      organizationId,
+      monitor.id,
+      100,
+      new Date('2026-10-21T08:00:00.000Z'),
+    );
+    await createScheduledAndComplete(
+      organizationId,
+      monitor.id,
+      200,
+      new Date('2026-10-21T16:00:00.000Z'),
+    );
+    const manual = await createAndComplete(monitor.id, 'PASS', 200, 999);
+    await connection.db
+      .update(checkExecutionResults)
+      .set({ checkedAt: new Date('2026-10-22T12:00:00.000Z') })
+      .where(eq(checkExecutionResults.roundId, manual.id));
+
+    const foreign = await createMonitorRecord(otherOrganizationId, 'Foreign API');
+    await createScheduledAndComplete(
+      otherOrganizationId,
+      foreign.id,
+      800,
+      new Date('2026-10-21T09:00:00.000Z'),
+    );
+    const paused = await createMonitorRecord(organizationId, 'Paused API');
+    await createScheduledAndComplete(
+      organizationId,
+      paused.id,
+      25,
+      new Date('2026-10-21T10:00:00.000Z'),
+    );
+    await new MonitorRepository(connection.db).updateLifecycle(organizationId, paused.id, 'PAUSED');
+
+    const overview = await history.responseTimeOverview(
+      organizationId,
+      new Date('2026-10-27T10:00:00.000Z'),
+    );
+    expect(overview.range.start).toEqual(new Date('2026-10-21T00:00:00.000Z'));
+    expect(overview.series).toEqual([
+      {
+        monitorId: monitor.id,
+        monitorName: 'Production API',
+        points: [{ date: '2026-10-21', averageResponseTimeMs: 150, sampleCount: 2 }],
+      },
+    ]);
+    expect(overview.series[0]?.points[0]?.averageResponseTimeMs).not.toBe(999);
+    expect(first.trigger).toBe('SCHEDULED');
+  });
+
   it('rejects corrupted durable diagnostics on both list and detail reads', async () => {
     const monitor = await createMonitorRecord(organizationId);
     const round = await createAndComplete(monitor.id, 'PASS', 200, 10);
@@ -326,6 +378,27 @@ describe('CheckHistoryRepository', () => {
   ) {
     const round = await new ManualRoundRepository(connection.db).create(organizationId, monitorId);
     await complete(round.id, outcome, statusCode, responseTimeMs);
+    return round;
+  }
+
+  async function createScheduledAndComplete(
+    owner: string,
+    monitorId: string,
+    responseTimeMs: number,
+    checkedAt: Date,
+  ) {
+    await connection.db
+      .update(monitors)
+      .set({ nextCheckAt: sql`clock_timestamp() - interval '1 second'` })
+      .where(eq(monitors.id, monitorId));
+    const dispatched = await new ScheduledRoundRepository(connection.db).dispatchDue(10);
+    const round = dispatched.find((candidate) => candidate.monitorId === monitorId);
+    if (!round || round.organizationId !== owner) throw new Error('Expected scheduled round.');
+    await complete(round.id, 'PASS', 200, responseTimeMs);
+    await connection.db
+      .update(checkExecutionResults)
+      .set({ checkedAt })
+      .where(eq(checkExecutionResults.roundId, round.id));
     return round;
   }
 
