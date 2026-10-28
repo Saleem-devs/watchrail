@@ -26,7 +26,15 @@ const columns: Array<DataTableColumn<Monitor>> = [
         >
           {monitor.name}
         </Link>
-        <div className="mt-0.5 max-w-xs truncate text-xs text-rail-muted">{monitor.url}</div>
+        <a
+          href={monitor.url}
+          target="_blank"
+          rel="noreferrer"
+          aria-label={`Open ${monitor.name} endpoint in a new tab`}
+          className="mt-0.5 block max-w-xs truncate text-xs text-rail-muted no-underline hover:text-rail-text hover:underline"
+        >
+          {monitor.url}
+        </a>
       </div>
     ),
   },

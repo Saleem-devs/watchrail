@@ -110,6 +110,9 @@ describe('OverviewDashboard', () => {
       'href',
       '/monitors/checkout',
     );
+    expect(
+      screen.getByRole('link', { name: 'Open Checkout endpoint in a new tab' }),
+    ).toHaveAttribute('target', '_blank');
     expect(screen.getAllByText('220 ms')).toHaveLength(3);
     expect(screen.getByText('98.00%')).toBeInTheDocument();
     expect(screen.getByText('92.00%')).toBeInTheDocument();
