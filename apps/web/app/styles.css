@@ -53,7 +53,7 @@ select:focus-visible {
   outline-offset: 3px;
 }
 
-main:not([data-watchrail-dashboard]) {
+main:not([data-watchrail-dashboard]):not([data-watchrail-workspace]) {
   width: min(1180px, calc(100% - 40px));
   margin: 0 auto;
   padding-bottom: 80px;
@@ -121,7 +121,7 @@ p {
   margin-top: 0;
 }
 
-main:not([data-watchrail-dashboard]) h1 {
+main:not([data-watchrail-dashboard]):not([data-watchrail-workspace]) h1 {
   margin-bottom: 16px;
   max-width: 760px;
   font-size: clamp(44px, 7vw, 82px);
@@ -462,7 +462,7 @@ form {
 }
 
 @media (max-width: 820px) {
-  main:not([data-watchrail-dashboard]) {
+  main:not([data-watchrail-dashboard]):not([data-watchrail-workspace]) {
     width: min(100% - 28px, 680px);
   }
 
@@ -880,6 +880,10 @@ form {
 }
 
 /* Transitional bridge: new Tailwind-first dashboard bypasses legacy global main sizing. */
+[data-watchrail-dashboard] form {
+  padding: 0;
+}
+
 [data-watchrail-dashboard] .monitor-card:last-child {
   border-bottom: 1px solid var(--border);
 }

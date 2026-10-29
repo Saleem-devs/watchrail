@@ -10,6 +10,7 @@ import {
   CheckHistoryRepository,
   CheckHistoryMonitorNotFoundError,
   CheckHistoryQueryError,
+  AvailabilityHistoryQueryError,
   IncidentHistoryQueryError,
   IncidentMonitorNotFoundError,
   IncidentReadRepository,
@@ -22,13 +23,17 @@ import {
   type CheckRoundRecord,
   type CheckHistoryDetail,
   type CheckHistoryPage,
+  type AvailabilityHistory,
   type CurrentCheck,
   type CurrentIncidentState,
   type IncidentDetail,
   type IncidentHistoryPage,
+  type OrganizationIncidentHistoryPage,
   type MonitorRecord,
   parseCheckHistoryQuery,
+  parseAvailabilityHistoryQuery,
   parseIncidentHistoryQuery,
+  parseOrganizationIncidentHistoryQuery,
   UptimeReadRepository,
   UptimeMonitorNotFoundError,
   UptimeQueryError,
@@ -53,6 +58,7 @@ import { storeRequestHeaders } from '@watchrail/http-header-security';
 import { AssertionRetentionError, storeResponseAssertions } from '@watchrail/assertion-security';
 import { APP_CONFIG, type AppConfig } from '../../config/config.js';
 import type { RequestContext } from '../../auth/request-context.js';
+import type { MonitorListQuery } from './dto/monitor-list-query.js';
 
 @Injectable()
 export class MonitorsService {
@@ -97,6 +103,21 @@ export class MonitorsService {
           message: error.message,
           fields: error instanceof MonitorInputError ? error.fields : { assertions: error.issues },
         });
+      }
+      throw error;
+    }
+  }
+
+  async updateName(
+    context: RequestContext,
+    monitorId: string,
+    name: string,
+  ): Promise<MonitorRecord> {
+    try {
+      return await this.monitors.updateName(context.organizationId, monitorId, name);
+    } catch (error) {
+      if (error instanceof MonitorUpdateNotFoundError) {
+        throw new NotFoundException({ code: 'MONITOR_NOT_FOUND', message: error.message });
       }
       throw error;
     }
@@ -178,21 +199,28 @@ export class MonitorsService {
     }
   }
 
-  async list(context: RequestContext): Promise<
-    Array<{
+  async list(
+    context: RequestContext,
+    query: MonitorListQuery = { name: undefined, location: undefined },
+  ): Promise<{
+    items: Array<{
       monitor: MonitorRecord;
       currentCheck: CurrentCheck | null;
       incidentState: CurrentIncidentState;
       uptime: UptimeMetrics;
-    }>
-  > {
+    }>;
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  }> {
     const [monitors, currentChecks, incidentStates, uptimes] = await Promise.all([
       this.monitors.listForOrganization(context.organizationId),
       this.history.currentForOrganization(context.organizationId),
       this.incidentReads.currentForOrganization(context.organizationId),
       this.uptimeReads.currentForOrganization(context.organizationId),
     ]);
-    return monitors.map((monitor) => ({
+    const results = monitors.map((monitor) => ({
       monitor,
       uptime:
         uptimes.get(monitor.id) ??
@@ -206,6 +234,32 @@ export class MonitorsService {
           throw new Error('Monitor incident state is missing.');
         })(),
     }));
+    const name = query.name?.toLocaleLowerCase();
+    const location = query.location?.toLocaleLowerCase();
+    const filtered = results.filter(({ monitor, currentCheck }) => {
+      if (name && !monitor.name.toLocaleLowerCase().includes(name)) return false;
+      if (
+        location &&
+        !monitor.locations.some((candidate) => candidate.toLocaleLowerCase() === location)
+      )
+        return false;
+      return !query.state || monitorListState(monitor, currentCheck) === query.state;
+    });
+    const page = query.page ?? 1;
+    const limit = query.limit ?? Math.max(filtered.length, 1);
+    const total = filtered.length;
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const offset = (page - 1) * limit;
+    return {
+      items:
+        query.page !== undefined || query.limit !== undefined
+          ? filtered.slice(offset, offset + limit)
+          : filtered,
+      page,
+      limit,
+      total,
+      totalPages,
+    };
   }
 
   currentCheck(context: RequestContext, monitorId: string): Promise<CurrentCheck | null> {
@@ -284,6 +338,23 @@ export class MonitorsService {
       throw new NotFoundException({ code: 'INCIDENT_NOT_FOUND', message: 'Incident not found.' });
     }
     return incident;
+  }
+
+  async listOrganizationIncidentHistory(
+    context: RequestContext,
+    query: Record<string, unknown>,
+  ): Promise<OrganizationIncidentHistoryPage> {
+    try {
+      return await this.incidentReads.listForOrganization(
+        context.organizationId,
+        parseOrganizationIncidentHistoryQuery(query),
+      );
+    } catch (error) {
+      if (error instanceof IncidentHistoryQueryError) {
+        throw new BadRequestException({ code: 'INVALID_INCIDENT_QUERY', message: error.message });
+      }
+      throw error;
+    }
   }
 
   async updateHttpSettings(
@@ -458,6 +529,31 @@ export class MonitorsService {
     }
   }
 
+  async availabilityHistory(
+    context: RequestContext,
+    monitorId: string,
+    query: Record<string, unknown>,
+  ): Promise<AvailabilityHistory> {
+    try {
+      return await this.history.availabilityForMonitor(
+        context.organizationId,
+        monitorId,
+        parseAvailabilityHistoryQuery(query),
+      );
+    } catch (error) {
+      if (error instanceof AvailabilityHistoryQueryError) {
+        throw new BadRequestException({
+          code: 'INVALID_AVAILABILITY_HISTORY_QUERY',
+          message: error.message,
+        });
+      }
+      if (error instanceof CheckHistoryMonitorNotFoundError) {
+        throw new NotFoundException({ code: 'MONITOR_NOT_FOUND', message: error.message });
+      }
+      throw error;
+    }
+  }
+
   async getCheckRound(
     context: RequestContext,
     monitorId: string,
@@ -475,4 +571,24 @@ export class MonitorsService {
     return round;
   }
 }
+
+function monitorListState(
+  monitor: MonitorRecord,
+  currentCheck: CurrentCheck | null,
+): NonNullable<MonitorListQuery['state']> {
+  if (monitor.lifecycleState === 'PAUSED') return 'paused';
+  if (
+    currentCheck?.availability === 'UNAVAILABLE' ||
+    currentCheck?.aggregateOutcome === 'DEGRADED' ||
+    currentCheck?.aggregateOutcome === 'DOWN'
+  )
+    return 'attention';
+  if (
+    currentCheck?.availability === 'AVAILABLE' &&
+    (currentCheck.aggregateOutcome == null || currentCheck.aggregateOutcome === 'UP')
+  )
+    return 'operational';
+  return 'pending';
+}
+
 import { randomUUID } from 'node:crypto';

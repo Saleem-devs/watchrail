@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import type { MonitorRecord } from '@watchrail/db';
 import type { CreateMonitorCommand } from '@watchrail/domain';
 import { MonitorsService } from './monitors.service.js';
@@ -6,6 +6,12 @@ import { RequirePermission } from '../../auth/auth.guard.js';
 import { PERMISSIONS } from '../../auth/permissions.js';
 import type { RequestWithContext } from '../../auth/request-context.js';
 import { type MonitorResponse, toResponse } from './monitors.presenter.js';
+import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe.js';
+import { monitorListQuerySchema, type MonitorListQuery } from './dto/monitor-list-query.js';
+import {
+  updateMonitorNameSchema,
+  type UpdateMonitorNameDto,
+} from './dto/update-monitor-name.dto.js';
 
 @Controller('monitors')
 export class MonitorsController {
@@ -23,13 +29,41 @@ export class MonitorsController {
 
   @Get()
   @RequirePermission(PERMISSIONS.MONITOR_READ)
-  async list(@Req() request: RequestWithContext): Promise<{ data: MonitorResponse[] }> {
-    const monitors = await this.monitors.list(request.watchrailContext);
+  async list(
+    @Req() request: RequestWithContext,
+    @Query(
+      new ZodValidationPipe(monitorListQuerySchema, 'query', (issue) =>
+        String(issue.path[0] ?? 'query'),
+      ),
+    )
+    query: MonitorListQuery,
+  ): Promise<{
+    data: MonitorResponse[];
+    page: { number: number; limit: number; total: number; totalPages: number };
+  }> {
+    const result = await this.monitors.list(request.watchrailContext, query);
     return {
-      data: monitors.map(({ monitor, currentCheck, incidentState, uptime }) =>
+      data: result.items.map(({ monitor, currentCheck, incidentState, uptime }) =>
         toResponse(monitor, currentCheck, incidentState, uptime),
       ),
+      page: {
+        number: result.page,
+        limit: result.limit,
+        total: result.total,
+        totalPages: result.totalPages,
+      },
     };
+  }
+
+  @Patch(':monitorId/name')
+  @RequirePermission(PERMISSIONS.MONITOR_UPDATE)
+  async updateName(
+    @Req() request: RequestWithContext,
+    @Param('monitorId') monitorId: string,
+    @Body(new ZodValidationPipe(updateMonitorNameSchema)) body: UpdateMonitorNameDto,
+  ): Promise<{ data: MonitorResponse }> {
+    const monitor = await this.monitors.updateName(request.watchrailContext, monitorId, body.name);
+    return { data: await this.toMonitorResponse(request, monitor) };
   }
 
   @Patch(':monitorId/status-policy')

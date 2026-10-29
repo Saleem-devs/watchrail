@@ -107,6 +107,21 @@ export class MonitorRepository {
       .orderBy(desc(monitors.createdAt));
   }
 
+  async updateName(
+    organizationId: string,
+    monitorId: string,
+    name: string,
+  ): Promise<MonitorRecord> {
+    const [updated] = await this.db
+      .update(monitors)
+      .set({ name, updatedAt: sql`now()` })
+      .where(and(eq(monitors.id, monitorId), eq(monitors.organizationId, organizationId)))
+      .returning();
+
+    if (!updated) throw new MonitorUpdateNotFoundError();
+    return updated;
+  }
+
   async updateStatusPolicy(
     organizationId: string,
     monitorId: string,

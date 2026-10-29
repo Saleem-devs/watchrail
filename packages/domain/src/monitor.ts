@@ -40,6 +40,11 @@ export interface CreateMonitorCommand {
   name: unknown;
   url: unknown;
   statusPolicy?: unknown;
+  method?: unknown;
+  timeoutMs?: unknown;
+  followRedirects?: unknown;
+  lifecycleState?: unknown;
+  locations?: unknown;
   requestHeaders?: unknown;
   assertions?: unknown;
   intervalSeconds?: unknown;
@@ -126,6 +131,28 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
   const name = normalizeName(command.name, fields);
   const url = normalizeUrl(command.url, fields);
   const statusPolicy = normalizeStatusPolicy(command.statusPolicy, fields);
+  const method =
+    command.method === undefined
+      ? MONITOR_DEFAULTS.method
+      : normalizeHttpMonitorMethod(command.method, fields);
+  const timeoutMs =
+    command.timeoutMs === undefined
+      ? MONITOR_DEFAULTS.timeoutMs
+      : normalizeTimeout(command.timeoutMs, fields);
+  const followRedirects =
+    command.followRedirects === undefined
+      ? MONITOR_DEFAULTS.followRedirects
+      : normalizeFollowRedirects(command.followRedirects, fields);
+  const lifecycleState = normalizeInitialLifecycleState(command.lifecycleState, fields);
+  let locations: string[] = [...MONITOR_DEFAULTS.locations];
+  if (command.locations !== undefined) {
+    try {
+      locations = parseMonitorLocationSettings({ locations: command.locations }).locations;
+    } catch (error) {
+      if (error instanceof MonitorInputError) Object.assign(fields, error.fields);
+      else throw error;
+    }
+  }
   const requestHeaders = normalizeHeaders(command.requestHeaders, fields);
   const assertions = normalizeAssertions(command.assertions, fields);
   const intervalSeconds = normalizeIntervalSeconds(command.intervalSeconds, fields, true);
@@ -135,15 +162,15 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
   return {
     name,
     url,
-    method: MONITOR_DEFAULTS.method,
-    lifecycleState: MONITOR_DEFAULTS.lifecycleState,
-    timeoutMs: MONITOR_DEFAULTS.timeoutMs,
+    method,
+    lifecycleState,
+    timeoutMs,
     intervalSeconds,
-    followRedirects: MONITOR_DEFAULTS.followRedirects,
+    followRedirects,
     statusPolicy,
     requestHeaders,
     assertions,
-    locations: [...MONITOR_DEFAULTS.locations],
+    locations,
   };
 }
 
@@ -319,6 +346,18 @@ function normalizeHttpMonitorMethod(value: unknown, fields: MonitorFieldErrors):
   if (value !== 'GET' && value !== 'HEAD') {
     fields.method = ['Choose GET or HEAD.'];
     return 'GET';
+  }
+  return value;
+}
+
+function normalizeInitialLifecycleState(
+  value: unknown,
+  fields: MonitorFieldErrors,
+): 'ENABLED' | 'PAUSED' {
+  if (value === undefined) return MONITOR_DEFAULTS.lifecycleState;
+  if (value !== 'ENABLED' && value !== 'PAUSED') {
+    fields.lifecycleState = ['Choose enabled or paused.'];
+    return MONITOR_DEFAULTS.lifecycleState;
   }
   return value;
 }

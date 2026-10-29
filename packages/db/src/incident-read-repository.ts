@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer';
-import { and, asc, desc, eq, lt, or } from 'drizzle-orm';
+import { and, asc, count, desc, eq, lt, or } from 'drizzle-orm';
 import { INCIDENT_FAILURE_THRESHOLD } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
 import { incidents, monitorIncidentState, monitors } from './schema.js';
@@ -47,9 +47,30 @@ export interface IncidentHistoryPage {
   nextCursor: string | null;
 }
 
+export interface OrganizationIncidentHistoryItem extends IncidentHistoryItem {
+  monitorId: string;
+  monitorName: string;
+  monitorUrl: string;
+  severity: 'DEGRADED' | 'DOWN' | null;
+}
+
+export interface OrganizationIncidentHistoryPage {
+  items: OrganizationIncidentHistoryItem[];
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
+
 export interface IncidentHistoryQuery {
   limit: number;
   cursor?: string;
+}
+
+export interface OrganizationIncidentHistoryQuery {
+  page: number;
+  limit: number;
+  status?: 'OPEN' | 'RESOLVED';
 }
 
 interface IncidentCursorV1 {
@@ -143,6 +164,48 @@ export class IncidentReadRepository {
               incidentId: last.id,
             })
           : null,
+    };
+  }
+
+  async listForOrganization(
+    organizationId: string,
+    query: OrganizationIncidentHistoryQuery,
+  ): Promise<OrganizationIncidentHistoryPage> {
+    const where = and(
+      eq(incidents.organizationId, organizationId),
+      query.status ? eq(incidents.status, query.status) : undefined,
+    );
+    const [countRow] = await this.db.select({ total: count() }).from(incidents).where(where);
+    const total = countRow?.total ?? 0;
+    const rows = await this.db
+      .select({
+        ...historySelection,
+        monitorId: incidents.monitorId,
+        monitorName: monitors.name,
+        monitorUrl: monitors.url,
+        severity: incidents.severity,
+      })
+      .from(incidents)
+      .innerJoin(
+        monitors,
+        and(
+          eq(monitors.organizationId, incidents.organizationId),
+          eq(monitors.id, incidents.monitorId),
+        ),
+      )
+      .where(where)
+      .orderBy(desc(incidents.openedAt), desc(incidents.id))
+      .limit(query.limit)
+      .offset((query.page - 1) * query.limit);
+    return {
+      items: rows.map((row) => ({
+        ...row,
+        severity: parseIncidentSeverity(row.severity),
+      })),
+      page: query.page,
+      limit: query.limit,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / query.limit)),
     };
   }
 
@@ -285,6 +348,52 @@ export function parseIncidentHistoryQuery(value: Record<string, unknown>): Incid
   }
   if (value.cursor) decodeCursor(value.cursor);
   return { limit, ...(typeof value.cursor === 'string' ? { cursor: value.cursor } : {}) };
+}
+
+export function parseOrganizationIncidentHistoryQuery(
+  value: Record<string, unknown>,
+): OrganizationIncidentHistoryQuery {
+  if (Object.keys(value).some((key) => !['page', 'limit', 'status'].includes(key))) {
+    throw new IncidentHistoryQueryError('Incident history query contains unsupported parameters.');
+  }
+  if (value.status !== undefined && value.status !== 'OPEN' && value.status !== 'RESOLVED') {
+    throw new IncidentHistoryQueryError('Incident status must be OPEN or RESOLVED.');
+  }
+  const page = parseIntegerParameter(value.page, 1, 1, Number.MAX_SAFE_INTEGER, 'page');
+  const limit = parseIntegerParameter(value.limit, 25, 1, 100, 'limit');
+  return {
+    page,
+    limit,
+    ...(value.status === 'OPEN' || value.status === 'RESOLVED' ? { status: value.status } : {}),
+  };
+}
+
+function parseIntegerParameter(
+  raw: unknown,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+  name: string,
+): number {
+  if (raw === undefined) return fallback;
+  const value = Number(raw);
+  if (
+    typeof raw !== 'string' ||
+    !Number.isSafeInteger(value) ||
+    value < minimum ||
+    value > maximum ||
+    String(value) !== raw
+  ) {
+    throw new IncidentHistoryQueryError(
+      `Incident history ${name} must be an integer from ${minimum} to ${maximum}.`,
+    );
+  }
+  return value;
+}
+
+function parseIncidentSeverity(value: string | null): 'DEGRADED' | 'DOWN' | null {
+  if (value === null || value === 'DEGRADED' || value === 'DOWN') return value;
+  throw new IncidentStateInvariantError();
 }
 
 function encodeCursor(cursor: IncidentCursorV1): string {

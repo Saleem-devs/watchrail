@@ -2,8 +2,12 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { createPortal } from 'react-dom';
 import {
+  useCallback,
   useEffect,
+  useId,
+  useLayoutEffect,
   useRef,
   useState,
   type KeyboardEvent,
@@ -51,6 +55,8 @@ export function DataTable<Row>({
   const navigationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [highlightedRowKey, setHighlightedRowKey] = useState<string>();
   const [pendingAction, setPendingAction] = useState<string>();
+  const [openActionRowKey, setOpenActionRowKey] = useState<string>();
+  const closeActionMenu = useCallback(() => setOpenActionRowKey(undefined), []);
 
   useEffect(
     () => () => {
@@ -122,8 +128,8 @@ export function DataTable<Row>({
               </th>
             ))}
             {actions.length > 0 ? (
-              <th className="px-4 py-2.5 text-right font-medium" scope="col">
-                Actions
+              <th className="w-12 px-3 py-2.5 text-right font-medium" scope="col">
+                <span className="sr-only">Actions</span>
               </th>
             ) : null}
           </tr>
@@ -154,41 +160,20 @@ export function DataTable<Row>({
                   </td>
                 ))}
                 {actions.length > 0 ? (
-                  <td className="px-4 py-2 text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      {actions.map((action) => {
-                        const actionKey = `${rowKey}:${action.id}`;
-                        const className = `inline-flex min-h-8 items-center rounded-rail-control border-0 bg-transparent px-2.5 text-xs font-medium no-underline hover:bg-rail-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-rail-accent disabled:cursor-wait disabled:opacity-60 ${
-                          action.tone === 'danger'
-                            ? 'text-rail-danger'
-                            : 'text-rail-subtle hover:text-rail-text'
-                        }`;
-                        const href = action.href?.(row);
-                        return href ? (
-                          <Link
-                            key={action.id}
-                            href={href}
-                            className={className}
-                            aria-label={`${action.label} ${rowLabel}`}
-                          >
-                            {action.label}
-                          </Link>
-                        ) : (
-                          <button
-                            key={action.id}
-                            type="button"
-                            className={className}
-                            disabled={pendingAction === actionKey}
-                            aria-label={`${action.label} ${rowLabel}`}
-                            onClick={() => void runAction(action, row)}
-                          >
-                            {pendingAction === actionKey
-                              ? (action.pendingLabel ?? `${action.label}…`)
-                              : action.label}
-                          </button>
-                        );
-                      })}
-                    </div>
+                  <td className="w-12 px-3 py-2 text-right">
+                    <ActionMenu
+                      row={row}
+                      rowKey={rowKey}
+                      rowLabel={rowLabel}
+                      actions={actions}
+                      open={openActionRowKey === rowKey}
+                      pendingAction={pendingAction}
+                      onToggle={() =>
+                        setOpenActionRowKey((current) => (current === rowKey ? undefined : rowKey))
+                      }
+                      onClose={closeActionMenu}
+                      onRunAction={runAction}
+                    />
                   </td>
                 ) : null}
               </tr>
@@ -197,6 +182,153 @@ export function DataTable<Row>({
         </tbody>
       </table>
     </div>
+  );
+}
+
+function ActionMenu<Row>({
+  row,
+  rowKey,
+  rowLabel,
+  actions,
+  open,
+  pendingAction,
+  onToggle,
+  onClose,
+  onRunAction,
+}: {
+  row: Row;
+  rowKey: string;
+  rowLabel: string;
+  actions: Array<DataTableAction<Row>>;
+  open: boolean;
+  pendingAction?: string | undefined;
+  onToggle: () => void;
+  onClose: () => void;
+  onRunAction: (action: DataTableAction<Row>, row: Row) => Promise<void>;
+}) {
+  const menuId = useId();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({ top: 0, left: 0 });
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const menuWidth = 152;
+    setPosition({
+      top: rect.bottom + 6,
+      left: Math.max(8, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - 8)),
+    });
+
+    const focusFrame = window.requestAnimationFrame(() => {
+      menuRef.current?.querySelector<HTMLElement>('a, button')?.focus();
+    });
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (!menuRef.current?.contains(target) && !trigger.contains(target)) onClose();
+    };
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+        trigger.focus();
+        return;
+      }
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+      const items = [...(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
+      if (items.length === 0) return;
+      event.preventDefault();
+      const currentIndex = items.indexOf(document.activeElement as HTMLElement);
+      const nextIndex =
+        event.key === 'Home'
+          ? 0
+          : event.key === 'End'
+            ? items.length - 1
+            : event.key === 'ArrowDown'
+              ? (currentIndex + 1) % items.length
+              : (currentIndex - 1 + items.length) % items.length;
+      items[nextIndex]?.focus();
+    };
+    const handleViewportChange = () => onClose();
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('resize', handleViewportChange);
+    window.addEventListener('scroll', handleViewportChange, true);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('resize', handleViewportChange);
+      window.removeEventListener('scroll', handleViewportChange, true);
+    };
+  }, [open, onClose]);
+
+  const menu = open ? (
+    <div
+      ref={menuRef}
+      id={menuId}
+      role="menu"
+      aria-label={`Actions for ${rowLabel}`}
+      className="fixed z-50 min-w-38 overflow-hidden rounded-rail-control border border-rail-border bg-rail-header p-1 shadow-lg"
+      style={position}
+    >
+      {actions.map((action) => {
+        const actionKey = `${rowKey}:${action.id}`;
+        const className = `flex min-h-9 w-full items-center rounded-rail-control px-3 text-left text-sm font-medium no-underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-rail-accent ${
+          action.tone === 'danger'
+            ? 'text-rail-danger hover:bg-rail-danger/10'
+            : 'text-rail-subtle hover:bg-rail-hover hover:text-rail-text'
+        }`;
+        const href = action.href?.(row);
+        return href ? (
+          <Link
+            key={action.id}
+            href={href}
+            role="menuitem"
+            className={className}
+            onClick={onClose}
+          >
+            {action.label}
+          </Link>
+        ) : (
+          <button
+            key={action.id}
+            type="button"
+            role="menuitem"
+            className={`${className} border-0 bg-transparent`}
+            disabled={pendingAction === actionKey}
+            onClick={() => void onRunAction(action, row).finally(onClose)}
+          >
+            {pendingAction === actionKey
+              ? (action.pendingLabel ?? `${action.label}…`)
+              : action.label}
+          </button>
+        );
+      })}
+    </div>
+  ) : null;
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-label={`Actions for ${rowLabel}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        className="inline-flex size-8 items-center justify-center rounded-rail-control border-0 bg-transparent text-rail-muted hover:bg-rail-hover hover:text-rail-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-rail-accent"
+        onClick={onToggle}
+      >
+        <svg aria-hidden="true" viewBox="0 0 20 20" className="size-4" fill="currentColor">
+          <circle cx="10" cy="4" r="1.5" />
+          <circle cx="10" cy="10" r="1.5" />
+          <circle cx="10" cy="16" r="1.5" />
+        </svg>
+      </button>
+      {menu ? createPortal(menu, document.body) : null}
+    </>
   );
 }
 

@@ -5,7 +5,14 @@ import Image from 'next/image';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { OrgSwitcher } from './org-switcher';
 
-type Page = 'overview' | 'monitors' | 'new-monitor' | 'monitor-detail' | 'organization';
+type Page =
+  | 'overview'
+  | 'monitors'
+  | 'new-monitor'
+  | 'monitor-detail'
+  | 'incidents'
+  | 'status-pages'
+  | 'organization';
 type IconName =
   | 'overview'
   | 'monitors'
@@ -35,9 +42,8 @@ const navigationGroups: { label: string; items: NavigationItem[] }[] = [
     items: [
       { label: 'Overview', href: '/', page: 'overview', icon: 'overview' },
       { label: 'Monitors', href: '/monitors', page: 'monitors', icon: 'monitors' },
-      { label: 'New monitor', href: '/monitors/new', page: 'new-monitor', icon: 'add' },
-      { label: 'Incidents', icon: 'incidents', disabled: true },
-      { label: 'Status pages', icon: 'status-pages', disabled: true },
+      { label: 'Incidents', href: '/incidents', page: 'incidents', icon: 'incidents' },
+      { label: 'Status pages', href: '/status-pages', page: 'status-pages', icon: 'status-pages' },
     ],
   },
   {

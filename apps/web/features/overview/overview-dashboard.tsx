@@ -506,7 +506,7 @@ function MonitorSnapshot({
           </Link>
         </div>
       ) : (
-        <MonitorTable monitors={visible} onDeleteMonitor={onDeleteMonitor} />
+        <MonitorTable monitors={visible} onDeleteMonitor={onDeleteMonitor} origin="/" />
       )}
     </section>
   );
