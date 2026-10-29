@@ -7,6 +7,7 @@ import {
   type CheckRoundResponse,
   toCheckRoundResponse,
   toHistoryListItem,
+  toAvailabilityHistoryResponse,
   toIncidentDetailResponse,
   toIncidentHistoryResponse,
   toPendingRoundResponse,
@@ -45,6 +46,20 @@ export class MonitorHistoryController {
     return {
       data: history.items.map(toHistoryListItem),
       page: { nextCursor: history.nextCursor },
+    };
+  }
+
+  @Get(':monitorId/availability-history')
+  @RequirePermission(PERMISSIONS.CHECK_READ)
+  async getAvailabilityHistory(
+    @Req() request: RequestWithContext,
+    @Param('monitorId') monitorId: string,
+    @Query() query: Record<string, unknown>,
+  ) {
+    return {
+      data: toAvailabilityHistoryResponse(
+        await this.monitors.availabilityHistory(request.watchrailContext, monitorId, query),
+      ),
     };
   }
 

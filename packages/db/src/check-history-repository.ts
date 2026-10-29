@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer';
-import { and, asc, desc, eq, inArray, lt, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, lt, or, sql } from 'drizzle-orm';
 import {
   parseHttpRedirectHops,
   parseStoredAssertionEvaluation,
@@ -115,6 +115,28 @@ export interface RegionalHistoryDetail {
 export interface CheckHistoryPage {
   items: CheckHistoryListItem[];
   nextCursor: string | null;
+}
+
+export type AvailabilityHistoryRange = '24h' | '7d' | '30d' | '90d';
+export type AvailabilityHistoryStatus = 'UP' | 'DOWN' | 'DEGRADED' | 'UNKNOWN' | 'NO_DATA';
+
+export interface AvailabilityHistory {
+  range: {
+    key: AvailabilityHistoryRange;
+    start: Date;
+    end: Date;
+    bucketSeconds: number;
+  };
+  buckets: Array<{
+    start: Date;
+    end: Date;
+    status: AvailabilityHistoryStatus;
+    checks: number;
+    up: number;
+    down: number;
+    degraded: number;
+    unknown: number;
+  }>;
 }
 
 export interface ResponseTimeOverview {
@@ -488,6 +510,88 @@ export class CheckHistoryRepository {
     };
   }
 
+  async availabilityForMonitor(
+    organizationId: string,
+    monitorId: string,
+    range: AvailabilityHistoryRange,
+  ): Promise<AvailabilityHistory> {
+    await this.assertMonitorExists(organizationId, monitorId);
+    const end = new Date();
+    const start = new Date(end.getTime() - availabilityRangeMilliseconds(range));
+    const bucketCount = 48;
+    const bucketMilliseconds = (end.getTime() - start.getTime()) / bucketCount;
+
+    const rows = await this.db
+      .selectDistinctOn([checkRounds.id], {
+        id: checkRounds.id,
+        createdAt: checkRounds.createdAt,
+        singleOutcome: checkExecutionResults.outcome,
+        aggregateOutcome: checkRoundAggregates.outcome,
+      })
+      .from(checkRounds)
+      .leftJoin(
+        checkExecutionAssignments,
+        and(
+          eq(checkExecutionAssignments.organizationId, checkRounds.organizationId),
+          eq(checkExecutionAssignments.roundId, checkRounds.id),
+        ),
+      )
+      .leftJoin(
+        checkExecutionResults,
+        and(
+          eq(checkExecutionResults.organizationId, checkRounds.organizationId),
+          eq(checkExecutionResults.roundId, checkRounds.id),
+          eq(checkExecutionResults.assignmentId, checkExecutionAssignments.id),
+        ),
+      )
+      .leftJoin(
+        checkRoundAggregates,
+        and(
+          eq(checkRoundAggregates.organizationId, checkRounds.organizationId),
+          eq(checkRoundAggregates.roundId, checkRounds.id),
+        ),
+      )
+      .where(
+        and(
+          eq(checkRounds.organizationId, organizationId),
+          eq(checkRounds.monitorId, monitorId),
+          gte(checkRounds.createdAt, start),
+        ),
+      )
+      .orderBy(checkRounds.id, asc(checkExecutionAssignments.location));
+
+    const counts = Array.from({ length: bucketCount }, () => ({
+      up: 0,
+      down: 0,
+      degraded: 0,
+      unknown: 0,
+    }));
+    for (const row of rows) {
+      const index = Math.min(
+        bucketCount - 1,
+        Math.max(0, Math.floor((row.createdAt.getTime() - start.getTime()) / bucketMilliseconds)),
+      );
+      const outcome = availabilityOutcome(row.aggregateOutcome, row.singleOutcome);
+      counts[index]![outcome] += 1;
+    }
+
+    return {
+      range: {
+        key: range,
+        start,
+        end,
+        bucketSeconds: Math.round(bucketMilliseconds / 1000),
+      },
+      buckets: counts.map((bucket, index) => ({
+        start: new Date(start.getTime() + index * bucketMilliseconds),
+        end: new Date(start.getTime() + (index + 1) * bucketMilliseconds),
+        status: availabilityBucketStatus(bucket),
+        checks: bucket.up + bucket.down + bucket.degraded + bucket.unknown,
+        ...bucket,
+      })),
+    };
+  }
+
   async findForMonitor(
     organizationId: string,
     monitorId: string,
@@ -706,6 +810,68 @@ export class CheckHistoryQueryError extends Error {
     super(message);
     this.name = 'CheckHistoryQueryError';
   }
+}
+
+export class AvailabilityHistoryQueryError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AvailabilityHistoryQueryError';
+  }
+}
+
+export function parseAvailabilityHistoryQuery(
+  value: Record<string, unknown>,
+): AvailabilityHistoryRange {
+  const keys = Object.keys(value);
+  if (keys.some((key) => key !== 'range')) {
+    throw new AvailabilityHistoryQueryError(
+      'Availability history query contains unsupported parameters.',
+    );
+  }
+  const range = value.range ?? '7d';
+  if (range !== '24h' && range !== '7d' && range !== '30d' && range !== '90d') {
+    throw new AvailabilityHistoryQueryError(
+      'Availability history range must be 24h, 7d, 30d, or 90d.',
+    );
+  }
+  return range;
+}
+
+function availabilityRangeMilliseconds(range: AvailabilityHistoryRange): number {
+  const day = 24 * 60 * 60 * 1000;
+  if (range === '24h') return day;
+  if (range === '7d') return 7 * day;
+  if (range === '30d') return 30 * day;
+  return 90 * day;
+}
+
+function availabilityOutcome(
+  aggregate: string | null,
+  single: CheckExecutionResultRecord['outcome'] | null,
+): 'up' | 'down' | 'degraded' | 'unknown' {
+  if (aggregate === 'UP') return 'up';
+  if (aggregate === 'DOWN') return 'down';
+  if (aggregate === 'DEGRADED') return 'degraded';
+  if (aggregate === 'UNKNOWN') return 'unknown';
+  if (single === 'PASS') return 'up';
+  if (single === 'FAIL') return 'down';
+  return 'unknown';
+}
+
+function availabilityBucketStatus(bucket: {
+  up: number;
+  down: number;
+  degraded: number;
+  unknown: number;
+}): AvailabilityHistoryStatus {
+  const checks = bucket.up + bucket.down + bucket.degraded + bucket.unknown;
+  if (checks === 0) return 'NO_DATA';
+  if (bucket.down > 0 && bucket.up === 0 && bucket.degraded === 0 && bucket.unknown === 0) {
+    return 'DOWN';
+  }
+  if (bucket.degraded > 0 || (bucket.down > 0 && bucket.up > 0)) return 'DEGRADED';
+  if (bucket.unknown > 0) return 'UNKNOWN';
+  return 'UP';
 }
 
 export function parseCheckHistoryQuery(value: Record<string, unknown>): CheckHistoryQuery {

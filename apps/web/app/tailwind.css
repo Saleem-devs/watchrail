@@ -91,6 +91,10 @@
     background: var(--color-rail-selected-border);
   }
 
+  dd {
+    margin-inline-start: 0;
+  }
+
   :where(button, a, input, select, textarea, summary):focus-visible {
     outline: 2px solid var(--color-rail-accent);
     outline-offset: 3px;

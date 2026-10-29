@@ -14,8 +14,8 @@ are not part of the refactor.
 
 | Area | HTTP entry points | Validation authority | Security boundary |
 | --- | --- | --- | --- |
-| Monitor settings | `/api/monitors`, `/:monitorId/*-settings`, lifecycle, headers, assertions, locations | `@watchrail/domain` parsing and service error mapping | Operator auth, active organization, permission decorators |
-| Monitor history, uptime, incidents | `/api/monitors/:monitorId/check-rounds`, `/incidents`, `/uptime` | Strict existing query parsers in `@watchrail/db` | Operator auth and organization-scoped reads |
+| Monitor settings | `/api/monitors`, `/:monitorId/*-settings`, lifecycle, headers, assertions, locations | Strict Zod query validation for optional `name`, `state`, and `location` list filters plus optional page-number pagination; `@watchrail/domain` parsing and service error mapping for mutations | Operator auth, active organization, permission decorators |
+| Monitor history, uptime, incidents | `/api/monitors/:monitorId/check-rounds`, `/availability-history`, `/incidents`, `/uptime`; workspace incident history at `/api/incidents` | Strict query parsers in `@watchrail/db`; workspace incidents accept page-number pagination and optional `OPEN` or `RESOLVED` status, while per-monitor evidence history retains cursor pagination; availability history accepts only `24h`, `7d`, `30d`, or `90d` and returns 48 authoritative outcome buckets | Operator auth, permission decorators, and organization-scoped reads |
 | Overview response-time analytics | `/api/overview/response-times` | Fixed seven-day UTC window; completed scheduled evidence; up to four monitor series | Operator auth, `check:read`, organization-scoped read model |
 | Probe location, enrollment, agent administration | `/api/probe-locations`, `/probe-enrollments`, `/probe-agents` | Existing `ProbeIdentityService` strict parsers | Operator auth and scoped repositories |
 | Probe machine | `/api/probe-machine/*` | `@watchrail/contracts` versioned parsers and `ProbeCoordinatorService` | Separate probe-machine auth, lease tokens, no-store, rate limiting |
@@ -29,7 +29,8 @@ are not part of the refactor.
 ## Response conventions
 
 - Successful JSON responses use `{ "data": value }`.
-- Paginated reads use `{ "data": [], "page": { "nextCursor": string | null } }`.
+- Evidence-history reads use cursor pagination. Workspace monitor and incident lists use
+  `{ "data": [], "page": { "number": number, "limit": number, "total": number, "totalPages": number } }`.
 - Existing `204 No Content`, `202 Accepted`, `304 Not Modified`, and endpoint-specific
   cache headers must be preserved.
 - Authenticated responses use explicit presenter allow-lists. Never spread database rows or

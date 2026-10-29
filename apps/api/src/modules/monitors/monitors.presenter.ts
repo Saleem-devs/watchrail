@@ -1,11 +1,13 @@
 import type {
   CheckHistoryDetail,
   CheckHistoryListItem,
+  AvailabilityHistory,
   CheckRoundRecord,
   CurrentCheck,
   CurrentIncidentState,
   IncidentDetail,
   IncidentHistoryItem,
+  OrganizationIncidentHistoryItem,
   MonitorRecord,
   UptimeMetrics,
 } from '@watchrail/db';
@@ -154,6 +156,16 @@ export function toIncidentHistoryResponse(incident: IncidentHistoryItem) {
   };
 }
 
+export function toOrganizationIncidentHistoryResponse(incident: OrganizationIncidentHistoryItem) {
+  return {
+    ...toIncidentHistoryResponse(incident),
+    monitorId: incident.monitorId,
+    monitorName: incident.monitorName,
+    monitorUrl: incident.monitorUrl,
+    severity: incident.severity,
+  };
+}
+
 export function toIncidentDetailResponse(incident: IncidentDetail) {
   return {
     ...toIncidentHistoryResponse(incident),
@@ -257,6 +269,21 @@ export function toHistoryListItem(round: CheckHistoryListItem) {
         ? toSingleLocationListResponse(round.result)
         : { ...round.result, finalizedAt: round.result.finalizedAt.toISOString() }
       : null,
+  };
+}
+
+export function toAvailabilityHistoryResponse(history: AvailabilityHistory) {
+  return {
+    range: {
+      ...history.range,
+      start: history.range.start.toISOString(),
+      end: history.range.end.toISOString(),
+    },
+    buckets: history.buckets.map((bucket) => ({
+      ...bucket,
+      start: bucket.start.toISOString(),
+      end: bucket.end.toISOString(),
+    })),
   };
 }
 

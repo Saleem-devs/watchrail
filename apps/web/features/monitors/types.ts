@@ -15,6 +15,13 @@ export interface Monitor {
   uptime: { uptimePercent: number | null; coveragePercent: number | null };
 }
 
+export interface ListPage {
+  number: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
+
 export interface ProbeLocation {
   id: string;
   name: string;
@@ -61,6 +68,11 @@ export interface FieldErrors {
   name?: string[];
   url?: string[];
   statusPolicy?: string[];
+  method?: string[];
+  timeoutMs?: string[];
+  followRedirects?: string[];
+  lifecycleState?: string[];
+  locations?: string[];
 }
 
 export interface ApiError {
@@ -132,6 +144,28 @@ export interface ManualRound {
 export interface HistoryPage {
   items: ManualRound[];
   nextCursor: string | null;
+}
+
+export type AvailabilityHistoryRange = '24h' | '7d' | '30d' | '90d';
+export type AvailabilityHistoryStatus = 'UP' | 'DOWN' | 'DEGRADED' | 'UNKNOWN' | 'NO_DATA';
+
+export interface AvailabilityHistory {
+  range: {
+    key: AvailabilityHistoryRange;
+    start: string;
+    end: string;
+    bucketSeconds: number;
+  };
+  buckets: Array<{
+    start: string;
+    end: string;
+    status: AvailabilityHistoryStatus;
+    checks: number;
+    up: number;
+    down: number;
+    degraded: number;
+    unknown: number;
+  }>;
 }
 
 export interface IncidentHistoryPage {
