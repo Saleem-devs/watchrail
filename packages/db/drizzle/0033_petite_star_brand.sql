@@ -1,0 +1,2 @@
+ALTER TABLE "status_page_components" ADD COLUMN "group_name" varchar(100);--> statement-breakpoint
+ALTER TABLE "status_page_components" ADD CONSTRAINT "status_page_components_group_name_not_blank" CHECK ("status_page_components"."group_name" is null or length(btrim("status_page_components"."group_name")) > 0);

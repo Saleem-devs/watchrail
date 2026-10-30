@@ -11,14 +11,17 @@ import { IncidentTable } from './incident-table';
 import type { IncidentStatusFilter, WorkspaceIncident, WorkspaceIncidentPage } from './types';
 
 export function IncidentsPage({
+  projectId,
   initialStatus,
   initialPage,
   initialLimit,
 }: {
+  projectId?: string | undefined;
   initialStatus: IncidentStatusFilter;
   initialPage: number;
   initialLimit: number;
 }) {
+  const projectBase = projectId ? `/projects/${projectId}` : '';
   const [status, setStatus] = useState(initialStatus);
   const [page, setPage] = useState<WorkspaceIncidentPage>({
     items: [],
@@ -30,14 +33,17 @@ export function IncidentsPage({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
 
-  const pathFor = useCallback((nextStatus: IncidentStatusFilter, number: number, limit: number) => {
-    const query = new URLSearchParams({
-      status: nextStatus,
-      page: String(number),
-      limit: String(limit),
-    });
-    return `/incidents?${query}`;
-  }, []);
+  const pathFor = useCallback(
+    (nextStatus: IncidentStatusFilter, number: number, limit: number) => {
+      const query = new URLSearchParams({
+        status: nextStatus,
+        page: String(number),
+        limit: String(limit),
+      });
+      return `${projectBase}/incidents?${query}`;
+    },
+    [projectBase],
+  );
 
   const load = useCallback(
     async (nextStatus: IncidentStatusFilter, number: number, limit: number) => {
@@ -45,6 +51,7 @@ export function IncidentsPage({
       setError(undefined);
       try {
         const query = new URLSearchParams({ page: String(number), limit: String(limit) });
+        if (projectId) query.set('projectId', projectId);
         if (nextStatus !== 'all') query.set('status', nextStatus.toUpperCase());
         const response = await fetch(`/api/incidents?${query}`, {
           headers: { Accept: 'application/json' },
@@ -63,7 +70,7 @@ export function IncidentsPage({
         setLoading(false);
       }
     },
-    [],
+    [projectId],
   );
 
   useEffect(() => {
@@ -95,11 +102,11 @@ export function IncidentsPage({
 
   const origin = pathFor(status, page.number, page.limit);
   return (
-    <AppShell page="incidents">
+    <AppShell page="incidents" projectId={projectId}>
       <main id="main-content" data-watchrail-workspace className="w-full min-w-0 pb-16">
         <PageHeader
           title="Incidents"
-          description="Investigate active service failures and review resolved interruptions across this workspace."
+          description="Investigate active service failures and review resolved interruptions in this project."
           actions={
             <IncidentFiltersDialog
               status={status}
@@ -133,7 +140,7 @@ export function IncidentsPage({
                   : 'Incident history will appear here when Watchrail confirms a service failure.'}
               </p>
               <Link
-                href="/monitors?page=1&limit=25"
+                href={`${projectBase}/monitors?page=1&limit=25`}
                 className={actionClassName({ size: 'compact' })}
               >
                 View monitors
@@ -141,7 +148,7 @@ export function IncidentsPage({
             </div>
           ) : (
             <>
-              <IncidentTable incidents={page.items} origin={origin} />
+              <IncidentTable incidents={page.items} origin={origin} projectId={projectId} />
               <TablePagination
                 page={page}
                 label="incidents"

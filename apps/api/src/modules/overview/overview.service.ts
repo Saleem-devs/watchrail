@@ -6,7 +6,7 @@ import type { RequestContext } from '../../auth/request-context.js';
 export class OverviewService {
   constructor(@Inject(CheckHistoryRepository) private readonly history: CheckHistoryRepository) {}
 
-  responseTimes(context: RequestContext) {
-    return this.history.responseTimeOverview(context.organizationId);
+  responseTimes(context: RequestContext, projectId: string) {
+    return this.history.responseTimeOverview(context.organizationId, new Date(), projectId);
   }
 }

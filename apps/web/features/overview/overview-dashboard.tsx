@@ -19,6 +19,7 @@ function average(values: Array<number | null | undefined>): number | null {
 }
 
 export function OverviewDashboard({
+  projectId,
   monitors,
   responseTimes,
   responseTimesLoading,
@@ -26,6 +27,7 @@ export function OverviewDashboard({
   onRetryResponseTimes,
   onDeleteMonitor,
 }: {
+  projectId?: string | undefined;
   monitors: Monitor[];
   responseTimes: ResponseTimeOverview | undefined;
   responseTimesLoading: boolean;
@@ -33,6 +35,7 @@ export function OverviewDashboard({
   onRetryResponseTimes: () => void;
   onDeleteMonitor?: ((monitor: Monitor) => void | Promise<void>) | undefined;
 }) {
+  const projectBase = projectId ? `/projects/${projectId}` : '';
   const summary = summarizeMonitors(monitors);
   const averageUptime = average(monitors.map((monitor) => monitor.uptime?.uptimePercent));
   const averageCoverage = average(monitors.map((monitor) => monitor.uptime?.coveragePercent));
@@ -41,7 +44,7 @@ export function OverviewDashboard({
       <section aria-labelledby="overview-metrics-heading">
         <div className="mb-3 flex items-center justify-between gap-3">
           <h2 id="overview-metrics-heading" className="m-0 text-sm font-medium text-rail-text">
-            Workspace health
+            Project health
           </h2>
           <span className="text-xs text-rail-muted">Latest authoritative state</span>
         </div>
@@ -89,6 +92,7 @@ export function OverviewDashboard({
             <span className="text-[11px] text-rail-muted">Milliseconds</span>
           </div>
           <ResponseTimeChart
+            projectBase={projectBase}
             data={responseTimes}
             loading={responseTimesLoading}
             error={responseTimesError}
@@ -97,23 +101,30 @@ export function OverviewDashboard({
         </section>
 
         <LatestResponseComparison
+          projectBase={projectBase}
           data={responseTimes}
           loading={responseTimesLoading}
           error={responseTimesError}
         />
       </div>
 
-      <MonitorSnapshot monitors={monitors} onDeleteMonitor={onDeleteMonitor} />
+      <MonitorSnapshot
+        monitors={monitors}
+        onDeleteMonitor={onDeleteMonitor}
+        projectId={projectId}
+      />
     </div>
   );
 }
 
 function ResponseTimeChart({
+  projectBase,
   data,
   loading,
   error,
   onRetry,
 }: {
+  projectBase: string;
   data: ResponseTimeOverview | undefined;
   loading: boolean;
   error: string | undefined;
@@ -244,7 +255,7 @@ function ResponseTimeChart({
         {data.series.map((series, index) => (
           <Link
             key={series.monitorId}
-            href={`/monitors/${series.monitorId}`}
+            href={`${projectBase}/monitors/${series.monitorId}`}
             className="inline-flex items-center gap-2 text-xs text-rail-subtle no-underline hover:text-rail-text hover:underline"
           >
             <span className={`size-2 rounded-full ${chartTones[index]!.fill}`} aria-hidden="true" />
@@ -281,10 +292,12 @@ function ResponseTimeChart({
 }
 
 function LatestResponseComparison({
+  projectBase,
   data,
   loading,
   error,
 }: {
+  projectBase: string;
   data: ResponseTimeOverview | undefined;
   loading: boolean;
   error: string | undefined;
@@ -325,7 +338,7 @@ function LatestResponseComparison({
               <li key={series.monitorId}>
                 <div className="mb-2 flex items-baseline justify-between gap-3">
                   <Link
-                    href={`/monitors/${series.monitorId}`}
+                    href={`${projectBase}/monitors/${series.monitorId}`}
                     className="min-w-0 truncate text-xs font-medium text-rail-text no-underline hover:underline"
                   >
                     {series.monitorName}
@@ -460,10 +473,13 @@ function EmptyInsight({ children }: { children: ReactNode }) {
 function MonitorSnapshot({
   monitors,
   onDeleteMonitor,
+  projectId,
 }: {
   monitors: Monitor[];
   onDeleteMonitor?: ((monitor: Monitor) => void | Promise<void>) | undefined;
+  projectId?: string | undefined;
 }) {
+  const projectBase = projectId ? `/projects/${projectId}` : '';
   const visible = [...monitors]
     .sort((left, right) => {
       const order = { attention: 0, pending: 1, paused: 2, operational: 3 } as const;
@@ -486,7 +502,7 @@ function MonitorSnapshot({
           </p>
         </div>
         <Link
-          href="/monitors"
+          href={`${projectBase}/monitors`}
           className="inline-flex min-h-8 items-center rounded-rail-control px-2.5 text-xs font-medium text-rail-accent no-underline hover:bg-rail-hover"
         >
           View all monitors
@@ -499,14 +515,19 @@ function MonitorSnapshot({
             Create a monitor to begin collecting availability evidence.
           </p>
           <Link
-            href="/monitors/new"
+            href={`${projectBase}/monitors/new`}
             className="inline-flex min-h-9 items-center rounded-rail-control bg-rail-accent px-3 text-sm font-medium text-rail-on-accent no-underline hover:bg-rail-accent-hover"
           >
             Create monitor
           </Link>
         </div>
       ) : (
-        <MonitorTable monitors={visible} onDeleteMonitor={onDeleteMonitor} origin="/" />
+        <MonitorTable
+          monitors={visible}
+          onDeleteMonitor={onDeleteMonitor}
+          origin={projectBase || '/'}
+          projectId={projectId}
+        />
       )}
     </section>
   );

@@ -28,19 +28,25 @@ export class StatusPagesService {
     private readonly pages: StatusPageRepository,
   ) {}
 
-  async create(context: RequestContext, input: CreateStatusPageInput): Promise<StatusPageRecord> {
+  async create(
+    context: RequestContext,
+    projectId: string,
+    input: CreateStatusPageInput,
+  ): Promise<StatusPageRecord> {
     return this.run(() =>
       this.pages.create(context.organizationId, {
         name: input.name,
+        ...(input.logoUrl === undefined ? {} : { logoUrl: input.logoUrl }),
         slug: input.slug,
+        projectId,
         components: input.components,
         ...(input.published === undefined ? {} : { published: input.published }),
       }),
     );
   }
 
-  list(context: RequestContext): Promise<StatusPageRecord[]> {
-    return this.pages.listForOrganization(context.organizationId);
+  list(context: RequestContext, projectId: string): Promise<StatusPageRecord[]> {
+    return this.pages.listForProject(context.organizationId, projectId);
   }
 
   async find(context: RequestContext, statusPageId: string): Promise<StatusPageRecord> {

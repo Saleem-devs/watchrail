@@ -45,7 +45,10 @@ function IncidentStatus({ incident }: { incident: WorkspaceIncident }) {
   );
 }
 
-function incidentColumns(origin: string): Array<DataTableColumn<WorkspaceIncident>> {
+function incidentColumns(
+  origin: string,
+  projectId?: string,
+): Array<DataTableColumn<WorkspaceIncident>> {
   return [
     {
       id: 'monitor',
@@ -53,7 +56,7 @@ function incidentColumns(origin: string): Array<DataTableColumn<WorkspaceInciden
       cell: (incident) => (
         <div className="min-w-0">
           <Link
-            href={monitorDetailHref(incident.monitorId, origin)}
+            href={monitorDetailHref(incident.monitorId, origin, projectId)}
             className="font-medium text-rail-text no-underline hover:text-rail-accent hover:underline"
           >
             {incident.monitorName}
@@ -103,14 +106,16 @@ function incidentColumns(origin: string): Array<DataTableColumn<WorkspaceInciden
 export function IncidentTable({
   incidents,
   origin,
+  projectId,
 }: {
   incidents: WorkspaceIncident[];
   origin: string;
+  projectId?: string | undefined;
 }) {
   return (
     <DataTable
       rows={incidents}
-      columns={incidentColumns(origin)}
+      columns={incidentColumns(origin, projectId)}
       actions={[
         {
           id: 'view-monitor',

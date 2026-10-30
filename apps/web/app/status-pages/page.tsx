@@ -1,5 +1,5 @@
-import { StatusPagesPage } from '../../features/status-pages/status-pages-page';
+import { redirect } from 'next/navigation';
 
 export default function StatusPagesRoute() {
-  return <StatusPagesPage />;
+  redirect('/projects');
 }

@@ -3,8 +3,12 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { AppShell } from '../../components/app-shell';
-import { Button } from '../../components/ui/button';
-import { DataTable, type DataTableColumn } from '../../components/ui/data-table';
+import { actionClassName, Button } from '../../components/ui/button';
+import {
+  DataTable,
+  type DataTableAction,
+  type DataTableColumn,
+} from '../../components/ui/data-table';
 import { PageHeader } from '../../components/ui/page-header';
 import type { WorkspaceStatusPage } from './types';
 
@@ -55,7 +59,23 @@ const columns: Array<DataTableColumn<WorkspaceStatusPage>> = [
   },
 ];
 
-export function StatusPagesPage() {
+const actions: Array<DataTableAction<WorkspaceStatusPage>> = [
+  {
+    id: 'manage',
+    label: 'Manage',
+    href: (page) =>
+      `${page.projectId ? `/projects/${page.projectId}` : ''}/status-pages/${page.id}`,
+  },
+  {
+    id: 'edit',
+    label: 'Edit',
+    href: (page) =>
+      `${page.projectId ? `/projects/${page.projectId}` : ''}/status-pages/${page.id}/edit`,
+  },
+];
+
+export function StatusPagesPage({ projectId }: { projectId?: string | undefined }) {
+  const projectBase = projectId ? `/projects/${projectId}` : '';
   const [pages, setPages] = useState<WorkspaceStatusPage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
@@ -63,9 +83,12 @@ export function StatusPagesPage() {
     setLoading(true);
     setError(undefined);
     try {
-      const response = await fetch('/api/status-pages', {
-        headers: { Accept: 'application/json' },
-      });
+      const response = await fetch(
+        `/api/status-pages${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`,
+        {
+          headers: { Accept: 'application/json' },
+        },
+      );
       if (!response.ok) throw new Error();
       const body = (await response.json()) as { data: WorkspaceStatusPage[] };
       setPages(body.data);
@@ -76,18 +99,37 @@ export function StatusPagesPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [projectId]);
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(timer);
   }, [load]);
 
   return (
-    <AppShell page="status-pages">
+    <AppShell page="status-pages" projectId={projectId}>
       <main id="main-content" data-watchrail-workspace className="w-full min-w-0 pb-16">
         <PageHeader
           title="Status pages"
           description="Publish a clear, customer-facing view of service health and incident history."
+          actions={
+            <Link
+              href={`${projectBase}/status-pages/new`}
+              className={actionClassName({ variant: 'primary' })}
+            >
+              <svg
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                aria-hidden="true"
+                className="size-3.5"
+              >
+                <path d="M8 3v10M3 8h10" />
+              </svg>
+              Create status page
+            </Link>
+          }
         />
         <section className="mt-6 overflow-hidden rounded-rail-panel border border-rail-border bg-rail-surface">
           {loading ? (
@@ -108,27 +150,29 @@ export function StatusPagesPage() {
             <div className="px-5 py-12 text-center">
               <h2 className="m-0 text-base font-medium text-rail-text">No status pages yet</h2>
               <p className="mx-auto mt-2 mb-0 max-w-md text-sm leading-6 text-rail-subtle">
-                Status pages will let you select monitors and publish their authoritative
-                availability without exposing private diagnostics.
+                Select monitors and publish authoritative availability without exposing private
+                diagnostics.
               </p>
+              <Link
+                href={`${projectBase}/status-pages/new`}
+                className={actionClassName({ variant: 'primary', className: 'mt-4' })}
+              >
+                Create status page
+              </Link>
             </div>
           ) : (
             <DataTable
               rows={pages}
               columns={columns}
+              actions={actions}
               getRowKey={(page) => page.id}
+              getRowHref={(page) => `${projectBase}/status-pages/${page.id}`}
               getRowLabel={(page) => page.name}
               ariaLabel="Workspace status pages"
               minWidthClassName="min-w-[680px]"
             />
           )}
         </section>
-        {pages.some((page) => page.published) ? (
-          <p className="mt-3 mb-0 text-xs text-rail-muted">
-            Published pages open in their public presentation. Management controls are the next
-            status-page slice.
-          </p>
-        ) : null}
       </main>
     </AppShell>
   );

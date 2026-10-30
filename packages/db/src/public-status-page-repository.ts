@@ -35,7 +35,12 @@ export class PublicStatusPageRepository {
         );
         const cutoff = new Date(clock.rows[0]!.cutoff);
         const [page] = await tx
-          .select({ id: statusPages.id, name: statusPages.name, slug: statusPages.slug })
+          .select({
+            id: statusPages.id,
+            name: statusPages.name,
+            slug: statusPages.slug,
+            logoUrl: statusPages.logoUrl,
+          })
           .from(statusPages)
           .where(and(eq(statusPages.slug, slug), eq(statusPages.published, true)))
           .limit(1);
@@ -45,8 +50,10 @@ export class PublicStatusPageRepository {
           .select({
             componentId: statusPageComponents.id,
             displayName: statusPageComponents.displayName,
+            groupName: statusPageComponents.groupName,
             monitorId: statusPageComponents.monitorId,
             position: statusPageComponents.position,
+            monitoringStartedAt: monitors.createdAt,
             lifecycleState: monitors.lifecycleState,
             availabilityState: monitorAvailabilityState.currentState,
             activeIncidentId: incidents.id,
@@ -91,7 +98,9 @@ export class PublicStatusPageRepository {
           return {
             id: row.componentId,
             displayName: row.displayName,
+            groupName: row.groupName,
             position: row.position,
+            monitoringStartedAt: row.monitoringStartedAt.toISOString(),
             status: derivePublicComponentStatus({
               lifecycleState: row.lifecycleState,
               aggregateState,
@@ -107,6 +116,7 @@ export class PublicStatusPageRepository {
                   id: incidents.id,
                   monitorId: incidents.monitorId,
                   status: incidents.status,
+                  severity: incidents.severity,
                   startedAt: incidents.startedAt,
                   openedAt: incidents.openedAt,
                   resolvedAt: incidents.resolvedAt,
@@ -150,6 +160,7 @@ export class PublicStatusPageRepository {
             id: incident.id,
             componentId,
             status: incident.status,
+            severity: incident.severity === 'DEGRADED' ? 'DEGRADED' : 'DOWN',
             startedAt: incident.startedAt.toISOString(),
             openedAt: incident.openedAt.toISOString(),
             resolvedAt: incident.resolvedAt?.toISOString() ?? null,
@@ -161,6 +172,7 @@ export class PublicStatusPageRepository {
         return {
           contractVersion: 1,
           name: page.name,
+          ...(page.logoUrl ? { logoUrl: page.logoUrl } : {}),
           slug: page.slug,
           status: derivePublicPageStatus(components.map(({ status }) => status)),
           components,

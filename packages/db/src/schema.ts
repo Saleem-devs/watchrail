@@ -329,11 +329,34 @@ export const monitorAvailabilityDaily = pgTable(
   ],
 );
 
+export const projects = pgTable(
+  'projects',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull(),
+    name: varchar('name', { length: 120 }).notNull(),
+    slug: varchar('slug', { length: 63 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('projects_identity_unique').on(table.id, table.organizationId),
+    unique('projects_organization_slug_unique').on(table.organizationId, table.slug),
+    index('projects_organization_created_idx').on(table.organizationId, table.createdAt, table.id),
+    check('projects_name_not_blank', sql`length(btrim(${table.name})) > 0`),
+    check(
+      'projects_slug_format',
+      sql`${table.slug} ~ '^[a-z0-9]+(-[a-z0-9]+)*$' and length(${table.slug}) between 2 and 63`,
+    ),
+  ],
+);
+
 export const monitors = pgTable(
   'monitors',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     organizationId: uuid('organization_id').notNull(),
+    projectId: uuid('project_id').notNull(),
 
     name: varchar('name', { length: 120 }).notNull(),
 
@@ -366,7 +389,17 @@ export const monitors = pgTable(
   (table) => [
     unique('monitors_id_organization_unique').on(table.id, table.organizationId),
 
-    index('monitors_organization_created_idx').on(table.organizationId, table.createdAt),
+    foreignKey({
+      name: 'monitors_project_fk',
+      columns: [table.projectId, table.organizationId],
+      foreignColumns: [projects.id, projects.organizationId],
+    }),
+
+    index('monitors_project_created_idx').on(
+      table.organizationId,
+      table.projectId,
+      table.createdAt,
+    ),
 
     check('monitors_name_not_blank', sql`length(btrim(${table.name})) > 0`),
 
@@ -419,7 +452,9 @@ export const statusPages = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     organizationId: uuid('organization_id').notNull(),
+    projectId: uuid('project_id').notNull(),
     name: varchar('name', { length: 100 }).notNull(),
+    logoUrl: text('logo_url'),
     slug: varchar('slug', { length: 63 }).notNull(),
     published: boolean('published').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -427,9 +462,15 @@ export const statusPages = pgTable(
   },
   (table) => [
     unique('status_pages_identity_unique').on(table.id, table.organizationId),
+    foreignKey({
+      name: 'status_pages_project_fk',
+      columns: [table.projectId, table.organizationId],
+      foreignColumns: [projects.id, projects.organizationId],
+    }),
     unique('status_pages_slug_unique').on(table.slug),
-    index('status_pages_organization_created_idx').on(
+    index('status_pages_project_created_idx').on(
       table.organizationId,
+      table.projectId,
       table.createdAt,
       table.id,
     ),
@@ -449,6 +490,7 @@ export const statusPageComponents = pgTable(
     statusPageId: uuid('status_page_id').notNull(),
     monitorId: uuid('monitor_id').notNull(),
     displayName: varchar('display_name', { length: 100 }).notNull(),
+    groupName: varchar('group_name', { length: 100 }),
     position: integer('position').notNull(),
   },
   (table) => [
@@ -468,6 +510,10 @@ export const statusPageComponents = pgTable(
     check(
       'status_page_components_display_name_not_blank',
       sql`length(btrim(${table.displayName})) > 0`,
+    ),
+    check(
+      'status_page_components_group_name_not_blank',
+      sql`${table.groupName} is null or length(btrim(${table.groupName})) > 0`,
     ),
     check('status_page_components_position_non_negative', sql`${table.position} >= 0`),
   ],
@@ -1460,6 +1506,8 @@ export const checkRoundOutbox = pgTable(
 
 export type MonitorRecord = typeof monitors.$inferSelect;
 export type NewMonitorRecord = typeof monitors.$inferInsert;
+export type ProjectRecord = typeof projects.$inferSelect;
+export type NewProjectRecord = typeof projects.$inferInsert;
 
 export type MonitorConfigurationVersionRecord = typeof monitorConfigurationVersions.$inferSelect;
 

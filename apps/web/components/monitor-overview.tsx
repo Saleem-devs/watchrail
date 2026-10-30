@@ -21,7 +21,7 @@ export function MonitorOverview({ monitors }: { monitors: readonly MonitorSummar
       aria-label="Monitor overview"
     >
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-rail-border px-4 py-3">
-        <h2 className="m-0 text-sm font-semibold text-rail-text">Workspace health</h2>
+        <h2 className="m-0 text-sm font-semibold text-rail-text">Project health</h2>
         <span className="text-xs text-rail-muted">Latest authoritative state</span>
       </div>
       <dl className="grid grid-cols-2 gap-px bg-rail-border sm:grid-cols-3 xl:grid-cols-5">

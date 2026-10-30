@@ -25,8 +25,10 @@ import {
   monitorIncidentState,
   monitors,
   probeLocations,
+  projects,
   type MonitorRecord,
 } from './schema.js';
+import { ensureDefaultProject } from './project-repository.js';
 
 export class MonitorRepository {
   constructor(private readonly db: WatchrailDatabase) {}
@@ -37,6 +39,7 @@ export class MonitorRepository {
     suppliedMonitor?: NewMonitor,
     suppliedRequestHeaders: StoredRequestHeader[] = [],
     suppliedAssertions: ResponseAssertionConfigurationV1 = EMPTY_ASSERTION_CONFIGURATION,
+    suppliedProjectId?: string,
   ): Promise<MonitorRecord> {
     const monitorId = typeof monitorOrId === 'string' ? monitorOrId : randomUUID();
     const monitor = typeof monitorOrId === 'string' ? suppliedMonitor : monitorOrId;
@@ -44,6 +47,7 @@ export class MonitorRepository {
     const requestHeaders = typeof monitorOrId === 'string' ? suppliedRequestHeaders : [];
     const assertions =
       typeof monitorOrId === 'string' ? suppliedAssertions : EMPTY_ASSERTION_CONFIGURATION;
+    const projectId = suppliedProjectId ?? (await ensureDefaultProject(this.db, organizationId)).id;
 
     return this.db.transaction(async (tx) => {
       const [created] = await tx
@@ -51,6 +55,7 @@ export class MonitorRepository {
         .values({
           id: monitorId,
           organizationId,
+          projectId,
           name: monitor.name,
           url: monitor.url,
           method: monitor.method,
@@ -105,6 +110,46 @@ export class MonitorRepository {
         and(eq(monitors.organizationId, organizationId), ne(monitors.lifecycleState, 'ARCHIVED')),
       )
       .orderBy(desc(monitors.createdAt));
+  }
+
+  async listForProject(organizationId: string, projectId: string): Promise<MonitorRecord[]> {
+    return this.db
+      .select()
+      .from(monitors)
+      .where(
+        and(
+          eq(monitors.organizationId, organizationId),
+          eq(monitors.projectId, projectId),
+          ne(monitors.lifecycleState, 'ARCHIVED'),
+        ),
+      )
+      .orderBy(desc(monitors.createdAt));
+  }
+
+  async belongsToProject(
+    organizationId: string,
+    projectId: string,
+    monitorId: string,
+  ): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: monitors.id })
+      .from(monitors)
+      .innerJoin(
+        projects,
+        and(
+          eq(projects.organizationId, monitors.organizationId),
+          eq(projects.id, monitors.projectId),
+        ),
+      )
+      .where(
+        and(
+          eq(monitors.organizationId, organizationId),
+          eq(monitors.projectId, projectId),
+          eq(monitors.id, monitorId),
+        ),
+      )
+      .limit(1);
+    return Boolean(row);
   }
 
   async updateName(

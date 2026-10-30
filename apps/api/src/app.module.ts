@@ -33,6 +33,8 @@ import { ApiCredentialsController } from './modules/api-credentials/api-credenti
 import { ApiCredentialsModule } from './modules/api-credentials/api-credentials.module.js';
 import { OverviewController } from './modules/overview/overview.controller.js';
 import { OverviewModule } from './modules/overview/overview.module.js';
+import { ProjectsController } from './modules/projects/projects.controller.js';
+import { ProjectsModule } from './modules/projects/projects.module.js';
 
 @Module({
   imports: [
@@ -41,6 +43,7 @@ import { OverviewModule } from './modules/overview/overview.module.js';
     AuthModule,
     ApiCredentialsModule,
     OrganizationsModule,
+    ProjectsModule,
     MonitorsModule,
     OverviewModule,
     ProbesModule,
@@ -88,6 +91,7 @@ export class AppModule implements NestModule {
         StatusPagesController,
         WebhookEndpointsController,
         OrganizationsController,
+        ProjectsController,
         ApiCredentialsController,
       );
 

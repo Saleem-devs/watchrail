@@ -8,6 +8,7 @@ import {
   Patch,
   Post,
   Put,
+  Query,
   Req,
 } from '@nestjs/common';
 import { RequirePermission } from '../../auth/auth.guard.js';
@@ -35,16 +36,24 @@ export class StatusPagesController {
   @RequirePermission(PERMISSIONS.STATUS_PAGE_MANAGE)
   async create(
     @Req() request: RequestWithContext,
+    @Query('projectId', ParseUUIDPipe) projectId: string,
     @Body(new ZodValidationPipe(createStatusPageSchema, 'statusPage'))
     input: CreateStatusPageInput,
   ) {
-    return { data: presentStatusPage(await this.pages.create(request.watchrailContext, input)) };
+    return {
+      data: presentStatusPage(await this.pages.create(request.watchrailContext, projectId, input)),
+    };
   }
 
   @Get()
   @RequirePermission(PERMISSIONS.STATUS_PAGE_READ)
-  async list(@Req() request: RequestWithContext) {
-    return { data: (await this.pages.list(request.watchrailContext)).map(presentStatusPage) };
+  async list(
+    @Req() request: RequestWithContext,
+    @Query('projectId', ParseUUIDPipe) projectId: string,
+  ) {
+    return {
+      data: (await this.pages.list(request.watchrailContext, projectId)).map(presentStatusPage),
+    };
   }
 
   @Get(':statusPageId')

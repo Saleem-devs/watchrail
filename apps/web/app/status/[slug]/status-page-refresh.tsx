@@ -2,7 +2,6 @@
 
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import styles from './status-page.module.css';
 
 export const STATUS_PAGE_REFRESH_INTERVAL_MS = 30_000;
 
@@ -41,7 +40,13 @@ export function StatusPageRefresh() {
   }, [refresh]);
 
   return (
-    <button className={styles.refresh} type="button" onClick={refresh} disabled={refreshing}>
+    <button
+      className="fixed right-4 bottom-4 z-20 inline-flex min-h-10 items-center rounded-rail-control border border-rail-border-strong bg-rail-overlay px-3 text-xs font-medium text-rail-subtle transition-colors hover:bg-rail-hover hover:text-rail-text disabled:cursor-wait disabled:opacity-60 sm:right-6 sm:bottom-6"
+      type="button"
+      onClick={refresh}
+      disabled={refreshing}
+      aria-live="polite"
+    >
       {refreshing ? 'Refreshing…' : 'Refresh status'}
     </button>
   );

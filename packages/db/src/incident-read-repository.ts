@@ -70,6 +70,7 @@ export interface IncidentHistoryQuery {
 export interface OrganizationIncidentHistoryQuery {
   page: number;
   limit: number;
+  projectId?: string;
   status?: 'OPEN' | 'RESOLVED';
 }
 
@@ -173,9 +174,20 @@ export class IncidentReadRepository {
   ): Promise<OrganizationIncidentHistoryPage> {
     const where = and(
       eq(incidents.organizationId, organizationId),
+      query.projectId ? eq(monitors.projectId, query.projectId) : undefined,
       query.status ? eq(incidents.status, query.status) : undefined,
     );
-    const [countRow] = await this.db.select({ total: count() }).from(incidents).where(where);
+    const [countRow] = await this.db
+      .select({ total: count() })
+      .from(incidents)
+      .innerJoin(
+        monitors,
+        and(
+          eq(monitors.organizationId, incidents.organizationId),
+          eq(monitors.id, incidents.monitorId),
+        ),
+      )
+      .where(where);
     const total = countRow?.total ?? 0;
     const rows = await this.db
       .select({
@@ -353,7 +365,7 @@ export function parseIncidentHistoryQuery(value: Record<string, unknown>): Incid
 export function parseOrganizationIncidentHistoryQuery(
   value: Record<string, unknown>,
 ): OrganizationIncidentHistoryQuery {
-  if (Object.keys(value).some((key) => !['page', 'limit', 'status'].includes(key))) {
+  if (Object.keys(value).some((key) => !['page', 'limit', 'projectId', 'status'].includes(key))) {
     throw new IncidentHistoryQueryError('Incident history query contains unsupported parameters.');
   }
   if (value.status !== undefined && value.status !== 'OPEN' && value.status !== 'RESOLVED') {
@@ -361,9 +373,19 @@ export function parseOrganizationIncidentHistoryQuery(
   }
   const page = parseIntegerParameter(value.page, 1, 1, Number.MAX_SAFE_INTEGER, 'page');
   const limit = parseIntegerParameter(value.limit, 25, 1, 100, 'limit');
+  if (
+    value.projectId !== undefined &&
+    (typeof value.projectId !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        value.projectId,
+      ))
+  ) {
+    throw new IncidentHistoryQueryError('Project ID must be a UUID.');
+  }
   return {
     page,
     limit,
+    ...(typeof value.projectId === 'string' ? { projectId: value.projectId } : {}),
     ...(value.status === 'OPEN' || value.status === 'RESOLVED' ? { status: value.status } : {}),
   };
 }

@@ -3,14 +3,24 @@ import { z } from 'zod';
 const componentSchema = z
   .object({
     displayName: z.string(),
+    groupName: z.string().max(100).nullable().optional(),
     monitorId: z.uuid(),
     position: z.number().int(),
   })
   .strict();
 
+const logoUrlSchema = z
+  .string()
+  .max(2048)
+  .refine((value) => value.startsWith('/') || /^https?:\/\//u.test(value), {
+    message: 'logoUrl must be an HTTP(S) URL or a root-relative path.',
+  })
+  .nullable();
+
 export const createStatusPageSchema = z
   .object({
     name: z.string(),
+    logoUrl: logoUrlSchema.optional(),
     slug: z.string(),
     published: z.boolean().optional(),
     components: z.array(componentSchema),
@@ -20,6 +30,7 @@ export const createStatusPageSchema = z
 export const updateStatusPageSettingsSchema = z
   .object({
     name: z.string(),
+    logoUrl: logoUrlSchema.optional(),
     slug: z.string(),
   })
   .strict();

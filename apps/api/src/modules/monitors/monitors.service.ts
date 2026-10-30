@@ -17,6 +17,7 @@ import {
   MonitorNotFoundError,
   MonitorNotRunnableError,
   MonitorRepository,
+  ProjectRepository,
   ArchivedMonitorLifecycleError,
   MonitorUpdateNotFoundError,
   MonitorLocationUnavailableError,
@@ -64,6 +65,7 @@ import type { MonitorListQuery } from './dto/monitor-list-query.js';
 export class MonitorsService {
   constructor(
     @Inject(MonitorRepository) private readonly monitors: MonitorRepository,
+    @Inject(ProjectRepository) private readonly projects: ProjectRepository,
     @Inject(ManualRoundRepository) private readonly manualRounds: ManualRoundRepository,
     @Inject(CheckHistoryRepository) private readonly history: CheckHistoryRepository,
     @Inject(IncidentReadRepository) private readonly incidentReads: IncidentReadRepository,
@@ -71,8 +73,13 @@ export class MonitorsService {
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
-  async create(context: RequestContext, command: CreateMonitorCommand): Promise<MonitorRecord> {
+  async create(
+    context: RequestContext,
+    projectId: string,
+    command: CreateMonitorCommand,
+  ): Promise<MonitorRecord> {
     try {
+      await this.assertProject(context, projectId);
       const monitor = createMonitor(command);
       const monitorId = randomUUID();
       const requestHeaders = storeRequestHeaders(
@@ -95,6 +102,7 @@ export class MonitorsService {
         monitor,
         requestHeaders,
         assertions,
+        projectId,
       );
     } catch (error) {
       if (error instanceof MonitorInputError || error instanceof AssertionInputError) {
@@ -215,7 +223,9 @@ export class MonitorsService {
     totalPages: number;
   }> {
     const [monitors, currentChecks, incidentStates, uptimes] = await Promise.all([
-      this.monitors.listForOrganization(context.organizationId),
+      query.projectId
+        ? this.monitors.listForProject(context.organizationId, query.projectId)
+        : this.monitors.listForOrganization(context.organizationId),
       this.history.currentForOrganization(context.organizationId),
       this.incidentReads.currentForOrganization(context.organizationId),
       this.uptimeReads.currentForOrganization(context.organizationId),
@@ -569,6 +579,16 @@ export class MonitorsService {
     }
 
     return round;
+  }
+
+  private async assertProject(context: RequestContext, projectId: string): Promise<void> {
+    const project = await this.projects.findForOrganization(context.organizationId, projectId);
+    if (!project) {
+      throw new NotFoundException({
+        code: 'PROJECT_NOT_FOUND',
+        message: 'Project not found.',
+      });
+    }
   }
 }
 

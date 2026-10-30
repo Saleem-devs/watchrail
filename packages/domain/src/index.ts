@@ -7,5 +7,6 @@ export * from './incident.js';
 export * from './monitor.js';
 export * from './multi-location.js';
 export * from './probe.js';
+export * from './project.js';
 export * from './request-header.js';
 export * from './status-page.js';

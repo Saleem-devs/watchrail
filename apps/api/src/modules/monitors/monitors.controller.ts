@@ -1,4 +1,15 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Inject,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+  Req,
+} from '@nestjs/common';
 import type { MonitorRecord } from '@watchrail/db';
 import type { CreateMonitorCommand } from '@watchrail/domain';
 import { MonitorsService } from './monitors.service.js';
@@ -21,9 +32,10 @@ export class MonitorsController {
   @RequirePermission(PERMISSIONS.MONITOR_CREATE)
   async create(
     @Req() request: RequestWithContext,
+    @Query('projectId', ParseUUIDPipe) projectId: string,
     @Body() command: CreateMonitorCommand,
   ): Promise<{ data: MonitorResponse }> {
-    const monitor = await this.monitors.create(request.watchrailContext, command);
+    const monitor = await this.monitors.create(request.watchrailContext, projectId, command);
     return { data: await this.toMonitorResponse(request, monitor) };
   }
 
