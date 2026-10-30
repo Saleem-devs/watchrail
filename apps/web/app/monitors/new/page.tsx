@@ -1,5 +1,5 @@
-import { Dashboard } from '../../dashboard';
+import { redirect } from 'next/navigation';
 
 export default function NewMonitorPage() {
-  return <Dashboard view="create" />;
+  redirect('/projects');
 }

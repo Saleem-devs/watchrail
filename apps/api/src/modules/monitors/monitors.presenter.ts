@@ -21,6 +21,7 @@ import {
 
 export interface MonitorResponse {
   id: string;
+  projectId: string;
   name: string;
   url: string;
   method: string;
@@ -109,6 +110,7 @@ export function toResponse(
 ): MonitorResponse {
   return {
     id: monitor.id,
+    projectId: monitor.projectId,
     uptime,
     name: monitor.name,
     url: monitor.url,

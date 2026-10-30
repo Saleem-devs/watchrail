@@ -15,7 +15,7 @@ function formatLocations(locations: string[]): string {
   return `${locations[0]} +${locations.length - 1}`;
 }
 
-function monitorColumns(origin: string): Array<DataTableColumn<Monitor>> {
+function monitorColumns(origin: string, projectId?: string): Array<DataTableColumn<Monitor>> {
   return [
     {
       id: 'monitor',
@@ -23,7 +23,7 @@ function monitorColumns(origin: string): Array<DataTableColumn<Monitor>> {
       cell: (monitor) => (
         <div className="min-w-0">
           <Link
-            href={monitorDetailHref(monitor.id, origin)}
+            href={monitorDetailHref(monitor.id, origin, projectId)}
             className="font-medium text-rail-text no-underline hover:text-rail-accent hover:underline"
           >
             {monitor.name}
@@ -85,18 +85,24 @@ export function MonitorTable({
   onDeleteMonitor,
   extraActions = [],
   origin = '/monitors',
+  projectId,
 }: {
   monitors: Monitor[];
   onDeleteMonitor?: ((monitor: Monitor) => void | Promise<void>) | undefined;
   extraActions?: Array<DataTableAction<Monitor>>;
   origin?: string;
+  projectId?: string | undefined;
 }) {
   const actions: Array<DataTableAction<Monitor>> = [
-    { id: 'view', label: 'View', href: (monitor) => monitorDetailHref(monitor.id, origin) },
+    {
+      id: 'view',
+      label: 'View',
+      href: (monitor) => monitorDetailHref(monitor.id, origin, projectId),
+    },
     {
       id: 'edit',
       label: 'Edit',
-      href: (monitor) => monitorEditHref(monitor.id, origin),
+      href: (monitor) => monitorEditHref(monitor.id, origin, projectId),
     },
     ...extraActions,
   ];
@@ -113,10 +119,10 @@ export function MonitorTable({
   return (
     <DataTable
       rows={monitors}
-      columns={monitorColumns(origin)}
+      columns={monitorColumns(origin, projectId)}
       actions={actions}
       getRowKey={(monitor) => monitor.id}
-      getRowHref={(monitor) => monitorDetailHref(monitor.id, origin)}
+      getRowHref={(monitor) => monitorDetailHref(monitor.id, origin, projectId)}
       getRowLabel={(monitor) => monitor.name}
       ariaLabel="Monitored services"
     />

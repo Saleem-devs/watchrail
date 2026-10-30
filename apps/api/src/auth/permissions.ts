@@ -12,6 +12,10 @@
 // ─── Resource / action pairs ──────────────────────────────────────────────────
 
 export const PERMISSIONS = {
+  // Projects
+  PROJECT_READ: 'project:read',
+  PROJECT_MANAGE: 'project:manage',
+
   // Monitors
   MONITOR_READ: 'monitor:read',
   MONITOR_CREATE: 'monitor:create',
@@ -72,6 +76,7 @@ import { createAccessControl } from 'better-auth/plugins/access';
 import { defaultStatements } from 'better-auth/plugins/organization/access';
 
 const VIEWER_PERMISSIONS: Permission[] = [
+  PERMISSIONS.PROJECT_READ,
   PERMISSIONS.MONITOR_READ,
   PERMISSIONS.CHECK_READ,
   PERMISSIONS.INCIDENT_READ,
@@ -90,6 +95,7 @@ const EDITOR_PERMISSIONS: Permission[] = [
   PERMISSIONS.MONITOR_CREATE,
   PERMISSIONS.MONITOR_UPDATE,
   PERMISSIONS.MONITOR_EXECUTE,
+  PERMISSIONS.PROJECT_MANAGE,
   PERMISSIONS.STATUS_PAGE_MANAGE,
   PERMISSIONS.WEBHOOK_MANAGE,
 ];

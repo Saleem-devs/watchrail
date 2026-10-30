@@ -3,12 +3,14 @@ export function safeInternalPath(value: string | null | undefined): string | und
   return value;
 }
 
-export function monitorDetailHref(monitorId: string, origin: string): string {
+export function monitorDetailHref(monitorId: string, origin: string, projectId?: string): string {
   const query = new URLSearchParams({ from: origin });
-  return `/monitors/${monitorId}?${query}`;
+  const base = projectId ? `/projects/${projectId}` : '';
+  return `${base}/monitors/${monitorId}?${query}`;
 }
 
-export function monitorEditHref(monitorId: string, origin: string): string {
+export function monitorEditHref(monitorId: string, origin: string, projectId?: string): string {
   const query = new URLSearchParams({ from: origin });
-  return `/monitors/${monitorId}/edit?${query}`;
+  const base = projectId ? `/projects/${projectId}` : '';
+  return `${base}/monitors/${monitorId}/edit?${query}`;
 }

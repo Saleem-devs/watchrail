@@ -19,6 +19,7 @@ export * from './notification-delivery-repository.js';
 export * from './public-status-page-repository.js';
 export * from './probe-identity-repository.js';
 export * from './probe-coordinator-repository.js';
+export * from './project-repository.js';
 export * from './migration.js';
 export * from './monitor-repository.js';
 export * from './round-routing.js';

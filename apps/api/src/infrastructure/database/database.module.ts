@@ -8,6 +8,7 @@ import {
   MonitorRepository,
   ProbeIdentityRepository,
   ProbeCoordinatorRepository,
+  ProjectRepository,
   PublicStatusPageRepository,
   StatusPageRepository,
   UptimeReadRepository,
@@ -63,6 +64,11 @@ import { APP_CONFIG, type AppConfig } from '../../config/config.js';
       provide: ProbeIdentityRepository,
       inject: [getDrizzleToken()],
       useFactory: (db: WatchrailDatabase) => new ProbeIdentityRepository(db),
+    },
+    {
+      provide: ProjectRepository,
+      inject: [getDrizzleToken()],
+      useFactory: (db: WatchrailDatabase) => new ProjectRepository(db),
     },
     {
       provide: PublicStatusPageRepository,
@@ -123,6 +129,7 @@ import { APP_CONFIG, type AppConfig } from '../../config/config.js';
     MonitorRepository,
     ProbeIdentityRepository,
     ProbeCoordinatorRepository,
+    ProjectRepository,
     PublicStatusPageRepository,
     StatusPageRepository,
     WebhookEndpointRepository,

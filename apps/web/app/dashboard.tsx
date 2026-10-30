@@ -57,18 +57,21 @@ type DashboardView = 'legacy' | 'overview' | 'monitors' | 'create' | 'detail' | 
 
 export function Dashboard({
   view = 'legacy',
+  projectId,
   monitorId,
   initialMonitorFilters,
   initialMonitorPagination,
   backPath = '/monitors',
 }: {
   view?: DashboardView;
+  projectId?: string;
   monitorId?: string;
   initialMonitorFilters?: MonitorListFilters;
   initialMonitorPagination?: MonitorListPagination;
   backPath?: string;
 }) {
   const router = useRouter();
+  const projectBase = projectId ? `/projects/${projectId}` : '';
   const initialMonitorFiltersRef = useRef(initialMonitorFilters ?? EMPTY_MONITOR_FILTERS);
   const initialMonitorPaginationRef = useRef(
     initialMonitorPagination ?? DEFAULT_MONITOR_PAGINATION,
@@ -135,6 +138,8 @@ export function Dashboard({
       for (const timeout of timeouts.values()) clearTimeout(timeout);
       timeouts.clear();
     };
+    // loadMonitors is intentionally scoped to the route's initial filter snapshot.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
 
   useEffect(() => {
@@ -150,10 +155,14 @@ export function Dashboard({
     };
     window.addEventListener('popstate', restoreFiltersFromUrl);
     return () => window.removeEventListener('popstate', restoreFiltersFromUrl);
+    // The popstate subscription is replaced only when the route mode changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
 
   useEffect(() => {
     if (view === 'overview') void loadOverviewAnalytics();
+    // Overview analytics reloads when entering the overview route.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
 
   useEffect(() => {
@@ -196,9 +205,12 @@ export function Dashboard({
     setIsOverviewAnalyticsLoading(true);
     setOverviewAnalyticsError(undefined);
     try {
-      const response = await fetch('/api/overview/response-times', {
-        headers: { Accept: 'application/json' },
-      });
+      const response = await fetch(
+        `/api/overview/response-times${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`,
+        {
+          headers: { Accept: 'application/json' },
+        },
+      );
       if (!response.ok) throw new Error('Could not load overview analytics.');
       const body = (await response.json()) as { data?: ResponseTimeOverview };
       if (!body.data) throw new Error('The API returned no overview analytics.');
@@ -219,6 +231,7 @@ export function Dashboard({
 
     try {
       const query = new URLSearchParams();
+      if (projectId) query.set('projectId', projectId);
       if (filters.name.trim()) query.set('name', filters.name.trim());
       if (filters.state !== 'all') query.set('state', filters.state);
       if (filters.location) query.set('location', filters.location);
@@ -250,14 +263,14 @@ export function Dashboard({
     const pagination = { ...monitorPagination, page: 1 };
     setMonitorPagination(pagination);
     const query = monitorListSearchParams(filters, pagination).toString();
-    window.history.pushState(null, '', `/monitors?${query}`);
+    window.history.pushState(null, '', `${projectBase}/monitors?${query}`);
     void loadMonitors(filters, pagination);
   }
 
   function changeMonitorPage(pagination: MonitorListPagination): void {
     setMonitorPagination(pagination);
     const query = monitorListSearchParams(monitorFilters, pagination).toString();
-    window.history.pushState(null, '', `/monitors?${query}`);
+    window.history.pushState(null, '', `${projectBase}/monitors?${query}`);
     void loadMonitors(monitorFilters, pagination);
   }
 
@@ -294,20 +307,23 @@ export function Dashboard({
     const statusPolicy = statusPolicyFromForm(formData);
 
     try {
-      const response = await fetch('/api/monitors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({
-          name: formData.get('name'),
-          url: formData.get('url'),
-          statusPolicy,
-          method: formData.get('method'),
-          timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
-          followRedirects: formData.get('followRedirects') === 'on',
-          locations: [formData.get('location')],
-          lifecycleState: formData.get('lifecycleState'),
-        }),
-      });
+      const response = await fetch(
+        `/api/monitors${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({
+            name: formData.get('name'),
+            url: formData.get('url'),
+            statusPolicy,
+            method: formData.get('method'),
+            timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
+            followRedirects: formData.get('followRedirects') === 'on',
+            locations: [formData.get('location')],
+            lifecycleState: formData.get('lifecycleState'),
+          }),
+        },
+      );
 
       const body = (await response.json()) as { data?: Monitor } & ApiError;
       if (!response.ok) {
@@ -373,7 +389,7 @@ export function Dashboard({
           current.map((monitor) => (monitor.id === monitorId ? updatedMonitor : monitor)),
         );
       }
-      router.push(`/monitors/${monitorId}${backPath.slice('/monitors'.length)}`);
+      router.push(`${projectBase}/monitors/${monitorId}`);
     } catch (error) {
       setActionError(
         error instanceof Error ? error.message : 'Watchrail could not update this monitor.',
@@ -724,9 +740,9 @@ export function Dashboard({
       ? monitors.filter((monitor) => monitor.id === monitorId)
       : monitors;
   const detailMonitor = visibleMonitors[0];
-  const detailPath = monitorId ? monitorDetailHref(monitorId, backPath) : backPath;
+  const detailPath = monitorId ? monitorDetailHref(monitorId, backPath, projectId) : backPath;
   const monitorListQuery = monitorListSearchParams(monitorFilters, monitorPagination).toString();
-  const monitorListOrigin = `/monitors?${monitorListQuery}`;
+  const monitorListOrigin = `${projectBase}/monitors?${monitorListQuery}`;
   const hasActiveMonitorFilters =
     Boolean(monitorFilters.name.trim()) ||
     monitorFilters.state !== 'all' ||
@@ -743,7 +759,7 @@ export function Dashboard({
             : 'monitors';
 
   return (
-    <AppShell page={shellPage}>
+    <AppShell page={shellPage} projectId={projectId}>
       <main id="main-content" data-watchrail-dashboard className="w-full min-w-0 pb-16">
         {view !== 'detail' && view !== 'edit' ? (
           <DashboardHeader
@@ -757,7 +773,7 @@ export function Dashboard({
                     onApply={applyMonitorFilters}
                   />
                   <Link
-                    href="/monitors/new"
+                    href={`${projectBase}/monitors/new`}
                     className={actionClassName({ variant: 'primary', className: 'px-5' })}
                   >
                     <svg
@@ -776,7 +792,10 @@ export function Dashboard({
                 </>
               ) : view === 'create' ? (
                 <>
-                  <Link href="/monitors" className={actionClassName({ variant: 'quiet' })}>
+                  <Link
+                    href={`${projectBase}/monitors`}
+                    className={actionClassName({ variant: 'quiet' })}
+                  >
                     Cancel
                   </Link>
                   <Button
@@ -825,7 +844,7 @@ export function Dashboard({
               detailMonitor ? (
                 <>
                   <Link
-                    href={monitorEditHref(detailMonitor.id, backPath)}
+                    href={monitorEditHref(detailMonitor.id, backPath, projectId)}
                     className={actionClassName()}
                   >
                     Edit
@@ -868,7 +887,7 @@ export function Dashboard({
           >
             <span>{createdMonitor.name} is ready for its first check.</span>
             <Link
-              href={`/monitors/${createdMonitor.id}`}
+              href={`${projectBase}/monitors/${createdMonitor.id}`}
               className="inline-flex min-h-9 items-center rounded-rail-control px-3 font-medium text-rail-success no-underline hover:bg-rail-hover"
             >
               View monitor
@@ -878,6 +897,7 @@ export function Dashboard({
 
         {view === 'overview' && !isLoading && !loadError ? (
           <OverviewDashboard
+            projectId={projectId}
             monitors={monitors}
             responseTimes={responseTimeOverview}
             responseTimesLoading={isOverviewAnalyticsLoading}
@@ -976,6 +996,7 @@ export function Dashboard({
                     monitors={visibleMonitors}
                     onDeleteMonitor={deleteMonitor}
                     origin={monitorListOrigin}
+                    projectId={projectId}
                   />
                   <TablePagination
                     page={monitorPage}

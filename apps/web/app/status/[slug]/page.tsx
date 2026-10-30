@@ -10,10 +10,10 @@ type Props = { params: Promise<{ slug: string }> };
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
   const page = await loadPublicStatusPage(slug);
-  if (!page) return { title: 'Status page not found — Watchrail', robots: { index: false } };
+  if (!page) return { title: 'Status page not found · Watchrail', robots: { index: false } };
   return {
-    title: `${page.name} — Watchrail`,
-    description: `${publicStatusLabel(page.status)} — ${page.name}`,
+    title: `${page.name} · Watchrail`,
+    description: `${publicStatusLabel(page.status)}. ${page.name}`,
   };
 }
 

@@ -20,6 +20,7 @@ export const STATUS_PAGE_LIMITS = {
   maximumSlugLength: 63,
   maximumNameLength: 100,
   maximumComponentNameLength: 100,
+  maximumGroupNameLength: 100,
   maximumComponents: 100,
 } as const;
 
@@ -40,6 +41,7 @@ export const STATUS_PAGE_RESOLVED_INCIDENT_RETENTION_DAYS = 90;
 export interface StatusPageComponent {
   id: string;
   displayName: string;
+  groupName: string | null;
   monitorId: string;
   position: number;
 }
@@ -60,6 +62,8 @@ export interface StatusPageComponentHealth {
 export interface PublicStatusPageComponentV1 {
   id: string;
   displayName: string;
+  groupName?: string | null;
+  monitoringStartedAt?: string;
   position: number;
   status: PublicStatusState;
 }
@@ -68,6 +72,7 @@ export interface PublicStatusPageIncidentV1 {
   id: string;
   componentId: string;
   status: 'OPEN' | 'RESOLVED';
+  severity?: 'DEGRADED' | 'DOWN';
   startedAt: string;
   openedAt: string;
   resolvedAt: string | null;
@@ -81,6 +86,8 @@ export interface PublicStatusPageIncidentV1 {
 export interface PublicStatusPageProjectionV1 {
   contractVersion: 1;
   name: string;
+  /** Customer-owned organization mark. Omitted when no logo is configured. */
+  logoUrl?: string;
   slug: string;
   status: PublicStatusState;
   components: PublicStatusPageComponentV1[];
@@ -203,8 +210,8 @@ function parseComponent(
   issues: string[],
 ): StatusPageComponent | null {
   const prefix = `components[${index}]`;
-  if (!hasExactKeys(value, ['displayName', 'id', 'monitorId', 'position'])) {
-    issues.push(`${prefix} must contain exactly id, displayName, monitorId, and position.`);
+  if (!hasOnlyKeys(value, ['displayName', 'groupName', 'id', 'monitorId', 'position'])) {
+    issues.push(`${prefix} contains an unsupported field.`);
     return null;
   }
   const id = parseNonEmptyString(value.id, `${prefix}.id`, 120, issues);
@@ -214,6 +221,12 @@ function parseComponent(
     STATUS_PAGE_LIMITS.maximumComponentNameLength,
     issues,
   );
+  const groupName = parseOptionalString(
+    value.groupName,
+    `${prefix}.groupName`,
+    STATUS_PAGE_LIMITS.maximumGroupNameLength,
+    issues,
+  );
   const monitorId = parseNonEmptyString(value.monitorId, `${prefix}.monitorId`, 120, issues);
   if (!Number.isSafeInteger(value.position) || (value.position as number) < 0) {
     issues.push(`${prefix}.position must be a non-negative safe integer.`);
@@ -221,9 +234,26 @@ function parseComponent(
   return {
     id,
     displayName,
+    groupName,
     monitorId,
     position: Number.isSafeInteger(value.position) ? (value.position as number) : 0,
   };
+}
+
+function parseOptionalString(
+  value: unknown,
+  field: string,
+  maximumLength: number,
+  issues: string[],
+): string | null {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string' || value.trim().length === 0 || value.length > maximumLength) {
+    issues.push(
+      `${field} must be null or a non-empty string no longer than ${maximumLength} characters.`,
+    );
+    return null;
+  }
+  return value.trim();
 }
 
 function parseSlug(value: unknown, issues: string[]): string {
@@ -262,6 +292,12 @@ function hasExactKeys(
   const keys = Object.keys(value).sort();
   const required = [...expected].sort();
   return keys.length === required.length && keys.every((key, index) => key === required[index]);
+}
+
+function hasOnlyKeys(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const allowed = new Set(keys);
+  return Object.keys(value).every((key) => allowed.has(key));
 }
 
 function assertValidDate(value: Date, name: string): void {

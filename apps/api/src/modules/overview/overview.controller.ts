@@ -1,4 +1,4 @@
-import { Controller, Get, Inject, Req } from '@nestjs/common';
+import { Controller, Get, Inject, ParseUUIDPipe, Query, Req } from '@nestjs/common';
 import { RequirePermission } from '../../auth/auth.guard.js';
 import { PERMISSIONS } from '../../auth/permissions.js';
 import type { RequestWithContext } from '../../auth/request-context.js';
@@ -11,10 +11,13 @@ export class OverviewController {
 
   @Get('response-times')
   @RequirePermission(PERMISSIONS.CHECK_READ)
-  async responseTimes(@Req() request: RequestWithContext) {
+  async responseTimes(
+    @Req() request: RequestWithContext,
+    @Query('projectId', ParseUUIDPipe) projectId: string,
+  ) {
     return {
       data: responseTimeOverviewResponse(
-        await this.overview.responseTimes(request.watchrailContext),
+        await this.overview.responseTimes(request.watchrailContext, projectId),
       ),
     };
   }

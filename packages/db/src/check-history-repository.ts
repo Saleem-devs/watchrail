@@ -198,6 +198,7 @@ export class CheckHistoryRepository {
   async responseTimeOverview(
     organizationId: string,
     now = new Date(),
+    projectId?: string,
   ): Promise<ResponseTimeOverview> {
     const end = new Date(now);
     const start = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate() - 6));
@@ -220,6 +221,7 @@ export class CheckHistoryRepository {
          and ${checkExecutionResults.roundId} = ${checkRounds.id}
          and ${checkExecutionResults.assignmentId} = ${checkExecutionAssignments.id}
         where ${checkRounds.organizationId} = ${organizationId}
+          and ${projectId ? sql`${monitors.projectId} = ${projectId}` : sql`true`}
           and ${monitors.lifecycleState} = 'ENABLED'
           and ${checkRounds.trigger} = 'SCHEDULED'
           and ${checkRounds.status} = 'COMPLETED'
@@ -252,6 +254,7 @@ export class CheckHistoryRepository {
           on ${checkRegionalExecutions.organizationId} = ${checkRounds.organizationId}
          and ${checkRegionalExecutions.roundId} = ${checkRounds.id}
         where ${checkRounds.organizationId} = ${organizationId}
+          and ${projectId ? sql`${monitors.projectId} = ${projectId}` : sql`true`}
           and ${monitors.lifecycleState} = 'ENABLED'
           and ${checkRounds.trigger} = 'SCHEDULED'
           and ${checkRounds.status} = 'COMPLETED'

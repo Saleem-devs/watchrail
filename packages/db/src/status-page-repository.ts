@@ -3,17 +3,21 @@ import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { parseStatusPage, type StatusPage } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
 import { monitors, statusPageComponents, statusPages } from './schema.js';
+import { ensureDefaultProject } from './project-repository.js';
 
 type Transaction = Parameters<Parameters<WatchrailDatabase['transaction']>[0]>[0];
 
 export interface StatusPageComponentInput {
   displayName: string;
+  groupName?: string | null | undefined;
   monitorId: string;
   position: number;
 }
 
 export interface StatusPageRecord extends StatusPage {
   id: string;
+  projectId?: string;
+  logoUrl?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -50,25 +54,30 @@ export class StatusPageRepository {
     organizationId: string,
     input: {
       name: string;
+      logoUrl?: string | null;
       slug: string;
       published?: boolean;
+      projectId?: string;
       components: StatusPageComponentInput[];
     },
   ): Promise<StatusPageRecord> {
     const pageId = randomUUID();
+    const projectId = input.projectId ?? (await ensureDefaultProject(this.db, organizationId)).id;
     const candidate = this.parseCandidate(organizationId, pageId, {
       ...input,
       published: input.published ?? false,
     });
     try {
       return await this.db.transaction(async (tx) => {
-        await this.assertSelectableMonitors(tx, organizationId, candidate.components);
+        await this.assertSelectableMonitors(tx, organizationId, candidate.components, projectId);
         const [page] = await tx
           .insert(statusPages)
           .values({
             id: pageId,
             organizationId,
+            projectId,
             name: candidate.name,
+            logoUrl: input.logoUrl ?? null,
             slug: candidate.slug,
             published: candidate.published,
           })
@@ -91,6 +100,17 @@ export class StatusPageRepository {
     return this.attachComponents(this.db, organizationId, pages);
   }
 
+  async listForProject(organizationId: string, projectId: string): Promise<StatusPageRecord[]> {
+    const pages = await this.db
+      .select()
+      .from(statusPages)
+      .where(
+        and(eq(statusPages.organizationId, organizationId), eq(statusPages.projectId, projectId)),
+      )
+      .orderBy(asc(statusPages.createdAt), asc(statusPages.id));
+    return this.attachComponents(this.db, organizationId, pages);
+  }
+
   async findForOrganization(
     organizationId: string,
     statusPageId: string,
@@ -107,7 +127,7 @@ export class StatusPageRepository {
   async updateSettings(
     organizationId: string,
     statusPageId: string,
-    input: { name: string; slug: string },
+    input: { name: string; logoUrl?: string | null | undefined; slug: string },
   ): Promise<StatusPageRecord> {
     try {
       return await this.db.transaction(async (tx) => {
@@ -116,19 +136,26 @@ export class StatusPageRepository {
           name: input.name,
           slug: input.slug,
           published: current.page.published,
-          components: current.components.map(({ displayName, monitorId, position }) => ({
+          components: current.components.map(({ displayName, groupName, monitorId, position }) => ({
             displayName,
+            groupName,
             monitorId,
             position,
           })),
         });
-        if (candidate.name === current.page.name && candidate.slug === current.page.slug) {
+        const logoUrl = input.logoUrl ?? null;
+        if (
+          candidate.name === current.page.name &&
+          candidate.slug === current.page.slug &&
+          logoUrl === current.page.logoUrl
+        ) {
           return toRecord(current.page, current.components);
         }
         const [page] = await tx
           .update(statusPages)
           .set({
             name: candidate.name,
+            logoUrl,
             slug: candidate.slug,
             updatedAt: sql`clock_timestamp()`,
           })
@@ -172,6 +199,7 @@ export class StatusPageRepository {
         tx,
         organizationId,
         candidate.components,
+        current.page.projectId,
         new Set(current.components.map(({ monitorId }) => monitorId)),
       );
       await tx
@@ -255,6 +283,7 @@ export class StatusPageRepository {
     tx: Transaction,
     organizationId: string,
     components: StatusPage['components'],
+    projectId?: string,
     previouslySelected = new Set<string>(),
   ): Promise<void> {
     if (components.length === 0) return;
@@ -264,6 +293,7 @@ export class StatusPageRepository {
       .where(
         and(
           eq(monitors.organizationId, organizationId),
+          projectId ? eq(monitors.projectId, projectId) : undefined,
           inArray(
             monitors.id,
             components.map(({ monitorId }) => monitorId),
@@ -329,6 +359,7 @@ export class StatusPageRepository {
       collection.push({
         id: row.id,
         displayName: row.displayName,
+        groupName: row.groupName,
         monitorId: row.monitorId,
         position: row.position,
       });
@@ -352,7 +383,9 @@ function toRecord(
   return {
     id: page.id,
     organizationId: page.organizationId,
+    projectId: page.projectId,
     name: page.name,
+    logoUrl: page.logoUrl,
     slug: page.slug,
     published: page.published,
     components,
@@ -374,6 +407,7 @@ function componentsEqual(
         component.id === other.id &&
         component.monitorId === other.monitorId &&
         component.displayName === other.displayName &&
+        component.groupName === other.groupName &&
         component.position === other.position
       );
     })

@@ -225,6 +225,27 @@
       "when": 1792363917155,
       "tag": "0031_repair_identity_upgrade",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1793315970622,
+      "tag": "0032_lazy_saracen",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1793319400785,
+      "tag": "0033_petite_star_brand",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1793351665620,
+      "tag": "0034_glossy_frightful_four",
+      "breakpoints": true
     }
   ]
 }

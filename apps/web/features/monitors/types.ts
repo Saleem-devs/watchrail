@@ -1,6 +1,7 @@
 /* Monitor feature API contracts. */
 export interface Monitor {
   id: string;
+  projectId?: string;
   name: string;
   url: string;
   method: string;
