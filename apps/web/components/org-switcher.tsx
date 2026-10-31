@@ -41,6 +41,39 @@ function CheckIcon() {
   );
 }
 
+function PlusIcon() {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      className="size-4"
+      aria-hidden="true"
+    >
+      <path d="M10 4v12M4 10h12" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ListIcon() {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      className="size-4"
+      aria-hidden="true"
+    >
+      <path d="M6.5 5h9M6.5 10h9M6.5 15h9" strokeLinecap="round" />
+      <circle cx="3.5" cy="5" r=".75" fill="currentColor" stroke="none" />
+      <circle cx="3.5" cy="10" r=".75" fill="currentColor" stroke="none" />
+      <circle cx="3.5" cy="15" r=".75" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 function OrganizationIcon() {
   return (
     <svg
@@ -59,26 +92,27 @@ function OrganizationIcon() {
   );
 }
 
-function reloadWindow() {
-  window.location.reload();
-}
-
-export function OrgSwitcher({ reload = reloadWindow }: { reload?: () => void } = {}) {
+export function OrgSwitcher({
+  reload,
+  workspaceId,
+}: { reload?: () => void; workspaceId?: string | undefined } = {}) {
   const { data: session } = authClient.useSession();
 
   if (!session?.user) return null;
-  return <AuthenticatedOrgSwitcher session={session} reload={reload} />;
+  return <AuthenticatedOrgSwitcher session={session} reload={reload} workspaceId={workspaceId} />;
 }
 
 function AuthenticatedOrgSwitcher({
   session,
   reload,
+  workspaceId,
 }: {
   session: {
     user: { name: string };
     session: { activeOrganizationId?: string | null | undefined };
   };
-  reload: () => void;
+  reload?: (() => void) | undefined;
+  workspaceId?: string | undefined;
 }) {
   const router = useRouter();
   const [orgs, setOrgs] = useState<Org[]>([]);
@@ -120,7 +154,8 @@ function AuthenticatedOrgSwitcher({
     };
   }, [open]);
 
-  const activeOrg = orgs.find((org) => org.id === session.session.activeOrganizationId) ?? orgs[0];
+  const activeOrganizationId = workspaceId ?? session.session.activeOrganizationId;
+  const activeOrg = orgs.find((org) => org.id === activeOrganizationId) ?? orgs[0];
 
   async function switchOrg(org: Org) {
     setSwitchError(undefined);
@@ -131,7 +166,12 @@ function AuthenticatedOrgSwitcher({
         return;
       }
       setOpen(false);
-      reload();
+      if (reload) {
+        reload();
+      } else {
+        router.replace(`/workspaces/${org.id}`);
+        router.refresh();
+      }
     } catch {
       setSwitchError('Could not switch organizations. Try again.');
     }
@@ -147,51 +187,79 @@ function AuthenticatedOrgSwitcher({
   const displayName = activeOrg?.name ?? session.user.name;
 
   return (
-    <div className="relative flex min-w-0 items-center gap-1.5" ref={wrapperRef}>
+    <div className="relative flex min-w-0 items-center gap-0" ref={wrapperRef}>
       <span className="px-1 text-sm text-rail-border-strong" aria-hidden="true">
         /
       </span>
-      <button
-        ref={triggerRef}
-        type="button"
-        className="flex min-h-10 max-w-48 min-w-0 items-center gap-2 rounded-rail-control border border-transparent bg-transparent px-2 text-[13px] font-medium text-rail-text transition-colors hover:border-rail-border hover:bg-rail-hover sm:min-h-8 sm:max-w-56"
-        aria-expanded={open}
-        aria-controls="organization-menu"
-        onClick={() => setOpen((current) => !current)}
+      <Link
+        href={activeOrg ? `/workspaces/${activeOrg.id}` : '/workspaces'}
+        className="flex min-h-10 max-w-48 min-w-0 items-center gap-2 rounded-rail-control py-1 pr-1 pl-2 text-[13px] font-medium text-rail-text no-underline transition-colors hover:bg-rail-hover sm:min-h-8 sm:max-w-56"
       >
         <span className="grid size-5 shrink-0 place-items-center text-rail-muted">
           <OrganizationIcon />
         </span>
         <span className="truncate">{displayName}</span>
-        <span className="shrink-0 text-rail-muted">
-          <ChevronIcon open={open} />
-        </span>
+      </Link>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="grid size-10 shrink-0 place-items-center rounded-rail-control border border-transparent bg-transparent text-rail-muted transition-colors hover:border-rail-border hover:bg-rail-hover hover:text-rail-text sm:size-8"
+        aria-expanded={open}
+        aria-controls="organization-menu"
+        aria-haspopup="menu"
+        aria-label={open ? 'Close workspace switcher' : 'Open workspace switcher'}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <ChevronIcon open={open} />
       </button>
 
       {open && (
         <div
           id="organization-menu"
-          role="group"
-          aria-label="Organization switcher"
-          className="absolute top-[calc(100%+0.5rem)] left-0 z-50 w-64 rounded-rail-panel border border-rail-border bg-rail-overlay p-2 shadow-[0_18px_50px_var(--color-rail-shadow)]"
+          role="menu"
+          aria-label="Workspace switcher"
+          className="absolute top-[calc(100%+0.5rem)] left-7 z-50 w-[18rem] overflow-hidden rounded-rail-panel border border-rail-border bg-rail-overlay shadow-[0_18px_50px_var(--color-rail-shadow)]"
         >
-          <p className="px-2 pt-1 pb-2 text-xs font-medium text-rail-muted">Organizations</p>
-          {orgs.map((org) => (
-            <button
-              key={org.id}
-              type="button"
-              aria-pressed={org.id === activeOrg?.id}
-              className="flex min-h-9 w-full items-center justify-between gap-3 rounded-rail-control px-2 text-left text-[13px] text-rail-text transition-colors hover:bg-rail-hover"
-              onClick={() => void switchOrg(org)}
-            >
-              <span className="truncate">{org.name}</span>
-              {org.id === activeOrg?.id && (
-                <span className="shrink-0 text-rail-accent">
-                  <CheckIcon />
-                </span>
-              )}
-            </button>
-          ))}
+          <div className="flex items-center justify-between border-b border-rail-border px-3 py-2.5">
+            <p className="text-xs font-medium text-rail-subtle">Switch workspace</p>
+            <span className="text-[11px] tabular-nums text-rail-muted">
+              {orgs.length} {orgs.length === 1 ? 'workspace' : 'workspaces'}
+            </span>
+          </div>
+
+          <div className="p-1.5">
+            {orgs.slice(0, 3).map((org) => {
+              const isActive = org.id === activeOrganizationId;
+
+              return (
+                <button
+                  key={org.id}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={isActive}
+                  className={`flex min-h-11 w-full items-center gap-2.5 rounded-rail-control border border-transparent px-2 text-left transition-colors focus-visible:!outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-rail-accent ${
+                    isActive
+                      ? 'bg-rail-selected text-rail-text'
+                      : 'bg-transparent text-rail-subtle hover:bg-rail-hover hover:text-rail-text'
+                  }`}
+                  onClick={() => void switchOrg(org)}
+                >
+                  <span className="grid size-7 shrink-0 place-items-center rounded-rail-control border border-rail-border bg-rail-surface text-rail-muted">
+                    <OrganizationIcon />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px] font-medium">{org.name}</span>
+                    <span className="block truncate text-[11px] text-rail-muted">/{org.slug}</span>
+                  </span>
+                  {isActive && (
+                    <span className="shrink-0 text-rail-accent">
+                      <CheckIcon />
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
 
           {switchError && (
             <p role="alert" className="mx-2 my-2 text-xs leading-5 text-rail-danger">
@@ -199,22 +267,49 @@ function AuthenticatedOrgSwitcher({
             </p>
           )}
 
-          <div className="my-2 h-px bg-rail-border" />
+          <div className="border-t border-rail-border p-1.5">
+            <Link
+              role="menuitem"
+              className="flex min-h-9 items-center gap-2.5 rounded-rail-control px-2 text-[13px] text-rail-subtle no-underline transition-colors hover:bg-rail-hover hover:text-rail-text focus-visible:!outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-rail-accent"
+              href="/workspaces"
+              onClick={() => setOpen(false)}
+            >
+              <span className="text-rail-muted">
+                <ListIcon />
+              </span>
+              All workspaces
+            </Link>
+            <Link
+              role="menuitem"
+              className="flex min-h-9 items-center gap-2.5 rounded-rail-control px-2 text-[13px] text-rail-subtle no-underline transition-colors hover:bg-rail-hover hover:text-rail-text focus-visible:!outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-rail-accent"
+              href="/workspaces/new"
+              onClick={() => setOpen(false)}
+            >
+              <span className="text-rail-muted">
+                <PlusIcon />
+              </span>
+              Create workspace
+            </Link>
+          </div>
 
-          <Link
-            className="flex min-h-9 items-center rounded-rail-control px-2 text-[13px] text-rail-subtle no-underline transition-colors hover:bg-rail-hover hover:text-rail-text"
-            href="/settings/organization"
-            onClick={() => setOpen(false)}
-          >
-            Organization settings
-          </Link>
-          <button
-            type="button"
-            className="flex min-h-9 w-full items-center rounded-rail-control px-2 text-left text-[13px] text-rail-subtle transition-colors hover:bg-rail-hover hover:text-rail-text"
-            onClick={() => void handleSignOut()}
-          >
-            Sign out
-          </button>
+          <div className="flex items-center justify-between border-t border-rail-border px-3 py-2">
+            <Link
+              role="menuitem"
+              className="rounded-rail-control text-xs text-rail-muted no-underline transition-colors hover:text-rail-text focus-visible:!outline-none focus-visible:text-rail-text"
+              href="/settings/organization"
+              onClick={() => setOpen(false)}
+            >
+              Workspace settings
+            </Link>
+            <button
+              type="button"
+              role="menuitem"
+              className="min-h-7 rounded-rail-control border border-transparent bg-transparent px-1.5 text-xs text-rail-muted transition-colors hover:bg-rail-hover hover:text-rail-danger focus-visible:!outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-rail-accent"
+              onClick={() => void handleSignOut()}
+            >
+              Sign out
+            </button>
+          </div>
         </div>
       )}
     </div>

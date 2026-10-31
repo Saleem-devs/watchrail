@@ -1,6 +1,7 @@
 'use client';
 
 import { Button } from './button';
+import { Select } from './form-control';
 
 export interface PaginationState {
   number: number;
@@ -30,9 +31,10 @@ export function TablePagination({
       <div className="flex flex-wrap items-center gap-3">
         <label className="flex items-center gap-2">
           Rows per page
-          <select
+          <Select
             value={page.limit}
-            className="min-h-8 rounded-rail-control border border-rail-border bg-rail-input px-2 text-xs text-rail-text"
+            controlSize="compact"
+            className="w-auto"
             onChange={(event) => onLimitChange(Number(event.target.value))}
           >
             {[10, 25, 50, 100].map((limit) => (
@@ -40,7 +42,7 @@ export function TablePagination({
                 {limit}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <span className="min-w-20 text-center tabular-nums">
           Page {page.number} of {page.totalPages}

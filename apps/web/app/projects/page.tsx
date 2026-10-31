@@ -1,5 +1,5 @@
-import { ProjectsPage } from '../../features/projects/projects-page';
+import { ActiveWorkspaceRedirect } from '../../features/workspaces/active-workspace-redirect';
 
 export default function ProjectsRoute() {
-  return <ProjectsPage />;
+  return <ActiveWorkspaceRedirect />;
 }

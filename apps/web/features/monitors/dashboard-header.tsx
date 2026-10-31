@@ -5,12 +5,12 @@ import { PageHeader } from '../../components/ui/page-header';
 
 const copy = {
   overview: {
-    title: 'Monitoring overview',
-    description: 'Review workspace health and the services that need attention.',
+    title: 'Project overview',
+    description: 'Review this project’s health, performance, and services that need attention.',
   },
   monitors: {
     title: 'Monitors',
-    description: 'Search and manage every endpoint in this workspace.',
+    description: 'Search and manage every endpoint in this project.',
   },
   create: {
     title: 'Create monitor',
@@ -21,15 +21,17 @@ const copy = {
 export function DashboardHeader({
   view = 'overview',
   actions,
+  basePath = '',
 }: {
   view?: keyof typeof copy;
   actions?: ReactNode;
+  basePath?: string;
 }) {
   const content = copy[view];
   const defaultActions =
     view !== 'create' ? (
       <Link
-        href="/monitors/new"
+        href={`${basePath}/monitors/new`}
         className={actionClassName({ variant: 'primary', className: 'px-5' })}
       >
         <svg
@@ -50,7 +52,9 @@ export function DashboardHeader({
     <PageHeader
       title={content.title}
       description={content.description}
-      backLink={view === 'create' ? { href: '/monitors', label: 'Back to monitors' } : undefined}
+      backLink={
+        view === 'create' ? { href: `${basePath}/monitors`, label: 'Back to monitors' } : undefined
+      }
       actions={actions ?? defaultActions}
     />
   );

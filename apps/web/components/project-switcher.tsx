@@ -6,6 +6,7 @@ import type { WorkspaceProject } from '../features/projects/types';
 
 export function ProjectSwitcher({ projectId }: { projectId?: string | undefined }) {
   const [projects, setProjects] = useState<WorkspaceProject[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const current = projects.find((project) => project.id === projectId);
@@ -21,7 +22,8 @@ export function ProjectSwitcher({ projectId }: { projectId?: string | undefined 
         const body = (await response.json()) as { data: WorkspaceProject[] };
         setProjects(body.data);
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => setLoaded(true));
     return () => controller.abort();
   }, []);
 
@@ -52,12 +54,19 @@ export function ProjectSwitcher({ projectId }: { projectId?: string | undefined 
       </span>
       <button
         type="button"
-        className="inline-flex min-h-8 min-w-0 items-center gap-1.5 rounded-rail-control px-2 text-[13px] font-medium text-rail-text hover:bg-rail-hover"
+        className="inline-flex min-h-8 min-w-0 items-center gap-1.5 rounded-rail-control border border-transparent bg-transparent px-2 text-[13px] font-medium text-rail-text hover:bg-rail-hover"
         aria-expanded={open}
         aria-haspopup="menu"
         onClick={() => setOpen((value) => !value)}
       >
-        <span className="truncate">{current?.name ?? 'Project'}</span>
+        {current ? (
+          <span className="truncate">{current.name}</span>
+        ) : (
+          <span
+            className={`h-3 w-14 rounded-sm bg-rail-border ${loaded ? '' : 'animate-pulse motion-reduce:animate-none'}`}
+            aria-label={loaded ? 'Project unavailable' : 'Loading project'}
+          />
+        )}
         <svg
           viewBox="0 0 16 16"
           fill="none"

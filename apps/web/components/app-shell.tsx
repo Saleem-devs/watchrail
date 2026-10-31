@@ -7,6 +7,7 @@ import { OrgSwitcher } from './org-switcher';
 import { ProjectSwitcher } from './project-switcher';
 
 type Page =
+  | 'workspaces'
   | 'projects'
   | 'overview'
   | 'monitors'
@@ -75,13 +76,21 @@ const projectNavigationGroups: { label: string; items: NavigationItem[] }[] = [
   },
 ];
 
-function navigationGroups(projectId?: string): { label: string; items: NavigationItem[] }[] {
+function navigationGroups(
+  projectId?: string,
+  workspaceId?: string,
+): { label: string; items: NavigationItem[] }[] {
   if (!projectId) {
     return [
       {
         label: 'Workspace',
         items: [
-          { label: 'Projects', href: '/projects', page: 'projects', icon: 'overview' },
+          {
+            label: 'Projects',
+            href: workspaceId ? `/workspaces/${workspaceId}` : '/projects',
+            page: 'projects',
+            icon: 'overview',
+          },
           { label: 'Members', href: '/settings/organization#members', icon: 'members' },
           {
             label: 'Workspace settings',
@@ -98,7 +107,6 @@ function navigationGroups(projectId?: string): { label: string; items: Navigatio
     {
       label: 'Project',
       items: [
-        { label: 'All projects', href: '/projects', icon: 'menu' },
         { label: 'Overview', href: base, page: 'overview', icon: 'overview' },
         { label: 'Monitors', href: `${base}/monitors`, page: 'monitors', icon: 'monitors' },
         { label: 'Incidents', href: `${base}/incidents`, page: 'incidents', icon: 'incidents' },
@@ -369,17 +377,19 @@ function GlobalSearch() {
 function Navigation({
   page,
   projectId,
+  workspaceId,
   collapsed = false,
   onNavigate,
 }: {
   page: Page;
   projectId?: string | undefined;
+  workspaceId?: string | undefined;
   collapsed?: boolean;
   onNavigate?: () => void;
 }) {
   return (
     <nav aria-label="Workspace navigation" className="grid content-start gap-4">
-      {navigationGroups(projectId).map((group) => (
+      {navigationGroups(projectId, workspaceId).map((group) => (
         <div key={group.label} className="grid gap-1">
           <p
             className={`m-0 overflow-hidden px-3 text-[10px] font-medium tracking-[0.08em] whitespace-nowrap text-rail-muted uppercase transition-[max-height,padding,opacity] duration-150 ${collapsed ? 'max-h-0 pb-0 opacity-0' : 'max-h-5 pb-1 opacity-100'}`}
@@ -444,7 +454,15 @@ function Navigation({
   );
 }
 
-function MobileNavigation({ page, projectId }: { page: Page; projectId?: string | undefined }) {
+function MobileNavigation({
+  page,
+  projectId,
+  workspaceId,
+}: {
+  page: Page;
+  projectId?: string | undefined;
+  workspaceId?: string | undefined;
+}) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -492,7 +510,12 @@ function MobileNavigation({ page, projectId }: { page: Page; projectId?: string 
           className="absolute top-[calc(100%+0.5rem)] right-0 z-50 w-[min(18rem,calc(100vw-2rem))] rounded-rail-panel border border-rail-border bg-rail-overlay p-2 shadow-[0_18px_50px_var(--color-rail-shadow)]"
         >
           <p className="px-3 pt-2 pb-3 text-xs font-medium text-rail-muted">Workspace</p>
-          <Navigation page={page} projectId={projectId} onNavigate={() => setOpen(false)} />
+          <Navigation
+            page={page}
+            projectId={projectId}
+            workspaceId={workspaceId}
+            onNavigate={() => setOpen(false)}
+          />
         </div>
       )}
     </div>
@@ -503,10 +526,12 @@ export function AppShell({
   children,
   page,
   projectId,
+  workspaceId,
 }: {
   children: ReactNode;
   page: Page;
   projectId?: string | undefined;
+  workspaceId?: string | undefined;
 }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
@@ -542,13 +567,13 @@ export function AppShell({
         <div className="flex min-h-12 items-center gap-1.5 px-3 sm:px-4">
           <WatchrailLogo compact />
           <div className="min-w-0">
-            <OrgSwitcher />
+            <OrgSwitcher workspaceId={workspaceId} />
           </div>
           <ProjectSwitcher projectId={projectId} />
           <div className="ml-auto flex items-center gap-2">
             <GlobalSearch />
             <div className="lg:hidden">
-              <MobileNavigation page={page} projectId={projectId} />
+              <MobileNavigation page={page} projectId={projectId} workspaceId={workspaceId} />
             </div>
           </div>
         </div>
@@ -561,7 +586,12 @@ export function AppShell({
           className={`sticky top-12 hidden h-[calc(100vh-3rem)] flex-col overflow-x-hidden border-r border-rail-border bg-rail-sidebar pt-3 pb-3 transition-[padding] duration-200 ease-out lg:flex ${sidebarCollapsed ? 'px-2' : 'px-3'}`}
           aria-label="Workspace"
         >
-          <Navigation page={page} projectId={projectId} collapsed={sidebarCollapsed} />
+          <Navigation
+            page={page}
+            projectId={projectId}
+            workspaceId={workspaceId}
+            collapsed={sidebarCollapsed}
+          />
           <div className="mt-auto">
             <button
               type="button"

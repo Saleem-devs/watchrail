@@ -8,6 +8,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import { Button } from '../../components/ui/button';
+import { Select } from '../../components/ui/form-control';
 import type { IncidentStatusFilter } from './types';
 
 export function IncidentFiltersDialog({
@@ -112,15 +113,15 @@ export function IncidentFiltersDialog({
               <div className="p-5">
                 <label className="grid gap-1.5 text-xs text-rail-subtle">
                   State
-                  <select
+                  <Select
                     value={draft}
-                    className="min-h-9 rounded-rail-control border border-rail-border bg-rail-input px-3 text-sm text-rail-text"
+                    controlSize="compact"
                     onChange={(event) => setDraft(event.target.value as IncidentStatusFilter)}
                   >
                     <option value="all">All incidents</option>
                     <option value="open">Open</option>
                     <option value="resolved">Resolved</option>
-                  </select>
+                  </Select>
                 </label>
               </div>
               <div className="flex justify-end gap-2 border-t border-rail-border px-5 py-4">
