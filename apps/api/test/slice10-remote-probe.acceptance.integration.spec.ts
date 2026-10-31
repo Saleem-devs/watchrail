@@ -11,6 +11,7 @@ import { Test } from '@nestjs/testing';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import {
   createDatabaseConnection,
+  ensureDefaultProject,
   migrateDatabase,
   ProbeCoordinatorRepository,
   ScheduledRoundRepository,
@@ -21,6 +22,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 
 const sentinel = 'WATCHRAIL_REMOTE_ACCEPTANCE_SECRET';
+const developmentOrganizationId = '00000000-0000-4000-8000-000000000002';
 
 interface AcceptanceRound {
   status: string;
@@ -33,6 +35,7 @@ describe('Slice 10 remote probe acceptance', () => {
   let app: INestApplication;
   let container: StartedPostgreSqlContainer;
   let database: WatchrailDatabase;
+  let projectId: string;
   let target: Server;
   let targetStatus = 200;
   let targetAuthorization: string | undefined;
@@ -62,6 +65,7 @@ describe('Slice 10 remote probe acceptance', () => {
     await migration.pool.end();
     const module = await Test.createTestingModule({ imports: [AppModule] }).compile();
     database = module.get<WatchrailDatabase>(getDrizzleToken());
+    projectId = (await ensureDefaultProject(database, developmentOrganizationId)).id;
     app = module.createNestApplication();
     app.setGlobalPrefix('api');
     await app.listen(0, '127.0.0.1');
@@ -99,7 +103,7 @@ describe('Slice 10 remote probe acceptance', () => {
     const targetAddress = target.address() as AddressInfo;
     const monitor = (
       await request(app.getHttpServer())
-        .post('/api/monitors')
+        .post(`/api/monitors?projectId=${projectId}`)
         .send({
           name: 'Remote acceptance monitor',
           url: `http://acceptance.test:${targetAddress.port}/health`,

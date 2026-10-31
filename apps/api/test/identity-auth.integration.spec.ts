@@ -538,7 +538,7 @@ describe('passwordless identity provisioning', () => {
         .set('Authorization', `Bearer ${signedIn.token}`)
         .expect(200);
       await request(app.getHttpServer())
-        .post('/api/monitors')
+        .post('/api/monitors?projectId=11111111-1111-4111-8111-111111111111')
         .set('Authorization', `Bearer ${signedIn.token}`)
         .send({ name: 'Forbidden write', url: 'https://example.test' })
         .expect(403);
@@ -557,7 +557,7 @@ describe('passwordless identity provisioning', () => {
         .set('Authorization', `Bearer ${createdCredential.body.data.token as string}`)
         .expect(200);
       await request(app.getHttpServer())
-        .post('/api/monitors')
+        .post('/api/monitors?projectId=11111111-1111-4111-8111-111111111111')
         .set('Authorization', `Bearer ${createdCredential.body.data.token as string}`)
         .send({ name: 'Forbidden key write', url: 'https://example.test' })
         .expect(403);

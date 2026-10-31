@@ -410,6 +410,69 @@ describe('monitor API', () => {
     );
   });
 
+  it('preserves the request body in execution snapshots after header and assertion updates', async () => {
+    const requestBody = { type: 'JSON', value: '{"query":"health"}' } as const;
+    const created = await request(app.getHttpServer())
+      .post(`/api/monitors?projectId=${projectId}`)
+      .send({
+        name: 'Body-preserving API',
+        url: 'https://example.com/graphql',
+        method: 'POST',
+        requestBody,
+      })
+      .expect(201);
+    const monitorId = created.body.data.id as string;
+
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/request-headers`)
+      .send({
+        requestHeaders: [{ name: 'content-type', sensitive: false, value: 'application/json' }],
+      })
+      .expect(200);
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/assertions`)
+      .send({
+        headers: [
+          {
+            name: 'content-type',
+            operator: 'contains',
+            target: { sensitive: false, value: 'json' },
+          },
+        ],
+        textBody: [],
+        jsonBody: [],
+      })
+      .expect(200);
+
+    const versions = await database.$client.query<{
+      version_number: number;
+      request_body: unknown;
+    }>(
+      `select version_number, request_body
+       from monitor_configuration_versions
+       where monitor_id = $1
+       order by version_number`,
+      [monitorId],
+    );
+    expect(versions.rows).toEqual([
+      { version_number: 1, request_body: requestBody },
+      { version_number: 2, request_body: requestBody },
+      { version_number: 3, request_body: requestBody },
+    ]);
+
+    const round = await request(app.getHttpServer())
+      .post(`/api/monitors/${monitorId}/check-rounds`)
+      .expect(202);
+    const claim = await new CheckExecutionRepository(database).claim(
+      round.body.data.id as string,
+      30_000,
+    );
+    expect(claim).toMatchObject({
+      state: 'CLAIMED',
+      execution: { requestBody },
+    });
+  });
+
   it('normalizes and versions exact status-policy edits', async () => {
     const created = await request(app.getHttpServer())
       .post(`/api/monitors?projectId=${projectId}`)
@@ -817,6 +880,89 @@ describe('monitor API', () => {
         jsonBody: [],
       })
       .expect(400);
+  });
+
+  it('atomically switches to HEAD while removing body assertions', async () => {
+    const created = await request(app.getHttpServer())
+      .post(`/api/monitors?projectId=${projectId}`)
+      .send({
+        name: 'Atomic HEAD transition',
+        url: 'https://example.com',
+        assertions: {
+          headers: [],
+          textBody: [{ operator: 'contains', target: { sensitive: false, value: 'ready' } }],
+          jsonBody: [],
+        },
+      })
+      .expect(201);
+    const monitorId = created.body.data.id as string;
+    const httpSettings = {
+      url: 'https://example.com',
+      method: 'HEAD',
+      timeoutMs: 10_000,
+      followRedirects: true,
+      requestBody: { type: 'NONE' },
+    } as const;
+
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/configuration`)
+      .send({
+        httpSettings,
+        requestHeaders: [],
+        assertions: {
+          headers: [],
+          textBody: [{ operator: 'contains', target: { sensitive: false, value: 'ready' } }],
+          jsonBody: [],
+        },
+      })
+      .expect(400);
+
+    const afterRejected = await database.$client.query<{
+      method: string;
+      version_count: number;
+    }>(
+      `select m.method, count(v.id)::int as version_count
+       from monitors m
+       join monitor_configuration_versions v on v.monitor_id = m.id
+       where m.id = $1
+       group by m.method`,
+      [monitorId],
+    );
+    expect(afterRejected.rows).toEqual([{ method: 'GET', version_count: 1 }]);
+
+    const updated = await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/configuration`)
+      .send({
+        httpSettings,
+        requestHeaders: [],
+        assertions: { headers: [], textBody: [], jsonBody: [] },
+      })
+      .expect(200);
+    expect(updated.body.data).toMatchObject({
+      method: 'HEAD',
+      assertions: {
+        contractVersion: 1,
+        assertions: { headers: [], textBody: [], jsonBody: [] },
+      },
+    });
+
+    const versions = await database.$client.query<{
+      version_number: number;
+      method: string;
+      assertions: { assertions: { textBody: unknown[] } };
+    }>(
+      `select version_number, method, assertions
+       from monitor_configuration_versions
+       where monitor_id = $1
+       order by version_number`,
+      [monitorId],
+    );
+    expect(versions.rows).toHaveLength(2);
+    expect(versions.rows[1]).toMatchObject({
+      version_number: 2,
+      method: 'HEAD',
+      assertions: { assertions: { textBody: [] } },
+    });
   });
 
   it('does not expose a sentinel from corrupted stored headers in API errors', async () => {

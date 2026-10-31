@@ -360,26 +360,22 @@ export function Dashboard({
 
     const formData = new FormData(event.currentTarget);
     const requests: Array<{ path: string; body: Record<string, unknown> }> = [
-      { path: 'name', body: { name: formData.get('name') } },
       {
-        path: 'http-settings',
+        path: 'configuration',
         body: {
-          url: urlFromMonitorForm(formData),
-          method: formData.get('method'),
-          timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
-          followRedirects: formData.get('followRedirects') === 'on',
-          requestBody: requestBodyFromForm(formData),
+          httpSettings: {
+            url: urlFromMonitorForm(formData),
+            method: formData.get('method'),
+            timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
+            followRedirects: formData.get('followRedirects') === 'on',
+            requestBody: requestBodyFromForm(formData),
+          },
+          requestHeaders: requestHeadersFromForm(formData),
+          assertions: responseAssertionsFromForm(formData),
         },
       },
+      { path: 'name', body: { name: formData.get('name') } },
       { path: 'status-policy', body: { statusPolicy: statusPolicyFromForm(formData) } },
-      {
-        path: 'request-headers',
-        body: { requestHeaders: requestHeadersFromForm(formData) },
-      },
-      {
-        path: 'assertions',
-        body: responseAssertionsFromForm(formData),
-      },
       { path: 'locations', body: { locations: [formData.get('location')] } },
       { path: 'lifecycle', body: { lifecycleState: formData.get('lifecycleState') } },
     ];

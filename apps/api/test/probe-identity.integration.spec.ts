@@ -7,6 +7,7 @@ import { Test } from '@nestjs/testing';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import {
   createDatabaseConnection,
+  ensureDefaultProject,
   migrateDatabase,
   ProbeIdentityRepository,
   type DatabaseConnection,
@@ -30,6 +31,7 @@ describe('probe enrollment and machine credentials API', () => {
   let app: INestApplication;
   let container: StartedPostgreSqlContainer;
   let database: WatchrailDatabase;
+  let projectId: string;
 
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:18.0-alpine').start();
@@ -53,6 +55,7 @@ describe('probe enrollment and machine credentials API', () => {
     await migration.pool.end();
     const module = await Test.createTestingModule({ imports: [AppModule] }).compile();
     database = module.get<WatchrailDatabase>(getDrizzleToken());
+    projectId = (await ensureDefaultProject(database, developmentOrganizationId)).id;
     app = module.createNestApplication();
     app.setGlobalPrefix('api');
     await app.init();
@@ -278,7 +281,7 @@ describe('probe enrollment and machine credentials API', () => {
     ).body.data as { credential: string };
     const monitor = (
       await request(app.getHttpServer())
-        .post('/api/monitors')
+        .post(`/api/monitors?projectId=${projectId}`)
         .send({ name: 'Remote API', url: 'https://example.com/health' })
         .expect(201)
     ).body.data as { id: string };

@@ -203,9 +203,9 @@ describe('assertion diagnostic presentation', () => {
           assignmentStatus: 'COMPLETED',
           createdAt: '2026-10-31T12:00:00.000Z',
           result: {
-            outcome: 'FAIL',
+            outcome: 'PASS',
             stage: 'HTTP',
-            reason: 'ASSERTION_FAILED',
+            reason: 'COMPLETED',
             statusCode: 200,
             responseTimeMs: 20,
             attemptDurationMs: 22,
@@ -218,6 +218,40 @@ describe('assertion diagnostic presentation', () => {
       />,
     );
     expect(screen.getByText('Response assertion failed')).toBeInTheDocument();
+    expect(screen.getAllByText('Passed').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Failed').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Unhealthy')).toHaveLength(2);
+
+    rerender(
+      <ManualDiagnostic
+        round={{
+          id: 'not-evaluated',
+          monitorId: 'monitor',
+          trigger: 'MANUAL',
+          status: 'COMPLETED',
+          assignmentStatus: 'COMPLETED',
+          createdAt: '2026-10-31T12:00:00.000Z',
+          result: {
+            outcome: 'PASS',
+            stage: 'HTTP',
+            reason: 'COMPLETED',
+            statusCode: 200,
+            responseTimeMs: 20,
+            attemptDurationMs: 22,
+            redirects: [],
+            assertionEvaluation: {
+              contractVersion: 1,
+              outcome: 'NOT_EVALUATED',
+              diagnostics: [],
+            },
+            checkedAt: '2026-10-31T12:00:00.000Z',
+          },
+        }}
+        error={undefined}
+      />,
+    );
+    expect(screen.getAllByText('Not evaluated')).toHaveLength(1);
+    expect(screen.getAllByText('Indeterminate')).toHaveLength(2);
 
     rerender(
       <ManualDiagnostic
@@ -247,7 +281,7 @@ describe('assertion diagnostic presentation', () => {
                     role: 'PRIMARY',
                     diagnosticSummary: {
                       stage: 'HTTP',
-                      reason: 'ASSERTION_FAILED',
+                      reason: 'COMPLETED',
                       statusCode: 200,
                       responseTimeMs: 20,
                       attemptDurationMs: 22,

@@ -10,6 +10,7 @@ import { Test } from '@nestjs/testing';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import {
   createDatabaseConnection,
+  ensureDefaultProject,
   migrateDatabase,
   MultiLocationRoundFinalizationRepository,
   ScheduledRoundRepository,
@@ -35,6 +36,7 @@ describe('Slice 11 multi-location acceptance', () => {
   let target: Server;
   let database: DatabaseConnection;
   let targetMode: TargetMode = 'HEALTHY';
+  let projectId: string;
   const agents: AgentProcess[] = [];
   const organizationId = '00000000-0000-4000-8000-000000000002';
 
@@ -58,6 +60,7 @@ describe('Slice 11 multi-location acceptance', () => {
     });
     database = createDatabaseConnection(container.getConnectionUri());
     await migrateDatabase(database, resolve(process.cwd(), '../../packages/db/drizzle'));
+    projectId = (await ensureDefaultProject(database.db, organizationId)).id;
     const module = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(ProbeMachineRateLimiter)
       .useValue({ consume: () => ({ allowed: true }) })
@@ -109,7 +112,7 @@ describe('Slice 11 multi-location acceptance', () => {
     const targetAddress = target.address() as AddressInfo;
     const monitor = (
       await request(app.getHttpServer())
-        .post('/api/monitors')
+        .post(`/api/monitors?projectId=${projectId}`)
         .send({
           name: 'Multi-location acceptance',
           url: `http://acceptance.test:${targetAddress.port}/health`,
@@ -195,7 +198,7 @@ describe('Slice 11 multi-location acceptance', () => {
     const targetAddress = target.address() as AddressInfo;
     const monitor = (
       await request(app.getHttpServer())
-        .post('/api/monitors')
+        .post(`/api/monitors?projectId=${projectId}`)
         .send({
           name: 'Multi-location release acceptance',
           url: `http://acceptance.test:${targetAddress.port}/health`,

@@ -97,6 +97,28 @@ export interface MonitorFieldErrors {
   locations?: string[];
 }
 
+export interface MonitorConfigurationUpdate {
+  settings: HttpMonitorSettings;
+  requestHeaders: unknown;
+  assertions: unknown;
+}
+
+export function parseMonitorConfigurationUpdate(value: unknown): MonitorConfigurationUpdate {
+  if (!hasExactKeys(value, ['assertions', 'httpSettings', 'requestHeaders'])) {
+    throw new MonitorInputError({
+      httpSettings: [
+        'Provide exactly httpSettings, requestHeaders, and assertions for a configuration update.',
+      ],
+    });
+  }
+
+  return {
+    settings: parseHttpMonitorSettings(value.httpSettings),
+    requestHeaders: value.requestHeaders,
+    assertions: value.assertions,
+  };
+}
+
 export interface MonitorLocationSettings {
   locations: string[];
 }

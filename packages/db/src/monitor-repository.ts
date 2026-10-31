@@ -275,10 +275,77 @@ export class MonitorRepository {
         followRedirects: configuration.followRedirects,
         statusPolicy: configuration.statusPolicy,
         requestHeaders,
+        requestBody: configuration.requestBody,
         assertions: configuration.assertions,
         locations: configuration.locations,
       });
 
+      return updated;
+    });
+  }
+
+  async updateConfiguration(
+    organizationId: string,
+    monitorId: string,
+    settings: HttpMonitorSettings,
+    updateRequestHeaders: (current: readonly StoredRequestHeader[]) => StoredRequestHeader[],
+    updateAssertions: (
+      current: ResponseAssertionConfigurationV1,
+      method: HttpMonitorMethod,
+    ) => ResponseAssertionConfigurationV1,
+  ): Promise<MonitorRecord> {
+    return this.db.transaction(async (tx) => {
+      const [monitor] = await tx
+        .select()
+        .from(monitors)
+        .where(and(eq(monitors.id, monitorId), eq(monitors.organizationId, organizationId)))
+        .limit(1)
+        .for('update');
+      if (!monitor) throw new MonitorUpdateNotFoundError();
+
+      const [configuration] = await tx
+        .select()
+        .from(monitorConfigurationVersions)
+        .where(
+          and(
+            eq(monitorConfigurationVersions.monitorId, monitorId),
+            eq(monitorConfigurationVersions.organizationId, organizationId),
+          ),
+        )
+        .orderBy(desc(monitorConfigurationVersions.versionNumber))
+        .limit(1);
+      if (!configuration) throw new Error('Monitor has no configuration version.');
+
+      const requestHeaders = updateRequestHeaders(configuration.requestHeaders);
+      const assertions = updateAssertions(
+        parseStoredAssertionConfiguration(configuration.assertions),
+        settings.method,
+      );
+      assertAssertionsCompatibleWithMethod(settings.method, assertions.assertions);
+
+      const [updated] = await tx
+        .update(monitors)
+        .set({
+          ...settings,
+          requestHeaders,
+          assertions,
+          updatedAt: sql`now()`,
+        })
+        .where(and(eq(monitors.id, monitorId), eq(monitors.organizationId, organizationId)))
+        .returning();
+      if (!updated) throw new Error('The monitor update returned no record.');
+
+      await tx.insert(monitorConfigurationVersions).values({
+        organizationId,
+        monitorId,
+        versionNumber: configuration.versionNumber + 1,
+        ...settings,
+        intervalSeconds: configuration.intervalSeconds,
+        statusPolicy: configuration.statusPolicy,
+        requestHeaders,
+        assertions,
+        locations: configuration.locations,
+      });
       return updated;
     });
   }
