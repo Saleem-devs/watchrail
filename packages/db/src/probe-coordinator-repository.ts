@@ -767,6 +767,7 @@ function diagnosticSummaryFromResult(result: AuthoritativeCheckResult) {
     responseTimeMs: result.responseTimeMs,
     attemptDurationMs: result.attemptDurationMs,
     checkedAt: result.checkedAt.toISOString(),
+    assertionEvaluation: result.assertionEvaluation,
   } as const;
 }
 

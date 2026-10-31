@@ -6,6 +6,8 @@ import { RequestHeadersField, type RequestHeaderFormValue } from './request-head
 import { HttpMethodOptions } from './http-method-options';
 import { endpointBaseUrl, QueryParametersField } from './query-parameters-field';
 import { RequestBodyField, type RequestBodyValue } from './request-body-field';
+import { ResponseAssertionsField } from './response-assertions-field';
+import type { RedactedResponseAssertionConfiguration } from './response-assertions';
 import type { FieldErrors, Monitor } from './types';
 
 export interface MonitorFormValues {
@@ -19,6 +21,7 @@ export interface MonitorFormValues {
   lifecycleState: Monitor['lifecycleState'];
   requestHeaders?: RequestHeaderFormValue[];
   requestBody?: RequestBodyValue;
+  assertions?: RedactedResponseAssertionConfiguration;
 }
 
 export function MonitorForm({
@@ -196,6 +199,13 @@ export function MonitorForm({
             method={method}
             initialBody={initialValues?.requestBody ?? { type: 'NONE' }}
             {...(errors.requestBody?.[0] ? { error: errors.requestBody[0] } : {})}
+          />
+          <ResponseAssertionsField
+            method={method}
+            {...(initialValues?.assertions
+              ? { initialConfiguration: initialValues.assertions }
+              : {})}
+            {...(errors.assertions?.[0] ? { error: errors.assertions[0] } : {})}
           />
         </div>
 

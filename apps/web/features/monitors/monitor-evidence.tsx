@@ -1,6 +1,7 @@
 import { Button } from '../../components/ui/button';
 import type { HistoryPage, IncidentHistoryPage, IncidentState, ManualRound } from './types';
 import { formatMilliseconds, formatRatio, humanize } from './formatting';
+import { AssertionDiagnostics, diagnosticFailureLabel } from './assertion-diagnostics';
 
 type DiagnosticOutcome = 'PASS' | 'FAIL' | 'UNKNOWN' | 'UP' | 'DEGRADED' | 'DOWN';
 
@@ -71,6 +72,11 @@ export function ManualDiagnostic({
   if (result.kind === 'MULTI_LOCATION') {
     return <MultiLocationDiagnostic result={result} label="Latest manual diagnostic" />;
   }
+  const assertionEvaluation = result.assertionEvaluation ?? {
+    contractVersion: 1,
+    outcome: result.assertionOutcome ?? 'NOT_EVALUATED',
+    diagnostics: [],
+  };
 
   return (
     <section
@@ -88,9 +94,20 @@ export function ManualDiagnostic({
         <Metric label="Attempt" value={formatMilliseconds(result.attemptDurationMs)} />
         <Metric label="Checked" value={new Date(result.checkedAt).toLocaleTimeString()} />
       </dl>
-      <p className="m-0 border-t border-rail-border px-4 py-3 text-xs text-rail-subtle">
-        {humanize(result.stage)} · {humanize(result.reason)}
-      </p>
+      <div className="border-t border-rail-border px-4 py-3 text-xs">
+        <p className="m-0 font-medium text-rail-text">
+          {diagnosticFailureLabel({
+            outcome: result.outcome,
+            stage: result.stage,
+            statusCode: result.statusCode,
+            assertionEvaluation,
+          })}
+        </p>
+        <p className="mt-1 mb-0 text-rail-subtle">
+          {humanize(result.stage)} · {humanize(result.reason)}
+        </p>
+      </div>
+      <AssertionDiagnostics evaluation={assertionEvaluation} />
       {result.redirects.length > 0 ? (
         <div className="border-t border-rail-border px-4 py-3">
           <h5 className="m-0 text-xs font-semibold text-rail-text">Redirect path</h5>
@@ -187,12 +204,25 @@ function MultiLocationDiagnostic({
               </div>
               {region.executions.map((execution) =>
                 execution.diagnosticSummary ? (
-                  <small key={execution.id} className="mt-1 block text-xs text-rail-muted">
-                    {' · '}
-                    {execution.role.toLowerCase()} ·{' '}
-                    {execution.diagnosticSummary.statusCode ?? 'no HTTP'} ·{' '}
-                    {formatMilliseconds(execution.diagnosticSummary.responseTimeMs)}
-                  </small>
+                  <div
+                    key={execution.id}
+                    className="mt-2 overflow-hidden rounded-rail-control border border-rail-border"
+                  >
+                    <p className="m-0 px-3 py-2 text-xs text-rail-muted">
+                      {execution.role.toLowerCase()} ·{' '}
+                      {execution.diagnosticSummary.statusCode ?? 'no HTTP'} ·{' '}
+                      {formatMilliseconds(execution.diagnosticSummary.responseTimeMs)}
+                      <span className="mt-1 block">
+                        {humanize(execution.diagnosticSummary.stage)} ·{' '}
+                        {humanize(execution.diagnosticSummary.reason)}
+                      </span>
+                    </p>
+                    {execution.diagnosticSummary.assertionEvaluation ? (
+                      <AssertionDiagnostics
+                        evaluation={execution.diagnosticSummary.assertionEvaluation}
+                      />
+                    ) : null}
+                  </div>
                 ) : null,
               )}
             </li>
@@ -256,14 +286,18 @@ export function CheckHistory({
                     {round.result
                       ? isRegional
                         ? `${regionalResult.outcome} · ${formatRatio(regionalResult.coverage)}`
-                        : `${singleResult!.outcome} · ${singleResult!.reason}`
+                        : `${singleResult!.outcome} · ${
+                            singleResult!.assertionOutcome === 'FAIL'
+                              ? 'assertion failed'
+                              : singleResult!.reason
+                          }`
                       : round.assignmentStatus}
                   </div>
                   <time className="mt-1 block text-xs text-rail-muted" dateTime={round.createdAt}>
                     {new Date(round.createdAt).toLocaleString()}
                   </time>
                 </div>
-                {isRegional ? (
+                {round.result ? (
                   <Button
                     variant="quiet"
                     size="compact"
@@ -274,8 +308,8 @@ export function CheckHistory({
                     {loadingRoundIds.has(round.id)
                       ? 'Loading evidence…'
                       : isExpanded
-                        ? 'Hide regional evidence'
-                        : 'Show regional evidence'}
+                        ? 'Hide diagnostic evidence'
+                        : 'Show diagnostic evidence'}
                   </Button>
                 ) : null}
               </div>
@@ -284,6 +318,22 @@ export function CheckHistory({
                   result={detail.result}
                   label="Historical regional evidence"
                 />
+              ) : null}
+              {isExpanded &&
+              detail?.result &&
+              detail.result.kind !== 'MULTI_LOCATION' &&
+              detail.result.assertionEvaluation ? (
+                <div className="mt-3 overflow-hidden rounded-rail-panel border border-rail-border bg-rail-sidebar/45">
+                  <p className="m-0 px-4 py-3 text-xs text-rail-subtle">
+                    {diagnosticFailureLabel({
+                      outcome: detail.result.outcome,
+                      stage: detail.result.stage,
+                      statusCode: detail.result.statusCode,
+                      assertionEvaluation: detail.result.assertionEvaluation,
+                    })}
+                  </p>
+                  <AssertionDiagnostics evaluation={detail.result.assertionEvaluation} />
+                </div>
               ) : null}
             </li>
           );

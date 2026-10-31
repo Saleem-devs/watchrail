@@ -37,6 +37,7 @@ import {
   CheckHistory,
 } from '../features/monitors/monitor-evidence';
 import { MonitorForm } from '../features/monitors/monitor-form';
+import { responseAssertionsFromForm } from '../features/monitors/response-assertions';
 import { HttpMethodOptions } from '../features/monitors/http-method-options';
 import { MonitorAvailabilityHistory } from '../features/monitors/monitor-availability-history';
 import { MonitorResponseTimeChart } from '../features/monitors/monitor-response-time-chart';
@@ -324,6 +325,7 @@ export function Dashboard({
             lifecycleState: formData.get('lifecycleState'),
             requestHeaders: requestHeadersFromForm(formData),
             requestBody: requestBodyFromForm(formData),
+            assertions: responseAssertionsFromForm(formData),
           }),
         },
       );
@@ -371,6 +373,10 @@ export function Dashboard({
       {
         path: 'request-headers',
         body: { requestHeaders: requestHeadersFromForm(formData) },
+      },
+      {
+        path: 'assertions',
+        body: responseAssertionsFromForm(formData),
       },
       { path: 'locations', body: { locations: [formData.get('location')] } },
       { path: 'lifecycle', body: { lifecycleState: formData.get('lifecycleState') } },
@@ -666,13 +672,13 @@ export function Dashboard({
       const response = await fetch(`/api/monitors/${monitorId}/check-rounds/${roundId}`, {
         headers: { Accept: 'application/json' },
       });
-      if (!response.ok) throw new Error('Could not load regional evidence.');
+      if (!response.ok) throw new Error('Could not load diagnostic evidence.');
       const body = (await response.json()) as { data: ManualRound };
       setHistoryDetails((current) => ({ ...current, [roundId]: body.data }));
     } catch {
       setRunErrors((current) => ({
         ...current,
-        [monitorId]: 'Watchrail could not load this round’s regional evidence.',
+        [monitorId]: 'Watchrail could not load this round’s diagnostic evidence.',
       }));
     } finally {
       setLoadingHistoryRoundIds((current) => {

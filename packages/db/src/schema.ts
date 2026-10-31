@@ -1057,6 +1057,7 @@ export interface RegionalDiagnosticSummary {
   responseTimeMs: number | null;
   attemptDurationMs: number;
   checkedAt: string;
+  assertionEvaluation?: AssertionEvaluationV1;
 }
 
 export const checkRegionalEvaluations = pgTable(
