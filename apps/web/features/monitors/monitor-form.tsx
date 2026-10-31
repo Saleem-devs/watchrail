@@ -10,6 +10,8 @@ import { RequestBodyField, type RequestBodyValue } from './request-body-field';
 import { ResponseAssertionsField } from './response-assertions-field';
 import type { RedactedResponseAssertionConfiguration } from './response-assertions';
 import type { FieldErrors, Monitor } from './types';
+import type { ConfigurationTestResult } from './types';
+import { ConfigurationTestPanel } from './configuration-test-result';
 
 export interface MonitorFormValues {
   name: string;
@@ -32,6 +34,9 @@ export function MonitorForm({
   submitting,
   formId,
   onSubmit,
+  testResult,
+  testError,
+  onDismissTest,
 }: {
   mode: 'create' | 'edit';
   initialValues?: MonitorFormValues;
@@ -39,6 +44,9 @@ export function MonitorForm({
   submitting: boolean;
   formId: string;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  testResult?: ConfigurationTestResult | undefined;
+  testError?: string | undefined;
+  onDismissTest: () => void;
 }) {
   const id = useId();
   const [policyMode, setPolicyMode] = useState<'ANY_2XX' | 'EXACT'>(
@@ -306,6 +314,7 @@ export function MonitorForm({
           </div>
         </aside>
       </div>
+      <ConfigurationTestPanel result={testResult} error={testError} onDismiss={onDismissTest} />
     </Form>
   );
 }

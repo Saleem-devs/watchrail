@@ -716,4 +716,36 @@ describe('executeHttpCheck', () => {
 
     expect(execute).not.toHaveBeenCalled();
   });
+
+  it('returns response evidence only for an explicitly transient capture', async () => {
+    const executor: HttpExecutor = {
+      execute: () =>
+        Promise.resolve({
+          statusCode: 200,
+          responseTimeMs: 12,
+          type: 'RESPONSE',
+          headers: [{ name: 'content-type', values: ['application/json'] }],
+          body: { state: 'CAPTURED', text: '{"ready":true}' },
+          redirects: [],
+        }),
+    };
+    const input = {
+      url: 'https://example.com',
+      method: 'GET' as const,
+      followRedirects: true,
+      timeoutMs: 10_000,
+    };
+
+    const scheduled = await executeHttpCheck(input, { executor, clock: createClock() });
+    const transient = await executeHttpCheck(
+      { ...input, captureResponseEvidence: true },
+      { executor, clock: createClock() },
+    );
+
+    expect(scheduled).not.toHaveProperty('responseEvidence');
+    expect(transient.responseEvidence).toEqual({
+      headers: [{ name: 'content-type', values: ['application/json'] }],
+      body: { state: 'CAPTURED', text: '{"ready":true}' },
+    });
+  });
 });

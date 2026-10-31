@@ -122,6 +122,41 @@ export interface ApiError {
   fields?: FieldErrors;
 }
 
+export interface ConfigurationTestResult {
+  result: {
+    outcome: 'PASS' | 'FAIL' | 'UNKNOWN';
+    stage: 'DNS' | 'CONNECT' | 'TLS' | 'HTTP' | 'PROBE';
+    reason: string;
+    statusCode: number | null;
+    responseTimeMs: number | null;
+    attemptDurationMs: number;
+    redirects: ManualRoundResultRedirect[];
+    assertionEvaluation: AssertionEvaluation;
+    checkedAt: string;
+  };
+  signals: {
+    transport: 'PASS' | 'FAIL' | 'UNKNOWN';
+    statusPolicy: 'PASS' | 'FAIL' | 'NOT_EVALUATED';
+    assertions: 'PASS' | 'FAIL' | 'NOT_EVALUATED';
+  };
+  response: {
+    headers: Array<{ name: string; values: string[]; redacted: boolean }>;
+    withheldHeaderCount: number;
+    body:
+      | { state: 'PREVIEW'; contentType: string; text: string; truncated: boolean }
+      | { state: 'UNAVAILABLE'; reason: string };
+  };
+}
+
+export interface ManualRoundResultRedirect {
+  sequence: number;
+  statusCode: 301 | 302 | 303 | 307 | 308;
+  source: { targetId: number; origin: string };
+  destination: { targetId: number; origin: string } | null;
+  responseTimeMs: number;
+  headers: 'PRESERVED' | 'STRIPPED' | 'NOT_SENT';
+}
+
 export interface ManualRound {
   id: string;
   monitorId: string;
@@ -138,14 +173,7 @@ export interface ManualRound {
         statusCode: number | null;
         responseTimeMs: number | null;
         attemptDurationMs: number;
-        redirects: Array<{
-          sequence: number;
-          statusCode: 301 | 302 | 303 | 307 | 308;
-          source: { targetId: number; origin: string };
-          destination: { targetId: number; origin: string } | null;
-          responseTimeMs: number;
-          headers: 'PRESERVED' | 'STRIPPED' | 'NOT_SENT';
-        }>;
+        redirects: ManualRoundResultRedirect[];
         assertionOutcome?: AssertionEvaluation['outcome'];
         assertionEvaluation?: AssertionEvaluation;
         checkedAt: string;

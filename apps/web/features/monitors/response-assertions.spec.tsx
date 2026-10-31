@@ -5,6 +5,11 @@ import { AssertionDiagnostics, diagnosticFailureLabel } from './assertion-diagno
 import { ManualDiagnostic } from './monitor-evidence';
 import { ResponseAssertionsField } from './response-assertions-field';
 import {
+  httpConfigurationTestFromForm,
+  requiresStateChangingMethodConfirmation,
+} from './monitor-form-serialization';
+import { ConfigurationTestPanel } from './configuration-test-result';
+import {
   responseAssertionRows,
   responseAssertionsFromForm,
   serializeResponseAssertions,
@@ -33,6 +38,46 @@ const configuredAssertions: RedactedResponseAssertionConfiguration = {
 };
 
 describe('response assertion configuration', () => {
+  it('warns only before methods that can change target state', () => {
+    expect(['POST', 'PUT', 'PATCH', 'DELETE'].every(requiresStateChangingMethodConfirmation)).toBe(
+      true,
+    );
+    expect(['GET', 'HEAD', 'OPTIONS'].some(requiresStateChangingMethodConfirmation)).toBe(false);
+  });
+
+  it('serializes the complete unsaved HTTP configuration for transient testing', () => {
+    const formData = new FormData();
+    formData.set('url', 'https://api.example.com/jobs');
+    formData.append('queryParameterName', 'verbose');
+    formData.append('queryParameterValue', 'true');
+    formData.set('method', 'POST');
+    formData.set('timeoutSeconds', '8');
+    formData.set('followRedirects', 'on');
+    formData.set('statusPolicyMode', 'EXACT');
+    formData.set('statusCodes', '200, 202');
+    formData.set('requestBodyType', 'JSON');
+    formData.set('requestBodyValue', '{"job":"sync"}');
+    formData.append('requestHeaderId', 'header-1');
+    formData.append('requestHeaderName', 'Authorization');
+    formData.append('requestHeaderValue', '');
+    formData.append('requestHeaderHasStoredValue', 'true');
+    formData.append('requestHeaderSensitive', 'header-1');
+    formData.set('responseAssertions', JSON.stringify(responseAssertionRows(configuredAssertions)));
+
+    expect(httpConfigurationTestFromForm(formData)).toEqual({
+      httpSettings: {
+        url: 'https://api.example.com/jobs?verbose=true',
+        method: 'POST',
+        timeoutMs: 8_000,
+        followRedirects: true,
+        requestBody: { type: 'JSON', value: '{"job":"sync"}' },
+      },
+      statusPolicy: { type: 'EXACT', statusCodes: [200, 202] },
+      requestHeaders: [{ name: 'Authorization', sensitive: true, retain: true }],
+      assertions: serializeResponseAssertions(responseAssertionRows(configuredAssertions)),
+    });
+  });
+
   it('constructs and serializes header, text, and typed JSON assertions', () => {
     const rows = responseAssertionRows(configuredAssertions);
     expect(serializeResponseAssertions(rows)).toEqual({
@@ -120,6 +165,77 @@ describe('response assertion configuration', () => {
       />,
     );
     expect(screen.getByRole('alert')).toHaveTextContent('HEAD responses do not include a body');
+  });
+
+  it('separates transport, status-policy, and non-evaluated assertion outcomes in test results', () => {
+    render(
+      <ConfigurationTestPanel
+        onDismiss={() => undefined}
+        result={{
+          result: {
+            outcome: 'FAIL',
+            stage: 'HTTP',
+            reason: 'UNEXPECTED_STATUS',
+            statusCode: 503,
+            responseTimeMs: 18,
+            attemptDurationMs: 20,
+            checkedAt: '2026-10-31T20:00:00.000Z',
+            redirects: [],
+            assertionEvaluation: {
+              contractVersion: 1,
+              outcome: 'NOT_EVALUATED',
+              diagnostics: [],
+            },
+          },
+          signals: { transport: 'PASS', statusPolicy: 'FAIL', assertions: 'NOT_EVALUATED' },
+          response: {
+            headers: [{ name: 'set-cookie', values: ['[REDACTED]'], redacted: true }],
+            withheldHeaderCount: 0,
+            body: { state: 'UNAVAILABLE', reason: 'UNSUPPORTED_CONTENT_TYPE' },
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Transport').parentElement).toHaveTextContent(/pass/i);
+    expect(screen.getByText('Status policy').parentElement).toHaveTextContent(/fail/i);
+    expect(screen.getByText('Assertions').parentElement).toHaveTextContent(/not evaluated/i);
+    expect(screen.getByText('[REDACTED]')).toBeInTheDocument();
+    expect(screen.getByText(/not eligible for a safe text preview/i)).toBeInTheDocument();
+  });
+
+  it('summarizes non-evaluated assertions as indeterminate instead of passed', () => {
+    render(
+      <ConfigurationTestPanel
+        onDismiss={() => undefined}
+        result={{
+          result: {
+            outcome: 'PASS',
+            stage: 'HTTP',
+            reason: 'COMPLETED',
+            statusCode: 200,
+            responseTimeMs: 18,
+            attemptDurationMs: 20,
+            checkedAt: '2026-10-31T20:00:00.000Z',
+            redirects: [],
+            assertionEvaluation: {
+              contractVersion: 1,
+              outcome: 'NOT_EVALUATED',
+              diagnostics: [],
+            },
+          },
+          signals: { transport: 'PASS', statusPolicy: 'PASS', assertions: 'NOT_EVALUATED' },
+          response: {
+            headers: [],
+            withheldHeaderCount: 0,
+            body: { state: 'UNAVAILABLE', reason: 'BODY_READ_FAILED' },
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Configuration test').parentElement).toHaveTextContent(/unknown/i);
+    expect(screen.getByText('Assertions').parentElement).toHaveTextContent(/not evaluated/i);
   });
 
   it('lets a user add a body assertion without exposing a separate test action', async () => {

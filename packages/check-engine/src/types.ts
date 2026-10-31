@@ -55,6 +55,18 @@ export interface HttpCheckInput {
   headerAssertions?: readonly HeaderAssertion[];
   textBodyAssertions?: readonly TextBodyAssertion[];
   jsonBodyAssertions?: readonly JsonBodyAssertion[];
+  /**
+   * Captures final-response evidence for an authorized transient diagnostic.
+   * Scheduled execution leaves this disabled so raw response material never
+   * enters the persisted check-result contract.
+   */
+  captureResponseEvidence?: boolean;
+}
+
+export interface HttpCapturedResponseEvidence {
+  headers: readonly HttpResponseHeader[];
+  /** Absent when only response headers were observed before the attempt ended. */
+  body?: HttpBodyCapture;
 }
 
 interface HttpCheckTiming {
@@ -68,6 +80,8 @@ interface HttpCheckTiming {
   checkedAt: Date;
   redirects: readonly HttpRedirectHop[];
   assertionEvaluation: AssertionEvaluationV1;
+  /** Present only when captureResponseEvidence was explicitly requested. */
+  responseEvidence?: HttpCapturedResponseEvidence;
 }
 
 interface HttpResponseEvidence {

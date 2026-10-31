@@ -201,43 +201,50 @@ export function ManualDiagnostic({
         </p>
       </div>
       <AssertionDiagnostics evaluation={assertionEvaluation} />
-      {result.redirects.length > 0 ? (
-        <div className="border-t border-rail-border px-4 py-3">
-          <h5 className="m-0 text-xs font-semibold text-rail-text">Redirect path</h5>
-          <ol className="mt-3 mb-0 grid list-decimal gap-3 pl-5" aria-label="Redirect chain">
-            {result.redirects.map((hop) => (
-              <li key={hop.sequence} className="pl-1 text-xs text-rail-muted">
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <code className="break-all text-rail-text">
-                    #{hop.source.targetId} {hop.source.origin}
-                  </code>
-                  <span className="sr-only"> → </span>
-                  <svg
-                    viewBox="0 0 16 16"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    className="size-3.5 shrink-0"
-                    aria-hidden="true"
-                  >
-                    <path d="M3 8h10m-3-3 3 3-3 3" />
-                  </svg>
-                  <code className="break-all text-rail-text">
-                    {hop.destination
-                      ? `#${hop.destination.targetId} ${hop.destination.origin}`
-                      : 'No valid destination'}
-                  </code>
-                </div>
-                <small className="mt-1 block text-xs text-rail-muted">
-                  {hop.statusCode} · {formatMilliseconds(hop.responseTimeMs)} ·{' '}
-                  {humanize(hop.headers)}
-                </small>
-              </li>
-            ))}
-          </ol>
-        </div>
-      ) : null}
+      {result.redirects.length > 0 ? <RedirectPath redirects={result.redirects} /> : null}
+      <EvidenceRetentionNotice />
     </section>
+  );
+}
+
+function RedirectPath({
+  redirects,
+}: {
+  redirects: Extract<NonNullable<ManualRound['result']>, { kind?: 'SINGLE_LOCATION' }>['redirects'];
+}) {
+  return (
+    <div className="border-t border-rail-border px-4 py-3">
+      <h5 className="m-0 text-xs font-semibold text-rail-text">Redirect path</h5>
+      <ol className="mt-3 mb-0 grid list-decimal gap-3 pl-5" aria-label="Redirect chain">
+        {redirects.map((hop) => (
+          <li key={hop.sequence} className="pl-1 text-xs text-rail-muted">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <code className="break-all text-rail-text">
+                #{hop.source.targetId} {hop.source.origin}
+              </code>
+              <span aria-hidden="true">→</span>
+              <code className="break-all text-rail-text">
+                {hop.destination
+                  ? `#${hop.destination.targetId} ${hop.destination.origin}`
+                  : 'No valid destination'}
+              </code>
+            </div>
+            <small className="mt-1 block text-xs text-rail-muted">
+              {hop.statusCode} · {formatMilliseconds(hop.responseTimeMs)} · {humanize(hop.headers)}
+            </small>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+function EvidenceRetentionNotice() {
+  return (
+    <p className="m-0 border-t border-rail-border px-4 py-3 text-xs leading-5 text-rail-muted">
+      Response headers and body were not retained for this check. Run a configuration test to
+      inspect bounded, redacted response evidence.
+    </p>
   );
 }
 
@@ -324,6 +331,7 @@ function MultiLocationDiagnostic({
           ))}
         </ul>
       ) : null}
+      <EvidenceRetentionNotice />
     </section>
   );
 }
@@ -424,21 +432,8 @@ export function CheckHistory({
                   label="Historical regional evidence"
                 />
               ) : null}
-              {isExpanded &&
-              detail?.result &&
-              detail.result.kind !== 'MULTI_LOCATION' &&
-              detail.result.assertionEvaluation ? (
-                <div className="mt-3 overflow-hidden rounded-rail-panel border border-rail-border bg-rail-sidebar/45">
-                  <p className="m-0 px-4 py-3 text-xs text-rail-subtle">
-                    {diagnosticFailureLabel({
-                      outcome: detail.result.outcome,
-                      stage: detail.result.stage,
-                      statusCode: detail.result.statusCode,
-                      assertionEvaluation: detail.result.assertionEvaluation,
-                    })}
-                  </p>
-                  <AssertionDiagnostics evaluation={detail.result.assertionEvaluation} />
-                </div>
+              {isExpanded && detail?.result && detail.result.kind !== 'MULTI_LOCATION' ? (
+                <HistoricalSingleLocationEvidence result={detail.result} />
               ) : null}
             </li>
           );
@@ -452,6 +447,46 @@ export function CheckHistory({
         </div>
       ) : null}
     </section>
+  );
+}
+
+function HistoricalSingleLocationEvidence({
+  result,
+}: {
+  result: Extract<NonNullable<ManualRound['result']>, { kind?: 'SINGLE_LOCATION' }>;
+}) {
+  const assertionEvaluation = result.assertionEvaluation ?? {
+    contractVersion: 1 as const,
+    outcome: result.assertionOutcome ?? ('NOT_EVALUATED' as const),
+    diagnostics: [],
+  };
+  return (
+    <div className="mt-3 overflow-hidden rounded-rail-panel border border-rail-border bg-rail-sidebar/45">
+      <dl className="grid grid-cols-2 gap-px bg-rail-border sm:grid-cols-4">
+        <Metric label="HTTP" value={result.statusCode?.toString() ?? 'No response'} />
+        <Metric label="Response" value={formatMilliseconds(result.responseTimeMs)} />
+        <Metric label="Attempt" value={formatMilliseconds(result.attemptDurationMs)} />
+        <Metric label="Checked" value={new Date(result.checkedAt).toLocaleTimeString()} />
+      </dl>
+      <DiagnosticOutcomeSummary
+        outcome={result.outcome}
+        reason={result.reason}
+        stage={result.stage}
+        statusCode={result.statusCode}
+        assertionEvaluation={assertionEvaluation}
+      />
+      <p className="m-0 border-t border-rail-border px-4 py-3 text-xs text-rail-subtle">
+        {diagnosticFailureLabel({
+          outcome: result.outcome,
+          stage: result.stage,
+          statusCode: result.statusCode,
+          assertionEvaluation,
+        })}
+      </p>
+      <AssertionDiagnostics evaluation={assertionEvaluation} />
+      {result.redirects.length > 0 ? <RedirectPath redirects={result.redirects} /> : null}
+      <EvidenceRetentionNotice />
+    </div>
   );
 }
 

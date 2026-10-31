@@ -103,6 +103,33 @@ export interface MonitorConfigurationUpdate {
   assertions: unknown;
 }
 
+export interface HttpConfigurationTestInput {
+  settings: HttpMonitorSettings;
+  statusPolicy: HttpStatusPolicy;
+  requestHeaders: RequestHeaderUpdate[];
+  assertions: unknown;
+}
+
+/**
+ * Validates the complete unsaved HTTP surface without introducing a second
+ * monitor-configuration contract. Secret-retention markers are intentionally
+ * left for the security packages to resolve against an existing monitor.
+ */
+export function parseHttpConfigurationTest(value: unknown): HttpConfigurationTestInput {
+  if (!hasExactKeys(value, ['assertions', 'httpSettings', 'requestHeaders', 'statusPolicy'])) {
+    throw new MonitorInputError({
+      httpSettings: ['Provide exactly httpSettings, statusPolicy, requestHeaders, and assertions.'],
+    });
+  }
+
+  return {
+    settings: parseHttpMonitorSettings(value.httpSettings),
+    statusPolicy: parseHttpStatusPolicy(value.statusPolicy),
+    requestHeaders: normalizeRequestHeaderUpdates(value.requestHeaders),
+    assertions: value.assertions,
+  };
+}
+
 export function parseMonitorConfigurationUpdate(value: unknown): MonitorConfigurationUpdate {
   if (!hasExactKeys(value, ['assertions', 'httpSettings', 'requestHeaders'])) {
     throw new MonitorInputError({

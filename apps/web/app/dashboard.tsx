@@ -9,6 +9,7 @@ import { actionClassName, Button } from '../components/ui/button';
 import { Checkbox, Select } from '../components/ui/form-control';
 import { Form } from '../components/ui/form';
 import { PageHeader } from '../components/ui/page-header';
+import { ConfirmationDialog } from '../components/ui/confirmation-dialog';
 import { TablePagination, type PaginationState } from '../components/ui/table-pagination';
 import { monitorDetailHref, monitorEditHref } from '../lib/navigation-origin';
 import { StatusBadge } from '../components/ui/status-badge';
@@ -40,6 +41,13 @@ import {
 } from '../features/monitors/monitor-evidence';
 import { MonitorForm } from '../features/monitors/monitor-form';
 import { responseAssertionsFromForm } from '../features/monitors/response-assertions';
+import {
+  httpConfigurationTestFromForm,
+  requiresStateChangingMethodConfirmation,
+  requestBodyFromForm,
+  requestHeadersFromForm,
+  urlFromMonitorForm,
+} from '../features/monitors/monitor-form-serialization';
 import { HTTP_METHODS } from '../features/monitors/http-method-options';
 import { MonitorAvailabilityHistory } from '../features/monitors/monitor-availability-history';
 import { MonitorResponseTimeChart } from '../features/monitors/monitor-response-time-chart';
@@ -53,6 +61,7 @@ import type {
   HistoryPage,
   IncidentHistoryPage,
   ResponseTimeOverview,
+  ConfigurationTestResult,
 } from '../features/monitors/types';
 
 const multiLocationUiEnabled = process.env.NEXT_PUBLIC_MULTI_LOCATION_EXECUTION_ENABLED === 'true';
@@ -103,6 +112,10 @@ export function Dashboard({
   const [actionError, setActionError] = useState<string>();
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [createdMonitor, setCreatedMonitor] = useState<Monitor>();
+  const [configurationTest, setConfigurationTest] = useState<ConfigurationTestResult>();
+  const [configurationTestError, setConfigurationTestError] = useState<string>();
+  const [isTestingConfiguration, setIsTestingConfiguration] = useState(false);
+  const [stateChangingTestMethod, setStateChangingTestMethod] = useState<string>();
   const [manualRounds, setManualRounds] = useState<Record<string, ManualRound>>({});
   const [runningMonitorIds, setRunningMonitorIds] = useState<Set<string>>(() => new Set());
   const [runErrors, setRunErrors] = useState<Record<string, string>>({});
@@ -408,6 +421,61 @@ export function Dashboard({
       );
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  function beginConfigurationTest(): void {
+    const form = document.getElementById('monitor-form');
+    if (!(form instanceof HTMLFormElement) || !form.reportValidity()) return;
+    const methodValue = new FormData(form).get('method');
+    const method = typeof methodValue === 'string' ? methodValue : 'GET';
+    if (requiresStateChangingMethodConfirmation(method)) {
+      setStateChangingTestMethod(method);
+      return;
+    }
+    void testConfiguration(form);
+  }
+
+  async function testConfiguration(form?: HTMLFormElement): Promise<void> {
+    const monitorForm = form ?? document.getElementById('monitor-form');
+    if (!(monitorForm instanceof HTMLFormElement) || !projectId) return;
+    setStateChangingTestMethod(undefined);
+    setIsTestingConfiguration(true);
+    setConfigurationTest(undefined);
+    setConfigurationTestError(undefined);
+    setActionError(undefined);
+    setFieldErrors({});
+
+    try {
+      const endpoint =
+        view === 'edit' && monitorId
+          ? `/api/monitors/${monitorId}/test-configuration`
+          : '/api/monitors/test-configuration';
+      const response = await fetch(`${endpoint}?projectId=${encodeURIComponent(projectId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(httpConfigurationTestFromForm(new FormData(monitorForm))),
+      });
+      const body = (await response.json()) as { data?: ConfigurationTestResult } & ApiError;
+      if (!response.ok || !body.data) {
+        if (response.status === 400 && body.fields) setFieldErrors(body.fields);
+        setConfigurationTestError(
+          body.message ??
+            'Watchrail could not test this configuration. Review the fields and try again.',
+        );
+        return;
+      }
+      setConfigurationTest(body.data);
+      window.requestAnimationFrame(() =>
+        document.querySelector('[aria-label="Configuration test result"]')?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'nearest',
+        }),
+      );
+    } catch {
+      setConfigurationTestError('Watchrail could not reach the test service. Try again.');
+    } finally {
+      setIsTestingConfiguration(false);
     }
   }
 
@@ -805,6 +873,13 @@ export function Dashboard({
                 </>
               ) : view === 'create' ? (
                 <>
+                  <Button
+                    variant="secondary"
+                    disabled={isTestingConfiguration || isSubmitting}
+                    onClick={beginConfigurationTest}
+                  >
+                    {isTestingConfiguration ? 'Testing…' : 'Test configuration'}
+                  </Button>
                   <Link
                     href={`${projectBase}/monitors`}
                     className={actionClassName({ variant: 'quiet' })}
@@ -832,6 +907,13 @@ export function Dashboard({
             actions={
               detailMonitor ? (
                 <>
+                  <Button
+                    variant="secondary"
+                    disabled={isTestingConfiguration || isSubmitting}
+                    onClick={beginConfigurationTest}
+                  >
+                    {isTestingConfiguration ? 'Testing…' : 'Test configuration'}
+                  </Button>
                   <Link href={detailPath} className={actionClassName({ variant: 'quiet' })}>
                     Cancel
                   </Link>
@@ -1213,6 +1295,12 @@ export function Dashboard({
               submitting={isSubmitting}
               formId="monitor-form"
               onSubmit={(event) => void createMonitor(event)}
+              testResult={configurationTest}
+              testError={configurationTestError}
+              onDismissTest={() => {
+                setConfigurationTest(undefined);
+                setConfigurationTestError(undefined);
+              }}
             />
           ) : null}
           {view === 'edit' && detailMonitor ? (
@@ -1224,6 +1312,12 @@ export function Dashboard({
               submitting={isSubmitting}
               formId="monitor-form"
               onSubmit={(event) => void editMonitor(event)}
+              testResult={configurationTest}
+              testError={configurationTestError}
+              onDismissTest={() => {
+                setConfigurationTest(undefined);
+                setConfigurationTestError(undefined);
+              }}
             />
           ) : null}
           {view === 'edit' && !isLoading && !loadError && !detailMonitor ? (
@@ -1233,73 +1327,21 @@ export function Dashboard({
           ) : null}
         </div>
       </main>
+      <ConfirmationDialog
+        open={Boolean(stateChangingTestMethod)}
+        title={`Run ${stateChangingTestMethod ?? ''} request?`}
+        description={
+          <>
+            This method can change data on the target service. Watchrail will send the unsaved
+            request exactly once and will not create a check record.
+          </>
+        }
+        confirmLabel="Run test"
+        onCancel={() => setStateChangingTestMethod(undefined)}
+        onConfirm={() => void testConfiguration()}
+      />
     </AppShell>
   );
-}
-
-function requestHeadersFromForm(formData: FormData): Array<Record<string, unknown>> {
-  const names = formData.getAll('requestHeaderName');
-  const values = formData.getAll('requestHeaderValue');
-  const ids = formData.getAll('requestHeaderId');
-  const storedValues = formData.getAll('requestHeaderHasStoredValue');
-  const sensitiveIds = new Set(
-    formData.getAll('requestHeaderSensitive').map((value) => formEntryString(value)),
-  );
-
-  return names.map((name, index) => {
-    const headerName = formEntryString(name);
-    const id = formEntryString(ids[index]);
-    const value = formEntryString(values[index]);
-    const sensitive = sensitiveIds.has(id);
-    if (storedValues[index] === 'true' && value === '') {
-      return { name: headerName, sensitive: true, retain: true };
-    }
-    return { name: headerName, sensitive, value };
-  });
-}
-
-function formEntryString(value: FormDataEntryValue | undefined): string {
-  return typeof value === 'string' ? value : '';
-}
-
-function requestBodyFromForm(formData: FormData): Record<string, unknown> {
-  const type = formEntryString(formData.get('requestBodyType') ?? undefined);
-  if (type === 'JSON')
-    return { type, value: formEntryString(formData.get('requestBodyValue') ?? undefined) };
-  if (type === 'RAW') {
-    return {
-      type,
-      contentType: formEntryString(formData.get('requestBodyContentType') ?? undefined),
-      value: formEntryString(formData.get('requestBodyValue') ?? undefined),
-    };
-  }
-  if (type === 'FORM_URLENCODED') {
-    const names = formData.getAll('requestBodyFieldName');
-    const values = formData.getAll('requestBodyFieldValue');
-    return {
-      type,
-      fields: names.map((name, index) => ({
-        name: formEntryString(name),
-        value: formEntryString(values[index]),
-      })),
-    };
-  }
-  return { type: 'NONE' };
-}
-
-function urlFromMonitorForm(formData: FormData): string {
-  const rawUrl = formEntryString(formData.get('url') ?? undefined);
-  try {
-    const url = new URL(rawUrl);
-    const names = formData.getAll('queryParameterName');
-    const values = formData.getAll('queryParameterValue');
-    for (const [index, name] of names.entries()) {
-      url.searchParams.append(formEntryString(name), formEntryString(values[index]));
-    }
-    return url.toString();
-  } catch {
-    return rawUrl;
-  }
 }
 
 function MonitorDetailView({
