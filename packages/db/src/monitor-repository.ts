@@ -66,6 +66,7 @@ export class MonitorRepository {
           followRedirects: monitor.followRedirects,
           statusPolicy: monitor.statusPolicy,
           requestHeaders,
+          requestBody: monitor.requestBody,
           assertions,
           locations: monitor.locations,
         })
@@ -87,6 +88,7 @@ export class MonitorRepository {
         followRedirects: created.followRedirects,
         statusPolicy: created.statusPolicy,
         requestHeaders: created.requestHeaders,
+        requestBody: created.requestBody,
         assertions: created.assertions,
         locations: created.locations,
       });
@@ -215,6 +217,7 @@ export class MonitorRepository {
         followRedirects: configuration.followRedirects,
         statusPolicy,
         requestHeaders: configuration.requestHeaders,
+        requestBody: configuration.requestBody,
         assertions: configuration.assertions,
         locations: configuration.locations,
       });
@@ -365,7 +368,7 @@ export class MonitorRepository {
         .orderBy(desc(monitorConfigurationVersions.versionNumber))
         .limit(1);
       if (!configuration) throw new Error('Monitor has no configuration version.');
-      if (configuration.method !== 'GET' && configuration.method !== 'HEAD') {
+      if (!isHttpMonitorMethod(configuration.method)) {
         throw new Error('Response assertions require a supported HTTP monitor method.');
       }
 
@@ -391,6 +394,7 @@ export class MonitorRepository {
         followRedirects: configuration.followRedirects,
         statusPolicy: configuration.statusPolicy,
         requestHeaders: configuration.requestHeaders,
+        requestBody: configuration.requestBody,
         assertions,
         locations: configuration.locations,
       });
@@ -452,6 +456,7 @@ export class MonitorRepository {
         followRedirects: configuration.followRedirects,
         statusPolicy: configuration.statusPolicy,
         requestHeaders: configuration.requestHeaders,
+        requestBody: configuration.requestBody,
         assertions: configuration.assertions,
         locations: configuration.locations,
       });
@@ -530,6 +535,7 @@ export class MonitorRepository {
         followRedirects: configuration.followRedirects,
         statusPolicy: configuration.statusPolicy,
         requestHeaders: configuration.requestHeaders,
+        requestBody: configuration.requestBody,
         assertions: configuration.assertions,
         locations: [...locations],
       });
@@ -575,6 +581,18 @@ export class MonitorRepository {
       return updated;
     });
   }
+}
+
+function isHttpMonitorMethod(method: string): method is HttpMonitorMethod {
+  return (
+    method === 'GET' ||
+    method === 'HEAD' ||
+    method === 'POST' ||
+    method === 'PUT' ||
+    method === 'PATCH' ||
+    method === 'DELETE' ||
+    method === 'OPTIONS'
+  );
 }
 
 export class MonitorUpdateNotFoundError extends Error {

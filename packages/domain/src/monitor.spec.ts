@@ -30,6 +30,7 @@ describe('createMonitor', () => {
       url: 'https://example.com/health',
       ...MONITOR_DEFAULTS,
       requestHeaders: [],
+      requestBody: { type: 'NONE' },
       assertions: { headers: [], textBody: [], jsonBody: [] },
       locations: ['local'],
     });
@@ -180,7 +181,30 @@ describe('parseHttpMonitorSettings', () => {
       method: 'HEAD',
       timeoutMs: 5_000,
       followRedirects: false,
+      requestBody: { type: 'NONE' },
     });
+  });
+
+  it('validates structured request bodies and rejects bodies on GET', () => {
+    expect(
+      parseHttpMonitorSettings({
+        url: 'https://api.example.com/jobs',
+        method: 'POST',
+        timeoutMs: 5_000,
+        followRedirects: true,
+        requestBody: { type: 'JSON', value: '{"ready":true}' },
+      }).requestBody,
+    ).toEqual({ type: 'JSON', value: '{"ready":true}' });
+
+    expect(() =>
+      parseHttpMonitorSettings({
+        url: 'https://api.example.com/jobs',
+        method: 'GET',
+        timeoutMs: 5_000,
+        followRedirects: true,
+        requestBody: { type: 'RAW', contentType: 'text/plain', value: 'payload' },
+      }),
+    ).toThrow(MonitorInputError);
   });
 
   it.each([1_000, 30_000])('accepts timeout boundary %i', (timeoutMs) => {
@@ -205,7 +229,21 @@ describe('parseHttpMonitorSettings', () => {
     ).toThrow(MonitorInputError);
   });
 
-  it.each(['POST', 'get', undefined])('rejects unsupported method %s', (method) => {
+  it.each(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] as const)(
+    'accepts supported method %s',
+    (method) => {
+      expect(
+        parseHttpMonitorSettings({
+          url: 'https://example.com',
+          method,
+          timeoutMs: 5_000,
+          followRedirects: true,
+        }).method,
+      ).toBe(method);
+    },
+  );
+
+  it.each(['TRACE', 'get', undefined])('rejects unsupported method %s', (method) => {
     expect(() =>
       parseHttpMonitorSettings({
         url: 'https://example.com',

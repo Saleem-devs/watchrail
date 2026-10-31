@@ -46,11 +46,16 @@ export interface ProbeExecutionConfigurationV1 {
   executionPolicyVersion: string;
   requiredEngineVersion: string;
   url: string;
-  method: 'GET' | 'HEAD';
+  method: 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'OPTIONS';
   timeoutMs: number;
   followRedirects: boolean;
   statusPolicy: { type: 'ANY_2XX' } | { type: 'EXACT'; statusCodes: number[] };
   requestHeaders: Array<{ name: string; value: string }>;
+  requestBody:
+    | { type: 'NONE' }
+    | { type: 'JSON'; value: string }
+    | { type: 'FORM_URLENCODED'; fields: Array<{ name: string; value: string }> }
+    | { type: 'RAW'; contentType: string; value: string };
   assertions: {
     headers: unknown[];
     textBody: unknown[];
@@ -159,6 +164,7 @@ export function parseProbeExecutionConfiguration(value: unknown): ProbeExecution
       'followRedirects',
       'method',
       'requestHeaders',
+      'requestBody',
       'requiredEngineVersion',
       'statusPolicy',
       'timeoutMs',
@@ -174,18 +180,60 @@ export function parseProbeExecutionConfiguration(value: unknown): ProbeExecution
     typeof value.url !== 'string' ||
     value.url.length === 0 ||
     value.url.length > 2048 ||
-    (value.method !== 'GET' && value.method !== 'HEAD') ||
+    !isHttpMethod(value.method) ||
     !Number.isInteger(value.timeoutMs) ||
     Number(value.timeoutMs) < 1_000 ||
     Number(value.timeoutMs) > 30_000 ||
     typeof value.followRedirects !== 'boolean' ||
     !isStatusPolicy(value.statusPolicy) ||
     !isRuntimeHeaders(value.requestHeaders) ||
+    !isRequestBody(value.requestBody) ||
     !isRuntimeAssertions(value.assertions)
   ) {
     throw new InvalidProbeCoordinatorContractError();
   }
   return value as unknown as ProbeExecutionConfigurationV1;
+}
+
+function isRequestBody(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !('type' in value))
+    return false;
+  const body = value as Record<string, unknown>;
+  if (body.type === 'NONE') return hasExactKeys(body, ['type']);
+  if (body.type === 'JSON')
+    return hasExactKeys(body, ['type', 'value']) && typeof body.value === 'string';
+  if (body.type === 'RAW') {
+    return (
+      hasExactKeys(body, ['contentType', 'type', 'value']) &&
+      typeof body.contentType === 'string' &&
+      typeof body.value === 'string'
+    );
+  }
+  return (
+    body.type === 'FORM_URLENCODED' &&
+    hasExactKeys(body, ['fields', 'type']) &&
+    Array.isArray(body.fields) &&
+    body.fields.every(
+      (field) =>
+        hasExactKeys(field, ['name', 'value']) &&
+        typeof field.name === 'string' &&
+        typeof field.value === 'string',
+    )
+  );
+}
+
+function isHttpMethod(
+  value: unknown,
+): value is 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'OPTIONS' {
+  return (
+    value === 'GET' ||
+    value === 'HEAD' ||
+    value === 'POST' ||
+    value === 'PUT' ||
+    value === 'PATCH' ||
+    value === 'DELETE' ||
+    value === 'OPTIONS'
+  );
 }
 
 function isStatusPolicy(value: unknown): boolean {

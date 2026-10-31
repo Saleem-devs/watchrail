@@ -307,6 +307,7 @@ describe('ScheduledRoundRepository', () => {
       method: 'HEAD',
       timeoutMs: 5_000,
       followRedirects: false,
+      requestBody: { type: 'NONE' },
     });
     const [newConfigurationRound] = await new ScheduledRoundRepository(connection.db).dispatchDue(
       1,
@@ -328,6 +329,7 @@ describe('ScheduledRoundRepository', () => {
       method: 'GET',
       timeoutMs: 6_000,
       followRedirects: true,
+      requestBody: { type: 'NONE' },
     });
     const [oldConfiguration] = await connection.db
       .select()

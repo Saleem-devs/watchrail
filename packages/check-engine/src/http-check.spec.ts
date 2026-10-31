@@ -659,36 +659,39 @@ describe('executeHttpCheck', () => {
     },
   );
 
-  it.each(['GET', 'HEAD'] as const)('accepts %s', async (method) => {
-    const executor: HttpExecutor = {
-      execute: () =>
-        Promise.resolve({
-          statusCode: 200,
-          responseTimeMs: 10,
-          type: 'RESPONSE',
-          headers: [],
-          body: { state: 'NOT_REQUESTED' },
-          redirects: [],
-        }),
-    };
+  it.each(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] as const)(
+    'accepts %s',
+    async (method) => {
+      const executor: HttpExecutor = {
+        execute: () =>
+          Promise.resolve({
+            statusCode: 200,
+            responseTimeMs: 10,
+            type: 'RESPONSE',
+            headers: [],
+            body: { state: 'NOT_REQUESTED' },
+            redirects: [],
+          }),
+      };
 
-    await expect(
-      executeHttpCheck(
-        {
-          url: 'https://example.com',
-          method,
-          followRedirects: true,
-          timeoutMs: 10_000,
-        },
-        {
-          executor,
-          clock: createClock(),
-        },
-      ),
-    ).resolves.toMatchObject({
-      outcome: 'PASS',
-    });
-  });
+      await expect(
+        executeHttpCheck(
+          {
+            url: 'https://example.com',
+            method,
+            followRedirects: true,
+            timeoutMs: 10_000,
+          },
+          {
+            executor,
+            clock: createClock(),
+          },
+        ),
+      ).resolves.toMatchObject({
+        outcome: 'PASS',
+      });
+    },
+  );
 
   it('rejects unsupported HTTP methods before executing the request', async () => {
     const execute = vi.fn<HttpExecutor['execute']>();
@@ -700,7 +703,7 @@ describe('executeHttpCheck', () => {
       executeHttpCheck(
         {
           url: 'https://example.com',
-          method: 'POST',
+          method: 'TRACE',
           followRedirects: true,
           timeoutMs: 10_000,
         } as never,

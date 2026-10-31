@@ -87,6 +87,7 @@ export class ProbeAgentRuntime {
           followRedirects: configuration.followRedirects,
           statusPolicy: configuration.statusPolicy,
           requestHeaders: configuration.requestHeaders,
+          requestBody: configuration.requestBody,
           headerAssertions: assertions.headers,
           textBodyAssertions: assertions.textBody,
           jsonBodyAssertions: assertions.jsonBody,

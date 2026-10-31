@@ -463,6 +463,37 @@ describe('NodeHttpExecutor', () => {
     expect(result).toMatchObject({ outcome: 'PASS', statusCode: 204 });
   });
 
+  it('applies HTTP redirect method semantics to write methods', async () => {
+    const postRequest = vi
+      .fn<PinnedHttpTransport['request']>()
+      .mockResolvedValueOnce(response(303, '/result'))
+      .mockResolvedValueOnce(response(200));
+    const patchRequest = vi
+      .fn<PinnedHttpTransport['request']>()
+      .mockResolvedValueOnce(response(307, '/continue'))
+      .mockResolvedValueOnce(response(204));
+
+    await new NodeHttpExecutor({
+      resolver: publicResolver(),
+      transport: { request: postRequest },
+    }).execute({
+      url: 'https://example.com/jobs',
+      method: 'POST',
+      signal: new AbortController().signal,
+    });
+    await new NodeHttpExecutor({
+      resolver: publicResolver(),
+      transport: { request: patchRequest },
+    }).execute({
+      url: 'https://example.com/jobs/1',
+      method: 'PATCH',
+      signal: new AbortController().signal,
+    });
+
+    expect(postRequest.mock.calls.map(([call]) => call.method)).toEqual(['POST', 'GET']);
+    expect(patchRequest.mock.calls.map(([call]) => call.method)).toEqual(['PATCH', 'PATCH']);
+  });
+
   it('preserves configured headers on same-origin redirects', async () => {
     const request = vi
       .fn<PinnedHttpTransport['request']>()
@@ -481,6 +512,32 @@ describe('NodeHttpExecutor', () => {
       requestHeaders,
       requestHeaders,
     ]);
+  });
+
+  it('sends an encoded JSON body and drops it when a redirect rewrites POST to GET', async () => {
+    const request = vi
+      .fn<PinnedHttpTransport['request']>()
+      .mockResolvedValueOnce(response(302, '/final'))
+      .mockResolvedValueOnce(response(200));
+
+    await executeHttpCheck(
+      {
+        url: 'https://example.com/start',
+        method: 'POST',
+        timeoutMs: 10_000,
+        followRedirects: true,
+        requestBody: { type: 'JSON', value: '{"ready":true}' },
+      },
+      { executor: new NodeHttpExecutor({ resolver: publicResolver(), transport: { request } }) },
+    );
+
+    expect(request.mock.calls[0]?.[0]).toMatchObject({
+      method: 'POST',
+      headers: [{ name: 'content-type', value: 'application/json' }],
+      body: new TextEncoder().encode('{"ready":true}'),
+    });
+    expect(request.mock.calls[1]?.[0]).toMatchObject({ method: 'GET', headers: [] });
+    expect(request.mock.calls[1]?.[0].body).toBeUndefined();
   });
 
   it('strips configured headers permanently after a cross-origin redirect', async () => {

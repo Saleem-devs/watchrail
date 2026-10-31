@@ -17,6 +17,7 @@ import {
   type HttpRedirectHop,
   type HttpStatusPolicy,
   type AssertionEvaluationV1,
+  type HttpRequestBody,
 } from '@watchrail/domain';
 
 export interface MonitorResponse {
@@ -37,6 +38,7 @@ export interface MonitorResponse {
     value: string | null;
     hasValue: true;
   }>;
+  requestBody: HttpRequestBody;
   assertions: unknown;
   locations: string[];
   createdAt: string;
@@ -122,6 +124,7 @@ export function toResponse(
     followRedirects: monitor.followRedirects,
     statusPolicy: monitor.statusPolicy,
     requestHeaders: redactRequestHeaders(monitor.requestHeaders),
+    requestBody: monitor.requestBody,
     assertions: redactAssertions(monitor.assertions),
     locations: monitor.locations,
     createdAt: monitor.createdAt.toISOString(),
