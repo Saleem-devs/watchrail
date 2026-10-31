@@ -1,16 +1,54 @@
 import { Button } from '../../components/ui/button';
-import type { HistoryPage, IncidentHistoryPage, IncidentState, ManualRound } from './types';
+import { classifyScheduledObservation } from '@watchrail/domain';
+import type {
+  AssertionEvaluation,
+  HistoryPage,
+  IncidentHistoryPage,
+  IncidentState,
+  ManualRound,
+} from './types';
 import { formatMilliseconds, formatRatio, humanize } from './formatting';
+import { AssertionDiagnostics, diagnosticFailureLabel } from './assertion-diagnostics';
 
-type DiagnosticOutcome = 'PASS' | 'FAIL' | 'UNKNOWN' | 'UP' | 'DEGRADED' | 'DOWN';
+type DiagnosticOutcome =
+  | 'PASS'
+  | 'FAIL'
+  | 'NOT_EVALUATED'
+  | 'NO_RESPONSE'
+  | 'HEALTHY'
+  | 'UNHEALTHY'
+  | 'INDETERMINATE'
+  | 'UNKNOWN'
+  | 'UP'
+  | 'DEGRADED'
+  | 'DOWN';
 
 const outcomeTone: Record<DiagnosticOutcome, string> = {
   PASS: 'border-rail-success/35 bg-rail-success/10 text-rail-success',
+  HEALTHY: 'border-rail-success/35 bg-rail-success/10 text-rail-success',
   UP: 'border-rail-success/35 bg-rail-success/10 text-rail-success',
   FAIL: 'border-rail-danger/35 bg-rail-danger/10 text-rail-danger',
+  UNHEALTHY: 'border-rail-danger/35 bg-rail-danger/10 text-rail-danger',
+  INDETERMINATE: 'border-rail-warning/35 bg-rail-warning/10 text-rail-warning',
   DOWN: 'border-rail-danger/35 bg-rail-danger/10 text-rail-danger',
   DEGRADED: 'border-rail-warning/35 bg-rail-warning/10 text-rail-warning',
+  NOT_EVALUATED: 'border-rail-border-strong bg-rail-surface text-rail-subtle',
+  NO_RESPONSE: 'border-rail-border-strong bg-rail-surface text-rail-subtle',
   UNKNOWN: 'border-rail-border-strong bg-rail-surface text-rail-subtle',
+};
+
+const outcomeLabel: Record<DiagnosticOutcome, string> = {
+  PASS: 'Passed',
+  FAIL: 'Failed',
+  NOT_EVALUATED: 'Not evaluated',
+  NO_RESPONSE: 'No response',
+  HEALTHY: 'Healthy',
+  UNHEALTHY: 'Unhealthy',
+  INDETERMINATE: 'Indeterminate',
+  UNKNOWN: 'Unknown',
+  UP: 'Up',
+  DEGRADED: 'Degraded',
+  DOWN: 'Down',
 };
 
 function OutcomeBadge({ outcome }: { outcome: DiagnosticOutcome }) {
@@ -18,8 +56,52 @@ function OutcomeBadge({ outcome }: { outcome: DiagnosticOutcome }) {
     <span
       className={`inline-flex min-h-7 items-center rounded-rail-control border px-2 py-1 text-xs font-semibold ${outcomeTone[outcome]}`}
     >
-      {outcome}
+      {outcomeLabel[outcome]}
     </span>
+  );
+}
+
+function singleLocationHealth(
+  outcome: 'PASS' | 'FAIL' | 'UNKNOWN',
+  reason: string,
+  assertionOutcome: AssertionEvaluation['outcome'],
+): 'HEALTHY' | 'UNHEALTHY' | 'INDETERMINATE' {
+  return classifyScheduledObservation({ outcome, reason, assertionOutcome });
+}
+
+function DiagnosticOutcomeSummary({
+  outcome,
+  reason,
+  stage,
+  statusCode,
+  assertionEvaluation,
+}: {
+  outcome: 'PASS' | 'FAIL' | 'UNKNOWN';
+  reason: string;
+  stage: string;
+  statusCode: number | null;
+  assertionEvaluation: AssertionEvaluation;
+}) {
+  const httpOutcome: DiagnosticOutcome =
+    stage !== 'HTTP' || statusCode === null ? 'NO_RESPONSE' : outcome;
+  const health = singleLocationHealth(outcome, reason, assertionEvaluation.outcome);
+  return (
+    <dl className="grid gap-px border-t border-rail-border bg-rail-border sm:grid-cols-3">
+      <DiagnosticSignal label="HTTP execution" outcome={httpOutcome} />
+      <DiagnosticSignal label="Response validation" outcome={assertionEvaluation.outcome} />
+      <DiagnosticSignal label="Monitoring health" outcome={health} />
+    </dl>
+  );
+}
+
+function DiagnosticSignal({ label, outcome }: { label: string; outcome: DiagnosticOutcome }) {
+  return (
+    <div className="flex min-w-0 items-center justify-between gap-3 bg-rail-header px-4 py-3">
+      <dt className="text-xs text-rail-muted">{label}</dt>
+      <dd className="m-0">
+        <OutcomeBadge outcome={outcome} />
+      </dd>
+    </div>
   );
 }
 
@@ -71,6 +153,16 @@ export function ManualDiagnostic({
   if (result.kind === 'MULTI_LOCATION') {
     return <MultiLocationDiagnostic result={result} label="Latest manual diagnostic" />;
   }
+  const assertionEvaluation = result.assertionEvaluation ?? {
+    contractVersion: 1,
+    outcome: result.assertionOutcome ?? 'NOT_EVALUATED',
+    diagnostics: [],
+  };
+  const monitoringHealth = singleLocationHealth(
+    result.outcome,
+    result.reason,
+    assertionEvaluation.outcome,
+  );
 
   return (
     <section
@@ -80,7 +172,7 @@ export function ManualDiagnostic({
     >
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rail-border px-4 py-3">
         <h4 className="m-0 text-sm font-semibold text-rail-text">Latest manual diagnostic</h4>
-        <OutcomeBadge outcome={result.outcome} />
+        <OutcomeBadge outcome={monitoringHealth} />
       </div>
       <dl className="grid grid-cols-2 gap-px bg-rail-border sm:grid-cols-4">
         <Metric label="HTTP" value={result.statusCode?.toString() ?? 'No response'} />
@@ -88,9 +180,27 @@ export function ManualDiagnostic({
         <Metric label="Attempt" value={formatMilliseconds(result.attemptDurationMs)} />
         <Metric label="Checked" value={new Date(result.checkedAt).toLocaleTimeString()} />
       </dl>
-      <p className="m-0 border-t border-rail-border px-4 py-3 text-xs text-rail-subtle">
-        {humanize(result.stage)} · {humanize(result.reason)}
-      </p>
+      <DiagnosticOutcomeSummary
+        outcome={result.outcome}
+        reason={result.reason}
+        stage={result.stage}
+        statusCode={result.statusCode}
+        assertionEvaluation={assertionEvaluation}
+      />
+      <div className="border-t border-rail-border px-4 py-3 text-xs">
+        <p className="m-0 font-medium text-rail-text">
+          {diagnosticFailureLabel({
+            outcome: result.outcome,
+            stage: result.stage,
+            statusCode: result.statusCode,
+            assertionEvaluation,
+          })}
+        </p>
+        <p className="mt-1 mb-0 text-rail-subtle">
+          {humanize(result.stage)} · {humanize(result.reason)}
+        </p>
+      </div>
+      <AssertionDiagnostics evaluation={assertionEvaluation} />
       {result.redirects.length > 0 ? (
         <div className="border-t border-rail-border px-4 py-3">
           <h5 className="m-0 text-xs font-semibold text-rail-text">Redirect path</h5>
@@ -187,12 +297,27 @@ function MultiLocationDiagnostic({
               </div>
               {region.executions.map((execution) =>
                 execution.diagnosticSummary ? (
-                  <small key={execution.id} className="mt-1 block text-xs text-rail-muted">
-                    {' · '}
-                    {execution.role.toLowerCase()} ·{' '}
-                    {execution.diagnosticSummary.statusCode ?? 'no HTTP'} ·{' '}
-                    {formatMilliseconds(execution.diagnosticSummary.responseTimeMs)}
-                  </small>
+                  <div
+                    key={execution.id}
+                    className="mt-2 overflow-hidden rounded-rail-control border border-rail-border"
+                  >
+                    <p className="m-0 px-3 py-2 text-xs text-rail-muted">
+                      {execution.role.toLowerCase()} · HTTP{' '}
+                      {execution.diagnosticSummary.statusCode ?? 'response unavailable'} ·{' '}
+                      {formatMilliseconds(execution.diagnosticSummary.responseTimeMs)}
+                      <span className="mt-1 block">
+                        Response validation:{' '}
+                        {execution.diagnosticSummary.assertionEvaluation
+                          ? outcomeLabel[execution.diagnosticSummary.assertionEvaluation.outcome]
+                          : 'Not reported'}
+                      </span>
+                    </p>
+                    {execution.diagnosticSummary.assertionEvaluation ? (
+                      <AssertionDiagnostics
+                        evaluation={execution.diagnosticSummary.assertionEvaluation}
+                      />
+                    ) : null}
+                  </div>
                 ) : null,
               )}
             </li>
@@ -244,6 +369,18 @@ export function CheckHistory({
           const regionalResult = round.result?.kind === 'MULTI_LOCATION' ? round.result : null;
           const singleResult =
             round.result && round.result.kind !== 'MULTI_LOCATION' ? round.result : null;
+          const singleHealth = singleResult
+            ? singleLocationHealth(
+                singleResult.outcome,
+                singleResult.reason,
+                singleResult.assertionOutcome ??
+                  singleResult.assertionEvaluation?.outcome ??
+                  'NOT_EVALUATED',
+              )
+            : null;
+          const singleAssertionFailed =
+            (singleResult?.assertionOutcome ?? singleResult?.assertionEvaluation?.outcome) ===
+            'FAIL';
           const isRegional = regionalResult !== null;
           const isExpanded = expandedRoundIds.has(round.id);
           const detail = details[round.id];
@@ -256,14 +393,16 @@ export function CheckHistory({
                     {round.result
                       ? isRegional
                         ? `${regionalResult.outcome} · ${formatRatio(regionalResult.coverage)}`
-                        : `${singleResult!.outcome} · ${singleResult!.reason}`
+                        : `${outcomeLabel[singleHealth!]} · ${
+                            singleAssertionFailed ? 'assertion failed' : singleResult!.reason
+                          }`
                       : round.assignmentStatus}
                   </div>
                   <time className="mt-1 block text-xs text-rail-muted" dateTime={round.createdAt}>
                     {new Date(round.createdAt).toLocaleString()}
                   </time>
                 </div>
-                {isRegional ? (
+                {round.result ? (
                   <Button
                     variant="quiet"
                     size="compact"
@@ -274,8 +413,8 @@ export function CheckHistory({
                     {loadingRoundIds.has(round.id)
                       ? 'Loading evidence…'
                       : isExpanded
-                        ? 'Hide regional evidence'
-                        : 'Show regional evidence'}
+                        ? 'Hide diagnostic evidence'
+                        : 'Show diagnostic evidence'}
                   </Button>
                 ) : null}
               </div>
@@ -284,6 +423,22 @@ export function CheckHistory({
                   result={detail.result}
                   label="Historical regional evidence"
                 />
+              ) : null}
+              {isExpanded &&
+              detail?.result &&
+              detail.result.kind !== 'MULTI_LOCATION' &&
+              detail.result.assertionEvaluation ? (
+                <div className="mt-3 overflow-hidden rounded-rail-panel border border-rail-border bg-rail-sidebar/45">
+                  <p className="m-0 px-4 py-3 text-xs text-rail-subtle">
+                    {diagnosticFailureLabel({
+                      outcome: detail.result.outcome,
+                      stage: detail.result.stage,
+                      statusCode: detail.result.statusCode,
+                      assertionEvaluation: detail.result.assertionEvaluation,
+                    })}
+                  </p>
+                  <AssertionDiagnostics evaluation={detail.result.assertionEvaluation} />
+                </div>
               ) : null}
             </li>
           );

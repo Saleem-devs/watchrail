@@ -13,8 +13,9 @@ import {
   MonitorRepository,
   ManualRoundRepository,
   MultiLocationRoundFinalizationRepository,
+  ProjectRepository,
 } from '@watchrail/db';
-import { createMonitor } from '@watchrail/domain';
+import { createMonitor, parseNewProject } from '@watchrail/domain';
 import type { WatchrailDatabase } from '@watchrail/db';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -24,6 +25,7 @@ describe('monitor API', () => {
   let app: INestApplication;
   let container: StartedPostgreSqlContainer;
   let database: WatchrailDatabase;
+  let projectId: string;
 
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:18.0-alpine').start();
@@ -65,10 +67,16 @@ describe('monitor API', () => {
         check_execution_assignments,
         check_rounds,
         monitor_configuration_versions,
-        monitors
+        monitors,
+        projects
       cascade
     `);
     await connection.pool.end();
+    const project = await new ProjectRepository(database).create(
+      '00000000-0000-4000-8000-000000000002',
+      parseNewProject({ name: 'Monitor API', slug: 'monitor-api' }),
+    );
+    projectId = project.id;
   });
 
   afterAll(async () => {
@@ -81,12 +89,10 @@ describe('monitor API', () => {
 
   it('creates and lists a monitor with server-owned defaults', async () => {
     const created = await request(app.getHttpServer())
-      .post('/api/monitors')
+      .post(`/api/monitors?projectId=${projectId}`)
       .send({
         name: 'Public API',
         url: 'https://example.com/health',
-        method: 'DELETE',
-        lifecycleState: 'ARCHIVED',
       })
       .expect(201);
 
@@ -110,7 +116,7 @@ describe('monitor API', () => {
 
   it('replaces the immutable execution location with an owned active remote location', async () => {
     const monitor = await request(app.getHttpServer())
-      .post('/api/monitors')
+      .post(`/api/monitors?projectId=${projectId}`)
       .send({ name: 'Remote API', url: 'https://example.com/health' })
       .expect(201);
     const location = await request(app.getHttpServer())
@@ -142,7 +148,7 @@ describe('monitor API', () => {
 
   it('reads live uptime and daily metrics without materializing the tail, retaining metrics through mutations', async () => {
     const created = await request(app.getHttpServer())
-      .post('/api/monitors')
+      .post(`/api/monitors?projectId=${projectId}`)
       .send({ name: 'Uptime API', url: 'https://example.com' })
       .expect(201);
     const monitorId = created.body.data.id as string;
@@ -194,7 +200,7 @@ describe('monitor API', () => {
 
   it('validates uptime presets, isolates organizations, and allows archived reads', async () => {
     const created = await request(app.getHttpServer())
-      .post('/api/monitors')
+      .post(`/api/monitors?projectId=${projectId}`)
       .send({ name: 'Uptime validation', url: 'https://example.com' })
       .expect(201);
     const monitorId = created.body.data.id as string;
@@ -228,7 +234,7 @@ describe('monitor API', () => {
   it('uses one shared cutoff across the monitor-list uptime projection', async () => {
     for (const name of ['First uptime', 'Second uptime']) {
       await request(app.getHttpServer())
-        .post('/api/monitors')
+        .post(`/api/monitors?projectId=${projectId}`)
         .send({ name, url: 'https://example.com' })
         .expect(201);
     }
@@ -241,7 +247,7 @@ describe('monitor API', () => {
   it('versions interval settings and enforces lifecycle scheduling invariants', async () => {
     const beforeCreate = Date.now();
     const created = await request(app.getHttpServer())
-      .post('/api/monitors')
+      .post(`/api/monitors?projectId=${projectId}`)
       .send({
         name: 'Scheduled API',
         url: 'https://example.com/health',
@@ -344,7 +350,7 @@ describe('monitor API', () => {
     { intervalSeconds: 60, nextCheckAt: null },
   ])('rejects invalid schedule settings %#', async (body) => {
     const created = await request(app.getHttpServer())
-      .post('/api/monitors')
+      .post(`/api/monitors?projectId=${projectId}`)
       .send({ name: 'Schedule validation', url: 'https://example.com' })
       .expect(201);
     await request(app.getHttpServer())
@@ -355,7 +361,7 @@ describe('monitor API', () => {
 
   it('preserves interval settings through every unrelated configuration writer', async () => {
     const created = await request(app.getHttpServer())
-      .post('/api/monitors')
+      .post(`/api/monitors?projectId=${projectId}`)
       .send({ name: 'Immutable schedule', url: 'https://example.com', intervalSeconds: 300 })
       .expect(201);
     const monitorId = created.body.data.id as string;
@@ -404,9 +410,72 @@ describe('monitor API', () => {
     );
   });
 
+  it('preserves the request body in execution snapshots after header and assertion updates', async () => {
+    const requestBody = { type: 'JSON', value: '{"query":"health"}' } as const;
+    const created = await request(app.getHttpServer())
+      .post(`/api/monitors?projectId=${projectId}`)
+      .send({
+        name: 'Body-preserving API',
+        url: 'https://example.com/graphql',
+        method: 'POST',
+        requestBody,
+      })
+      .expect(201);
+    const monitorId = created.body.data.id as string;
+
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/request-headers`)
+      .send({
+        requestHeaders: [{ name: 'content-type', sensitive: false, value: 'application/json' }],
+      })
+      .expect(200);
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/assertions`)
+      .send({
+        headers: [
+          {
+            name: 'content-type',
+            operator: 'contains',
+            target: { sensitive: false, value: 'json' },
+          },
+        ],
+        textBody: [],
+        jsonBody: [],
+      })
+      .expect(200);
+
+    const versions = await database.$client.query<{
+      version_number: number;
+      request_body: unknown;
+    }>(
+      `select version_number, request_body
+       from monitor_configuration_versions
+       where monitor_id = $1
+       order by version_number`,
+      [monitorId],
+    );
+    expect(versions.rows).toEqual([
+      { version_number: 1, request_body: requestBody },
+      { version_number: 2, request_body: requestBody },
+      { version_number: 3, request_body: requestBody },
+    ]);
+
+    const round = await request(app.getHttpServer())
+      .post(`/api/monitors/${monitorId}/check-rounds`)
+      .expect(202);
+    const claim = await new CheckExecutionRepository(database).claim(
+      round.body.data.id as string,
+      30_000,
+    );
+    expect(claim).toMatchObject({
+      state: 'CLAIMED',
+      execution: { requestBody },
+    });
+  });
+
   it('normalizes and versions exact status-policy edits', async () => {
     const created = await request(app.getHttpServer())
-      .post('/api/monitors')
+      .post(`/api/monitors?projectId=${projectId}`)
       .send({
         name: 'Expected maintenance response',
         url: 'https://example.com/health',
@@ -446,7 +515,7 @@ describe('monitor API', () => {
 
   it('versions complete HTTP settings while old rounds retain captured settings', async () => {
     const created = await request(app.getHttpServer())
-      .post('/api/monitors')
+      .post(`/api/monitors?projectId=${projectId}`)
       .send({
         name: 'Versioned API',
         url: 'https://old.example.com/health',
@@ -531,14 +600,12 @@ describe('monitor API', () => {
   });
 
   it.each([
-    [{ url: 'https://example.com', method: 'POST', timeoutMs: 5_000, followRedirects: true }],
     [{ url: 'https://example.com', method: 'GET', timeoutMs: 999, followRedirects: true }],
     [{ url: 'https://example.com', method: 'GET', timeoutMs: 30_001, followRedirects: true }],
     [{ url: 'https://example.com', method: 'GET', timeoutMs: 5_000, followRedirects: 'false' }],
-    [{ url: 'https://example.com', method: 'GET', timeoutMs: 5_000 }],
-  ])('rejects invalid or incomplete HTTP settings %#', async (settings) => {
+  ])('rejects invalid HTTP settings %#', async (settings) => {
     const created = await request(app.getHttpServer())
-      .post('/api/monitors')
+      .post(`/api/monitors?projectId=${projectId}`)
       .send({ name: 'Validation target', url: 'https://example.com' })
       .expect(201);
 
@@ -551,7 +618,7 @@ describe('monitor API', () => {
 
   it('encrypts sensitive headers, redacts reads, and retains secrets explicitly', async () => {
     const created = await request(app.getHttpServer())
-      .post('/api/monitors')
+      .post(`/api/monitors?projectId=${projectId}`)
       .send({
         name: 'Authenticated API',
         url: 'https://example.com/health',
@@ -602,7 +669,7 @@ describe('monitor API', () => {
 
   it('rejects unsafe headers and retaining a missing secret', async () => {
     await request(app.getHttpServer())
-      .post('/api/monitors')
+      .post(`/api/monitors?projectId=${projectId}`)
       .send({
         name: 'Unsafe headers',
         url: 'https://example.com',
@@ -611,7 +678,7 @@ describe('monitor API', () => {
       .expect(400);
 
     const created = await request(app.getHttpServer())
-      .post('/api/monitors')
+      .post(`/api/monitors?projectId=${projectId}`)
       .send({ name: 'API', url: 'https://example.com' })
       .expect(201);
 
@@ -624,7 +691,7 @@ describe('monitor API', () => {
   it('encrypts, redacts, retains, and immutably snapshots response assertions', async () => {
     const sentinel = 'WATCHRAIL_ASSERTION_SENTINEL_SECRET';
     const created = await request(app.getHttpServer())
-      .post('/api/monitors')
+      .post(`/api/monitors?projectId=${projectId}`)
       .send({ name: 'Assertion target', url: 'https://example.com' })
       .expect(201);
     const monitorId = created.body.data.id as string;
@@ -711,9 +778,65 @@ describe('monitor API', () => {
     expect(claim.execution.assertions).toEqual(stored.rows[1]?.assertions);
   });
 
+  it('creates a monitor with response assertions and rejects configurations above the limit', async () => {
+    const sentinel = 'WATCHRAIL_CREATE_ASSERTION_SECRET';
+    const created = await request(app.getHttpServer())
+      .post(`/api/monitors?projectId=${projectId}`)
+      .send({
+        name: 'Configured at creation',
+        url: 'https://example.com/health',
+        assertions: {
+          headers: [
+            {
+              name: 'content-type',
+              operator: 'contains',
+              target: { sensitive: false, value: 'json' },
+            },
+          ],
+          textBody: [{ operator: 'not_contains', target: { sensitive: true, value: sentinel } }],
+          jsonBody: [
+            {
+              selector: '$.healthy',
+              operator: 'equals',
+              target: { sensitive: false, value: { type: 'boolean', value: true } },
+            },
+          ],
+        },
+      })
+      .expect(201);
+
+    expect(created.body.data.assertions).toMatchObject({
+      assertions: {
+        headers: [{ target: { sensitive: false, value: 'json' } }],
+        textBody: [{ target: { sensitive: true, hasValue: true } }],
+        jsonBody: [{ target: { sensitive: false, value: { type: 'boolean', value: true } } }],
+      },
+    });
+    expect(JSON.stringify(created.body)).not.toContain(sentinel);
+    const stored = await database.$client.query<{ assertions: unknown }>(
+      'select assertions from monitors where id = $1',
+      [created.body.data.id],
+    );
+    expect(JSON.stringify(stored.rows)).not.toContain(sentinel);
+
+    const tooMany = Array.from({ length: 33 }, (_, index) => ({
+      name: `x-check-${index}`,
+      operator: 'exists',
+    }));
+    const rejected = await request(app.getHttpServer())
+      .post(`/api/monitors?projectId=${projectId}`)
+      .send({
+        name: 'Too many assertions',
+        url: 'https://example.com',
+        assertions: { headers: tooMany, textBody: [], jsonBody: [] },
+      })
+      .expect(400);
+    expect(rejected.body.fields.assertions[0]).toContain('at most 32 assertions');
+  });
+
   it('enforces HEAD and body-assertion compatibility in both update directions', async () => {
     const created = await request(app.getHttpServer())
-      .post('/api/monitors')
+      .post(`/api/monitors?projectId=${projectId}`)
       .send({ name: 'Compatibility target', url: 'https://example.com' })
       .expect(201);
     const monitorId = created.body.data.id as string;
@@ -737,7 +860,7 @@ describe('monitor API', () => {
       .expect(400);
 
     const head = await request(app.getHttpServer())
-      .post('/api/monitors')
+      .post(`/api/monitors?projectId=${projectId}`)
       .send({ name: 'HEAD target', url: 'https://example.com' })
       .expect(201);
     await request(app.getHttpServer())
@@ -759,11 +882,94 @@ describe('monitor API', () => {
       .expect(400);
   });
 
+  it('atomically switches to HEAD while removing body assertions', async () => {
+    const created = await request(app.getHttpServer())
+      .post(`/api/monitors?projectId=${projectId}`)
+      .send({
+        name: 'Atomic HEAD transition',
+        url: 'https://example.com',
+        assertions: {
+          headers: [],
+          textBody: [{ operator: 'contains', target: { sensitive: false, value: 'ready' } }],
+          jsonBody: [],
+        },
+      })
+      .expect(201);
+    const monitorId = created.body.data.id as string;
+    const httpSettings = {
+      url: 'https://example.com',
+      method: 'HEAD',
+      timeoutMs: 10_000,
+      followRedirects: true,
+      requestBody: { type: 'NONE' },
+    } as const;
+
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/configuration`)
+      .send({
+        httpSettings,
+        requestHeaders: [],
+        assertions: {
+          headers: [],
+          textBody: [{ operator: 'contains', target: { sensitive: false, value: 'ready' } }],
+          jsonBody: [],
+        },
+      })
+      .expect(400);
+
+    const afterRejected = await database.$client.query<{
+      method: string;
+      version_count: number;
+    }>(
+      `select m.method, count(v.id)::int as version_count
+       from monitors m
+       join monitor_configuration_versions v on v.monitor_id = m.id
+       where m.id = $1
+       group by m.method`,
+      [monitorId],
+    );
+    expect(afterRejected.rows).toEqual([{ method: 'GET', version_count: 1 }]);
+
+    const updated = await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/configuration`)
+      .send({
+        httpSettings,
+        requestHeaders: [],
+        assertions: { headers: [], textBody: [], jsonBody: [] },
+      })
+      .expect(200);
+    expect(updated.body.data).toMatchObject({
+      method: 'HEAD',
+      assertions: {
+        contractVersion: 1,
+        assertions: { headers: [], textBody: [], jsonBody: [] },
+      },
+    });
+
+    const versions = await database.$client.query<{
+      version_number: number;
+      method: string;
+      assertions: { assertions: { textBody: unknown[] } };
+    }>(
+      `select version_number, method, assertions
+       from monitor_configuration_versions
+       where monitor_id = $1
+       order by version_number`,
+      [monitorId],
+    );
+    expect(versions.rows).toHaveLength(2);
+    expect(versions.rows[1]).toMatchObject({
+      version_number: 2,
+      method: 'HEAD',
+      assertions: { assertions: { textBody: [] } },
+    });
+  });
+
   it('does not expose a sentinel from corrupted stored headers in API errors', async () => {
     const sentinel = 'WATCHRAIL_SENTINEL_SECRET';
     const logger = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     const created = await request(app.getHttpServer())
-      .post('/api/monitors')
+      .post(`/api/monitors?projectId=${projectId}`)
       .send({ name: 'Corrupted configuration', url: 'https://example.com' })
       .expect(201);
 
@@ -780,7 +986,7 @@ describe('monitor API', () => {
 
   it('rejects an invalid exact status policy', async () => {
     const invalid = await request(app.getHttpServer())
-      .post('/api/monitors')
+      .post(`/api/monitors?projectId=${projectId}`)
       .send({
         name: 'API',
         url: 'https://example.com',
@@ -795,7 +1001,7 @@ describe('monitor API', () => {
 
   it('returns field-level errors and does not create a partial record', async () => {
     const invalid = await request(app.getHttpServer())
-      .post('/api/monitors')
+      .post(`/api/monitors?projectId=${projectId}`)
       .send({ name: ' ', url: 'ftp://example.com' })
       .expect(400);
 
@@ -813,7 +1019,7 @@ describe('monitor API', () => {
 
   it('starts a durable manual round and returns its eventual result', async () => {
     const createdMonitor = await request(app.getHttpServer())
-      .post('/api/monitors')
+      .post(`/api/monitors?projectId=${projectId}`)
       .send({ name: 'Public API', url: 'https://example.com/health' })
       .expect(201);
 
@@ -987,7 +1193,7 @@ describe('monitor API', () => {
 
   it('returns one aggregate history row with regional diagnostic drill-down', async () => {
     const created = await request(app.getHttpServer())
-      .post('/api/monitors')
+      .post(`/api/monitors?projectId=${projectId}`)
       .send({ name: 'Regional API history', url: 'https://example.com/health' })
       .expect(201);
     const monitorId = created.body.data.id as string;
@@ -1029,6 +1235,20 @@ describe('monitor API', () => {
           responseTimeMs: 15,
           attemptDurationMs: 20,
           checkedAt: new Date().toISOString(),
+          assertionEvaluation: {
+            contractVersion: 1,
+            outcome: 'PASS',
+            diagnostics: [
+              {
+                index: 0,
+                source: 'HEADER',
+                subject: 'content-type',
+                operator: 'contains',
+                outcome: 'PASS',
+                reason: 'MATCHED',
+              },
+            ],
+          },
         },
       });
     }
@@ -1049,8 +1269,28 @@ describe('monitor API', () => {
         kind: 'MULTI_LOCATION',
         outcome: 'UP',
         regions: [
-          { outcome: 'PASS', executions: [{ diagnosticSummary: { statusCode: 200 } }] },
-          { outcome: 'PASS', executions: [{ diagnosticSummary: { statusCode: 200 } }] },
+          {
+            outcome: 'PASS',
+            executions: [
+              {
+                diagnosticSummary: {
+                  statusCode: 200,
+                  assertionEvaluation: { outcome: 'PASS', diagnostics: [{ source: 'HEADER' }] },
+                },
+              },
+            ],
+          },
+          {
+            outcome: 'PASS',
+            executions: [
+              {
+                diagnosticSummary: {
+                  statusCode: 200,
+                  assertionEvaluation: { outcome: 'PASS', diagnostics: [{ source: 'HEADER' }] },
+                },
+              },
+            ],
+          },
         ],
       },
     });
@@ -1064,7 +1304,7 @@ describe('monitor API', () => {
 
   it('rejects invalid history queries and isolates monitor history', async () => {
     const created = await request(app.getHttpServer())
-      .post('/api/monitors')
+      .post(`/api/monitors?projectId=${projectId}`)
       .send({ name: 'History API', url: 'https://example.com' })
       .expect(201);
     const monitorId = created.body.data.id as string;

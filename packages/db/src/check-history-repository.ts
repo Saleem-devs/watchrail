@@ -957,6 +957,7 @@ function parseRegionalDiagnosticSummary(value: unknown): RegionalDiagnosticSumma
   if (!isRecord(value)) throw new Error('Stored regional diagnostic summary is invalid.');
   const keys = Object.keys(value).sort();
   const expected = [
+    ...(Object.hasOwn(value, 'assertionEvaluation') ? ['assertionEvaluation'] : []),
     'attemptDurationMs',
     'checkedAt',
     'reason',
@@ -964,6 +965,9 @@ function parseRegionalDiagnosticSummary(value: unknown): RegionalDiagnosticSumma
     'stage',
     'statusCode',
   ];
+  if (Object.hasOwn(value, 'assertionEvaluation')) {
+    parseStoredAssertionEvaluation(value.assertionEvaluation);
+  }
   const validStage = ['DNS', 'CONNECT', 'TLS', 'HTTP', 'PROBE'].includes(String(value.stage));
   const validTime = (candidate: unknown) =>
     candidate === null ||

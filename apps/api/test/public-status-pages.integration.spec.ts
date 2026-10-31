@@ -95,6 +95,8 @@ describe('public status page API', () => {
         {
           id: configured.components[0]!.id,
           displayName: 'API',
+          groupName: null,
+          monitoringStartedAt: expect.any(String),
           position: 0,
           status: 'MONITORING_IMPAIRED',
         },

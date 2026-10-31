@@ -1,4 +1,5 @@
 import type { RequestBodyValue } from './request-body-field';
+import type { RedactedResponseAssertionConfiguration } from './response-assertions';
 
 /* Monitor feature API contracts. */
 export interface Monitor {
@@ -18,6 +19,7 @@ export interface Monitor {
     hasValue: true;
   }>;
   requestBody?: RequestBodyValue;
+  assertions?: RedactedResponseAssertionConfiguration;
   locations: string[];
   createdAt: string;
   currentCheck: CurrentCheck | null;
@@ -85,6 +87,34 @@ export interface FieldErrors {
   locations?: string[];
   requestHeaders?: string[];
   requestBody?: string[];
+  assertions?: string[];
+}
+
+export interface AssertionDiagnostic {
+  index: number;
+  source: 'HEADER' | 'TEXT_BODY' | 'JSON_BODY';
+  subject: string | null;
+  operator: 'exists' | 'does_not_exist' | 'equals' | 'not_equals' | 'contains' | 'not_contains';
+  outcome: 'PASS' | 'FAIL' | 'NOT_EVALUATED';
+  reason:
+    | 'MATCHED'
+    | 'HEADER_MISMATCH'
+    | 'TEXT_BODY_MISMATCH'
+    | 'JSON_BODY_MISMATCH'
+    | 'INVALID_JSON'
+    | 'DUPLICATE_JSON_KEY'
+    | 'JSON_TYPE_UNSUPPORTED'
+    | 'UNSUPPORTED_CONTENT_ENCODING'
+    | 'UNSUPPORTED_CHARSET'
+    | 'BODY_TOO_LARGE'
+    | 'BODY_READ_FAILED'
+    | 'RESPONSE_UNAVAILABLE';
+}
+
+export interface AssertionEvaluation {
+  contractVersion: 1;
+  outcome: 'PASS' | 'FAIL' | 'NOT_EVALUATED';
+  diagnostics: AssertionDiagnostic[];
 }
 
 export interface ApiError {
@@ -116,6 +146,8 @@ export interface ManualRound {
           responseTimeMs: number;
           headers: 'PRESERVED' | 'STRIPPED' | 'NOT_SENT';
         }>;
+        assertionOutcome?: AssertionEvaluation['outcome'];
+        assertionEvaluation?: AssertionEvaluation;
         checkedAt: string;
       }
     | {
@@ -146,6 +178,7 @@ export interface ManualRound {
               responseTimeMs: number | null;
               attemptDurationMs: number;
               checkedAt: string;
+              assertionEvaluation?: AssertionEvaluation;
             } | null;
           }>;
         }>;

@@ -9,6 +9,7 @@ import {
 } from 'react';
 import { Button } from '../../components/ui/button';
 import { Select } from '../../components/ui/form-control';
+import { Form } from '../../components/ui/form';
 import type { IncidentStatusFilter } from './types';
 
 export function IncidentFiltersDialog({
@@ -109,7 +110,7 @@ export function IncidentFiltersDialog({
                 Choose which incident state is shown.
               </p>
             </div>
-            <form onSubmit={submit}>
+            <Form onSubmit={submit}>
               <div className="p-5">
                 <label className="grid gap-1.5 text-xs text-rail-subtle">
                   State
@@ -132,7 +133,7 @@ export function IncidentFiltersDialog({
                   Apply filter
                 </Button>
               </div>
-            </form>
+            </Form>
           </div>
         </div>
       ) : null}

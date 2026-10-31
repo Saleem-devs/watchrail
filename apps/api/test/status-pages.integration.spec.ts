@@ -6,6 +6,7 @@ import { Test } from '@nestjs/testing';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import {
   createDatabaseConnection,
+  ensureDefaultProject,
   migrateDatabase,
   MonitorRepository,
   StatusPageRepository,
@@ -24,6 +25,7 @@ describe('status page settings API', () => {
   let container: StartedPostgreSqlContainer;
   let database: WatchrailDatabase;
   let monitors: MonitorRepository;
+  let projectId: string;
 
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:18.0-alpine').start();
@@ -47,6 +49,8 @@ describe('status page settings API', () => {
     await migration.pool.end();
     const module = await Test.createTestingModule({ imports: [AppModule] }).compile();
     database = module.get<WatchrailDatabase>(getDrizzleToken());
+    projectId = (await ensureDefaultProject(database, DEVELOPMENT_REQUEST_CONTEXT.organizationId))
+      .id;
     monitors = new MonitorRepository(database);
     app = module.createNestApplication();
     app.setGlobalPrefix('api');
@@ -68,6 +72,7 @@ describe('status page settings API', () => {
     const created = (
       await request(app.getHttpServer())
         .post('/api/status-pages')
+        .query({ projectId })
         .send({
           name: 'Acme Status',
           slug: 'acme',
@@ -83,7 +88,8 @@ describe('status page settings API', () => {
     });
     expect(created).not.toHaveProperty('organizationId');
     expect(
-      (await request(app.getHttpServer()).get('/api/status-pages').expect(200)).body.data,
+      (await request(app.getHttpServer()).get('/api/status-pages').query({ projectId }).expect(200))
+        .body.data,
     ).toEqual([created]);
     expect(
       (await request(app.getHttpServer()).get(`/api/status-pages/${created.id}`).expect(200)).body
@@ -120,6 +126,7 @@ describe('status page settings API', () => {
     });
     const response = await request(app.getHttpServer())
       .post('/api/status-pages')
+      .query({ projectId })
       .send({ name: 'Acme', slug: 'reserved', components: [] })
       .expect(409);
     expect(response.body).toMatchObject({ code: 'STATUS_PAGE_SLUG_TAKEN' });
@@ -134,6 +141,7 @@ describe('status page settings API', () => {
     await request(app.getHttpServer()).get(`/api/status-pages/${foreign.id}`).expect(404);
     await request(app.getHttpServer())
       .post('/api/status-pages')
+      .query({ projectId })
       .send({
         organizationId: organizationB,
         name: 'Injected',
@@ -151,6 +159,7 @@ describe('status page settings API', () => {
     const created = (
       await request(app.getHttpServer())
         .post('/api/status-pages')
+        .query({ projectId })
         .send({
           name: 'Acme',
           slug: 'acme',
@@ -179,6 +188,7 @@ describe('status page settings API', () => {
   it('keeps transport and domain validation fields compatible', async () => {
     const transportError = await request(app.getHttpServer())
       .post('/api/status-pages')
+      .query({ projectId })
       .send({ name: 42, slug: 'acme', components: [] })
       .expect(400);
 
@@ -192,6 +202,7 @@ describe('status page settings API', () => {
 
     const domainError = await request(app.getHttpServer())
       .post('/api/status-pages')
+      .query({ projectId })
       .send({ name: 'Acme', slug: 'Invalid Slug', components: [] })
       .expect(400);
 

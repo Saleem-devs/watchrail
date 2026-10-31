@@ -49,6 +49,7 @@ import {
   normalizeRequestHeaderUpdates,
   parseHttpMonitorSettings,
   parseHttpStatusPolicy,
+  parseMonitorConfigurationUpdate,
   parseMonitorLifecycleSettings,
   parseMonitorLocationSettings,
   parseMonitorScheduleSettings,
@@ -385,6 +386,73 @@ export class MonitorsService {
       }
       if (error instanceof MonitorUpdateNotFoundError) {
         throw new NotFoundException({ code: 'MONITOR_NOT_FOUND', message: error.message });
+      }
+      throw error;
+    }
+  }
+
+  async updateConfiguration(
+    context: RequestContext,
+    monitorId: string,
+    value: unknown,
+  ): Promise<MonitorRecord> {
+    try {
+      const update = parseMonitorConfigurationUpdate(value);
+      const requestHeaderUpdates = normalizeRequestHeaderUpdates(update.requestHeaders);
+      return await this.monitors.updateConfiguration(
+        context.organizationId,
+        monitorId,
+        update.settings,
+        (current) =>
+          storeRequestHeaders(
+            requestHeaderUpdates,
+            current,
+            { organizationId: context.organizationId, monitorId },
+            this.config.headerEncryptionKeyring,
+          ),
+        (current, method) =>
+          storeResponseAssertions(
+            update.assertions,
+            current,
+            method,
+            { organizationId: context.organizationId, monitorId },
+            this.config.assertionEncryptionKeyring,
+            { allowRetain: true },
+          ),
+      );
+    } catch (error) {
+      if (error instanceof MonitorInputError) {
+        throw new BadRequestException({
+          code: 'VALIDATION_FAILED',
+          message: error.message,
+          fields: error.fields,
+        });
+      }
+      if (error instanceof RequestHeaderInputError) {
+        throw new BadRequestException({
+          code: 'VALIDATION_FAILED',
+          message: error.message,
+          fields: { requestHeaders: error.issues },
+        });
+      }
+      if (error instanceof AssertionInputError || error instanceof AssertionRetentionError) {
+        throw new BadRequestException({
+          code: 'VALIDATION_FAILED',
+          message: 'Response assertions are invalid.',
+          fields: {
+            assertions: error instanceof AssertionInputError ? error.issues : [error.message],
+          },
+        });
+      }
+      if (error instanceof MonitorUpdateNotFoundError) {
+        throw new NotFoundException({ code: 'MONITOR_NOT_FOUND', message: error.message });
+      }
+      if (error instanceof Error && error.message.startsWith('Cannot retain missing sensitive')) {
+        throw new BadRequestException({
+          code: 'VALIDATION_FAILED',
+          message: 'Request headers are invalid.',
+          fields: { requestHeaders: [error.message] },
+        });
       }
       throw error;
     }

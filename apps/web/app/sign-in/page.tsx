@@ -2,6 +2,7 @@
 
 import { type FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Form } from '../../components/ui/form';
 import { authClient } from '../../lib/auth-client';
 import { safeNextPath } from '../../lib/safe-next-path';
 
@@ -166,7 +167,7 @@ export default function SignInPage() {
       </div>
 
       {/* ─── Email OTP ────────────────────────────────────────────────── */}
-      <form onSubmit={(e) => void handleEmail(e)} noValidate>
+      <Form onSubmit={(e) => void handleEmail(e)} noValidate>
         <label className="sign-in-label" htmlFor="email">
           Email address
         </label>
@@ -192,7 +193,7 @@ export default function SignInPage() {
         <button type="submit" className="sign-in-primary-btn" disabled={anyPending}>
           {emailPending ? 'Sending code…' : 'Continue with email'}
         </button>
-      </form>
+      </Form>
 
       <p className="sign-in-footnote">
         By signing in you agree to the{' '}

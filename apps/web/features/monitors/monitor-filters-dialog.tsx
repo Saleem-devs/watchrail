@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { Button } from '../../components/ui/button';
 import { Input, Select } from '../../components/ui/form-control';
+import { Form } from '../../components/ui/form';
 import type { MonitorFilter, MonitorListFilters } from './filter-monitors';
 
 export function MonitorFiltersDialog({
@@ -137,7 +138,7 @@ export function MonitorFiltersDialog({
                 </svg>
               </button>
             </div>
-            <form onSubmit={submit}>
+            <Form onSubmit={submit}>
               <div className="grid gap-4 p-5">
                 <label className="grid gap-1.5 text-xs text-rail-subtle">
                   Monitor name
@@ -204,7 +205,7 @@ export function MonitorFiltersDialog({
                   </Button>
                 </div>
               </div>
-            </form>
+            </Form>
           </div>
         </div>
       ) : null}

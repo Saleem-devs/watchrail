@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { AppShell } from '../../components/app-shell';
 import { actionClassName, Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/form-control';
+import { Form } from '../../components/ui/form';
 import { PageHeader } from '../../components/ui/page-header';
 import type { ProjectApiError, WorkspaceProject } from './types';
 
@@ -184,7 +185,7 @@ export function ProjectsPage({ workspaceId }: { workspaceId: string }) {
               if (event.target === event.currentTarget) setCreating(false);
             }}
           >
-            <form
+            <Form
               onSubmit={createProject}
               className="w-full max-w-md rounded-rail-panel border border-rail-border bg-rail-overlay p-5 shadow-[0_24px_80px_var(--color-rail-shadow)]"
               aria-labelledby="create-project-title"
@@ -224,7 +225,7 @@ export function ProjectsPage({ workspaceId }: { workspaceId: string }) {
                   {submitting ? 'Creating…' : 'Create project'}
                 </Button>
               </div>
-            </form>
+            </Form>
           </div>
         ) : null}
       </main>

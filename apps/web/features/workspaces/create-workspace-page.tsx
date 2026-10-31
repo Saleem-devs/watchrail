@@ -6,6 +6,7 @@ import { useState, type FormEvent } from 'react';
 import { AppShell } from '../../components/app-shell';
 import { actionClassName, Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/form-control';
+import { Form } from '../../components/ui/form';
 import { PageHeader } from '../../components/ui/page-header';
 import { authClient } from '../../lib/auth-client';
 
@@ -70,7 +71,7 @@ export function CreateWorkspacePage() {
           }
         />
 
-        <form
+        <Form
           id="create-workspace-form"
           onSubmit={submit}
           className="mt-6 max-w-2xl overflow-hidden rounded-rail-panel border border-rail-border bg-rail-surface"
@@ -130,7 +131,7 @@ export function CreateWorkspacePage() {
               {error}
             </p>
           ) : null}
-        </form>
+        </Form>
       </main>
     </AppShell>
   );

@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react';
 import { Button } from '../../components/ui/button';
-import { Input } from '../../components/ui/form-control';
+import { Checkbox, Input } from '../../components/ui/form-control';
 
 export interface RequestHeaderFormValue {
   name: string;
@@ -77,15 +77,16 @@ export function RequestHeadersField({
                   name="requestHeaderValue"
                   type={row.sensitive ? 'password' : 'text'}
                   defaultValue={row.value ?? ''}
-                  placeholder={row.value === null ? 'Stored securely — leave blank to retain' : 'Value'}
+                  placeholder={
+                    row.value === null ? 'Stored securely — leave blank to retain' : 'Value'
+                  }
                   autoComplete="off"
                 />
               </label>
               <div className="flex min-h-10 items-center gap-2 pt-5 sm:justify-end">
                 <label className="flex min-h-10 cursor-pointer items-center gap-2 text-xs font-medium text-rail-subtle">
-                  <input
+                  <Checkbox
                     name="requestHeaderSensitive"
-                    type="checkbox"
                     value={row.id}
                     defaultChecked={row.sensitive}
                     onChange={(event) =>

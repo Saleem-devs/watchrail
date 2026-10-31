@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { AppShell } from '../../components/app-shell';
 import { actionClassName, Button } from '../../components/ui/button';
-import { Input } from '../../components/ui/form-control';
+import { Checkbox, Input } from '../../components/ui/form-control';
+import { Form } from '../../components/ui/form';
 import { PageHeader } from '../../components/ui/page-header';
 import { apiErrorMessage, loadStatusPage, loadStatusPageMonitors } from './status-page-api';
 import { publicMonitorState } from './status-page-status';
@@ -242,7 +243,7 @@ export function StatusPageForm({
             <Button onClick={() => void load()}>Try again</Button>
           </section>
         ) : (
-          <form
+          <Form
             id={formId}
             className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]"
             onSubmit={submit}
@@ -337,11 +338,10 @@ export function StatusPageForm({
                       return (
                         <div key={monitor.id} className="py-4 first:pt-3 last:pb-3">
                           <label className="flex min-h-11 cursor-pointer items-start gap-3">
-                            <input
-                              type="checkbox"
+                            <Checkbox
                               checked={checked}
                               onChange={() => toggleMonitor(monitor)}
-                              className="mt-0.5 size-4 accent-rail-accent"
+                              className="mt-0.5"
                             />
                             <span className="min-w-0 flex-1">
                               <span className="block truncate text-sm font-medium text-rail-text">
@@ -478,7 +478,7 @@ export function StatusPageForm({
                 {error} Review the page details and try again.
               </div>
             ) : null}
-          </form>
+          </Form>
         )}
       </main>
     </AppShell>

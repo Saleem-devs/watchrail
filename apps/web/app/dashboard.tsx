@@ -6,6 +6,8 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { AppShell } from '../components/app-shell';
 import { MonitorOverview } from '../components/monitor-overview';
 import { actionClassName, Button } from '../components/ui/button';
+import { Checkbox, Select } from '../components/ui/form-control';
+import { Form } from '../components/ui/form';
 import { PageHeader } from '../components/ui/page-header';
 import { TablePagination, type PaginationState } from '../components/ui/table-pagination';
 import { monitorDetailHref, monitorEditHref } from '../lib/navigation-origin';
@@ -37,7 +39,8 @@ import {
   CheckHistory,
 } from '../features/monitors/monitor-evidence';
 import { MonitorForm } from '../features/monitors/monitor-form';
-import { HttpMethodOptions } from '../features/monitors/http-method-options';
+import { responseAssertionsFromForm } from '../features/monitors/response-assertions';
+import { HTTP_METHODS } from '../features/monitors/http-method-options';
 import { MonitorAvailabilityHistory } from '../features/monitors/monitor-availability-history';
 import { MonitorResponseTimeChart } from '../features/monitors/monitor-response-time-chart';
 import { MonitorTable } from '../features/monitors/monitor-table';
@@ -324,6 +327,7 @@ export function Dashboard({
             lifecycleState: formData.get('lifecycleState'),
             requestHeaders: requestHeadersFromForm(formData),
             requestBody: requestBodyFromForm(formData),
+            assertions: responseAssertionsFromForm(formData),
           }),
         },
       );
@@ -356,22 +360,22 @@ export function Dashboard({
 
     const formData = new FormData(event.currentTarget);
     const requests: Array<{ path: string; body: Record<string, unknown> }> = [
-      { path: 'name', body: { name: formData.get('name') } },
       {
-        path: 'http-settings',
+        path: 'configuration',
         body: {
-          url: urlFromMonitorForm(formData),
-          method: formData.get('method'),
-          timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
-          followRedirects: formData.get('followRedirects') === 'on',
-          requestBody: requestBodyFromForm(formData),
+          httpSettings: {
+            url: urlFromMonitorForm(formData),
+            method: formData.get('method'),
+            timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
+            followRedirects: formData.get('followRedirects') === 'on',
+            requestBody: requestBodyFromForm(formData),
+          },
+          requestHeaders: requestHeadersFromForm(formData),
+          assertions: responseAssertionsFromForm(formData),
         },
       },
+      { path: 'name', body: { name: formData.get('name') } },
       { path: 'status-policy', body: { statusPolicy: statusPolicyFromForm(formData) } },
-      {
-        path: 'request-headers',
-        body: { requestHeaders: requestHeadersFromForm(formData) },
-      },
       { path: 'locations', body: { locations: [formData.get('location')] } },
       { path: 'lifecycle', body: { lifecycleState: formData.get('lifecycleState') } },
     ];
@@ -666,13 +670,13 @@ export function Dashboard({
       const response = await fetch(`/api/monitors/${monitorId}/check-rounds/${roundId}`, {
         headers: { Accept: 'application/json' },
       });
-      if (!response.ok) throw new Error('Could not load regional evidence.');
+      if (!response.ok) throw new Error('Could not load diagnostic evidence.');
       const body = (await response.json()) as { data: ManualRound };
       setHistoryDetails((current) => ({ ...current, [roundId]: body.data }));
     } catch {
       setRunErrors((current) => ({
         ...current,
-        [monitorId]: 'Watchrail could not load this round’s regional evidence.',
+        [monitorId]: 'Watchrail could not load this round’s diagnostic evidence.',
       }));
     } finally {
       setLoadingHistoryRoundIds((current) => {
@@ -1633,43 +1637,57 @@ function MonitorConfiguration({
         Configure monitor
       </summary>
       <div className="border-t border-rail-border p-4">
-        <form className="status-policy-form" onSubmit={onUpdateLocation}>
+        <Form className="status-policy-form" onSubmit={onUpdateLocation}>
           <label>
             Execution {multiLocationUiEnabled ? 'locations' : 'location'}
-            <select
-              name="location"
-              multiple={multiLocationUiEnabled}
-              defaultValue={
-                multiLocationUiEnabled ? monitor.locations : (monitor.locations[0] ?? 'local')
-              }
-              onFocus={onLoadProbeLocations}
-            >
-              <option value="local">Local</option>
-              {probeLocations.map((location) => (
-                <option
-                  key={location.id}
-                  value={location.id}
-                  disabled={location.status !== 'ACTIVE'}
-                >
-                  {location.name} — {location.health.toLowerCase()}
-                </option>
-              ))}
-            </select>
+            <div onFocusCapture={onLoadProbeLocations}>
+              {multiLocationUiEnabled ? (
+                <select name="location" multiple defaultValue={monitor.locations}>
+                  <option value="local">Local</option>
+                  {probeLocations.map((location) => (
+                    <option
+                      key={location.id}
+                      value={location.id}
+                      disabled={location.status !== 'ACTIVE'}
+                    >
+                      {location.name} — {location.health.toLowerCase()}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <Select name="location" defaultValue={monitor.locations[0] ?? 'local'}>
+                  <option value="local">Local</option>
+                  {probeLocations.map((location) => (
+                    <option
+                      key={location.id}
+                      value={location.id}
+                      disabled={location.status !== 'ACTIVE'}
+                    >
+                      {location.name} — {location.health.toLowerCase()}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </div>
           </label>
           <button type="submit" disabled={updatingSettings}>
             Save location
           </button>
-        </form>
-        <form className="status-policy-form" onSubmit={onUpdateHttpSettings}>
+        </Form>
+        <Form className="status-policy-form" onSubmit={onUpdateHttpSettings}>
           <label>
             URL
             <input name="url" type="url" defaultValue={monitor.url} required />
           </label>
           <label>
             Method
-            <select name="method" defaultValue={monitor.method}>
-              <HttpMethodOptions />
-            </select>
+            <Select name="method" defaultValue={monitor.method}>
+              {HTTP_METHODS.map((method) => (
+                <option key={method} value={method}>
+                  {method}
+                </option>
+              ))}
+            </Select>
           </label>
           <label>
             Timeout (seconds)
@@ -1683,24 +1701,20 @@ function MonitorConfiguration({
             />
           </label>
           <label>
-            <input
-              name="followRedirects"
-              type="checkbox"
-              defaultChecked={monitor.followRedirects}
-            />
+            <Checkbox name="followRedirects" defaultChecked={monitor.followRedirects} />
             Follow redirects
           </label>
           <button className="quiet-button" type="submit" disabled={updatingSettings}>
             {updatingSettings ? 'Saving…' : 'Save HTTP settings'}
           </button>
-        </form>
-        <form className="status-policy-form" onSubmit={onUpdateStatusPolicy}>
+        </Form>
+        <Form className="status-policy-form" onSubmit={onUpdateStatusPolicy}>
           <label>
             Expected status
-            <select name="statusPolicyMode" defaultValue={monitor.statusPolicy.type}>
+            <Select name="statusPolicyMode" defaultValue={monitor.statusPolicy.type}>
               <option value="ANY_2XX">Any 2xx response</option>
               <option value="EXACT">Specific status codes</option>
-            </select>
+            </Select>
           </label>
           <input
             name="statusCodes"
@@ -1717,7 +1731,7 @@ function MonitorConfiguration({
           <button className="quiet-button" type="submit" disabled={updatingPolicy}>
             {updatingPolicy ? 'Saving…' : 'Save policy'}
           </button>
-        </form>
+        </Form>
       </div>
     </details>
   );
