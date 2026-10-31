@@ -20,12 +20,14 @@ import type { WatchrailDatabase } from '@watchrail/db';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppModule } from '../src/app.module.js';
+import { NodeHttpExecutor, type HttpExecutor } from '@watchrail/check-engine';
 
 describe('monitor API', () => {
   let app: INestApplication;
   let container: StartedPostgreSqlContainer;
   let database: WatchrailDatabase;
   let projectId: string;
+  const executeTransient = vi.fn<HttpExecutor['execute']>();
 
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:18.0-alpine').start();
@@ -50,7 +52,10 @@ describe('monitor API', () => {
     await migrateDatabase(migrationConnection, resolve(process.cwd(), '../../packages/db/drizzle'));
     await migrationConnection.pool.end();
 
-    const testingModule = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    const testingModule = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(NodeHttpExecutor)
+      .useValue({ execute: executeTransient })
+      .compile();
     database = testingModule.get<WatchrailDatabase>(getDrizzleToken());
     app = testingModule.createNestApplication();
     app.setGlobalPrefix('api');
@@ -59,6 +64,15 @@ describe('monitor API', () => {
   }, 60_000);
 
   beforeEach(async () => {
+    executeTransient.mockReset();
+    executeTransient.mockResolvedValue({
+      type: 'RESPONSE',
+      statusCode: 200,
+      responseTimeMs: 12,
+      headers: [{ name: 'content-type', values: ['application/json'] }],
+      body: { state: 'CAPTURED', text: '{"ready":true}' },
+      redirects: [],
+    });
     const connection = createDatabaseConnection(container.getConnectionUri());
     await connection.pool.query(`
       truncate table
@@ -962,6 +976,195 @@ describe('monitor API', () => {
       version_number: 2,
       method: 'HEAD',
       assertions: { assertions: { textBody: [] } },
+    });
+  });
+
+  it('tests an unsaved configuration with retained secrets without creating monitoring state', async () => {
+    executeTransient.mockResolvedValueOnce({
+      type: 'RESPONSE',
+      statusCode: 202,
+      responseTimeMs: 17,
+      headers: [
+        { name: 'content-type', values: ['application/json'] },
+        { name: 'set-cookie', values: ['session=response-secret'] },
+        { name: 'x-state', values: ['ready'] },
+      ],
+      body: {
+        state: 'CAPTURED',
+        text: '{"token":"body-request-secret","echo":"assertion-secret","ready":true}',
+      },
+      redirects: [],
+    });
+    const created = await request(app.getHttpServer())
+      .post(`/api/monitors?projectId=${projectId}`)
+      .send({
+        name: 'Transient diagnostic',
+        url: 'https://example.com/jobs',
+        method: 'POST',
+        requestBody: { type: 'JSON', value: '{"saved":true}' },
+        requestHeaders: [
+          { name: 'Authorization', sensitive: true, value: 'Bearer request-secret' },
+        ],
+        assertions: {
+          headers: [],
+          textBody: [
+            { operator: 'contains', target: { sensitive: true, value: 'assertion-secret' } },
+          ],
+          jsonBody: [],
+        },
+      })
+      .expect(201);
+    const monitorId = created.body.data.id as string;
+    const before = await database.$client.query<{ rounds: number; versions: number }>(
+      `select
+         (select count(*)::int from check_rounds) as rounds,
+         (select count(*)::int from monitor_configuration_versions) as versions`,
+    );
+
+    const tested = await request(app.getHttpServer())
+      .post(`/api/monitors/${monitorId}/test-configuration?projectId=${projectId}`)
+      .send({
+        httpSettings: {
+          url: 'https://example.com/jobs?dryRun=true',
+          method: 'POST',
+          timeoutMs: 8_000,
+          followRedirects: true,
+          requestBody: { type: 'JSON', value: '{"token":"body-request-secret"}' },
+        },
+        statusPolicy: { type: 'EXACT', statusCodes: [202] },
+        requestHeaders: [{ name: 'authorization', sensitive: true, retain: true }],
+        assertions: {
+          headers: [],
+          textBody: [{ operator: 'contains', target: { sensitive: true, retain: true } }],
+          jsonBody: [],
+        },
+      })
+      .expect(201);
+
+    expect(tested.body.data).toMatchObject({
+      result: { statusCode: 202, outcome: 'PASS' },
+      signals: { transport: 'PASS', statusPolicy: 'PASS', assertions: 'PASS' },
+      response: {
+        headers: expect.arrayContaining([
+          { name: 'set-cookie', values: ['[REDACTED]'], redacted: true },
+        ]),
+        body: { state: 'PREVIEW' },
+      },
+    });
+    expect(JSON.stringify(tested.body)).not.toContain('request-secret');
+    expect(JSON.stringify(tested.body)).not.toContain('assertion-secret');
+    expect(JSON.stringify(tested.body)).not.toContain('body-request-secret');
+    expect(executeTransient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'POST',
+        url: 'https://example.com/jobs?dryRun=true',
+        captureResponseBody: true,
+        requestHeaders: [{ name: 'authorization', value: 'Bearer request-secret' }],
+        requestBody: expect.objectContaining({ contentType: 'application/json' }),
+      }),
+    );
+    expect(
+      await database.$client.query('select count(*)::int as count from check_execution_results'),
+    ).toMatchObject({ rows: [{ count: 0 }] });
+    expect(
+      await database.$client.query('select count(*)::int as count from incidents'),
+    ).toMatchObject({ rows: [{ count: 0 }] });
+    expect(
+      await database.$client.query(
+        `select
+           (select count(*)::int from check_rounds) as rounds,
+           (select count(*)::int from monitor_configuration_versions) as versions`,
+      ),
+    ).toMatchObject({ rows: before.rows });
+
+    const otherProject = await new ProjectRepository(database).create(
+      '00000000-0000-4000-8000-000000000002',
+      parseNewProject({ name: 'Other project', slug: 'other-project' }),
+    );
+    await request(app.getHttpServer())
+      .post(`/api/monitors/${monitorId}/test-configuration?projectId=${otherProject.id}`)
+      .send({})
+      .expect(404);
+  });
+
+  it('redacts camel-case request secrets reflected under ordinary response keys and in text', async () => {
+    executeTransient
+      .mockResolvedValueOnce({
+        type: 'RESPONSE',
+        statusCode: 200,
+        responseTimeMs: 9,
+        headers: [{ name: 'content-type', values: ['application/json'] }],
+        body: {
+          state: 'CAPTURED',
+          text: JSON.stringify({ echo: 'abc123', detail: 'credential-value' }),
+        },
+        redirects: [],
+      })
+      .mockResolvedValueOnce({
+        type: 'RESPONSE',
+        statusCode: 200,
+        responseTimeMs: 7,
+        headers: [{ name: 'content-type', values: ['text/plain'] }],
+        body: { state: 'CAPTURED', text: 'received abc123 and credential-value' },
+        redirects: [],
+      });
+
+    const configuration = {
+      httpSettings: {
+        url: 'https://example.com/echo',
+        method: 'POST',
+        timeoutMs: 8_000,
+        followRedirects: true,
+        requestBody: {
+          type: 'JSON',
+          value: JSON.stringify({ accessToken: 'abc123', credentials: 'credential-value' }),
+        },
+      },
+      statusPolicy: { type: 'ANY_2XX' },
+      requestHeaders: [],
+      assertions: { headers: [], textBody: [], jsonBody: [] },
+    };
+
+    const jsonResponse = await request(app.getHttpServer())
+      .post(`/api/monitors/test-configuration?projectId=${projectId}`)
+      .send(configuration)
+      .expect(201);
+    const textResponse = await request(app.getHttpServer())
+      .post(`/api/monitors/test-configuration?projectId=${projectId}`)
+      .send(configuration)
+      .expect(201);
+
+    for (const response of [jsonResponse, textResponse]) {
+      expect(JSON.stringify(response.body)).not.toMatch(/abc123|credential-value/u);
+      expect(JSON.stringify(response.body)).toContain('[REDACTED]');
+    }
+  });
+
+  it('validates create-form configuration tests without saving a monitor', async () => {
+    const before = await database.$client.query('select count(*)::int as count from monitors');
+    await request(app.getHttpServer())
+      .post(`/api/monitors/test-configuration?projectId=${projectId}`)
+      .send({
+        httpSettings: {
+          url: 'https://example.com/health',
+          method: 'HEAD',
+          timeoutMs: 5_000,
+          followRedirects: false,
+          requestBody: { type: 'NONE' },
+        },
+        statusPolicy: { type: 'ANY_2XX' },
+        requestHeaders: [],
+        assertions: {
+          headers: [],
+          textBody: [{ operator: 'contains', target: { sensitive: false, value: 'ready' } }],
+          jsonBody: [],
+        },
+      })
+      .expect(400);
+    expect(
+      await database.$client.query('select count(*)::int as count from monitors'),
+    ).toMatchObject({
+      rows: before.rows,
     });
   });
 

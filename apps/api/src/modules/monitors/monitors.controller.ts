@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Inject,
+  Header,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -13,6 +14,7 @@ import {
 import type { MonitorRecord } from '@watchrail/db';
 import type { CreateMonitorCommand } from '@watchrail/domain';
 import { MonitorsService } from './monitors.service.js';
+import { MonitorConfigurationTestService } from './monitor-configuration-test.service.js';
 import { RequirePermission } from '../../auth/auth.guard.js';
 import { PERMISSIONS } from '../../auth/permissions.js';
 import type { RequestWithContext } from '../../auth/request-context.js';
@@ -26,7 +28,43 @@ import {
 
 @Controller('monitors')
 export class MonitorsController {
-  constructor(@Inject(MonitorsService) private readonly monitors: MonitorsService) {}
+  constructor(
+    @Inject(MonitorsService) private readonly monitors: MonitorsService,
+    @Inject(MonitorConfigurationTestService)
+    private readonly configurationTests: MonitorConfigurationTestService,
+  ) {}
+
+  @Post('test-configuration')
+  @Header('Cache-Control', 'no-store, max-age=0')
+  @RequirePermission(PERMISSIONS.MONITOR_EXECUTE)
+  async testConfiguration(
+    @Req() request: RequestWithContext,
+    @Query('projectId', ParseUUIDPipe) projectId: string,
+    @Body() body: unknown,
+  ) {
+    return {
+      data: await this.configurationTests.execute(request.watchrailContext, projectId, body),
+    };
+  }
+
+  @Post(':monitorId/test-configuration')
+  @Header('Cache-Control', 'no-store, max-age=0')
+  @RequirePermission(PERMISSIONS.MONITOR_EXECUTE)
+  async testExistingConfiguration(
+    @Req() request: RequestWithContext,
+    @Query('projectId', ParseUUIDPipe) projectId: string,
+    @Param('monitorId', ParseUUIDPipe) monitorId: string,
+    @Body() body: unknown,
+  ) {
+    return {
+      data: await this.configurationTests.execute(
+        request.watchrailContext,
+        projectId,
+        body,
+        monitorId,
+      ),
+    };
+  }
 
   @Post()
   @RequirePermission(PERMISSIONS.MONITOR_CREATE)

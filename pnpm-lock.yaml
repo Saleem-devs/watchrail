@@ -211,6 +211,9 @@ importers:
       '@watchrail/assertion-security':
         specifier: workspace:*
         version: link:../../packages/assertion-security
+      '@watchrail/check-engine':
+        specifier: workspace:*
+        version: link:../../packages/check-engine
       '@watchrail/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts

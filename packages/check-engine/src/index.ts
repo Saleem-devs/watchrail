@@ -48,6 +48,7 @@ export type {
   HttpCheckDependencies,
   HttpBodyCapture,
   HttpCheckInput,
+  HttpCapturedResponseEvidence,
   HttpCheckOutcome,
   HttpCheckReason,
   HttpCheckResult,

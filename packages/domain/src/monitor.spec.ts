@@ -4,6 +4,7 @@ import {
   MONITOR_DEFAULTS,
   MonitorInputError,
   parseHttpMonitorSettings,
+  parseHttpConfigurationTest,
   parseMonitorLifecycleSettings,
   parseMonitorLocationSettings,
   parseMonitorScheduleSettings,
@@ -280,6 +281,49 @@ describe('parseHttpMonitorSettings', () => {
         timeoutMs: 5_000,
         followRedirects: true,
         statusPolicy: { type: 'ANY_2XX' },
+      }),
+    ).toThrow(MonitorInputError);
+  });
+});
+
+describe('parseHttpConfigurationTest', () => {
+  it('reuses HTTP, status-policy, and request-header validation while preserving retention markers', () => {
+    expect(
+      parseHttpConfigurationTest({
+        httpSettings: {
+          url: 'https://api.example.com/jobs?verbose=true',
+          method: 'POST',
+          timeoutMs: 5_000,
+          followRedirects: true,
+          requestBody: { type: 'JSON', value: '{"ready":true}' },
+        },
+        statusPolicy: { type: 'EXACT', statusCodes: [202] },
+        requestHeaders: [{ name: 'Authorization', sensitive: true, retain: true }],
+        assertions: { headers: [], textBody: [], jsonBody: [] },
+      }),
+    ).toMatchObject({
+      settings: { method: 'POST', requestBody: { type: 'JSON' } },
+      statusPolicy: { type: 'EXACT', statusCodes: [202] },
+      requestHeaders: [{ name: 'authorization', sensitive: true, retain: true }],
+    });
+  });
+
+  it('rejects incomplete and incompatible test configurations', () => {
+    expect(() =>
+      parseHttpConfigurationTest({ httpSettings: {}, requestHeaders: [], assertions: {} }),
+    ).toThrow(MonitorInputError);
+    expect(() =>
+      parseHttpConfigurationTest({
+        httpSettings: {
+          url: 'https://api.example.com',
+          method: 'HEAD',
+          timeoutMs: 5_000,
+          followRedirects: true,
+          requestBody: { type: 'JSON', value: '{}' },
+        },
+        statusPolicy: { type: 'ANY_2XX' },
+        requestHeaders: [],
+        assertions: {},
       }),
     ).toThrow(MonitorInputError);
   });

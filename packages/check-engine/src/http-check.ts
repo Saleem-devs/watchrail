@@ -96,7 +96,10 @@ export async function executeHttpCheck(
       followRedirects: input.followRedirects,
       requestHeaders: input.requestHeaders ?? [],
       ...(requestBody === undefined ? {} : { requestBody }),
-      captureResponseBody: textBodyAssertions.length > 0 || jsonBodyAssertions.length > 0,
+      captureResponseBody:
+        input.captureResponseEvidence === true ||
+        textBodyAssertions.length > 0 ||
+        jsonBodyAssertions.length > 0,
       onEvidence: (evidence) => {
         redirects = [...evidence.redirects];
         if (evidence.finalResponse !== undefined) {
@@ -115,6 +118,9 @@ export async function executeHttpCheck(
       jsonBodyAssertions,
       checkedAt,
       attemptDurationMs: elapsed(clock, startedAt),
+      ...(input.captureResponseEvidence === undefined
+        ? {}
+        : { captureResponseEvidence: input.captureResponseEvidence }),
     });
   } catch (error) {
     const attemptDurationMs = elapsed(clock, startedAt);
@@ -143,6 +149,9 @@ export async function executeHttpCheck(
             ...timeoutResult,
             statusCode: responseEvidence.statusCode,
             responseTimeMs: responseEvidence.responseTimeMs,
+            ...(input.captureResponseEvidence === true
+              ? { responseEvidence: { headers: responseEvidence.headers } }
+              : {}),
           };
     }
 
@@ -195,6 +204,7 @@ function classifyHttpExecution(input: {
   jsonBodyAssertions: NonNullable<HttpCheckInput['jsonBodyAssertions']>;
   checkedAt: Date;
   attemptDurationMs: number;
+  captureResponseEvidence?: boolean;
 }): HttpCheckResult {
   const {
     execution,
@@ -204,6 +214,7 @@ function classifyHttpExecution(input: {
     jsonBodyAssertions,
     checkedAt,
     attemptDurationMs,
+    captureResponseEvidence,
   } = input;
   const unavailableAssertions = combineAssertionEvaluations(
     notEvaluateHeaderAssertions(headerAssertions),
@@ -266,6 +277,9 @@ function classifyHttpExecution(input: {
       checkedAt,
       redirects: execution.redirects,
       assertionEvaluation,
+      ...(captureResponseEvidence === true
+        ? { responseEvidence: { headers: execution.headers, body: execution.body } }
+        : {}),
     };
   }
 
@@ -279,6 +293,9 @@ function classifyHttpExecution(input: {
     checkedAt,
     redirects: execution.redirects,
     assertionEvaluation,
+    ...(captureResponseEvidence === true
+      ? { responseEvidence: { headers: execution.headers, body: execution.body } }
+      : {}),
   };
 }
 

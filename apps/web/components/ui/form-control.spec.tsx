@@ -8,8 +8,10 @@ describe('shared form controls', () => {
   it('uses the custom select and retains native form serialization', async () => {
     const user = userEvent.setup();
     const submitted = vi.fn();
+    const changed = vi.fn();
     render(
       <Form
+        onChange={changed}
         onSubmit={(event) => {
           submitted(Object.fromEntries(new FormData(event.currentTarget)));
         }}
@@ -31,6 +33,7 @@ describe('shared form controls', () => {
     expect(select).toHaveAttribute('aria-expanded', 'true');
     await user.click(screen.getByRole('option', { name: 'contains' }));
     expect(select).toHaveTextContent('contains');
+    expect(changed).toHaveBeenCalledTimes(1);
 
     await user.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(submitted).toHaveBeenCalledWith({ operator: 'contains' }));
