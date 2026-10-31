@@ -111,6 +111,7 @@ export class CheckRoundJobHandler implements CheckJobHandler {
             followRedirects: claim.execution.followRedirects,
             statusPolicy: claim.execution.statusPolicy,
             requestHeaders,
+            requestBody: claim.execution.requestBody,
             headerAssertions: assertions.headers,
             textBodyAssertions: assertions.textBody,
             jsonBodyAssertions: assertions.jsonBody,
@@ -130,8 +131,18 @@ export class CheckRoundJobHandler implements CheckJobHandler {
   }
 }
 
-function isSupportedMethod(method: string): method is 'GET' | 'HEAD' {
-  return method === 'GET' || method === 'HEAD';
+function isSupportedMethod(
+  method: string,
+): method is 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'OPTIONS' {
+  return (
+    method === 'GET' ||
+    method === 'HEAD' ||
+    method === 'POST' ||
+    method === 'PUT' ||
+    method === 'PATCH' ||
+    method === 'DELETE' ||
+    method === 'OPTIONS'
+  );
 }
 
 function internalExecutionFailureResult(): HttpCheckResult {

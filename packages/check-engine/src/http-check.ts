@@ -24,12 +24,20 @@ import type {
   HttpTargetFailure,
 } from './types.js';
 
+const SUPPORTED_METHODS = new Set<HttpMethod>([
+  'GET',
+  'HEAD',
+  'POST',
+  'PUT',
+  'PATCH',
+  'DELETE',
+  'OPTIONS',
+]);
+
 const defaultClock: CheckClock = {
   now: () => new Date(),
   monotonicNow: () => performance.now(),
 };
-
-const SUPPORTED_METHODS = new Set<HttpMethod>(['GET', 'HEAD']);
 
 export async function executeHttpCheck(
   input: HttpCheckInput,
@@ -38,6 +46,7 @@ export async function executeHttpCheck(
   assertSupportedMethod(input.method);
   assertValidTimeout(input.timeoutMs);
   assertValidStatusPolicy(input.statusPolicy);
+  const requestBody = encodeRequestBody(input.requestBody, input.method);
   const headerAssertions = input.headerAssertions ?? [];
   const textBodyAssertions = input.textBodyAssertions ?? [];
   const jsonBodyAssertions = input.jsonBodyAssertions ?? [];
@@ -86,6 +95,7 @@ export async function executeHttpCheck(
       signal: controller.signal,
       followRedirects: input.followRedirects,
       requestHeaders: input.requestHeaders ?? [],
+      ...(requestBody === undefined ? {} : { requestBody }),
       captureResponseBody: textBodyAssertions.length > 0 || jsonBodyAssertions.length > 0,
       onEvidence: (evidence) => {
         redirects = [...evidence.redirects];
@@ -153,6 +163,28 @@ export async function executeHttpCheck(
       clearTimeout(timeoutHandle);
     }
   }
+}
+
+function encodeRequestBody(
+  body: HttpCheckInput['requestBody'],
+  method: HttpMethod,
+): { bytes: Uint8Array; contentType: string } | undefined {
+  if (body === undefined || body.type === 'NONE') return undefined;
+  if (method === 'GET' || method === 'HEAD') {
+    throw new TypeError(`${method} checks cannot send a request body.`);
+  }
+  const encoder = new TextEncoder();
+  if (body.type === 'JSON') {
+    JSON.parse(body.value);
+    return { bytes: encoder.encode(body.value), contentType: 'application/json' };
+  }
+  if (body.type === 'FORM_URLENCODED') {
+    const value = new URLSearchParams(
+      body.fields.map(({ name, value }) => [name, value]),
+    ).toString();
+    return { bytes: encoder.encode(value), contentType: 'application/x-www-form-urlencoded' };
+  }
+  return { bytes: encoder.encode(body.value), contentType: body.contentType };
 }
 
 function classifyHttpExecution(input: {

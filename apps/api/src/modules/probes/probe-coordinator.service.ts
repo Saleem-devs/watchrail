@@ -46,7 +46,7 @@ export class ProbeCoordinatorService {
       this.coordinator.configuration(machine, attemptId, token),
     );
     if (!stored) throw staleLease();
-    if (stored.method !== 'GET' && stored.method !== 'HEAD') {
+    if (!isHttpMonitorMethod(stored.method)) {
       throw new Error('Stored remote execution method is unsupported.');
     }
     const context = {
@@ -71,6 +71,7 @@ export class ProbeCoordinatorService {
         context,
         this.config.headerEncryptionKeyring,
       ),
+      requestBody: stored.requestBody,
       assertions: resolveResponseAssertions(
         stored.assertions,
         stored.method,
@@ -153,6 +154,20 @@ export class ProbeCoordinatorService {
       throw error;
     }
   }
+}
+
+function isHttpMonitorMethod(
+  method: string,
+): method is 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'OPTIONS' {
+  return (
+    method === 'GET' ||
+    method === 'HEAD' ||
+    method === 'POST' ||
+    method === 'PUT' ||
+    method === 'PATCH' ||
+    method === 'DELETE' ||
+    method === 'OPTIONS'
+  );
 }
 
 function parseAction(attemptId: string, body: unknown): ProbeResultSubmissionReferenceV1 {

@@ -53,6 +53,8 @@ export type {
   HttpCheckResult,
   HttpCheckStage,
   HttpExecutionInput,
+  HttpRequestBody,
+  EncodedHttpRequestBody,
   HttpFinalResponseEvidence,
   HttpResponseObservation,
   HttpExecutionResult,

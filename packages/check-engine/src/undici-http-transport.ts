@@ -32,7 +32,7 @@ export interface PinnedHttpTransport {
     this: void,
     input: {
       target: ResolvedHttpTarget;
-      method: 'GET' | 'HEAD' | 'POST';
+      method: 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'OPTIONS';
       signal: AbortSignal;
       headers?: readonly HttpRequestHeader[];
       body?: Uint8Array;
@@ -54,7 +54,7 @@ export class UndiciPinnedHttpTransport implements PinnedHttpTransport {
 
   async request(input: {
     target: ResolvedHttpTarget;
-    method: 'GET' | 'HEAD' | 'POST';
+    method: 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'OPTIONS';
     signal: AbortSignal;
     headers?: readonly HttpRequestHeader[];
     body?: Uint8Array;

@@ -31,6 +31,7 @@ const claimedExecution = {
   organizationId: '44444444-4444-4444-8444-444444444444',
   monitorId: '55555555-5555-4555-8555-555555555555',
   requestHeaders: [],
+  requestBody: { type: 'NONE' },
   assertions: EMPTY_ASSERTION_CONFIGURATION,
 } as const;
 
@@ -421,7 +422,7 @@ describe('CheckRoundJobHandler', () => {
     const { executions, executor, claim, complete, execute } = createDependencies();
     claim.mockResolvedValue({
       state: 'CLAIMED',
-      execution: { ...claimedExecution, method: 'POST' },
+      execution: { ...claimedExecution, method: 'TRACE' as never },
     });
     complete.mockResolvedValue(true);
 

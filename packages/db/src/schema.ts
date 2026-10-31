@@ -34,6 +34,7 @@ import {
   HTTP_ENGINE_VERSION,
   HTTP_EXECUTION_POLICY_VERSION,
   type HttpStatusPolicy,
+  type HttpRequestBody,
   type AssertionEvaluationV1,
   type HttpRedirectHop,
   type StoredRequestHeader,
@@ -376,6 +377,7 @@ export const monitors = pgTable(
       .notNull()
       .default({ type: 'ANY_2XX' }),
     requestHeaders: jsonb('request_headers').$type<StoredRequestHeader[]>().notNull().default([]),
+    requestBody: jsonb('request_body').$type<HttpRequestBody>().notNull().default({ type: 'NONE' }),
     assertions: jsonb('assertions')
       .$type<ResponseAssertionConfigurationV1>()
       .notNull()
@@ -443,6 +445,7 @@ export const monitors = pgTable(
       sql`watchrail_location_snapshot_is_valid(${table.locations})`,
     ),
     check('monitors_request_headers_array', sql`jsonb_typeof(${table.requestHeaders}) = 'array'`),
+    check('monitors_request_body_object', sql`jsonb_typeof(${table.requestBody}) = 'object'`),
     check('monitors_assertions_object', sql`jsonb_typeof(${table.assertions}) = 'object'`),
   ],
 );
@@ -539,6 +542,7 @@ export const monitorConfigurationVersions = pgTable(
       .notNull()
       .default({ type: 'ANY_2XX' }),
     requestHeaders: jsonb('request_headers').$type<StoredRequestHeader[]>().notNull().default([]),
+    requestBody: jsonb('request_body').$type<HttpRequestBody>().notNull().default({ type: 'NONE' }),
     assertions: jsonb('assertions')
       .$type<ResponseAssertionConfigurationV1>()
       .notNull()
@@ -613,6 +617,10 @@ export const monitorConfigurationVersions = pgTable(
     check(
       'monitor_configuration_versions_request_headers_array',
       sql`jsonb_typeof(${table.requestHeaders}) = 'array'`,
+    ),
+    check(
+      'monitor_configuration_versions_request_body_object',
+      sql`jsonb_typeof(${table.requestBody}) = 'object'`,
     ),
     check(
       'monitor_configuration_versions_assertions_object',

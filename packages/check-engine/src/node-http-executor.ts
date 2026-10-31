@@ -70,6 +70,8 @@ export class NodeHttpExecutor implements HttpExecutor {
       });
     };
     let currentUrl: string | URL = input.url;
+    let currentMethod = input.method;
+    let currentBody = input.requestBody;
     let redirectsFollowed = 0;
     let headersAttached = true;
     let pendingHopIndex: number | null = null;
@@ -106,11 +108,19 @@ export class NodeHttpExecutor implements HttpExecutor {
           }
           pendingHopIndex = null;
         }
+        const requestHeaders = headersAttached ? [...(input.requestHeaders ?? [])] : [];
+        if (
+          currentBody !== undefined &&
+          !requestHeaders.some((header) => header.name.toLowerCase() === 'content-type')
+        ) {
+          requestHeaders.push({ name: 'content-type', value: currentBody.contentType });
+        }
         response = await this.transport.request({
           target,
-          method: input.method,
+          method: currentMethod,
           signal: input.signal,
-          headers: headersAttached ? (input.requestHeaders ?? []) : [],
+          headers: requestHeaders,
+          ...(currentBody === undefined ? {} : { body: currentBody.bytes }),
         });
       } catch (error) {
         if (
@@ -224,10 +234,22 @@ export class NodeHttpExecutor implements HttpExecutor {
 
       redirectsFollowed += 1;
       if (target.url.origin !== nextUrl.origin) headersAttached = false;
+      const nextMethod = redirectedMethod(currentMethod, response.statusCode);
+      if (nextMethod !== currentMethod) currentBody = undefined;
+      currentMethod = nextMethod;
       pendingHopIndex = redirects.length - 1;
       currentUrl = nextUrl;
     }
   }
+}
+
+function redirectedMethod(
+  method: HttpExecutionInput['method'],
+  statusCode: RedirectStatusCode,
+): HttpExecutionInput['method'] {
+  if (statusCode === 303 && method !== 'HEAD') return 'GET';
+  if ((statusCode === 301 || statusCode === 302) && method === 'POST') return 'GET';
+  return method;
 }
 
 function redirectIdentity(url: URL): string {

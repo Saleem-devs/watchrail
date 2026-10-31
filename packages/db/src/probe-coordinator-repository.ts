@@ -63,6 +63,7 @@ export interface ProbeExecutionConfigurationRecord {
   followRedirects: boolean;
   statusPolicy: unknown;
   requestHeaders: unknown;
+  requestBody: unknown;
   assertions: unknown;
 }
 
@@ -125,6 +126,7 @@ export class ProbeCoordinatorRepository {
           followRedirects: monitorConfigurationVersions.followRedirects,
           statusPolicy: monitorConfigurationVersions.statusPolicy,
           requestHeaders: monitorConfigurationVersions.requestHeaders,
+          requestBody: monitorConfigurationVersions.requestBody,
           assertions: monitorConfigurationVersions.assertions,
         })
         .from(probeExecutionAttempts)
@@ -182,6 +184,7 @@ export class ProbeCoordinatorRepository {
         followRedirects: row.followRedirects,
         statusPolicy: row.statusPolicy,
         requestHeaders: row.requestHeaders,
+        requestBody: row.requestBody,
         assertions: row.assertions,
       };
     });

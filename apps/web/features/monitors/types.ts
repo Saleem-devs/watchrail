@@ -1,3 +1,5 @@
+import type { RequestBodyValue } from './request-body-field';
+
 /* Monitor feature API contracts. */
 export interface Monitor {
   id: string;
@@ -9,6 +11,13 @@ export interface Monitor {
   timeoutMs: number;
   followRedirects: boolean;
   statusPolicy: { type: 'ANY_2XX' } | { type: 'EXACT'; statusCodes: number[] };
+  requestHeaders?: Array<{
+    name: string;
+    sensitive: boolean;
+    value: string | null;
+    hasValue: true;
+  }>;
+  requestBody?: RequestBodyValue;
   locations: string[];
   createdAt: string;
   currentCheck: CurrentCheck | null;
@@ -74,6 +83,8 @@ export interface FieldErrors {
   followRedirects?: string[];
   lifecycleState?: string[];
   locations?: string[];
+  requestHeaders?: string[];
+  requestBody?: string[];
 }
 
 export interface ApiError {

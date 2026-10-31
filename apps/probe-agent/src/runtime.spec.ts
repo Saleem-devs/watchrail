@@ -34,6 +34,7 @@ const configuration: ProbeExecutionConfigurationV1 = {
   followRedirects: true,
   statusPolicy: { type: 'ANY_2XX' },
   requestHeaders: [],
+  requestBody: { type: 'NONE' },
   assertions: { headers: [], textBody: [], jsonBody: [] },
 };
 

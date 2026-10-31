@@ -1,0 +1,4 @@
+ALTER TABLE "monitor_configuration_versions" ADD COLUMN "request_body" jsonb DEFAULT '{"type":"NONE"}'::jsonb NOT NULL;--> statement-breakpoint
+ALTER TABLE "monitors" ADD COLUMN "request_body" jsonb DEFAULT '{"type":"NONE"}'::jsonb NOT NULL;--> statement-breakpoint
+ALTER TABLE "monitor_configuration_versions" ADD CONSTRAINT "monitor_configuration_versions_request_body_object" CHECK (jsonb_typeof("monitor_configuration_versions"."request_body") = 'object');--> statement-breakpoint
+ALTER TABLE "monitors" ADD CONSTRAINT "monitors_request_body_object" CHECK (jsonb_typeof("monitors"."request_body") = 'object');

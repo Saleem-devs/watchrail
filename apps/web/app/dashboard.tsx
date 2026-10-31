@@ -37,6 +37,7 @@ import {
   CheckHistory,
 } from '../features/monitors/monitor-evidence';
 import { MonitorForm } from '../features/monitors/monitor-form';
+import { HttpMethodOptions } from '../features/monitors/http-method-options';
 import { MonitorAvailabilityHistory } from '../features/monitors/monitor-availability-history';
 import { MonitorResponseTimeChart } from '../features/monitors/monitor-response-time-chart';
 import { MonitorTable } from '../features/monitors/monitor-table';
@@ -314,13 +315,15 @@ export function Dashboard({
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify({
             name: formData.get('name'),
-            url: formData.get('url'),
+            url: urlFromMonitorForm(formData),
             statusPolicy,
             method: formData.get('method'),
             timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
             followRedirects: formData.get('followRedirects') === 'on',
             locations: [formData.get('location')],
             lifecycleState: formData.get('lifecycleState'),
+            requestHeaders: requestHeadersFromForm(formData),
+            requestBody: requestBodyFromForm(formData),
           }),
         },
       );
@@ -357,13 +360,18 @@ export function Dashboard({
       {
         path: 'http-settings',
         body: {
-          url: formData.get('url'),
+          url: urlFromMonitorForm(formData),
           method: formData.get('method'),
           timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
           followRedirects: formData.get('followRedirects') === 'on',
+          requestBody: requestBodyFromForm(formData),
         },
       },
       { path: 'status-policy', body: { statusPolicy: statusPolicyFromForm(formData) } },
+      {
+        path: 'request-headers',
+        body: { requestHeaders: requestHeadersFromForm(formData) },
+      },
       { path: 'locations', body: { locations: [formData.get('location')] } },
       { path: 'lifecycle', body: { lifecycleState: formData.get('lifecycleState') } },
     ];
@@ -1225,6 +1233,71 @@ export function Dashboard({
   );
 }
 
+function requestHeadersFromForm(formData: FormData): Array<Record<string, unknown>> {
+  const names = formData.getAll('requestHeaderName');
+  const values = formData.getAll('requestHeaderValue');
+  const ids = formData.getAll('requestHeaderId');
+  const storedValues = formData.getAll('requestHeaderHasStoredValue');
+  const sensitiveIds = new Set(
+    formData.getAll('requestHeaderSensitive').map((value) => formEntryString(value)),
+  );
+
+  return names.map((name, index) => {
+    const headerName = formEntryString(name);
+    const id = formEntryString(ids[index]);
+    const value = formEntryString(values[index]);
+    const sensitive = sensitiveIds.has(id);
+    if (storedValues[index] === 'true' && value === '') {
+      return { name: headerName, sensitive: true, retain: true };
+    }
+    return { name: headerName, sensitive, value };
+  });
+}
+
+function formEntryString(value: FormDataEntryValue | undefined): string {
+  return typeof value === 'string' ? value : '';
+}
+
+function requestBodyFromForm(formData: FormData): Record<string, unknown> {
+  const type = formEntryString(formData.get('requestBodyType') ?? undefined);
+  if (type === 'JSON')
+    return { type, value: formEntryString(formData.get('requestBodyValue') ?? undefined) };
+  if (type === 'RAW') {
+    return {
+      type,
+      contentType: formEntryString(formData.get('requestBodyContentType') ?? undefined),
+      value: formEntryString(formData.get('requestBodyValue') ?? undefined),
+    };
+  }
+  if (type === 'FORM_URLENCODED') {
+    const names = formData.getAll('requestBodyFieldName');
+    const values = formData.getAll('requestBodyFieldValue');
+    return {
+      type,
+      fields: names.map((name, index) => ({
+        name: formEntryString(name),
+        value: formEntryString(values[index]),
+      })),
+    };
+  }
+  return { type: 'NONE' };
+}
+
+function urlFromMonitorForm(formData: FormData): string {
+  const rawUrl = formEntryString(formData.get('url') ?? undefined);
+  try {
+    const url = new URL(rawUrl);
+    const names = formData.getAll('queryParameterName');
+    const values = formData.getAll('queryParameterValue');
+    for (const [index, name] of names.entries()) {
+      url.searchParams.append(formEntryString(name), formEntryString(values[index]));
+    }
+    return url.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
 function MonitorDetailView({
   monitor,
   manualRound,
@@ -1595,8 +1668,7 @@ function MonitorConfiguration({
           <label>
             Method
             <select name="method" defaultValue={monitor.method}>
-              <option value="GET">GET</option>
-              <option value="HEAD">HEAD</option>
+              <HttpMethodOptions />
             </select>
           </label>
           <label>

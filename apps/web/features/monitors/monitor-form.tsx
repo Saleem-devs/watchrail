@@ -2,6 +2,10 @@
 
 import { useId, useState, type FormEvent } from 'react';
 import { Input, Select } from '../../components/ui/form-control';
+import { RequestHeadersField, type RequestHeaderFormValue } from './request-headers-field';
+import { HttpMethodOptions } from './http-method-options';
+import { endpointBaseUrl, QueryParametersField } from './query-parameters-field';
+import { RequestBodyField, type RequestBodyValue } from './request-body-field';
 import type { FieldErrors, Monitor } from './types';
 
 export interface MonitorFormValues {
@@ -13,6 +17,8 @@ export interface MonitorFormValues {
   followRedirects: boolean;
   locations: string[];
   lifecycleState: Monitor['lifecycleState'];
+  requestHeaders?: RequestHeaderFormValue[];
+  requestBody?: RequestBodyValue;
 }
 
 export function MonitorForm({
@@ -34,6 +40,7 @@ export function MonitorForm({
   const [policyMode, setPolicyMode] = useState<'ANY_2XX' | 'EXACT'>(
     initialValues?.statusPolicy.type ?? 'ANY_2XX',
   );
+  const [method, setMethod] = useState(initialValues?.method ?? 'GET');
   const nameErrorId = `${id}-name-error`;
   const urlHelpId = `${id}-url-help`;
   const urlErrorId = `${id}-url-error`;
@@ -83,7 +90,7 @@ export function MonitorForm({
                   id={`${id}-url`}
                   name="url"
                   type="url"
-                  defaultValue={initialValues?.url}
+                  defaultValue={endpointBaseUrl(initialValues?.url)}
                   placeholder="https://api.example.com/health"
                   inputMode="url"
                   autoComplete="url"
@@ -103,6 +110,8 @@ export function MonitorForm({
               </label>
             </div>
           </section>
+
+          <QueryParametersField initialUrl={initialValues?.url} />
 
           <fieldset className="m-0 border-0 px-5 py-5 sm:px-6">
             <legend className="p-0 text-sm font-semibold text-rail-text">Expected response</legend>
@@ -178,6 +187,16 @@ export function MonitorForm({
               </label>
             ) : null}
           </fieldset>
+
+          <RequestHeadersField
+            initialHeaders={initialValues?.requestHeaders ?? []}
+            {...(errors.requestHeaders?.[0] ? { error: errors.requestHeaders[0] } : {})}
+          />
+          <RequestBodyField
+            method={method}
+            initialBody={initialValues?.requestBody ?? { type: 'NONE' }}
+            {...(errors.requestBody?.[0] ? { error: errors.requestBody[0] } : {})}
+          />
         </div>
 
         <aside
@@ -199,11 +218,11 @@ export function MonitorForm({
               Method
               <Select
                 name="method"
-                defaultValue={initialValues?.method ?? 'GET'}
+                value={method}
+                onChange={(event) => setMethod(event.target.value)}
                 aria-invalid={Boolean(errors.method)}
               >
-                <option value="GET">GET</option>
-                <option value="HEAD">HEAD</option>
+                <HttpMethodOptions />
               </Select>
               {errors.method ? (
                 <span className="font-normal text-rail-danger">{errors.method[0]}</span>

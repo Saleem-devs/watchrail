@@ -8,6 +8,7 @@ import {
   type HttpMethod,
   type HttpRedirectHop,
   type HttpStatusPolicy,
+  type HttpRequestBody,
   type ResponseAssertionConfigurationV1,
   type StoredRequestHeader,
 } from '@watchrail/domain';
@@ -40,6 +41,7 @@ export interface ClaimedCheckExecution {
   organizationId: string;
   monitorId: string;
   requestHeaders: readonly StoredRequestHeader[];
+  requestBody: HttpRequestBody;
   assertions: ResponseAssertionConfigurationV1;
 }
 
@@ -86,6 +88,7 @@ export class CheckExecutionRepository {
           organizationId: monitorConfigurationVersions.organizationId,
           monitorId: monitorConfigurationVersions.monitorId,
           requestHeaders: monitorConfigurationVersions.requestHeaders,
+          requestBody: monitorConfigurationVersions.requestBody,
           assertions: monitorConfigurationVersions.assertions,
         })
         .from(checkExecutionAssignments)
@@ -146,6 +149,7 @@ export class CheckExecutionRepository {
           organizationId: candidate.organizationId,
           monitorId: candidate.monitorId,
           requestHeaders: candidate.requestHeaders,
+          requestBody: candidate.requestBody,
           assertions: candidate.assertions,
         },
       };

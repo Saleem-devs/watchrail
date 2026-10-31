@@ -5,12 +5,22 @@ export const HTTP_CHECK_TIMEOUT_LIMITS = {
 
 export const HTTP_BODY_CAPTURE_LIMIT_BYTES = 256 * 1024;
 
-export type HttpMethod = 'GET' | 'HEAD';
+export type HttpMethod = 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'OPTIONS';
 export type HttpStatusPolicy =
   { type: 'ANY_2XX' } | { type: 'EXACT'; statusCodes: readonly number[] };
 export interface HttpRequestHeader {
   name: string;
   value: string;
+}
+export type HttpRequestBody =
+  | { type: 'NONE' }
+  | { type: 'JSON'; value: string }
+  | { type: 'FORM_URLENCODED'; fields: Array<{ name: string; value: string }> }
+  | { type: 'RAW'; contentType: string; value: string };
+
+export interface EncodedHttpRequestBody {
+  bytes: Uint8Array;
+  contentType: string;
 }
 
 export interface HttpResponseHeader {
@@ -41,6 +51,7 @@ export interface HttpCheckInput {
   followRedirects: boolean;
   statusPolicy?: HttpStatusPolicy;
   requestHeaders?: readonly HttpRequestHeader[];
+  requestBody?: HttpRequestBody;
   headerAssertions?: readonly HeaderAssertion[];
   textBodyAssertions?: readonly TextBodyAssertion[];
   jsonBodyAssertions?: readonly JsonBodyAssertion[];
@@ -183,6 +194,7 @@ export interface HttpExecutionInput {
   signal: AbortSignal;
   followRedirects?: boolean;
   requestHeaders?: readonly HttpRequestHeader[];
+  requestBody?: EncodedHttpRequestBody;
   captureResponseBody?: boolean;
 
   /**

@@ -5,7 +5,15 @@ import {
 } from './assertion.js';
 
 export const HTTP_METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] as const;
-export const HTTP_MONITOR_METHODS = ['GET', 'HEAD'] as const;
+export const HTTP_MONITOR_METHODS = [
+  'GET',
+  'HEAD',
+  'POST',
+  'PUT',
+  'PATCH',
+  'DELETE',
+  'OPTIONS',
+] as const;
 export const MONITOR_LIFECYCLE_STATES = ['ENABLED', 'PAUSED', 'ARCHIVED'] as const;
 export const MONITOR_LOCATIONS = ['local'] as const;
 export const MONITOR_INTERVAL_LIMITS = {
@@ -17,6 +25,13 @@ export type HttpMethod = (typeof HTTP_METHODS)[number];
 export type HttpMonitorMethod = (typeof HTTP_MONITOR_METHODS)[number];
 export type MonitorLifecycleState = (typeof MONITOR_LIFECYCLE_STATES)[number];
 export type HttpStatusPolicy = { type: 'ANY_2XX' } | { type: 'EXACT'; statusCodes: number[] };
+export type HttpRequestBody =
+  | { type: 'NONE' }
+  | { type: 'JSON'; value: string }
+  | { type: 'FORM_URLENCODED'; fields: Array<{ name: string; value: string }> }
+  | { type: 'RAW'; contentType: string; value: string };
+
+export const HTTP_REQUEST_BODY_LIMIT_BYTES = 64 * 1024;
 
 export const MONITOR_DEFAULTS = {
   method: 'GET',
@@ -46,6 +61,7 @@ export interface CreateMonitorCommand {
   lifecycleState?: unknown;
   locations?: unknown;
   requestHeaders?: unknown;
+  requestBody?: unknown;
   assertions?: unknown;
   intervalSeconds?: unknown;
 }
@@ -60,6 +76,7 @@ export interface NewMonitor {
   followRedirects: boolean;
   statusPolicy: HttpStatusPolicy;
   requestHeaders: RequestHeaderUpdate[];
+  requestBody: HttpRequestBody;
   assertions: ResponseAssertions;
   locations: string[];
 }
@@ -69,6 +86,7 @@ export interface MonitorFieldErrors {
   url?: string[];
   statusPolicy?: string[];
   requestHeaders?: string[];
+  requestBody?: string[];
   assertions?: string[];
   method?: string[];
   timeoutMs?: string[];
@@ -114,6 +132,7 @@ export interface HttpMonitorSettings {
   method: HttpMonitorMethod;
   timeoutMs: number;
   followRedirects: boolean;
+  requestBody: HttpRequestBody;
 }
 
 export class MonitorInputError extends Error {
@@ -124,6 +143,10 @@ export class MonitorInputError extends Error {
     this.name = 'MonitorInputError';
     this.fields = fields;
   }
+}
+
+export function isHttpMonitorMethod(value: unknown): value is HttpMonitorMethod {
+  return typeof value === 'string' && HTTP_MONITOR_METHODS.includes(value as HttpMonitorMethod);
 }
 
 export function createMonitor(command: CreateMonitorCommand): NewMonitor {
@@ -154,6 +177,7 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
     }
   }
   const requestHeaders = normalizeHeaders(command.requestHeaders, fields);
+  const requestBody = normalizeRequestBody(command.requestBody, method, fields);
   const assertions = normalizeAssertions(command.assertions, fields);
   const intervalSeconds = normalizeIntervalSeconds(command.intervalSeconds, fields, true);
 
@@ -169,6 +193,7 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
     followRedirects,
     statusPolicy,
     requestHeaders,
+    requestBody,
     assertions,
     locations,
   };
@@ -281,22 +306,102 @@ export function parseHttpMonitorSettings(value: unknown): HttpMonitorSettings {
   }
 
   const settings = value as Record<string, unknown>;
-  const expectedKeys = ['followRedirects', 'method', 'timeoutMs', 'url'];
+  const legacyKeys = ['followRedirects', 'method', 'timeoutMs', 'url'];
+  const expectedKeys = ['followRedirects', 'method', 'requestBody', 'timeoutMs', 'url'];
   const keys = Object.keys(settings).sort();
-  if (
-    keys.length !== expectedKeys.length ||
-    keys.some((key, index) => key !== expectedKeys[index])
-  ) {
-    fields.httpSettings = ['Provide exactly url, method, timeoutMs, and followRedirects.'];
+  if (!(
+    (keys.length === legacyKeys.length && keys.every((key, index) => key === legacyKeys[index])) ||
+    (keys.length === expectedKeys.length && keys.every((key, index) => key === expectedKeys[index]))
+  )) {
+    fields.httpSettings = [
+      'Provide exactly url, method, timeoutMs, followRedirects, and requestBody.',
+    ];
   }
 
   const url = normalizeUrl(settings.url, fields);
   const method = normalizeHttpMonitorMethod(settings.method, fields);
   const timeoutMs = normalizeTimeout(settings.timeoutMs, fields);
   const followRedirects = normalizeFollowRedirects(settings.followRedirects, fields);
+  const requestBody = normalizeRequestBody(settings.requestBody, method, fields);
 
   if (Object.keys(fields).length > 0) throw new MonitorInputError(fields);
-  return { url, method, timeoutMs, followRedirects };
+  return { url, method, timeoutMs, followRedirects, requestBody };
+}
+
+function normalizeRequestBody(
+  value: unknown,
+  method: HttpMonitorMethod,
+  fields: MonitorFieldErrors,
+): HttpRequestBody {
+  if (value === undefined) return { type: 'NONE' };
+  const fail = (message: string): HttpRequestBody => {
+    fields.requestBody = [message];
+    return { type: 'NONE' };
+  };
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return fail('Choose a valid request body type.');
+  }
+  const body = value as Record<string, unknown>;
+  if (body.type === 'NONE' && hasExactKeys(body, ['type'])) return { type: 'NONE' };
+  if (method === 'GET' || method === 'HEAD') {
+    return fail(`${method} monitors cannot send a request body.`);
+  }
+  if (body.type === 'JSON' && hasExactKeys(body, ['type', 'value'])) {
+    if (typeof body.value !== 'string' || body.value.trim() === '') {
+      return fail('Enter a JSON request body.');
+    }
+    try {
+      JSON.parse(body.value);
+    } catch {
+      return fail('Enter valid JSON.');
+    }
+    if (utf8Bytes(body.value) > HTTP_REQUEST_BODY_LIMIT_BYTES) {
+      return fail('Keep the encoded request body at 64 KB or less.');
+    }
+    return { type: 'JSON', value: body.value };
+  }
+  if (body.type === 'FORM_URLENCODED' && hasExactKeys(body, ['fields', 'type'])) {
+    if (!Array.isArray(body.fields) || body.fields.length === 0 || body.fields.length > 50) {
+      return fail('Provide one to 50 form fields.');
+    }
+    const fieldsList: Array<{ name: string; value: string }> = [];
+    for (const field of body.fields) {
+      if (
+        !hasExactKeys(field, ['name', 'value']) ||
+        typeof field.name !== 'string' ||
+        typeof field.value !== 'string' ||
+        field.name.trim() === ''
+      ) {
+        return fail('Every form field needs a name and string value.');
+      }
+      fieldsList.push({ name: field.name.trim(), value: field.value });
+    }
+    const encoded = new URLSearchParams(
+      fieldsList.map(({ name, value }) => [name, value]),
+    ).toString();
+    if (utf8Bytes(encoded) > HTTP_REQUEST_BODY_LIMIT_BYTES) {
+      return fail('Keep the encoded request body at 64 KB or less.');
+    }
+    return { type: 'FORM_URLENCODED', fields: fieldsList };
+  }
+  if (body.type === 'RAW' && hasExactKeys(body, ['contentType', 'type', 'value'])) {
+    if (
+      typeof body.contentType !== 'string' ||
+      body.contentType.trim() === '' ||
+      /[\r\n]/u.test(body.contentType)
+    ) {
+      return fail('Enter a valid content type for the raw body.');
+    }
+    if (typeof body.value !== 'string' || utf8Bytes(body.value) > HTTP_REQUEST_BODY_LIMIT_BYTES) {
+      return fail('Keep the raw request body at 64 KB or less.');
+    }
+    return { type: 'RAW', contentType: body.contentType.trim(), value: body.value };
+  }
+  return fail('Choose none, JSON, form URL encoded, or raw request body.');
+}
+
+function utf8Bytes(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
 }
 
 function normalizeStatusPolicy(value: unknown, fields: MonitorFieldErrors): HttpStatusPolicy {
@@ -343,8 +448,8 @@ function normalizeName(value: unknown, fields: MonitorFieldErrors): string {
 }
 
 function normalizeHttpMonitorMethod(value: unknown, fields: MonitorFieldErrors): HttpMonitorMethod {
-  if (value !== 'GET' && value !== 'HEAD') {
-    fields.method = ['Choose GET or HEAD.'];
+  if (!isHttpMonitorMethod(value)) {
+    fields.method = [`Choose ${HTTP_MONITOR_METHODS.join(', ')}.`];
     return 'GET';
   }
   return value;
