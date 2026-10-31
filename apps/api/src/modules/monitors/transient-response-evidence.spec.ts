@@ -87,4 +87,67 @@ describe('transient response evidence', () => {
       ).signals,
     ).toEqual({ transport: 'FAIL', statusPolicy: 'NOT_EVALUATED', assertions: 'NOT_EVALUATED' });
   });
+
+  it('redacts short configured secrets and common camel-case sensitive JSON fields', () => {
+    const result: HttpCheckResult = {
+      outcome: 'PASS',
+      stage: 'HTTP',
+      reason: 'COMPLETED',
+      statusCode: 200,
+      responseTimeMs: 4,
+      attemptDurationMs: 5,
+      checkedAt: new Date(),
+      redirects: [],
+      assertionEvaluation: { contractVersion: 1, outcome: 'PASS', diagnostics: [] },
+      responseEvidence: {
+        headers: [
+          { name: 'content-type', values: ['application/json'] },
+          { name: 'x-reflected-secret', values: ['ok'] },
+        ],
+        body: {
+          state: 'CAPTURED',
+          text: JSON.stringify({
+            accessToken: 'access-value',
+            clientSecret: 'client-value',
+            sessionId: 'session-value',
+            credentials: 'credential-value',
+            reflected: 'ok',
+          }),
+        },
+      },
+    };
+
+    const safe = toSafeTransientCheckResult(result, { type: 'ANY_2XX' }, 'GET', ['ok']);
+    expect(JSON.stringify(safe.response)).not.toMatch(
+      /access-value|client-value|session-value|credential-value|ok/u,
+    );
+    expect(JSON.stringify(safe.response)).toContain('[REDACTED]');
+  });
+
+  it.each([
+    ['REDIRECT_LOOP', 302],
+    ['REQUEST_TIMEOUT', 200],
+  ] as const)(
+    'classifies %s with retained response headers as a transport failure',
+    (reason, statusCode) => {
+      const result = {
+        outcome: 'FAIL',
+        stage: 'HTTP',
+        reason,
+        statusCode,
+        responseTimeMs: 7,
+        attemptDurationMs: 20,
+        checkedAt: new Date(),
+        redirects: [],
+        assertionEvaluation: { contractVersion: 1, outcome: 'NOT_EVALUATED', diagnostics: [] },
+        responseEvidence: { headers: [{ name: 'content-type', values: ['text/plain'] }] },
+      } satisfies HttpCheckResult;
+
+      expect(toSafeTransientCheckResult(result, { type: 'ANY_2XX' }, 'GET', []).signals).toEqual({
+        transport: 'FAIL',
+        statusPolicy: 'NOT_EVALUATED',
+        assertions: 'NOT_EVALUATED',
+      });
+    },
+  );
 });

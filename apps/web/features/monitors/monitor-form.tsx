@@ -37,6 +37,7 @@ export function MonitorForm({
   testResult,
   testError,
   onDismissTest,
+  onConfigurationChange,
 }: {
   mode: 'create' | 'edit';
   initialValues?: MonitorFormValues;
@@ -47,6 +48,7 @@ export function MonitorForm({
   testResult?: ConfigurationTestResult | undefined;
   testError?: string | undefined;
   onDismissTest: () => void;
+  onConfigurationChange: () => void;
 }) {
   const id = useId();
   const [policyMode, setPolicyMode] = useState<'ANY_2XX' | 'EXACT'>(
@@ -60,7 +62,19 @@ export function MonitorForm({
   const policyErrorId = `${id}-policy-error`;
 
   return (
-    <Form id={formId} className="min-w-0 p-0" onSubmit={onSubmit} aria-busy={submitting} noValidate>
+    <Form
+      id={formId}
+      className="min-w-0 p-0"
+      onSubmit={onSubmit}
+      onChange={onConfigurationChange}
+      onClickCapture={(event) => {
+        if (event.target instanceof Element && event.target.closest('button[type="button"]')) {
+          onConfigurationChange();
+        }
+      }}
+      aria-busy={submitting}
+      noValidate
+    >
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_18rem]">
         <div className="overflow-hidden rounded-rail-panel border border-rail-border bg-rail-raised">
           <section className="border-b border-rail-border px-5 py-5 sm:px-6">

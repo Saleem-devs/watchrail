@@ -197,6 +197,58 @@ describe('Dashboard', () => {
     });
   });
 
+  it('removes a completed configuration-test result when the form changes', async () => {
+    const projectId = '00000000-0000-4000-8000-000000000003';
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url === '/api/projects') return Promise.resolve(projectListResponse(projectId));
+      return Promise.resolve(
+        url.includes('/test-configuration')
+          ? configurationTestResponse()
+          : new Response(JSON.stringify({ data: [] }), { status: 200 }),
+      );
+    });
+
+    render(<Dashboard view="create" projectId={projectId} />);
+    const urlInput = await screen.findByRole('textbox', { name: /HTTP\(S\) URL/i });
+    await userEvent.type(screen.getByRole('textbox', { name: 'Monitor name' }), 'Production API');
+    await userEvent.type(urlInput, 'https://status.watchrail.app/health');
+    await userEvent.click(screen.getByRole('button', { name: 'Test configuration' }));
+
+    expect(await screen.findByLabelText('Configuration test result')).toBeInTheDocument();
+    await userEvent.type(screen.getByRole('textbox', { name: /HTTP\(S\) URL/i }), '?version=2');
+    expect(screen.queryByLabelText('Configuration test result')).not.toBeInTheDocument();
+  });
+
+  it('ignores an in-flight configuration-test response after the form changes', async () => {
+    const projectId = '00000000-0000-4000-8000-000000000003';
+    let resolveTest: (response: Response) => void = () => undefined;
+    const pendingTest = new Promise<Response>((resolve) => {
+      resolveTest = resolve;
+    });
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url === '/api/projects') return Promise.resolve(projectListResponse(projectId));
+      return url.includes('/test-configuration')
+        ? pendingTest
+        : Promise.resolve(new Response(JSON.stringify({ data: [] }), { status: 200 }));
+    });
+
+    render(<Dashboard view="create" projectId={projectId} />);
+    const urlInput = await screen.findByRole('textbox', { name: /HTTP\(S\) URL/i });
+    await userEvent.type(screen.getByRole('textbox', { name: 'Monitor name' }), 'Production API');
+    await userEvent.type(urlInput, 'https://status.watchrail.app/health');
+    await userEvent.click(screen.getByRole('button', { name: 'Test configuration' }));
+    expect(screen.getByRole('button', { name: 'Testing…' })).toBeDisabled();
+
+    await userEvent.type(screen.getByRole('textbox', { name: /HTTP\(S\) URL/i }), '?version=2');
+    expect(screen.getByRole('button', { name: 'Test configuration' })).toBeEnabled();
+    resolveTest(configurationTestResponse());
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Configuration test result')).not.toBeInTheDocument();
+    });
+  });
+
   it('runs a manual diagnostic and replaces its pending state with the result', async () => {
     const monitor = {
       id: 'monitor-1',
@@ -892,3 +944,52 @@ describe('Dashboard', () => {
     expect(screen.queryByRole('heading', { name: 'Monitors' })).not.toBeInTheDocument();
   });
 });
+
+function configurationTestResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      data: {
+        result: {
+          outcome: 'PASS',
+          stage: 'HTTP',
+          reason: 'COMPLETED',
+          statusCode: 200,
+          responseTimeMs: 12,
+          attemptDurationMs: 14,
+          checkedAt: '2026-10-31T20:00:00.000Z',
+          redirects: [],
+          assertionEvaluation: { contractVersion: 1, outcome: 'PASS', diagnostics: [] },
+        },
+        signals: { transport: 'PASS', statusPolicy: 'PASS', assertions: 'PASS' },
+        response: {
+          headers: [{ name: 'content-type', values: ['text/plain'], redacted: false }],
+          withheldHeaderCount: 0,
+          body: { state: 'PREVIEW', contentType: 'text/plain', text: 'ok', truncated: false },
+        },
+      },
+    }),
+    { status: 200 },
+  );
+}
+
+function requestUrl(input: RequestInfo | URL): string {
+  return typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+}
+
+function projectListResponse(projectId: string): Response {
+  return new Response(
+    JSON.stringify({
+      data: [
+        {
+          id: projectId,
+          name: 'Assertions project',
+          slug: 'assertions-project',
+          monitorCount: 0,
+          createdAt: '2026-10-31T20:00:00.000Z',
+          updatedAt: '2026-10-31T20:00:00.000Z',
+        },
+      ],
+    }),
+    { status: 200 },
+  );
+}

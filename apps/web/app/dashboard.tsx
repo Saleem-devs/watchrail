@@ -143,6 +143,10 @@ export function Dashboard({
   const pollTimeouts = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const incidentHistoryRequests = useRef(new Set<string>());
   const probeLocationsRequest = useRef(false);
+  const configurationTestRequest = useRef<{ id: number; controller: AbortController } | undefined>(
+    undefined,
+  );
+  const configurationTestRequestId = useRef(0);
 
   useEffect(() => {
     void loadMonitors(
@@ -154,6 +158,7 @@ export function Dashboard({
     return () => {
       for (const timeout of timeouts.values()) clearTimeout(timeout);
       timeouts.clear();
+      configurationTestRequest.current?.controller.abort();
     };
     // loadMonitors is intentionally scoped to the route's initial filter snapshot.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -436,6 +441,16 @@ export function Dashboard({
     void testConfiguration(form);
   }
 
+  function invalidateConfigurationTest(): void {
+    configurationTestRequestId.current += 1;
+    configurationTestRequest.current?.controller.abort();
+    configurationTestRequest.current = undefined;
+    setConfigurationTest(undefined);
+    setConfigurationTestError(undefined);
+    setIsTestingConfiguration(false);
+    setStateChangingTestMethod(undefined);
+  }
+
   async function testConfiguration(form?: HTMLFormElement): Promise<void> {
     const monitorForm = form ?? document.getElementById('monitor-form');
     if (!(monitorForm instanceof HTMLFormElement) || !projectId) return;
@@ -445,6 +460,10 @@ export function Dashboard({
     setConfigurationTestError(undefined);
     setActionError(undefined);
     setFieldErrors({});
+    configurationTestRequest.current?.controller.abort();
+    const requestId = ++configurationTestRequestId.current;
+    const controller = new AbortController();
+    configurationTestRequest.current = { id: requestId, controller };
 
     try {
       const endpoint =
@@ -455,8 +474,10 @@ export function Dashboard({
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify(httpConfigurationTestFromForm(new FormData(monitorForm))),
+        signal: controller.signal,
       });
       const body = (await response.json()) as { data?: ConfigurationTestResult } & ApiError;
+      if (configurationTestRequest.current?.id !== requestId) return;
       if (!response.ok || !body.data) {
         if (response.status === 400 && body.fields) setFieldErrors(body.fields);
         setConfigurationTestError(
@@ -472,10 +493,19 @@ export function Dashboard({
           block: 'nearest',
         }),
       );
-    } catch {
+    } catch (error) {
+      if (
+        configurationTestRequest.current?.id !== requestId ||
+        (error instanceof DOMException && error.name === 'AbortError')
+      ) {
+        return;
+      }
       setConfigurationTestError('Watchrail could not reach the test service. Try again.');
     } finally {
-      setIsTestingConfiguration(false);
+      if (configurationTestRequest.current?.id === requestId) {
+        configurationTestRequest.current = undefined;
+        setIsTestingConfiguration(false);
+      }
     }
   }
 
@@ -1301,6 +1331,7 @@ export function Dashboard({
                 setConfigurationTest(undefined);
                 setConfigurationTestError(undefined);
               }}
+              onConfigurationChange={invalidateConfigurationTest}
             />
           ) : null}
           {view === 'edit' && detailMonitor ? (
@@ -1318,6 +1349,7 @@ export function Dashboard({
                 setConfigurationTest(undefined);
                 setConfigurationTestError(undefined);
               }}
+              onConfigurationChange={invalidateConfigurationTest}
             />
           ) : null}
           {view === 'edit' && !isLoading && !loadError && !detailMonitor ? (

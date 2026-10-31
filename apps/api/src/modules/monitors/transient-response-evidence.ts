@@ -12,8 +12,24 @@ const RESPONSE_HEADER_VALUE_LIMIT = 1_024;
 const REDACTED = '[REDACTED]';
 const sensitiveHeaderName =
   /^(authorization|proxy-authorization|proxy-authenticate|set-cookie|cookie|www-authenticate|x-api-key|x-auth-token)$/iu;
-const sensitiveJsonKey =
-  /(?:^|[-_])(api[-_]?key|authorization|cookie|credential|password|passwd|private[-_]?key|refresh[-_]?token|secret|session|token)(?:$|[-_])/iu;
+const sensitiveJsonKeys = new Set([
+  'accesstoken',
+  'apikey',
+  'authorization',
+  'authtoken',
+  'clientsecret',
+  'cookie',
+  'credential',
+  'credentials',
+  'password',
+  'passwd',
+  'privatekey',
+  'refreshtoken',
+  'secret',
+  'session',
+  'sessionid',
+  'token',
+]);
 
 export interface SafeTransientCheckResult {
   result: Omit<HttpCheckResult, 'responseEvidence'>;
@@ -46,13 +62,13 @@ export function toSafeTransientCheckResult(
   secretValues: readonly string[],
 ): SafeTransientCheckResult {
   const { responseEvidence, ...publicResult } = result;
+  const transport = transportOutcome(result);
   return {
     result: publicResult,
     signals: {
-      transport:
-        result.statusCode !== null ? 'PASS' : result.outcome === 'UNKNOWN' ? 'UNKNOWN' : 'FAIL',
+      transport,
       statusPolicy:
-        result.statusCode === null
+        transport !== 'PASS' || result.statusCode === null
           ? 'NOT_EVALUATED'
           : matchesStatusPolicy(statusPolicy, result.statusCode)
             ? 'PASS'
@@ -61,6 +77,14 @@ export function toSafeTransientCheckResult(
     },
     response: sanitizeResponseEvidence(responseEvidence, method, secretValues),
   };
+}
+
+function transportOutcome(
+  result: HttpCheckResult,
+): SafeTransientCheckResult['signals']['transport'] {
+  if (result.reason === 'COMPLETED' || result.reason === 'UNEXPECTED_STATUS') return 'PASS';
+  if (result.outcome === 'UNKNOWN') return 'UNKNOWN';
+  return 'FAIL';
 }
 
 function sanitizeResponseEvidence(
@@ -153,16 +177,20 @@ function redactJsonValue(value: unknown): unknown {
   return Object.fromEntries(
     Object.entries(value).map(([key, child]) => [
       key,
-      sensitiveJsonKey.test(key) ? REDACTED : redactJsonValue(child),
+      isSensitiveJsonKey(key) ? REDACTED : redactJsonValue(child),
     ]),
   );
 }
 
 function redactKnownSecrets(value: string, secretValues: readonly string[]): string {
   return secretValues
-    .filter((secret) => secret.length >= 4)
+    .filter((secret) => secret.length > 0)
     .sort((left, right) => right.length - left.length)
     .reduce((text, secret) => text.split(secret).join(REDACTED), value);
+}
+
+function isSensitiveJsonKey(key: string): boolean {
+  return sensitiveJsonKeys.has(key.replace(/[^a-z0-9]/giu, '').toLowerCase());
 }
 
 function headerValue(headers: readonly HttpResponseHeader[], name: string): string | null {
