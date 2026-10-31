@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { Button } from '../../components/ui/button';
+import { Input, Select } from '../../components/ui/form-control';
 import type { MonitorFilter, MonitorListFilters } from './filter-monitors';
 
 export function MonitorFiltersDialog({
@@ -17,13 +18,18 @@ export function MonitorFiltersDialog({
   const [draft, setDraft] = useState(filters);
   const dialogRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const activeCount = Number(Boolean(filters.name)) + Number(filters.state !== 'all') + Number(Boolean(filters.location));
+  const activeCount =
+    Number(Boolean(filters.name)) +
+    Number(filters.state !== 'all') +
+    Number(Boolean(filters.location));
 
   useEffect(() => {
     if (!open) return;
     const previous = document.activeElement as HTMLElement | null;
     const trigger = triggerRef.current;
-    window.requestAnimationFrame(() => dialogRef.current?.querySelector<HTMLElement>('input, select')?.focus());
+    window.requestAnimationFrame(() =>
+      dialogRef.current?.querySelector<HTMLElement>('input, select')?.focus(),
+    );
     const handleEscape = (event: globalThis.KeyboardEvent) => {
       if (event.key === 'Escape') setOpen(false);
     };
@@ -119,7 +125,14 @@ export function MonitorFiltersDialog({
                 className="grid size-8 shrink-0 place-items-center rounded-rail-control border-0 bg-transparent text-rail-muted hover:bg-rail-hover hover:text-rail-text"
                 onClick={() => setOpen(false)}
               >
-                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true" className="size-4">
+                <svg
+                  viewBox="0 0 20 20"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  aria-hidden="true"
+                  className="size-4"
+                >
                   <path d="m5 5 10 10M15 5 5 15" />
                 </svg>
               </button>
@@ -128,34 +141,43 @@ export function MonitorFiltersDialog({
               <div className="grid gap-4 p-5">
                 <label className="grid gap-1.5 text-xs text-rail-subtle">
                   Monitor name
-                  <input
+                  <Input
                     type="search"
                     value={draft.name}
                     placeholder="Search by name"
-                    className="min-h-9 rounded-rail-control border border-rail-border bg-rail-input px-3 text-sm text-rail-text placeholder:text-rail-muted"
-                    onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
+                    controlSize="compact"
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, name: event.target.value }))
+                    }
                   />
                 </label>
                 <label className="grid gap-1.5 text-xs text-rail-subtle">
                   State
-                  <select
+                  <Select
                     value={draft.state}
-                    className="min-h-9 rounded-rail-control border border-rail-border bg-rail-input px-3 text-sm text-rail-text"
-                    onChange={(event) => setDraft((current) => ({ ...current, state: event.target.value as MonitorFilter }))}
+                    controlSize="compact"
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        state: event.target.value as MonitorFilter,
+                      }))
+                    }
                   >
                     <option value="all">All states</option>
                     <option value="operational">Operational</option>
                     <option value="attention">Needs attention</option>
                     <option value="paused">Paused</option>
                     <option value="pending">Awaiting evidence</option>
-                  </select>
+                  </Select>
                 </label>
                 <label className="grid gap-1.5 text-xs text-rail-subtle">
                   Location
-                  <select
+                  <Select
                     value={draft.location}
-                    className="min-h-9 rounded-rail-control border border-rail-border bg-rail-input px-3 text-sm text-rail-text"
-                    onChange={(event) => setDraft((current) => ({ ...current, location: event.target.value }))}
+                    controlSize="compact"
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, location: event.target.value }))
+                    }
                   >
                     <option value="">All locations</option>
                     {locations.map((location) => (
@@ -163,7 +185,7 @@ export function MonitorFiltersDialog({
                         {location}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </label>
               </div>
               <div className="flex items-center justify-between gap-3 border-t border-rail-border px-5 py-4">

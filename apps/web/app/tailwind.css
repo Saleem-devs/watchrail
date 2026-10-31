@@ -95,9 +95,14 @@
     margin-inline-start: 0;
   }
 
-  :where(button, a, input, select, textarea, summary):focus-visible {
+  :where(button, a, summary, input[type='checkbox'], input[type='radio']):focus-visible {
     outline: 2px solid var(--color-rail-accent);
     outline-offset: 3px;
+  }
+
+  :where(input:not([type='checkbox']):not([type='radio']), select, textarea):focus-visible {
+    outline: none;
+    border-color: var(--color-rail-accent);
   }
 
   @media (prefers-reduced-motion: reduce) {

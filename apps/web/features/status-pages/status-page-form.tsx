@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { AppShell } from '../../components/app-shell';
 import { actionClassName, Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/form-control';
 import { PageHeader } from '../../components/ui/page-header';
 import { apiErrorMessage, loadStatusPage, loadStatusPageMonitors } from './status-page-api';
 import { publicMonitorState } from './status-page-status';
@@ -257,19 +258,18 @@ export function StatusPageForm({
                 <div className="grid gap-4 sm:grid-cols-2">
                   <label className="grid gap-2 text-sm font-medium text-rail-text">
                     Name
-                    <input
+                    <Input
                       name="name"
                       required
                       maxLength={100}
                       value={name}
                       onChange={(event) => updateName(event.target.value)}
-                      className="min-h-10 rounded-rail-control border border-rail-border-strong bg-rail-input px-3 text-sm text-rail-text outline-none focus:border-rail-accent focus:ring-1 focus:ring-rail-accent"
                       placeholder="Customer-facing service status"
                     />
                   </label>
                   <label className="grid gap-2 text-sm font-medium text-rail-text">
                     Public slug
-                    <input
+                    <Input
                       name="slug"
                       required
                       minLength={3}
@@ -280,7 +280,6 @@ export function StatusPageForm({
                         setSlugEdited(true);
                         setSlug(event.target.value.toLowerCase());
                       }}
-                      className="min-h-10 rounded-rail-control border border-rail-border-strong bg-rail-input px-3 text-sm text-rail-text outline-none focus:border-rail-accent focus:ring-1 focus:ring-rail-accent"
                       placeholder="service-status"
                       aria-describedby="status-page-url-preview"
                     />
@@ -291,13 +290,12 @@ export function StatusPageForm({
                 </p>
                 <label className="mt-4 grid gap-2 text-sm font-medium text-rail-text">
                   Brand logo URL
-                  <input
+                  <Input
                     name="logoUrl"
                     type="url"
                     maxLength={2048}
                     value={logoUrl}
                     onChange={(event) => setLogoUrl(event.target.value)}
-                    className="min-h-10 rounded-rail-control border border-rail-border-strong bg-rail-input px-3 text-sm text-rail-text outline-none focus:border-rail-accent focus:ring-1 focus:ring-rail-accent"
                     aria-describedby="status-page-logo-help"
                   />
                   <span id="status-page-logo-help" className="text-xs font-normal text-rail-muted">
@@ -363,25 +361,25 @@ export function StatusPageForm({
                             <div className="mt-3 grid gap-3 pl-7 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
                               <label className="grid gap-1.5 text-xs font-medium text-rail-subtle">
                                 Public display name
-                                <input
+                                <Input
                                   required
                                   maxLength={100}
                                   value={component.displayName}
                                   onChange={(event) =>
                                     updateDisplayName(monitor.id, event.target.value)
                                   }
-                                  className="min-h-9 rounded-rail-control border border-rail-border-strong bg-rail-input px-3 text-sm text-rail-text outline-none focus:border-rail-accent focus:ring-1 focus:ring-rail-accent"
+                                  controlSize="compact"
                                 />
                               </label>
                               <label className="grid gap-1.5 text-xs font-medium text-rail-subtle">
                                 Group
-                                <input
+                                <Input
                                   maxLength={100}
                                   value={component.groupName}
                                   onChange={(event) =>
                                     updateGroupName(monitor.id, event.target.value)
                                   }
-                                  className="min-h-9 rounded-rail-control border border-rail-border-strong bg-rail-input px-3 text-sm text-rail-text outline-none focus:border-rail-accent focus:ring-1 focus:ring-rail-accent"
+                                  controlSize="compact"
                                   placeholder="Services"
                                 />
                               </label>

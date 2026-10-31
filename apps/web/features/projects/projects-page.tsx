@@ -5,10 +5,11 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { AppShell } from '../../components/app-shell';
 import { actionClassName, Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/form-control';
 import { PageHeader } from '../../components/ui/page-header';
 import type { ProjectApiError, WorkspaceProject } from './types';
 
-export function ProjectsPage() {
+export function ProjectsPage({ workspaceId }: { workspaceId: string }) {
   const router = useRouter();
   const [projects, setProjects] = useState<WorkspaceProject[]>([]);
   const [query, setQuery] = useState('');
@@ -72,8 +73,8 @@ export function ProjectsPage() {
   }
 
   return (
-    <AppShell page="projects">
-      <main id="main-content" className="w-full min-w-0 pb-16">
+    <AppShell page="projects" workspaceId={workspaceId}>
+      <main id="main-content" data-watchrail-workspace className="w-full min-w-0 pb-16">
         <PageHeader
           title="Projects"
           description="Keep each product’s monitors, incidents, and public status separate."
@@ -94,7 +95,7 @@ export function ProjectsPage() {
           }
         />
 
-        <div className="mt-6 flex max-w-md items-center gap-2 rounded-rail-control border border-rail-border bg-rail-surface px-3 focus-within:border-rail-border-strong focus-within:ring-2 focus-within:ring-rail-accent/20">
+        <div className="mt-6 flex max-w-md items-center gap-2 rounded-rail-control border border-rail-border bg-rail-surface px-3 focus-within:border-rail-accent">
           <svg
             viewBox="0 0 20 20"
             fill="none"
@@ -114,7 +115,7 @@ export function ProjectsPage() {
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search projects"
-            className="min-h-10 min-w-0 flex-1 border-0 bg-transparent text-sm text-rail-text outline-none placeholder:text-rail-muted"
+            className="min-h-10 min-w-0 flex-1 border-0 bg-transparent text-sm text-rail-text outline-none placeholder:text-rail-muted focus-visible:!outline-none"
           />
         </div>
 
@@ -196,13 +197,7 @@ export function ProjectsPage() {
               </p>
               <label className="grid gap-1.5 text-xs font-medium text-rail-subtle">
                 Project name
-                <input
-                  name="name"
-                  required
-                  maxLength={120}
-                  autoFocus
-                  className="min-h-10 rounded-rail-control border border-rail-border bg-rail-surface px-3 text-sm text-rail-text outline-none focus:border-rail-accent"
-                />
+                <Input name="name" required maxLength={120} autoFocus />
               </label>
               {fieldErrors?.name?.[0] ? (
                 <p className="mt-1 text-xs text-rail-danger">{fieldErrors.name[0]}</p>
@@ -212,11 +207,7 @@ export function ProjectsPage() {
                 <span className="font-normal text-rail-muted">
                   Optional—generated from the name
                 </span>
-                <input
-                  name="slug"
-                  maxLength={63}
-                  className="min-h-10 rounded-rail-control border border-rail-border bg-rail-surface px-3 text-sm text-rail-text outline-none focus:border-rail-accent"
-                />
+                <Input name="slug" maxLength={63} />
               </label>
               {fieldErrors?.slug?.[0] ? (
                 <p className="mt-1 text-xs text-rail-danger">{fieldErrors.slug[0]}</p>

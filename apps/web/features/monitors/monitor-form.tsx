@@ -1,6 +1,7 @@
 'use client';
 
 import { useId, useState, type FormEvent } from 'react';
+import { Input, Select } from '../../components/ui/form-control';
 import type { FieldErrors, Monitor } from './types';
 
 export interface MonitorFormValues {
@@ -54,7 +55,7 @@ export function MonitorForm({
                 htmlFor={`${id}-name`}
               >
                 Monitor name
-                <input
+                <Input
                   id={`${id}-name`}
                   name="name"
                   type="text"
@@ -65,7 +66,6 @@ export function MonitorForm({
                   required
                   aria-describedby={errors.name ? nameErrorId : undefined}
                   aria-invalid={Boolean(errors.name)}
-                  className="min-h-10 rounded-rail-control border border-rail-border-strong bg-rail-input px-3 text-sm font-normal text-rail-text placeholder:text-rail-muted"
                 />
                 {errors.name ? (
                   <span className="font-normal text-rail-danger" id={nameErrorId}>
@@ -79,7 +79,7 @@ export function MonitorForm({
                 htmlFor={`${id}-url`}
               >
                 HTTP(S) URL
-                <input
+                <Input
                   id={`${id}-url`}
                   name="url"
                   type="url"
@@ -90,7 +90,6 @@ export function MonitorForm({
                   required
                   aria-describedby={errors.url ? urlErrorId : urlHelpId}
                   aria-invalid={Boolean(errors.url)}
-                  className="min-h-10 rounded-rail-control border border-rail-border-strong bg-rail-input px-3 text-sm font-normal text-rail-text placeholder:text-rail-muted"
                 />
                 {errors.url ? (
                   <span className="font-normal text-rail-danger" id={urlErrorId}>
@@ -112,7 +111,7 @@ export function MonitorForm({
             </p>
             <div className="mt-4 grid gap-2 sm:grid-cols-2">
               <label className="flex min-h-20 cursor-pointer items-start gap-3 rounded-rail-control border border-rail-border bg-rail-surface px-4 py-3 hover:border-rail-border-strong has-[:checked]:border-rail-accent has-[:checked]:bg-rail-accent/5">
-                <input
+                <Input
                   name="statusPolicyMode"
                   type="radio"
                   value="ANY_2XX"
@@ -131,7 +130,7 @@ export function MonitorForm({
                 </span>
               </label>
               <label className="flex min-h-20 cursor-pointer items-start gap-3 rounded-rail-control border border-rail-border bg-rail-surface px-4 py-3 hover:border-rail-border-strong has-[:checked]:border-rail-accent has-[:checked]:bg-rail-accent/5">
-                <input
+                <Input
                   name="statusPolicyMode"
                   type="radio"
                   value="EXACT"
@@ -156,7 +155,7 @@ export function MonitorForm({
                 htmlFor={`${id}-status-codes`}
               >
                 Accepted status codes
-                <input
+                <Input
                   id={`${id}-status-codes`}
                   name="statusCodes"
                   type="text"
@@ -170,7 +169,6 @@ export function MonitorForm({
                   required
                   aria-describedby={errors.statusPolicy ? policyErrorId : policyHelpId}
                   aria-invalid={Boolean(errors.statusPolicy)}
-                  className="min-h-10 rounded-rail-control border border-rail-border-strong bg-rail-input px-3 text-sm font-normal text-rail-text placeholder:text-rail-muted"
                 />
                 {errors.statusPolicy ? (
                   <span className="font-normal text-rail-danger" id={policyErrorId}>
@@ -199,15 +197,14 @@ export function MonitorForm({
           <div className="grid gap-4 px-5 py-5">
             <label className="grid gap-1.5 text-xs font-medium text-rail-subtle">
               Method
-              <select
+              <Select
                 name="method"
                 defaultValue={initialValues?.method ?? 'GET'}
                 aria-invalid={Boolean(errors.method)}
-                className="min-h-10 rounded-rail-control border border-rail-border-strong bg-rail-input px-3 text-sm font-normal text-rail-text"
               >
                 <option value="GET">GET</option>
                 <option value="HEAD">HEAD</option>
-              </select>
+              </Select>
               {errors.method ? (
                 <span className="font-normal text-rail-danger">{errors.method[0]}</span>
               ) : null}
@@ -215,7 +212,7 @@ export function MonitorForm({
             <label className="grid gap-1.5 text-xs font-medium text-rail-subtle">
               Timeout
               <div className="relative">
-                <input
+                <Input
                   name="timeoutSeconds"
                   type="number"
                   min="1"
@@ -224,7 +221,7 @@ export function MonitorForm({
                   defaultValue={(initialValues?.timeoutMs ?? 10_000) / 1_000}
                   required
                   aria-invalid={Boolean(errors.timeoutMs)}
-                  className="min-h-10 w-full rounded-rail-control border border-rail-border-strong bg-rail-input px-3 pr-16 text-sm font-normal text-rail-text"
+                  className="pr-16"
                 />
                 <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-rail-muted">
                   seconds
@@ -236,29 +233,27 @@ export function MonitorForm({
             </label>
             <label className="grid gap-1.5 text-xs font-medium text-rail-subtle">
               Location
-              <select
+              <Select
                 name="location"
                 defaultValue={initialValues?.locations[0] ?? 'local'}
                 aria-invalid={Boolean(errors.locations)}
-                className="min-h-10 rounded-rail-control border border-rail-border-strong bg-rail-input px-3 text-sm font-normal text-rail-text"
               >
                 <option value="local">Local</option>
-              </select>
+              </Select>
               {errors.locations ? (
                 <span className="font-normal text-rail-danger">{errors.locations[0]}</span>
               ) : null}
             </label>
             <label className="grid gap-1.5 text-xs font-medium text-rail-subtle">
               Lifecycle
-              <select
+              <Select
                 name="lifecycleState"
                 defaultValue={initialValues?.lifecycleState ?? 'ENABLED'}
                 aria-invalid={Boolean(errors.lifecycleState)}
-                className="min-h-10 rounded-rail-control border border-rail-border-strong bg-rail-input px-3 text-sm font-normal text-rail-text"
               >
                 <option value="ENABLED">Enabled</option>
                 <option value="PAUSED">Paused</option>
-              </select>
+              </Select>
               {errors.lifecycleState ? (
                 <span className="font-normal text-rail-danger">{errors.lifecycleState[0]}</span>
               ) : null}

@@ -43,14 +43,17 @@ a {
 
 button:focus-visible,
 a:focus-visible,
-input:focus-visible {
+input[type='checkbox']:focus-visible,
+input[type='radio']:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
 
-select:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
+input:not([type='checkbox']):not([type='radio']):focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  border-color: var(--accent);
 }
 
 main:not([data-watchrail-dashboard]):not([data-watchrail-workspace]) {

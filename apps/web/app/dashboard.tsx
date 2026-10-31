@@ -764,6 +764,7 @@ export function Dashboard({
         {view !== 'detail' && view !== 'edit' ? (
           <DashboardHeader
             view={view === 'create' ? 'create' : view === 'monitors' ? 'monitors' : 'overview'}
+            basePath={projectBase}
             actions={
               view === 'monitors' ? (
                 <>
