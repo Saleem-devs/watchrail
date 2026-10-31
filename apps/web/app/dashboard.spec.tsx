@@ -249,6 +249,44 @@ describe('Dashboard', () => {
     });
   });
 
+  it('invalidates configuration-test results for custom selects and dynamic assertion rows', async () => {
+    const projectId = '00000000-0000-4000-8000-000000000003';
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url === '/api/projects') return Promise.resolve(projectListResponse(projectId));
+      return Promise.resolve(
+        url.includes('/test-configuration')
+          ? configurationTestResponse()
+          : new Response(JSON.stringify({ data: [] }), { status: 200 }),
+      );
+    });
+
+    render(<Dashboard view="create" projectId={projectId} />);
+    await userEvent.type(
+      await screen.findByRole('textbox', { name: 'Monitor name' }),
+      'Production API',
+    );
+    await userEvent.type(
+      screen.getByRole('textbox', { name: /HTTP\(S\) URL/i }),
+      'https://status.watchrail.app/health',
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Test configuration' }));
+    expect(await screen.findByLabelText('Configuration test result')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('combobox', { name: 'Method' }));
+    await userEvent.click(screen.getByRole('option', { name: 'HEAD' }));
+    expect(screen.queryByLabelText('Configuration test result')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('combobox', { name: 'Method' }));
+    await userEvent.click(screen.getByRole('option', { name: 'GET' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Test configuration' }));
+    expect(await screen.findByLabelText('Configuration test result')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Add text' }));
+    expect(screen.getByText('Text body')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Configuration test result')).not.toBeInTheDocument();
+  });
+
   it('runs a manual diagnostic and replaces its pending state with the result', async () => {
     const monitor = {
       id: 'monitor-1',

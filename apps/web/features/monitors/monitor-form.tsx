@@ -68,9 +68,9 @@ export function MonitorForm({
       onSubmit={onSubmit}
       onChange={onConfigurationChange}
       onClickCapture={(event) => {
-        if (event.target instanceof Element && event.target.closest('button[type="button"]')) {
-          onConfigurationChange();
-        }
+        if (!(event.target instanceof Element)) return;
+        const button = event.target.closest('button[type="button"]');
+        if (button && button.getAttribute('role') !== 'combobox') onConfigurationChange();
       }}
       aria-busy={submitting}
       noValidate

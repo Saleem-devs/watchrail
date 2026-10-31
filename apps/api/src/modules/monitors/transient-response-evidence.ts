@@ -5,6 +5,7 @@ import type {
   HttpResponseHeader,
 } from '@watchrail/check-engine';
 import type { HttpStatusPolicy } from '@watchrail/domain';
+import { isSensitiveFieldName } from './sensitive-field.js';
 
 export const RESPONSE_PREVIEW_LIMIT_BYTES = 8 * 1024;
 const RESPONSE_HEADER_LIMIT = 64;
@@ -12,24 +13,6 @@ const RESPONSE_HEADER_VALUE_LIMIT = 1_024;
 const REDACTED = '[REDACTED]';
 const sensitiveHeaderName =
   /^(authorization|proxy-authorization|proxy-authenticate|set-cookie|cookie|www-authenticate|x-api-key|x-auth-token)$/iu;
-const sensitiveJsonKeys = new Set([
-  'accesstoken',
-  'apikey',
-  'authorization',
-  'authtoken',
-  'clientsecret',
-  'cookie',
-  'credential',
-  'credentials',
-  'password',
-  'passwd',
-  'privatekey',
-  'refreshtoken',
-  'secret',
-  'session',
-  'sessionid',
-  'token',
-]);
 
 export interface SafeTransientCheckResult {
   result: Omit<HttpCheckResult, 'responseEvidence'>;
@@ -177,7 +160,7 @@ function redactJsonValue(value: unknown): unknown {
   return Object.fromEntries(
     Object.entries(value).map(([key, child]) => [
       key,
-      isSensitiveJsonKey(key) ? REDACTED : redactJsonValue(child),
+      isSensitiveFieldName(key) ? REDACTED : redactJsonValue(child),
     ]),
   );
 }
@@ -187,10 +170,6 @@ function redactKnownSecrets(value: string, secretValues: readonly string[]): str
     .filter((secret) => secret.length > 0)
     .sort((left, right) => right.length - left.length)
     .reduce((text, secret) => text.split(secret).join(REDACTED), value);
-}
-
-function isSensitiveJsonKey(key: string): boolean {
-  return sensitiveJsonKeys.has(key.replace(/[^a-z0-9]/giu, '').toLowerCase());
 }
 
 function headerValue(headers: readonly HttpResponseHeader[], name: string): string | null {

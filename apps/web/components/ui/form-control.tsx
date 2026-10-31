@@ -5,6 +5,7 @@ import {
   Children,
   isValidElement,
   useId,
+  useRef,
   useState,
   type ChangeEvent,
   type InputHTMLAttributes,
@@ -108,6 +109,7 @@ export function Select({
   value,
 }: SelectProps) {
   const generatedId = useId();
+  const hiddenInputRef = useRef<HTMLInputElement>(null);
   const options = selectOptions(children);
   const controlled = value !== undefined;
   const initialValue = String(value ?? defaultValue ?? options[0]?.value ?? '');
@@ -119,11 +121,12 @@ export function Select({
     const nextValue = nextRadixValue === EMPTY_VALUE ? '' : nextRadixValue;
     if (!controlled) setUncontrolledValue(nextValue);
     onChange?.({ target: { value: nextValue } } as ChangeEvent<HTMLSelectElement>);
+    hiddenInputRef.current?.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
   return (
     <>
-      {name ? <input type="hidden" name={name} value={currentValue} /> : null}
+      {name ? <input ref={hiddenInputRef} type="hidden" name={name} value={currentValue} /> : null}
       <SelectPrimitive.Root
         value={radixValue}
         onValueChange={change}

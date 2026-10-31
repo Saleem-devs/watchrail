@@ -30,6 +30,7 @@ import {
   toSafeTransientCheckResult,
   type SafeTransientCheckResult,
 } from './transient-response-evidence.js';
+import { isSensitiveFieldName } from './sensitive-field.js';
 
 export class MonitorConfigurationTestRateLimiter extends PublicStatusPageRateLimiter {
   constructor() {
@@ -194,7 +195,7 @@ function secretValues(
     .map((header) => header.value);
   const parsedUrl = new URL(url);
   for (const [name, value] of parsedUrl.searchParams) {
-    if (sensitiveFieldName.test(name)) values.push(value);
+    if (isSensitiveFieldName(name)) values.push(value);
   }
   if (requestBody?.type === 'JSON') {
     try {
@@ -204,7 +205,7 @@ function secretValues(
     }
   } else if (requestBody?.type === 'FORM_URLENCODED') {
     for (const field of requestBody.fields) {
-      if (sensitiveFieldName.test(field.name)) values.push(field.value);
+      if (isSensitiveFieldName(field.name)) values.push(field.value);
     }
   }
   for (const assertion of [...assertions.headers, ...assertions.textBody, ...assertions.jsonBody]) {
@@ -216,9 +217,6 @@ function secretValues(
   return values;
 }
 
-const sensitiveFieldName =
-  /(?:^|[-_])(api[-_]?key|authorization|cookie|credential|password|passwd|private[-_]?key|refresh[-_]?token|secret|session|token)(?:$|[-_])/iu;
-
 function collectSensitiveJsonValues(value: unknown, output: string[]): void {
   if (Array.isArray(value)) {
     for (const item of value) collectSensitiveJsonValues(item, output);
@@ -226,7 +224,7 @@ function collectSensitiveJsonValues(value: unknown, output: string[]): void {
   }
   if (!value || typeof value !== 'object') return;
   for (const [key, child] of Object.entries(value)) {
-    if (sensitiveFieldName.test(key)) {
+    if (isSensitiveFieldName(key)) {
       const secret = sensitiveTargetValue(child);
       if (secret !== null) output.push(secret);
     } else {

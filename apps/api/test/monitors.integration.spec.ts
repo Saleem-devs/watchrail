@@ -1087,6 +1087,59 @@ describe('monitor API', () => {
       .expect(404);
   });
 
+  it('redacts camel-case request secrets reflected under ordinary response keys and in text', async () => {
+    executeTransient
+      .mockResolvedValueOnce({
+        type: 'RESPONSE',
+        statusCode: 200,
+        responseTimeMs: 9,
+        headers: [{ name: 'content-type', values: ['application/json'] }],
+        body: {
+          state: 'CAPTURED',
+          text: JSON.stringify({ echo: 'abc123', detail: 'credential-value' }),
+        },
+        redirects: [],
+      })
+      .mockResolvedValueOnce({
+        type: 'RESPONSE',
+        statusCode: 200,
+        responseTimeMs: 7,
+        headers: [{ name: 'content-type', values: ['text/plain'] }],
+        body: { state: 'CAPTURED', text: 'received abc123 and credential-value' },
+        redirects: [],
+      });
+
+    const configuration = {
+      httpSettings: {
+        url: 'https://example.com/echo',
+        method: 'POST',
+        timeoutMs: 8_000,
+        followRedirects: true,
+        requestBody: {
+          type: 'JSON',
+          value: JSON.stringify({ accessToken: 'abc123', credentials: 'credential-value' }),
+        },
+      },
+      statusPolicy: { type: 'ANY_2XX' },
+      requestHeaders: [],
+      assertions: { headers: [], textBody: [], jsonBody: [] },
+    };
+
+    const jsonResponse = await request(app.getHttpServer())
+      .post(`/api/monitors/test-configuration?projectId=${projectId}`)
+      .send(configuration)
+      .expect(201);
+    const textResponse = await request(app.getHttpServer())
+      .post(`/api/monitors/test-configuration?projectId=${projectId}`)
+      .send(configuration)
+      .expect(201);
+
+    for (const response of [jsonResponse, textResponse]) {
+      expect(JSON.stringify(response.body)).not.toMatch(/abc123|credential-value/u);
+      expect(JSON.stringify(response.body)).toContain('[REDACTED]');
+    }
+  });
+
   it('validates create-form configuration tests without saving a monitor', async () => {
     const before = await database.$client.query('select count(*)::int as count from monitors');
     await request(app.getHttpServer())
