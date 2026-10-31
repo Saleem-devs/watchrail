@@ -2,6 +2,7 @@
 
 import { Suspense, type FormEvent, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { Form } from '../../../components/ui/form';
 import { authClient, ensureActiveOrganization } from '../../../lib/auth-client';
 import { safeNextPath } from '../../../lib/safe-next-path';
 
@@ -99,7 +100,7 @@ function OtpVerifyForm() {
         We sent a 6-digit code to <strong>{email}</strong>. Enter it below to sign in.
       </p>
 
-      <form onSubmit={(e) => void handleVerify(e)} noValidate>
+      <Form onSubmit={(e) => void handleVerify(e)} noValidate>
         <label className="sign-in-label" htmlFor="otp">
           Verification code
         </label>
@@ -136,7 +137,7 @@ function OtpVerifyForm() {
         >
           {verifying ? 'Verifying…' : 'Verify code'}
         </button>
-      </form>
+      </Form>
 
       <div className="sign-in-resend">
         {resendCountdown > 0 ? (

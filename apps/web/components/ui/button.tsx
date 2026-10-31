@@ -28,7 +28,7 @@ export function actionClassName({
   size?: ButtonSize;
   className?: string | undefined;
 } = {}): string {
-  return `inline-flex items-center justify-center gap-2 rounded-rail-control border font-medium no-underline transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rail-accent disabled:cursor-not-allowed disabled:opacity-50 ${variants[variant]} ${sizes[size]} ${className}`.trim();
+  return `inline-flex cursor-pointer items-center justify-center gap-2 rounded-rail-control border font-medium no-underline transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rail-accent disabled:cursor-not-allowed disabled:opacity-50 ${variants[variant]} ${sizes[size]} ${className}`.trim();
 }
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {

@@ -2,7 +2,7 @@
 
 import { useId, useRef, useState } from 'react';
 import { Button } from '../../components/ui/button';
-import { Input, Select } from '../../components/ui/form-control';
+import { Checkbox, Input, Select } from '../../components/ui/form-control';
 import {
   ASSERTION_MAX_COUNT,
   newAssertionRow,
@@ -183,10 +183,13 @@ function AssertionRow({
             {SOURCE_LABELS[row.source]}
           </strong>
         </div>
-        <button
+        <Button
           type="button"
-          className="grid size-10 shrink-0 place-items-center rounded-rail-control text-rail-muted transition-colors hover:bg-rail-hover hover:text-rail-text"
+          variant="quiet"
+          size="compact"
+          className="size-9 shrink-0 p-0 text-rail-muted hover:text-rail-danger"
           aria-label={`Remove ${SOURCE_LABELS[row.source].toLowerCase()} assertion ${index + 1}`}
+          title="Remove assertion"
           onClick={onRemove}
         >
           <svg
@@ -198,9 +201,9 @@ function AssertionRow({
             strokeWidth="1.6"
             strokeLinecap="round"
           >
-            <path d="M5 5l10 10M15 5 5 15" />
+            <path d="M4 5.5h12M7 5.5V4h6v1.5M6 7.5l.6 8h6.8l.6-8M8.5 8.5v4.5M11.5 8.5v4.5" />
           </svg>
-        </button>
+        </Button>
       </div>
       <div className="grid gap-3 md:grid-cols-[minmax(10rem,1fr)_minmax(10rem,0.8fr)_minmax(12rem,1.2fr)]">
         {row.source === 'TEXT_BODY' ? (
@@ -211,7 +214,7 @@ function AssertionRow({
             </div>
           </div>
         ) : (
-          <label className="grid gap-1.5 text-xs font-medium text-rail-subtle">
+          <label className="grid content-start gap-1.5 text-xs font-medium text-rail-subtle">
             {row.source === 'HEADER' ? 'Header name' : 'JSON selector'}
             <Input
               value={row.subject}
@@ -225,7 +228,7 @@ function AssertionRow({
             />
           </label>
         )}
-        <label className="grid gap-1.5 text-xs font-medium text-rail-subtle">
+        <label className="grid content-start gap-1.5 text-xs font-medium text-rail-subtle">
           Operator
           <Select
             value={row.operator}
@@ -268,7 +271,7 @@ function TargetField({
   const isJson = row.source === 'JSON_BODY';
   const valueDisabled = isJson && row.targetType === 'null';
   return (
-    <div className="grid gap-1.5 text-xs font-medium text-rail-subtle">
+    <div className="grid content-start gap-1.5 text-xs font-medium text-rail-subtle">
       <span>Expected value</span>
       <div className={`grid gap-2 ${isJson ? 'sm:grid-cols-[7.5rem_minmax(0,1fr)]' : ''}`}>
         {isJson ? (
@@ -323,9 +326,7 @@ function TargetField({
         )}
       </div>
       <label className="mt-1 flex min-h-8 cursor-pointer items-center gap-2 font-normal text-rail-muted">
-        <input
-          type="checkbox"
-          className="size-4"
+        <Checkbox
           checked={row.sensitive}
           disabled={row.targetType === 'null'}
           onChange={(event) =>

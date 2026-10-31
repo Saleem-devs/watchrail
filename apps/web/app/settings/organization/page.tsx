@@ -3,6 +3,8 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { Checkbox, Select } from '../../../components/ui/form-control';
+import { Form } from '../../../components/ui/form';
 
 type Member = {
   id: string;
@@ -180,7 +182,7 @@ export default function OrganizationSettingsPage() {
       <section id="general" className="settings-card scroll-mt-16">
         <h2>General</h2>
         {organization && (
-          <form onSubmit={saveOrganization} className="settings-form">
+          <Form onSubmit={saveOrganization} className="settings-form">
             <label>
               Name
               <input name="name" defaultValue={organization.name} required maxLength={120} />
@@ -190,7 +192,7 @@ export default function OrganizationSettingsPage() {
               <input name="slug" defaultValue={organization.slug} required />
             </label>
             <button type="submit">Save organization</button>
-          </form>
+          </Form>
         )}
       </section>
 
@@ -203,7 +205,7 @@ export default function OrganizationSettingsPage() {
                 <strong>{member.user?.name ?? member.user?.email ?? member.userId}</strong>
                 <small>{member.user?.email}</small>
               </div>
-              <select
+              <Select
                 aria-label="Member role"
                 value={member.role}
                 onChange={(event) => void changeRole(member.id, event.target.value)}
@@ -213,7 +215,7 @@ export default function OrganizationSettingsPage() {
                 <option value="admin">Admin</option>
                 <option value="editor">Editor</option>
                 <option value="viewer">Viewer</option>
-              </select>
+              </Select>
               {member.role !== 'owner' && (
                 <button
                   className="danger"
@@ -234,21 +236,21 @@ export default function OrganizationSettingsPage() {
 
       <section id="invitations" className="settings-card scroll-mt-16">
         <h2>Invitations</h2>
-        <form onSubmit={invite} className="settings-form inline">
+        <Form onSubmit={invite} className="settings-form inline">
           <label>
             Email
             <input name="email" type="email" required />
           </label>
           <label>
             Role
-            <select name="role" defaultValue="viewer">
+            <Select name="role" defaultValue="viewer">
               <option value="admin">Admin</option>
               <option value="editor">Editor</option>
               <option value="viewer">Viewer</option>
-            </select>
+            </Select>
           </label>
           <button type="submit">Invite member</button>
-        </form>
+        </Form>
         <div className="settings-list">
           {invitations.map((invitation) => (
             <div key={invitation.id} className="settings-row">
@@ -276,7 +278,7 @@ export default function OrganizationSettingsPage() {
 
       <section id="api-credentials" className="settings-card scroll-mt-16">
         <h2>API credentials</h2>
-        <form onSubmit={createCredential} className="settings-form">
+        <Form onSubmit={createCredential} className="settings-form">
           <label>
             Name
             <input name="name" required maxLength={120} />
@@ -285,12 +287,12 @@ export default function OrganizationSettingsPage() {
             <legend>Permissions</legend>
             {credentialScopes.map(([scope, label]) => (
               <label className="scope-option" key={scope}>
-                <input type="checkbox" name={scope} /> {label}
+                <Checkbox name={scope} /> {label}
               </label>
             ))}
           </fieldset>
           <button type="submit">Create credential</button>
-        </form>
+        </Form>
         {secret && (
           <div className="credential-secret">
             <strong>One-time secret</strong>
@@ -322,10 +324,10 @@ export default function OrganizationSettingsPage() {
 
       <section className="settings-card danger-zone">
         <h2>Organization lifecycle</h2>
-        <form onSubmit={transferOwnership} className="settings-form inline">
+        <Form onSubmit={transferOwnership} className="settings-form inline">
           <label>
             Transfer ownership to
-            <select name="userId" required defaultValue="">
+            <Select name="userId" required defaultValue="">
               <option value="" disabled>
                 Select a member
               </option>
@@ -336,10 +338,10 @@ export default function OrganizationSettingsPage() {
                     {member.user?.email ?? member.userId}
                   </option>
                 ))}
-            </select>
+            </Select>
           </label>
           <button type="submit">Transfer ownership</button>
-        </form>
+        </Form>
         <div className="settings-actions">
           <button type="button" className="danger" onClick={() => void leaveOrganization()}>
             Leave organization

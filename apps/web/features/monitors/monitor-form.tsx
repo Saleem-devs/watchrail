@@ -1,9 +1,10 @@
 'use client';
 
 import { useId, useState, type FormEvent } from 'react';
-import { Input, Select } from '../../components/ui/form-control';
+import { Checkbox, Input, Select } from '../../components/ui/form-control';
+import { Form } from '../../components/ui/form';
 import { RequestHeadersField, type RequestHeaderFormValue } from './request-headers-field';
-import { HttpMethodOptions } from './http-method-options';
+import { HTTP_METHODS } from './http-method-options';
 import { endpointBaseUrl, QueryParametersField } from './query-parameters-field';
 import { RequestBodyField, type RequestBodyValue } from './request-body-field';
 import { ResponseAssertionsField } from './response-assertions-field';
@@ -51,7 +52,7 @@ export function MonitorForm({
   const policyErrorId = `${id}-policy-error`;
 
   return (
-    <form id={formId} className="min-w-0 p-0" onSubmit={onSubmit} aria-busy={submitting} noValidate>
+    <Form id={formId} className="min-w-0 p-0" onSubmit={onSubmit} aria-busy={submitting} noValidate>
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_18rem]">
         <div className="overflow-hidden rounded-rail-panel border border-rail-border bg-rail-raised">
           <section className="border-b border-rail-border px-5 py-5 sm:px-6">
@@ -94,7 +95,7 @@ export function MonitorForm({
                   name="url"
                   type="url"
                   defaultValue={endpointBaseUrl(initialValues?.url)}
-                  placeholder="https://api.example.com/health"
+                  placeholder="https://status.watchrail.app/health"
                   inputMode="url"
                   autoComplete="url"
                   required
@@ -232,7 +233,11 @@ export function MonitorForm({
                 onChange={(event) => setMethod(event.target.value)}
                 aria-invalid={Boolean(errors.method)}
               >
-                <HttpMethodOptions />
+                {HTTP_METHODS.map((httpMethod) => (
+                  <option key={httpMethod} value={httpMethod}>
+                    {httpMethod}
+                  </option>
+                ))}
               </Select>
               {errors.method ? (
                 <span className="font-normal text-rail-danger">{errors.method[0]}</span>
@@ -288,12 +293,10 @@ export function MonitorForm({
               ) : null}
             </label>
             <label className="flex min-h-10 cursor-pointer items-center gap-2.5 rounded-rail-control border border-rail-border px-3 text-xs font-medium text-rail-subtle hover:border-rail-border-strong">
-              <input
+              <Checkbox
                 name="followRedirects"
-                type="checkbox"
                 defaultChecked={initialValues?.followRedirects ?? true}
                 aria-invalid={Boolean(errors.followRedirects)}
-                className="size-4 shrink-0"
               />
               Follow redirects
             </label>
@@ -303,6 +306,6 @@ export function MonitorForm({
           </div>
         </aside>
       </div>
-    </form>
+    </Form>
   );
 }
