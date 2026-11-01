@@ -3,12 +3,14 @@ import { and, asc, desc, eq, gte, inArray, lt, or, sql } from 'drizzle-orm';
 import {
   parseHttpRedirectHops,
   parseStoredAssertionEvaluation,
+  parseTlsCertificateEvidenceList,
   type AssertionEvaluationV1,
   type CheckRoundTrigger,
   type HttpRedirectHop,
   type AggregateRoundDecisionV1,
   type AggregateHealthState,
   type RegionalEvaluationV1,
+  type TlsCertificateEvidenceV1,
 } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
 import {
@@ -83,6 +85,7 @@ export interface CheckHistoryDetail extends Omit<CheckHistoryListItem, 'result'>
         attemptDurationMs: number;
         redirects: HttpRedirectHop[];
         assertionEvaluation: AssertionEvaluationV1;
+        tlsCertificates: TlsCertificateEvidenceV1[];
         checkedAt: Date;
       }
     | {
@@ -189,6 +192,7 @@ interface HistoryRow {
   attemptDurationMs: number | null;
   redirects: HttpRedirectHop[] | null;
   assertionEvaluation: AssertionEvaluationV1 | null;
+  tlsCertificates: TlsCertificateEvidenceV1[] | null;
   checkedAt: Date | null;
 }
 
@@ -729,6 +733,7 @@ export class CheckHistoryRepository {
             attemptDurationMs: required(row.attemptDurationMs),
             redirects: parseHttpRedirectHops(row.redirects ?? []),
             assertionEvaluation: required(assertionEvaluation),
+            tlsCertificates: parseTlsCertificateEvidenceList(row.tlsCertificates ?? []),
             checkedAt: required(row.checkedAt),
           }
         : null,
@@ -770,6 +775,7 @@ const historySelection = {
   attemptDurationMs: checkExecutionResults.attemptDurationMs,
   redirects: checkExecutionResults.redirects,
   assertionEvaluation: checkExecutionResults.assertionEvaluation,
+  tlsCertificates: checkExecutionResults.tlsCertificates,
   checkedAt: checkExecutionResults.checkedAt,
 };
 
@@ -964,9 +970,13 @@ function parseRegionalDiagnosticSummary(value: unknown): RegionalDiagnosticSumma
     'responseTimeMs',
     'stage',
     'statusCode',
+    ...(Object.hasOwn(value, 'tlsCertificates') ? ['tlsCertificates'] : []),
   ];
   if (Object.hasOwn(value, 'assertionEvaluation')) {
     parseStoredAssertionEvaluation(value.assertionEvaluation);
+  }
+  if (Object.hasOwn(value, 'tlsCertificates')) {
+    parseTlsCertificateEvidenceList(value.tlsCertificates);
   }
   const validStage = ['DNS', 'CONNECT', 'TLS', 'HTTP', 'PROBE'].includes(String(value.stage));
   const validTime = (candidate: unknown) =>

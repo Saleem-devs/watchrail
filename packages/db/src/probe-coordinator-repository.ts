@@ -62,6 +62,7 @@ export interface ProbeExecutionConfigurationRecord {
   timeoutMs: number;
   followRedirects: boolean;
   statusPolicy: unknown;
+  tlsPolicy: unknown;
   requestHeaders: unknown;
   requestBody: unknown;
   assertions: unknown;
@@ -125,6 +126,7 @@ export class ProbeCoordinatorRepository {
           timeoutMs: monitorConfigurationVersions.timeoutMs,
           followRedirects: monitorConfigurationVersions.followRedirects,
           statusPolicy: monitorConfigurationVersions.statusPolicy,
+          tlsPolicy: monitorConfigurationVersions.tlsPolicy,
           requestHeaders: monitorConfigurationVersions.requestHeaders,
           requestBody: monitorConfigurationVersions.requestBody,
           assertions: monitorConfigurationVersions.assertions,
@@ -183,6 +185,7 @@ export class ProbeCoordinatorRepository {
         timeoutMs: row.timeoutMs,
         followRedirects: row.followRedirects,
         statusPolicy: row.statusPolicy,
+        tlsPolicy: row.tlsPolicy,
         requestHeaders: row.requestHeaders,
         requestBody: row.requestBody,
         assertions: row.assertions,
@@ -768,6 +771,9 @@ function diagnosticSummaryFromResult(result: AuthoritativeCheckResult) {
     attemptDurationMs: result.attemptDurationMs,
     checkedAt: result.checkedAt.toISOString(),
     assertionEvaluation: result.assertionEvaluation,
+    ...(result.tlsCertificates === undefined
+      ? {}
+      : { tlsCertificates: [...result.tlsCertificates] }),
   } as const;
 }
 
@@ -1013,6 +1019,7 @@ function sameResult(
     stored.attemptDurationMs === result.attemptDurationMs &&
     stored.checkedAt.getTime() === result.checkedAt.getTime() &&
     isDeepStrictEqual(stored.redirects, result.redirects) &&
-    isDeepStrictEqual(stored.assertionEvaluation, result.assertionEvaluation)
+    isDeepStrictEqual(stored.assertionEvaluation, result.assertionEvaluation) &&
+    isDeepStrictEqual(stored.tlsCertificates, result.tlsCertificates ?? [])
   );
 }

@@ -57,6 +57,8 @@ describe('response assertion configuration', () => {
     formData.set('statusCodes', '200, 202');
     formData.set('requestBodyType', 'JSON');
     formData.set('requestBodyValue', '{"job":"sync"}');
+    formData.set('tlsExpiryEnabled', 'on');
+    formData.set('tlsExpiryDays', '14');
     formData.append('requestHeaderId', 'header-1');
     formData.append('requestHeaderName', 'Authorization');
     formData.append('requestHeaderValue', '');
@@ -71,6 +73,7 @@ describe('response assertion configuration', () => {
         timeoutMs: 8_000,
         followRedirects: true,
         requestBody: { type: 'JSON', value: '{"job":"sync"}' },
+        tlsPolicy: { type: 'MINIMUM_VALIDITY', days: 14 },
       },
       statusPolicy: { type: 'EXACT', statusCodes: [200, 202] },
       requestHeaders: [{ name: 'Authorization', sensitive: true, retain: true }],

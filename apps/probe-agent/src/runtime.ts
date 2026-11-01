@@ -86,6 +86,7 @@ export class ProbeAgentRuntime {
           timeoutMs: configuration.timeoutMs,
           followRedirects: configuration.followRedirects,
           statusPolicy: configuration.statusPolicy,
+          tlsPolicy: configuration.tlsPolicy ?? { type: 'DISABLED' },
           requestHeaders: configuration.requestHeaders,
           requestBody: configuration.requestBody,
           headerAssertions: assertions.headers,

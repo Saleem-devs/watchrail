@@ -17,6 +17,7 @@ import {
   parseHttpRedirectHops,
   parseHttpStatusPolicy,
   parseStoredAssertionEvaluation,
+  parseTlsCertificateEvidenceList,
 } from '@watchrail/domain';
 import { resolveRequestHeaders } from '@watchrail/http-header-security';
 import { resolveResponseAssertions } from '@watchrail/assertion-security';
@@ -66,6 +67,7 @@ export class ProbeCoordinatorService {
       timeoutMs: stored.timeoutMs,
       followRedirects: stored.followRedirects,
       statusPolicy: parseHttpStatusPolicy(stored.statusPolicy),
+      tlsPolicy: stored.tlsPolicy,
       requestHeaders: resolveRequestHeaders(
         stored.requestHeaders,
         context,
@@ -182,18 +184,20 @@ function parseClaimToken(value: string | undefined): string {
 }
 
 function parseResult(value: unknown): AuthoritativeCheckResult {
+  const resultKeys = [
+    'assertionEvaluation',
+    'attemptDurationMs',
+    'checkedAt',
+    'outcome',
+    'reason',
+    'redirects',
+    'responseTimeMs',
+    'stage',
+    'statusCode',
+  ];
   if (
-    !hasExactKeys(value, [
-      'assertionEvaluation',
-      'attemptDurationMs',
-      'checkedAt',
-      'outcome',
-      'reason',
-      'redirects',
-      'responseTimeMs',
-      'stage',
-      'statusCode',
-    ]) ||
+    (!hasExactKeys(value, resultKeys) &&
+      !hasExactKeys(value, [...resultKeys, 'tlsCertificates'])) ||
     !['PASS', 'FAIL', 'UNKNOWN'].includes(String(value.outcome)) ||
     !['DNS', 'CONNECT', 'TLS', 'HTTP', 'PROBE'].includes(String(value.stage)) ||
     ![
@@ -206,6 +210,7 @@ function parseResult(value: unknown): AuthoritativeCheckResult {
       'CERTIFICATE_NOT_YET_VALID',
       'CERTIFICATE_HOSTNAME_MISMATCH',
       'CERTIFICATE_UNTRUSTED',
+      'CERTIFICATE_EXPIRING',
       'TLS_HANDSHAKE_FAILED',
       'PROHIBITED_DESTINATION',
       'REDIRECT_LOOP',
@@ -236,6 +241,11 @@ function parseResult(value: unknown): AuthoritativeCheckResult {
     assertionEvaluation: parseOrBadRequest(() =>
       parseStoredAssertionEvaluation(value.assertionEvaluation),
     ),
+    tlsCertificates: parseOrBadRequest(() =>
+      parseTlsCertificateEvidenceList(
+        Object.hasOwn(value, 'tlsCertificates') ? value.tlsCertificates : [],
+      ),
+    ),
     checkedAt: new Date(value.checkedAt),
   };
 }
@@ -264,6 +274,7 @@ function expectedClassification(reason: string): { outcome: string; stage: strin
       'CERTIFICATE_NOT_YET_VALID',
       'CERTIFICATE_HOSTNAME_MISMATCH',
       'CERTIFICATE_UNTRUSTED',
+      'CERTIFICATE_EXPIRING',
       'TLS_HANDSHAKE_FAILED',
     ].includes(reason)
   ) {

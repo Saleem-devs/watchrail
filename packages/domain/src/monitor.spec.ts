@@ -47,6 +47,31 @@ describe('createMonitor', () => {
     ).toThrow(MonitorInputError);
   });
 
+  it('accepts supported HTTPS certificate-expiry policies and rejects them for HTTP endpoints', () => {
+    expect(
+      createMonitor({
+        name: 'API',
+        url: 'https://example.com',
+        tlsPolicy: { type: 'MINIMUM_VALIDITY', days: 30 },
+      }).tlsPolicy,
+    ).toEqual({ type: 'MINIMUM_VALIDITY', days: 30 });
+
+    expect(() =>
+      createMonitor({
+        name: 'API',
+        url: 'http://example.com',
+        tlsPolicy: { type: 'MINIMUM_VALIDITY', days: 30 },
+      }),
+    ).toThrow(MonitorInputError);
+    expect(() =>
+      createMonitor({
+        name: 'API',
+        url: 'https://example.com',
+        tlsPolicy: { type: 'MINIMUM_VALIDITY', days: 31 },
+      }),
+    ).toThrow(MonitorInputError);
+  });
+
   it('normalizes assertions and rejects retained assertion secrets during creation', () => {
     expect(
       createMonitor({
@@ -169,6 +194,27 @@ describe('monitor scheduling settings', () => {
 });
 
 describe('parseHttpMonitorSettings', () => {
+  it('preserves legacy settings and accepts a validated TLS expiry policy', () => {
+    expect(
+      parseHttpMonitorSettings({
+        url: 'https://example.com',
+        method: 'GET',
+        timeoutMs: 5_000,
+        followRedirects: true,
+        requestBody: { type: 'NONE' },
+        tlsPolicy: { type: 'MINIMUM_VALIDITY', days: 14 },
+      }),
+    ).toMatchObject({ tlsPolicy: { type: 'MINIMUM_VALIDITY', days: 14 } });
+
+    expect(
+      parseHttpMonitorSettings({
+        url: 'https://example.com',
+        method: 'GET',
+        timeoutMs: 5_000,
+        followRedirects: true,
+      }),
+    ).toMatchObject({ tlsPolicy: { type: 'DISABLED' } });
+  });
   it('accepts the complete strict HTTP settings contract', () => {
     expect(
       parseHttpMonitorSettings({
@@ -183,6 +229,7 @@ describe('parseHttpMonitorSettings', () => {
       timeoutMs: 5_000,
       followRedirects: false,
       requestBody: { type: 'NONE' },
+      tlsPolicy: { type: 'DISABLED' },
     });
   });
 

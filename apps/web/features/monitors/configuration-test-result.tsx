@@ -2,6 +2,7 @@ import { Button } from '../../components/ui/button';
 import { AssertionDiagnostics } from './assertion-diagnostics';
 import { formatMilliseconds, humanize } from './formatting';
 import type { ConfigurationTestResult, ManualRoundResultRedirect } from './types';
+import { TlsCertificateEvidencePanel } from './tls-certificate-evidence';
 
 type SignalOutcome = 'PASS' | 'FAIL' | 'UNKNOWN' | 'NOT_EVALUATED';
 
@@ -72,10 +73,11 @@ export function ConfigurationTestPanel({
         <Metric label="Attempt" value={formatMilliseconds(data.result.attemptDurationMs)} />
         <Metric label="Checked" value={new Date(data.result.checkedAt).toLocaleTimeString()} />
       </dl>
-      <dl className="grid gap-px border-t border-rail-border bg-rail-border sm:grid-cols-3">
+      <dl className="grid gap-px border-t border-rail-border bg-rail-border sm:grid-cols-2 lg:grid-cols-4">
         <Signal label="Transport" outcome={data.signals.transport} />
         <Signal label="Status policy" outcome={data.signals.statusPolicy} />
         <Signal label="Assertions" outcome={data.signals.assertions} />
+        <Signal label="TLS expiry" outcome={data.signals.tlsCertificate ?? 'NOT_EVALUATED'} />
       </dl>
 
       <div className="border-t border-rail-border px-5 py-3 text-xs">
@@ -83,6 +85,10 @@ export function ConfigurationTestPanel({
         <p className="mt-1 mb-0 text-rail-muted">{humanize(data.result.stage)} stage</p>
       </div>
       <AssertionDiagnostics evaluation={data.result.assertionEvaluation} />
+      <TlsCertificateEvidencePanel
+        certificates={data.result.tlsCertificates}
+        observedAt={data.result.checkedAt}
+      />
       {data.result.redirects.length > 0 ? (
         <RedirectEvidence redirects={data.result.redirects} />
       ) : null}
@@ -96,7 +102,12 @@ export function ConfigurationTestPanel({
 }
 
 function configurationTestOutcome(signals: ConfigurationTestResult['signals']): SignalOutcome {
-  const outcomes = [signals.transport, signals.statusPolicy, signals.assertions];
+  const outcomes = [
+    signals.transport,
+    signals.statusPolicy,
+    signals.assertions,
+    signals.tlsCertificate ?? 'NOT_EVALUATED',
+  ];
   if (outcomes.includes('FAIL')) return 'FAIL';
   if (outcomes.every((outcome) => outcome === 'PASS')) return 'PASS';
   return 'UNKNOWN';

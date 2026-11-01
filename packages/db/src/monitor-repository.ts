@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import {
   EMPTY_ASSERTION_CONFIGURATION,
+  DISABLED_TLS_CERTIFICATE_POLICY,
   assertAssertionsCompatibleWithMethod,
   normalizeLocationSnapshot,
   parseStoredAssertionConfiguration,
@@ -68,6 +69,7 @@ export class MonitorRepository {
           requestHeaders,
           requestBody: monitor.requestBody,
           assertions,
+          tlsPolicy: monitor.tlsPolicy,
           locations: monitor.locations,
         })
         .returning();
@@ -90,6 +92,7 @@ export class MonitorRepository {
         requestHeaders: created.requestHeaders,
         requestBody: created.requestBody,
         assertions: created.assertions,
+        tlsPolicy: created.tlsPolicy,
         locations: created.locations,
       });
 
@@ -239,6 +242,7 @@ export class MonitorRepository {
         requestHeaders: configuration.requestHeaders,
         requestBody: configuration.requestBody,
         assertions: configuration.assertions,
+        tlsPolicy: configuration.tlsPolicy,
         locations: configuration.locations,
       });
 
@@ -297,6 +301,7 @@ export class MonitorRepository {
         requestHeaders,
         requestBody: configuration.requestBody,
         assertions: configuration.assertions,
+        tlsPolicy: configuration.tlsPolicy,
         locations: configuration.locations,
       });
 
@@ -314,6 +319,7 @@ export class MonitorRepository {
       method: HttpMonitorMethod,
     ) => ResponseAssertionConfigurationV1,
   ): Promise<MonitorRecord> {
+    const tlsPolicy = settings.tlsPolicy ?? DISABLED_TLS_CERTIFICATE_POLICY;
     return this.db.transaction(async (tx) => {
       const [monitor] = await tx
         .select()
@@ -347,6 +353,7 @@ export class MonitorRepository {
         .update(monitors)
         .set({
           ...settings,
+          tlsPolicy,
           requestHeaders,
           assertions,
           updatedAt: sql`now()`,
@@ -360,6 +367,7 @@ export class MonitorRepository {
         monitorId,
         versionNumber: configuration.versionNumber + 1,
         ...settings,
+        tlsPolicy,
         intervalSeconds: configuration.intervalSeconds,
         statusPolicy: configuration.statusPolicy,
         requestHeaders,
@@ -375,6 +383,7 @@ export class MonitorRepository {
     monitorId: string,
     settings: HttpMonitorSettings,
   ): Promise<MonitorRecord> {
+    const tlsPolicy = settings.tlsPolicy ?? DISABLED_TLS_CERTIFICATE_POLICY;
     return this.db.transaction(async (tx) => {
       const [monitor] = await tx
         .select()
@@ -404,7 +413,7 @@ export class MonitorRepository {
 
       const [updated] = await tx
         .update(monitors)
-        .set({ ...settings, updatedAt: sql`now()` })
+        .set({ ...settings, tlsPolicy, updatedAt: sql`now()` })
         .where(and(eq(monitors.id, monitorId), eq(monitors.organizationId, organizationId)))
         .returning();
 
@@ -415,6 +424,7 @@ export class MonitorRepository {
         monitorId,
         versionNumber: configuration.versionNumber + 1,
         ...settings,
+        tlsPolicy,
         intervalSeconds: configuration.intervalSeconds,
         statusPolicy: configuration.statusPolicy,
         requestHeaders: configuration.requestHeaders,
@@ -483,6 +493,7 @@ export class MonitorRepository {
         requestHeaders: configuration.requestHeaders,
         requestBody: configuration.requestBody,
         assertions,
+        tlsPolicy: configuration.tlsPolicy,
         locations: configuration.locations,
       });
       return updated;
@@ -545,6 +556,7 @@ export class MonitorRepository {
         requestHeaders: configuration.requestHeaders,
         requestBody: configuration.requestBody,
         assertions: configuration.assertions,
+        tlsPolicy: configuration.tlsPolicy,
         locations: configuration.locations,
       });
       return updated;
@@ -624,6 +636,7 @@ export class MonitorRepository {
         requestHeaders: configuration.requestHeaders,
         requestBody: configuration.requestBody,
         assertions: configuration.assertions,
+        tlsPolicy: configuration.tlsPolicy,
         locations: [...locations],
       });
       return updated;

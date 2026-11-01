@@ -1,6 +1,7 @@
 import { isIP, type LookupFunction } from 'node:net';
-import type { SecureContextOptions } from 'node:tls';
-import { Client } from 'undici';
+import { TLSSocket, type SecureContextOptions } from 'node:tls';
+import type { TlsCertificateEvidenceV1 } from '@watchrail/domain';
+import { buildConnector, Client } from 'undici';
 import type { ResolvedHttpTarget, ValidatedAddress } from './safe-http-target.js';
 import type { HttpResponseHeader } from './types.js';
 import type { HttpRequestHeader } from './types.js';
@@ -9,6 +10,7 @@ export interface HttpTransportResponse {
   statusCode: number;
   location: string | null;
   headers: readonly HttpResponseHeader[];
+  tlsCertificate?: TlsCertificateEvidenceV1;
   captureEncodedBody(limitBytes: number): Promise<Uint8Array>;
   discardBody(): Promise<void>;
 }
@@ -64,13 +66,29 @@ export class UndiciPinnedHttpTransport implements PinnedHttpTransport {
       throw new Error('A pinned HTTP request requires at least one validated address.');
     }
 
+    let tlsCertificate: TlsCertificateEvidenceV1 | undefined;
+    const connector = buildConnector({
+      lookup: createPinnedLookup(target.addresses),
+      autoSelectFamily: true,
+      ...(isIP(target.hostname) === 0 ? { servername: target.hostname } : {}),
+      ...(this.ca === undefined ? {} : { ca: this.ca }),
+    });
     const client = new Client(target.url.origin, {
       pipelining: 0,
       autoSelectFamily: true,
-      connect: {
-        lookup: createPinnedLookup(target.addresses),
-        ...(isIP(target.hostname) === 0 ? { servername: target.hostname } : {}),
-        ...(this.ca === undefined ? {} : { ca: this.ca }),
+      connect(options, callback) {
+        connector(options, (error, socket) => {
+          if (error) {
+            callback(error, null);
+            return;
+          }
+          if (!socket) {
+            callback(new Error('The HTTP connector returned no socket.'), null);
+            return;
+          }
+          if (socket instanceof TLSSocket) tlsCertificate = certificateEvidence(socket, target.url);
+          callback(null, socket);
+        });
       },
     });
 
@@ -101,6 +119,7 @@ export class UndiciPinnedHttpTransport implements PinnedHttpTransport {
         statusCode: response.statusCode,
         location: headerValue(response.headers.location),
         headers: normalizeResponseHeaders(response.headers),
+        ...(tlsCertificate === undefined ? {} : { tlsCertificate }),
         captureEncodedBody(limitBytes) {
           return consume(async () => {
             const chunks: Uint8Array[] = [];
@@ -140,6 +159,29 @@ export class UndiciPinnedHttpTransport implements PinnedHttpTransport {
       throw error;
     }
   }
+}
+
+function certificateEvidence(socket: TLSSocket, url: URL): TlsCertificateEvidenceV1 | undefined {
+  const certificate = socket.getPeerX509Certificate();
+  if (!certificate) return undefined;
+  const cipher = socket.getCipher();
+  return {
+    contractVersion: 1,
+    origin: url.origin,
+    hostname: url.hostname,
+    validFrom: certificate.validFromDate.toISOString(),
+    validTo: certificate.validToDate.toISOString(),
+    fingerprint256: certificate.fingerprint256,
+    subject: boundedCertificateText(certificate.subject, 'Not provided'),
+    issuer: boundedCertificateText(certificate.issuer, 'Not provided'),
+    protocol: socket.getProtocol() ?? 'unknown',
+    cipher: boundedCertificateText(cipher.standardName ?? cipher.name, 'unknown'),
+  };
+}
+
+function boundedCertificateText(value: string, fallback: string): string {
+  const normalized = value.trim() || fallback;
+  return normalized.length <= 1_024 ? normalized : `${normalized.slice(0, 1_021)}...`;
 }
 
 function bodyChunk(value: unknown): Uint8Array {

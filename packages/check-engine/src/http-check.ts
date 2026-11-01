@@ -75,6 +75,7 @@ export async function executeHttpCheck(
     dependencies.signal?.addEventListener('abort', cancelFromCaller, { once: true });
   }
   let redirects: HttpCheckResult['redirects'] = [];
+  let tlsCertificates: NonNullable<HttpCheckResult['tlsCertificates']> = [];
   let finalResponse: HttpFinalResponseEvidence | undefined;
 
   let deadlineExceeded = false;
@@ -102,6 +103,7 @@ export async function executeHttpCheck(
         jsonBodyAssertions.length > 0,
       onEvidence: (evidence) => {
         redirects = [...evidence.redirects];
+        tlsCertificates = [...(evidence.tlsCertificates ?? [])];
         if (evidence.finalResponse !== undefined) {
           finalResponse = evidence.finalResponse;
         }
@@ -121,6 +123,7 @@ export async function executeHttpCheck(
       ...(input.captureResponseEvidence === undefined
         ? {}
         : { captureResponseEvidence: input.captureResponseEvidence }),
+      tlsPolicy: input.tlsPolicy ?? { type: 'DISABLED' },
     });
   } catch (error) {
     const attemptDurationMs = elapsed(clock, startedAt);
@@ -134,6 +137,7 @@ export async function executeHttpCheck(
         attemptDurationMs,
         checkedAt,
         redirects,
+        ...tlsEvidence(tlsCertificates),
         assertionEvaluation:
           responseEvidence === undefined
             ? unavailableAssertions
@@ -164,6 +168,7 @@ export async function executeHttpCheck(
       attemptDurationMs,
       checkedAt,
       redirects,
+      ...tlsEvidence(tlsCertificates),
       assertionEvaluation: unavailableAssertions,
     };
   } finally {
@@ -205,6 +210,7 @@ function classifyHttpExecution(input: {
   checkedAt: Date;
   attemptDurationMs: number;
   captureResponseEvidence?: boolean;
+  tlsPolicy: NonNullable<HttpCheckInput['tlsPolicy']>;
 }): HttpCheckResult {
   const {
     execution,
@@ -215,7 +221,9 @@ function classifyHttpExecution(input: {
     checkedAt,
     attemptDurationMs,
     captureResponseEvidence,
+    tlsPolicy,
   } = input;
+  const tlsCertificates = [...(execution.tlsCertificates ?? [])];
   const unavailableAssertions = combineAssertionEvaluations(
     notEvaluateHeaderAssertions(headerAssertions),
     notEvaluateTextBodyAssertions(textBodyAssertions),
@@ -232,6 +240,7 @@ function classifyHttpExecution(input: {
       attemptDurationMs,
       checkedAt,
       redirects: execution.redirects,
+      ...tlsEvidence(tlsCertificates),
       assertionEvaluation: unavailableAssertions,
     };
   }
@@ -246,6 +255,7 @@ function classifyHttpExecution(input: {
       attemptDurationMs,
       checkedAt,
       redirects: execution.redirects,
+      ...tlsEvidence(tlsCertificates),
       assertionEvaluation: unavailableAssertions,
     };
   }
@@ -256,6 +266,7 @@ function classifyHttpExecution(input: {
       attemptDurationMs,
       checkedAt,
       assertionEvaluation: unavailableAssertions,
+      tlsCertificates,
     });
   }
 
@@ -265,6 +276,24 @@ function classifyHttpExecution(input: {
     evaluateTextBodyAssertions(textBodyAssertions, execution.body),
     evaluateJsonBodyAssertions(jsonBodyAssertions, execution.body),
   );
+
+  if (successful && certificateExpiresWithinPolicy(tlsPolicy, tlsCertificates, checkedAt)) {
+    return {
+      outcome: 'FAIL',
+      stage: 'TLS',
+      reason: 'CERTIFICATE_EXPIRING',
+      statusCode: execution.statusCode,
+      responseTimeMs: execution.responseTimeMs,
+      attemptDurationMs,
+      checkedAt,
+      redirects: execution.redirects,
+      ...tlsEvidence(tlsCertificates),
+      assertionEvaluation,
+      ...(captureResponseEvidence === true
+        ? { responseEvidence: { headers: execution.headers, body: execution.body } }
+        : {}),
+    };
+  }
 
   if (successful) {
     return {
@@ -276,6 +305,7 @@ function classifyHttpExecution(input: {
       attemptDurationMs,
       checkedAt,
       redirects: execution.redirects,
+      ...tlsEvidence(tlsCertificates),
       assertionEvaluation,
       ...(captureResponseEvidence === true
         ? { responseEvidence: { headers: execution.headers, body: execution.body } }
@@ -292,11 +322,22 @@ function classifyHttpExecution(input: {
     attemptDurationMs,
     checkedAt,
     redirects: execution.redirects,
+    ...tlsEvidence(tlsCertificates),
     assertionEvaluation,
     ...(captureResponseEvidence === true
       ? { responseEvidence: { headers: execution.headers, body: execution.body } }
       : {}),
   };
+}
+
+function certificateExpiresWithinPolicy(
+  policy: NonNullable<HttpCheckInput['tlsPolicy']>,
+  certificates: NonNullable<HttpCheckResult['tlsCertificates']>,
+  checkedAt: Date,
+): boolean {
+  if (policy.type === 'DISABLED') return false;
+  const threshold = checkedAt.getTime() + policy.days * 86_400_000;
+  return certificates.some((certificate) => Date.parse(certificate.validTo) < threshold);
 }
 
 function statusMatches(
@@ -313,8 +354,9 @@ function classifyTargetFailure(input: {
   checkedAt: Date;
   attemptDurationMs: number;
   assertionEvaluation: AssertionEvaluationV1;
+  tlsCertificates: NonNullable<HttpCheckResult['tlsCertificates']>;
 }): HttpCheckResult {
-  const { failure, checkedAt, attemptDurationMs, assertionEvaluation } = input;
+  const { failure, checkedAt, attemptDurationMs, assertionEvaluation, tlsCertificates } = input;
   const common = {
     outcome: 'FAIL',
     statusCode: null,
@@ -322,6 +364,7 @@ function classifyTargetFailure(input: {
     attemptDurationMs,
     checkedAt,
     redirects: failure.redirects,
+    ...tlsEvidence(tlsCertificates),
     assertionEvaluation,
   } as const;
 
@@ -333,6 +376,12 @@ function classifyTargetFailure(input: {
     case 'TLS':
       return { ...common, stage: 'TLS', reason: failure.reason };
   }
+}
+
+function tlsEvidence(
+  certificates: NonNullable<HttpCheckResult['tlsCertificates']>,
+): Pick<HttpCheckResult, 'tlsCertificates'> | Record<string, never> {
+  return certificates.length === 0 ? {} : { tlsCertificates: [...certificates] };
 }
 
 function assertValidAssertionConfiguration(

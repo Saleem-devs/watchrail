@@ -55,6 +55,7 @@ export interface HttpCheckInput {
   headerAssertions?: readonly HeaderAssertion[];
   textBodyAssertions?: readonly TextBodyAssertion[];
   jsonBodyAssertions?: readonly JsonBodyAssertion[];
+  tlsPolicy?: TlsCertificatePolicy;
   /**
    * Captures final-response evidence for an authorized transient diagnostic.
    * Scheduled execution leaves this disabled so raw response material never
@@ -80,6 +81,8 @@ interface HttpCheckTiming {
   checkedAt: Date;
   redirects: readonly HttpRedirectHop[];
   assertionEvaluation: AssertionEvaluationV1;
+  /** Bounded certificate metadata from each verified HTTPS hop. */
+  tlsCertificates?: readonly TlsCertificateEvidenceV1[];
   /** Present only when captureResponseEvidence was explicitly requested. */
   responseEvidence?: HttpCapturedResponseEvidence;
 }
@@ -133,6 +136,12 @@ export type HttpCheckResult =
           | 'INSECURE_REDIRECT';
       })
   | (HttpCheckTiming &
+      HttpResponseEvidence & {
+        outcome: 'FAIL';
+        stage: 'TLS';
+        reason: 'CERTIFICATE_EXPIRING';
+      })
+  | (HttpCheckTiming &
       (HttpResponseEvidence | { statusCode: null; responseTimeMs: null }) & {
         outcome: 'FAIL';
         stage: 'HTTP';
@@ -166,6 +175,7 @@ export type HttpCheckReason = HttpCheckResult['reason'];
 export interface HttpExecutionEvidence {
   redirects: readonly HttpRedirectHop[];
   finalResponse?: HttpFinalResponseEvidence;
+  tlsCertificates?: readonly TlsCertificateEvidenceV1[];
 }
 
 export interface HttpResponseObservation extends HttpResponseEvidence, HttpExecutionEvidence {
@@ -251,4 +261,6 @@ import type {
   HttpRedirectHop,
   JsonBodyAssertion,
   TextBodyAssertion,
+  TlsCertificateEvidenceV1,
+  TlsCertificatePolicy,
 } from '@watchrail/domain';

@@ -59,6 +59,7 @@ export class NodeHttpExecutor implements HttpExecutor {
     const visited = new Set<string>();
     const endpoints = new Map<string, HttpRedirectEndpoint>();
     const redirects: HttpRedirectHop[] = [];
+    const tlsCertificates: NonNullable<HttpExecutionResult['tlsCertificates']>[number][] = [];
     const publishEvidence = (finalResponse?: {
       statusCode: number;
       responseTimeMs: number;
@@ -66,6 +67,7 @@ export class NodeHttpExecutor implements HttpExecutor {
     }): void => {
       input.onEvidence?.({
         redirects: [...redirects],
+        tlsCertificates: [...tlsCertificates],
         ...(finalResponse === undefined ? {} : { finalResponse }),
       });
     };
@@ -88,7 +90,7 @@ export class NodeHttpExecutor implements HttpExecutor {
     while (true) {
       const hopStartedAt = this.monotonicNow();
       let target;
-      let response;
+      let response: HttpTransportResponse;
 
       try {
         target = await resolveSafeHttpTarget(currentUrl, {
@@ -122,6 +124,16 @@ export class NodeHttpExecutor implements HttpExecutor {
           headers: requestHeaders,
           ...(currentBody === undefined ? {} : { body: currentBody.bytes }),
         });
+        if (
+          response.tlsCertificate &&
+          !tlsCertificates.some(
+            (certificate) =>
+              certificate.origin === response.tlsCertificate?.origin &&
+              certificate.fingerprint256 === response.tlsCertificate.fingerprint256,
+          )
+        ) {
+          tlsCertificates.push(response.tlsCertificate);
+        }
       } catch (error) {
         if (
           error instanceof ProhibitedDestinationError ||
@@ -132,11 +144,13 @@ export class NodeHttpExecutor implements HttpExecutor {
             stage: 'DNS',
             reason: 'PROHIBITED_DESTINATION',
             redirects,
+            ...tlsEvidence(tlsCertificates),
           };
         }
 
         const targetFailure = classifyFetchFailure(error, target?.url.protocol === 'https:');
-        if (targetFailure !== null) return { ...targetFailure, redirects };
+        if (targetFailure !== null)
+          return { ...targetFailure, redirects, ...tlsEvidence(tlsCertificates) };
         throw error;
       }
 
@@ -158,6 +172,7 @@ export class NodeHttpExecutor implements HttpExecutor {
           headers: response.headers,
           body,
           redirects,
+          ...tlsEvidence(tlsCertificates),
         };
       }
 
@@ -175,6 +190,7 @@ export class NodeHttpExecutor implements HttpExecutor {
           headers: response.headers,
           body,
           redirects: [],
+          ...tlsEvidence(tlsCertificates),
         };
       }
 
@@ -190,6 +206,7 @@ export class NodeHttpExecutor implements HttpExecutor {
           response.statusCode,
           responseTimeMs,
           redirects,
+          tlsCertificates,
         );
       }
 
@@ -205,6 +222,7 @@ export class NodeHttpExecutor implements HttpExecutor {
           response.statusCode,
           responseTimeMs,
           redirects,
+          tlsCertificates,
         );
       }
 
@@ -215,12 +233,24 @@ export class NodeHttpExecutor implements HttpExecutor {
       publishEvidence();
 
       if (target.url.protocol === 'https:' && nextUrl.protocol === 'http:') {
-        return redirectFailure('INSECURE_REDIRECT', response.statusCode, responseTimeMs, redirects);
+        return redirectFailure(
+          'INSECURE_REDIRECT',
+          response.statusCode,
+          responseTimeMs,
+          redirects,
+          tlsCertificates,
+        );
       }
 
       const identity = redirectIdentity(nextUrl);
       if (visited.has(identity)) {
-        return redirectFailure('REDIRECT_LOOP', response.statusCode, responseTimeMs, redirects);
+        return redirectFailure(
+          'REDIRECT_LOOP',
+          response.statusCode,
+          responseTimeMs,
+          redirects,
+          tlsCertificates,
+        );
       }
 
       if (redirectsFollowed >= MAX_REDIRECTS) {
@@ -229,6 +259,7 @@ export class NodeHttpExecutor implements HttpExecutor {
           response.statusCode,
           responseTimeMs,
           redirects,
+          tlsCertificates,
         );
       }
 
@@ -268,8 +299,22 @@ function redirectFailure(
   statusCode: number,
   responseTimeMs: number,
   redirects: readonly HttpRedirectHop[],
+  tlsCertificates: NonNullable<HttpExecutionResult['tlsCertificates']>,
 ): HttpExecutionResult {
-  return { type: 'REDIRECT_FAILURE', reason, statusCode, responseTimeMs, redirects };
+  return {
+    type: 'REDIRECT_FAILURE',
+    reason,
+    statusCode,
+    responseTimeMs,
+    redirects,
+    ...tlsEvidence(tlsCertificates),
+  };
+}
+
+function tlsEvidence(
+  certificates: NonNullable<HttpExecutionResult['tlsCertificates']>,
+): Pick<HttpExecutionResult, 'tlsCertificates'> | Record<string, never> {
+  return certificates.length === 0 ? {} : { tlsCertificates: [...certificates] };
 }
 
 function createHop(

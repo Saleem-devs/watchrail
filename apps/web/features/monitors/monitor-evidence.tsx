@@ -9,6 +9,7 @@ import type {
 } from './types';
 import { formatMilliseconds, formatRatio, humanize } from './formatting';
 import { AssertionDiagnostics, diagnosticFailureLabel } from './assertion-diagnostics';
+import { TlsCertificateEvidencePanel } from './tls-certificate-evidence';
 
 type DiagnosticOutcome =
   | 'PASS'
@@ -201,6 +202,10 @@ export function ManualDiagnostic({
         </p>
       </div>
       <AssertionDiagnostics evaluation={assertionEvaluation} />
+      <TlsCertificateEvidencePanel
+        certificates={result.tlsCertificates}
+        observedAt={result.checkedAt}
+      />
       {result.redirects.length > 0 ? <RedirectPath redirects={result.redirects} /> : null}
       <EvidenceRetentionNotice />
     </section>
@@ -324,6 +329,10 @@ function MultiLocationDiagnostic({
                         evaluation={execution.diagnosticSummary.assertionEvaluation}
                       />
                     ) : null}
+                    <TlsCertificateEvidencePanel
+                      certificates={execution.diagnosticSummary.tlsCertificates}
+                      observedAt={execution.diagnosticSummary.checkedAt}
+                    />
                   </div>
                 ) : null,
               )}
@@ -484,6 +493,10 @@ function HistoricalSingleLocationEvidence({
         })}
       </p>
       <AssertionDiagnostics evaluation={assertionEvaluation} />
+      <TlsCertificateEvidencePanel
+        certificates={result.tlsCertificates}
+        observedAt={result.checkedAt}
+      />
       {result.redirects.length > 0 ? <RedirectPath redirects={result.redirects} /> : null}
       <EvidenceRetentionNotice />
     </div>

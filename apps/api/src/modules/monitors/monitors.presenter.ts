@@ -18,6 +18,8 @@ import {
   type HttpStatusPolicy,
   type AssertionEvaluationV1,
   type HttpRequestBody,
+  type TlsCertificateEvidenceV1,
+  type TlsCertificatePolicy,
 } from '@watchrail/domain';
 
 export interface MonitorResponse {
@@ -32,6 +34,7 @@ export interface MonitorResponse {
   nextCheckAt: string | null;
   followRedirects: boolean;
   statusPolicy: HttpStatusPolicy;
+  tlsPolicy: TlsCertificatePolicy;
   requestHeaders: Array<{
     name: string;
     sensitive: boolean;
@@ -77,6 +80,7 @@ export interface CheckRoundResponse {
         attemptDurationMs: number;
         redirects: HttpRedirectHop[];
         assertionEvaluation: AssertionEvaluationV1;
+        tlsCertificates?: TlsCertificateEvidenceV1[];
         checkedAt: string;
       }
     | {
@@ -123,6 +127,7 @@ export function toResponse(
     nextCheckAt: monitor.nextCheckAt?.toISOString() ?? null,
     followRedirects: monitor.followRedirects,
     statusPolicy: monitor.statusPolicy,
+    tlsPolicy: monitor.tlsPolicy,
     requestHeaders: redactRequestHeaders(monitor.requestHeaders),
     requestBody: monitor.requestBody,
     assertions: redactAssertions(monitor.assertions),
@@ -304,6 +309,7 @@ function toSingleLocationDetailResponse(
     attemptDurationMs: result.attemptDurationMs,
     redirects: result.redirects,
     assertionEvaluation: result.assertionEvaluation,
+    ...(result.tlsCertificates.length === 0 ? {} : { tlsCertificates: result.tlsCertificates }),
     checkedAt: result.checkedAt.toISOString(),
   };
 }

@@ -1,6 +1,22 @@
 import type { RequestBodyValue } from './request-body-field';
 import type { RedactedResponseAssertionConfiguration } from './response-assertions';
 
+export type TlsCertificatePolicy =
+  { type: 'DISABLED' } | { type: 'MINIMUM_VALIDITY'; days: 1 | 2 | 3 | 7 | 14 | 30 | 60 };
+
+export interface TlsCertificateEvidence {
+  contractVersion: 1;
+  origin: string;
+  hostname: string;
+  validFrom: string;
+  validTo: string;
+  fingerprint256: string;
+  subject: string;
+  issuer: string;
+  protocol: string;
+  cipher: string;
+}
+
 /* Monitor feature API contracts. */
 export interface Monitor {
   id: string;
@@ -12,6 +28,7 @@ export interface Monitor {
   timeoutMs: number;
   followRedirects: boolean;
   statusPolicy: { type: 'ANY_2XX' } | { type: 'EXACT'; statusCodes: number[] };
+  tlsPolicy?: TlsCertificatePolicy;
   requestHeaders?: Array<{
     name: string;
     sensitive: boolean;
@@ -88,6 +105,7 @@ export interface FieldErrors {
   requestHeaders?: string[];
   requestBody?: string[];
   assertions?: string[];
+  tlsPolicy?: string[];
 }
 
 export interface AssertionDiagnostic {
@@ -132,12 +150,14 @@ export interface ConfigurationTestResult {
     attemptDurationMs: number;
     redirects: ManualRoundResultRedirect[];
     assertionEvaluation: AssertionEvaluation;
+    tlsCertificates?: TlsCertificateEvidence[];
     checkedAt: string;
   };
   signals: {
     transport: 'PASS' | 'FAIL' | 'UNKNOWN';
     statusPolicy: 'PASS' | 'FAIL' | 'NOT_EVALUATED';
     assertions: 'PASS' | 'FAIL' | 'NOT_EVALUATED';
+    tlsCertificate?: 'PASS' | 'FAIL' | 'NOT_EVALUATED';
   };
   response: {
     headers: Array<{ name: string; values: string[]; redacted: boolean }>;
@@ -176,6 +196,7 @@ export interface ManualRound {
         redirects: ManualRoundResultRedirect[];
         assertionOutcome?: AssertionEvaluation['outcome'];
         assertionEvaluation?: AssertionEvaluation;
+        tlsCertificates?: TlsCertificateEvidence[];
         checkedAt: string;
       }
     | {
@@ -207,6 +228,7 @@ export interface ManualRound {
               attemptDurationMs: number;
               checkedAt: string;
               assertionEvaluation?: AssertionEvaluation;
+              tlsCertificates?: TlsCertificateEvidence[];
             } | null;
           }>;
         }>;

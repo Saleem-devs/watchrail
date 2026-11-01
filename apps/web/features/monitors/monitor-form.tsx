@@ -12,11 +12,13 @@ import type { RedactedResponseAssertionConfiguration } from './response-assertio
 import type { FieldErrors, Monitor } from './types';
 import type { ConfigurationTestResult } from './types';
 import { ConfigurationTestPanel } from './configuration-test-result';
+import { TlsCertificatePolicyField } from './tls-certificate-policy-field';
 
 export interface MonitorFormValues {
   name: string;
   url: string;
   statusPolicy: Monitor['statusPolicy'];
+  tlsPolicy?: Monitor['tlsPolicy'];
   method: Monitor['method'];
   timeoutMs: number;
   followRedirects: boolean;
@@ -55,6 +57,9 @@ export function MonitorForm({
     initialValues?.statusPolicy.type ?? 'ANY_2XX',
   );
   const [method, setMethod] = useState(initialValues?.method ?? 'GET');
+  const [httpsEndpoint, setHttpsEndpoint] = useState(
+    (initialValues?.url ?? '').trim().toLowerCase().startsWith('https://'),
+  );
   const nameErrorId = `${id}-name-error`;
   const urlHelpId = `${id}-url-help`;
   const urlErrorId = `${id}-url-error`;
@@ -123,6 +128,9 @@ export function MonitorForm({
                   required
                   aria-describedby={errors.url ? urlErrorId : urlHelpId}
                   aria-invalid={Boolean(errors.url)}
+                  onChange={(event) =>
+                    setHttpsEndpoint(event.target.value.trim().toLowerCase().startsWith('https://'))
+                  }
                 />
                 {errors.url ? (
                   <span className="font-normal text-rail-danger" id={urlErrorId}>
@@ -213,6 +221,12 @@ export function MonitorForm({
               </label>
             ) : null}
           </fieldset>
+
+          <TlsCertificatePolicyField
+            initialPolicy={initialValues?.tlsPolicy ?? { type: 'DISABLED' }}
+            httpsEndpoint={httpsEndpoint}
+            {...(errors.tlsPolicy?.[0] ? { error: errors.tlsPolicy[0] } : {})}
+          />
 
           <RequestHeadersField
             initialHeaders={initialValues?.requestHeaders ?? []}

@@ -4,7 +4,7 @@ import type {
   HttpCheckResult,
   HttpResponseHeader,
 } from '@watchrail/check-engine';
-import type { HttpStatusPolicy } from '@watchrail/domain';
+import type { HttpStatusPolicy, TlsCertificatePolicy } from '@watchrail/domain';
 import { isSensitiveFieldName } from './sensitive-field.js';
 
 export const RESPONSE_PREVIEW_LIMIT_BYTES = 8 * 1024;
@@ -20,6 +20,7 @@ export interface SafeTransientCheckResult {
     transport: 'PASS' | 'FAIL' | 'UNKNOWN';
     statusPolicy: 'PASS' | 'FAIL' | 'NOT_EVALUATED';
     assertions: 'PASS' | 'FAIL' | 'NOT_EVALUATED';
+    tlsCertificate: 'PASS' | 'FAIL' | 'NOT_EVALUATED';
   };
   response: {
     headers: Array<{ name: string; values: string[]; redacted: boolean }>;
@@ -43,6 +44,7 @@ export function toSafeTransientCheckResult(
   statusPolicy: HttpStatusPolicy,
   method: string,
   secretValues: readonly string[],
+  tlsPolicy: TlsCertificatePolicy = { type: 'DISABLED' },
 ): SafeTransientCheckResult {
   const { responseEvidence, ...publicResult } = result;
   const transport = transportOutcome(result);
@@ -57,6 +59,12 @@ export function toSafeTransientCheckResult(
             ? 'PASS'
             : 'FAIL',
       assertions: result.assertionEvaluation.outcome,
+      tlsCertificate:
+        tlsPolicy.type === 'DISABLED' || !result.tlsCertificates?.length
+          ? 'NOT_EVALUATED'
+          : result.reason === 'CERTIFICATE_EXPIRING'
+            ? 'FAIL'
+            : 'PASS',
     },
     response: sanitizeResponseEvidence(responseEvidence, method, secretValues),
   };
@@ -65,7 +73,12 @@ export function toSafeTransientCheckResult(
 function transportOutcome(
   result: HttpCheckResult,
 ): SafeTransientCheckResult['signals']['transport'] {
-  if (result.reason === 'COMPLETED' || result.reason === 'UNEXPECTED_STATUS') return 'PASS';
+  if (
+    result.reason === 'COMPLETED' ||
+    result.reason === 'UNEXPECTED_STATUS' ||
+    result.reason === 'CERTIFICATE_EXPIRING'
+  )
+    return 'PASS';
   if (result.outcome === 'UNKNOWN') return 'UNKNOWN';
   return 'FAIL';
 }

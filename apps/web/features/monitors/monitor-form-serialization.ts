@@ -13,10 +13,19 @@ export function httpConfigurationTestFromForm(formData: FormData) {
       timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
       followRedirects: formData.get('followRedirects') === 'on',
       requestBody: requestBodyFromForm(formData),
+      tlsPolicy: tlsPolicyFromForm(formData),
     },
     statusPolicy: statusPolicyFromForm(formData),
     requestHeaders: requestHeadersFromForm(formData),
     assertions: responseAssertionsFromForm(formData),
+  };
+}
+
+export function tlsPolicyFromForm(formData: FormData) {
+  if (formData.get('tlsExpiryEnabled') !== 'on') return { type: 'DISABLED' } as const;
+  return {
+    type: 'MINIMUM_VALIDITY' as const,
+    days: Number(formData.get('tlsExpiryDays')),
   };
 }
 

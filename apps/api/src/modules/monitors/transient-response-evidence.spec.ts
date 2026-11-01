@@ -85,7 +85,12 @@ describe('transient response evidence', () => {
         'GET',
         [],
       ).signals,
-    ).toEqual({ transport: 'FAIL', statusPolicy: 'NOT_EVALUATED', assertions: 'NOT_EVALUATED' });
+    ).toEqual({
+      transport: 'FAIL',
+      statusPolicy: 'NOT_EVALUATED',
+      assertions: 'NOT_EVALUATED',
+      tlsCertificate: 'NOT_EVALUATED',
+    });
   });
 
   it('redacts short configured secrets and common camel-case sensitive JSON fields', () => {
@@ -124,6 +129,47 @@ describe('transient response evidence', () => {
     expect(JSON.stringify(safe.response)).toContain('[REDACTED]');
   });
 
+  it('reports certificate-expiry failures without misclassifying the HTTPS transport', () => {
+    const result: HttpCheckResult = {
+      outcome: 'FAIL',
+      stage: 'TLS',
+      reason: 'CERTIFICATE_EXPIRING',
+      statusCode: 200,
+      responseTimeMs: 9,
+      attemptDurationMs: 10,
+      checkedAt: new Date('2026-10-31T20:00:00.000Z'),
+      redirects: [],
+      assertionEvaluation: { contractVersion: 1, outcome: 'PASS', diagnostics: [] },
+      tlsCertificates: [
+        {
+          contractVersion: 1,
+          origin: 'https://example.com',
+          hostname: 'example.com',
+          validFrom: '2026-09-01T00:00:00.000Z',
+          validTo: '2026-11-05T00:00:00.000Z',
+          fingerprint256:
+            'DD:DD:DD:DD:DD:DD:DD:DD:DD:DD:DD:DD:DD:DD:DD:DD:DD:DD:DD:DD:DD:DD:DD:DD:DD:DD:DD:DD:DD:DD:DD:DD',
+          subject: 'CN=example.com',
+          issuer: 'CN=Example CA',
+          protocol: 'TLSv1.3',
+          cipher: 'TLS_AES_256_GCM_SHA384',
+        },
+      ],
+    };
+
+    expect(
+      toSafeTransientCheckResult(result, { type: 'ANY_2XX' }, 'GET', [], {
+        type: 'MINIMUM_VALIDITY',
+        days: 14,
+      }).signals,
+    ).toEqual({
+      transport: 'PASS',
+      statusPolicy: 'PASS',
+      assertions: 'PASS',
+      tlsCertificate: 'FAIL',
+    });
+  });
+
   it.each([
     ['REDIRECT_LOOP', 302],
     ['REQUEST_TIMEOUT', 200],
@@ -147,6 +193,7 @@ describe('transient response evidence', () => {
         transport: 'FAIL',
         statusPolicy: 'NOT_EVALUATED',
         assertions: 'NOT_EVALUATED',
+        tlsCertificate: 'NOT_EVALUATED',
       });
     },
   );

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   InvalidProbeCoordinatorContractError,
   parseProbeClaimRequest,
+  parseProbeExecutionConfiguration,
   parseProbeHeartbeat,
   parseProbeLeaseReference,
   parseProbeResultSubmissionReference,
@@ -84,5 +85,27 @@ describe('probe coordinator contracts', () => {
     expect(() => parseProbeClaimRequest({ ...input, locationId })).toThrow(
       InvalidProbeCoordinatorContractError,
     );
+  });
+
+  it('defaults legacy probe execution configurations to disabled TLS monitoring', () => {
+    expect(
+      parseProbeExecutionConfiguration({
+        contractVersion: 1,
+        assignmentId,
+        attemptId,
+        configurationVersionId,
+        configurationVersionNumber: 7,
+        executionPolicyVersion: 'http-v1',
+        requiredEngineVersion: 'watchrail-http-v1',
+        url: 'https://status.example.com/health',
+        method: 'GET',
+        timeoutMs: 10_000,
+        followRedirects: true,
+        statusPolicy: { type: 'ANY_2XX' },
+        requestHeaders: [],
+        requestBody: { type: 'NONE' },
+        assertions: { headers: [], textBody: [], jsonBody: [] },
+      }),
+    ).toMatchObject({ tlsPolicy: { type: 'DISABLED' } });
   });
 });

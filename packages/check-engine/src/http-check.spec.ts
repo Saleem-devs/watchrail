@@ -23,6 +23,20 @@ function createClock() {
 }
 
 describe('executeHttpCheck', () => {
+  const expiringCertificate = {
+    contractVersion: 1,
+    origin: 'https://example.com',
+    hostname: 'example.com',
+    validFrom: '2026-09-01T00:00:00.000Z',
+    validTo: '2026-09-25T12:00:00.000Z',
+    fingerprint256:
+      'AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA',
+    subject: 'CN=example.com',
+    issuer: 'CN=Example CA',
+    protocol: 'TLSv1.3',
+    cipher: 'TLS_AES_256_GCM_SHA384',
+  } as const;
+
   it('returns PASS / HTTP / COMPLETED for a 2xx response', async () => {
     const clock = createClock();
 
@@ -65,6 +79,68 @@ describe('executeHttpCheck', () => {
       redirects: [],
       assertionEvaluation: emptyAssertionEvaluation,
     });
+  });
+
+  it('fails an otherwise successful response when a certificate expires inside the configured window', async () => {
+    const executor: HttpExecutor = {
+      execute: () =>
+        Promise.resolve({
+          type: 'RESPONSE',
+          statusCode: 200,
+          responseTimeMs: 20,
+          headers: [],
+          body: { state: 'NOT_REQUESTED' },
+          redirects: [],
+          tlsCertificates: [expiringCertificate],
+        }),
+    };
+
+    const result = await executeHttpCheck(
+      {
+        url: 'https://example.com',
+        method: 'GET',
+        followRedirects: true,
+        timeoutMs: 10_000,
+        tlsPolicy: { type: 'MINIMUM_VALIDITY', days: 7 },
+      },
+      { executor, clock: createClock() },
+    );
+
+    expect(result).toMatchObject({
+      outcome: 'FAIL',
+      stage: 'TLS',
+      reason: 'CERTIFICATE_EXPIRING',
+      statusCode: 200,
+      tlsCertificates: [expiringCertificate],
+    });
+  });
+
+  it('does not apply certificate expiry thresholds when the TLS policy is disabled', async () => {
+    const executor: HttpExecutor = {
+      execute: () =>
+        Promise.resolve({
+          type: 'RESPONSE',
+          statusCode: 200,
+          responseTimeMs: 20,
+          headers: [],
+          body: { state: 'NOT_REQUESTED' },
+          redirects: [],
+          tlsCertificates: [expiringCertificate],
+        }),
+    };
+
+    const result = await executeHttpCheck(
+      {
+        url: 'https://example.com',
+        method: 'GET',
+        followRedirects: true,
+        timeoutMs: 10_000,
+        tlsPolicy: { type: 'DISABLED' },
+      },
+      { executor, clock: createClock() },
+    );
+
+    expect(result).toMatchObject({ outcome: 'PASS', reason: 'COMPLETED' });
   });
 
   it('records checkedAt as the attempt start time', async () => {

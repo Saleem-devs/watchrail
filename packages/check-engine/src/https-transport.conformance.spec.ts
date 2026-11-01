@@ -47,6 +47,14 @@ describe('HTTPS transport conformance', () => {
       stage: 'HTTP',
       reason: 'COMPLETED',
       statusCode: 200,
+      tlsCertificates: [
+        expect.objectContaining({
+          contractVersion: 1,
+          hostname: 'original.example',
+          protocol: expect.stringMatching(/^TLS/u),
+          fingerprint256: expect.stringMatching(/^(?:[0-9A-F]{2}:){31}[0-9A-F]{2}$/u),
+        }),
+      ],
     });
     expect(server.requests[0]?.headers.host).toBe(`original.example:${server.port}`);
   });
