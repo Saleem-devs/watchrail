@@ -21,8 +21,10 @@ export interface TlsCertificateEvidence {
 export interface Monitor {
   id: string;
   projectId?: string;
+  type: 'HTTP' | 'TCP';
   name: string;
   url: string;
+  configuration: { type: 'HTTP'; url: string } | { type: 'TCP'; host: string; port: number };
   method: string;
   lifecycleState: 'ENABLED' | 'PAUSED';
   timeoutMs: number;
@@ -94,8 +96,12 @@ export interface CurrentCheck {
 }
 
 export interface FieldErrors {
+  type?: string[];
   name?: string[];
   url?: string[];
+  host?: string[];
+  port?: string[];
+  tcpSettings?: string[];
   statusPolicy?: string[];
   method?: string[];
   timeoutMs?: string[];

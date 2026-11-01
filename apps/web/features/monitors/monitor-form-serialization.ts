@@ -5,6 +5,14 @@ export function requiresStateChangingMethodConfirmation(method: string): boolean
   return ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
 }
 
+export function tcpSettingsFromForm(formData: FormData) {
+  return {
+    host: formEntryString(formData.get('host') ?? undefined),
+    port: Number(formData.get('port')),
+    timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
+  };
+}
+
 export function httpConfigurationTestFromForm(formData: FormData) {
   return {
     httpSettings: {

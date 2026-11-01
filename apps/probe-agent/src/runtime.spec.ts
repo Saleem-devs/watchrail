@@ -1,6 +1,10 @@
-import type { HttpExecutor } from '@watchrail/check-engine';
+import type { HttpExecutor, TcpConnector } from '@watchrail/check-engine';
 import type { ProbeExecutionConfigurationV1, ProbeLeaseReferenceV1 } from '@watchrail/contracts';
-import { HTTP_ENGINE_VERSION, LEGACY_HTTP_ENGINE_VERSION } from '@watchrail/domain';
+import {
+  HTTP_ENGINE_VERSION,
+  LEGACY_HTTP_ENGINE_VERSION,
+  TCP_ENGINE_VERSION,
+} from '@watchrail/domain';
 import { describe, expect, it, vi } from 'vitest';
 import { ProbeCoordinatorClient, ProbeCoordinatorError } from './coordinator-client.js';
 import type { ProbeAgentConfig } from './config.js';
@@ -79,9 +83,47 @@ describe('ProbeAgentRuntime', () => {
 
     await runtime.run();
 
-    expect(claim).toHaveBeenNthCalledWith(1, HTTP_ENGINE_VERSION, expect.any(AbortSignal));
-    expect(claim).toHaveBeenNthCalledWith(2, LEGACY_HTTP_ENGINE_VERSION, expect.any(AbortSignal));
+    expect(claim).toHaveBeenNthCalledWith(1, TCP_ENGINE_VERSION, expect.any(AbortSignal));
+    expect(claim).toHaveBeenNthCalledWith(2, HTTP_ENGINE_VERSION, expect.any(AbortSignal));
+    expect(claim).toHaveBeenNthCalledWith(3, LEGACY_HTTP_ENGINE_VERSION, expect.any(AbortSignal));
     expect(submit).toHaveBeenCalledOnce();
+  });
+
+  it('executes TCP assignments without routing them through the HTTP executor', async () => {
+    const tcpConfiguration: ProbeExecutionConfigurationV1 = {
+      contractVersion: 1,
+      type: 'TCP',
+      assignmentId: lease.assignmentId,
+      attemptId: lease.attemptId,
+      configurationVersionId: lease.configurationVersionId,
+      configurationVersionNumber: lease.configurationVersionNumber,
+      executionPolicyVersion: 'tcp-v1',
+      requiredEngineVersion: TCP_ENGINE_VERSION,
+      host: '93.184.216.34',
+      port: 5432,
+      timeoutMs: 8_000,
+    };
+    const tcpLease = {
+      ...lease,
+      executionPolicyVersion: 'tcp-v1',
+      requiredEngineVersion: TCP_ENGINE_VERSION,
+    };
+    const connect = vi.fn().mockResolvedValue({ type: 'CONNECTED', connectionTimeMs: 23 });
+    const connector: TcpConnector = { connect };
+    const fixture = runtimeFixture(tcpLease, 1, false, tcpConfiguration, connector);
+    vi.spyOn(fixture.client, 'submitSerialized').mockImplementation(fixture.submit);
+
+    await fixture.runtime.run();
+
+    expect(fixture.execute).not.toHaveBeenCalled();
+    expect(connect).toHaveBeenCalledWith(
+      expect.objectContaining({ host: '93.184.216.34', port: 5432 }),
+    );
+    expect(fixture.serialize).toHaveBeenCalledWith(
+      tcpLease,
+      TCP_ENGINE_VERSION,
+      expect.objectContaining({ reason: 'CONNECTED', connectionTimeMs: 23 }),
+    );
   });
 
   it('discards a result when renewal reports a stale claim', async () => {
@@ -170,25 +212,27 @@ function runtimeFixture(
   runtimeLease: ProbeLeaseReferenceV1 = lease,
   executionDelayMs = 25,
   legacyFallback = false,
+  runtimeConfiguration: ProbeExecutionConfigurationV1 = configuration,
+  tcpConnector?: TcpConnector,
 ) {
   const client = new ProbeCoordinatorClient('https://coordinator.example', 'm'.repeat(43));
   const state: { runtime?: ProbeAgentRuntime } = {};
   const claim = vi.fn();
-  if (legacyFallback) claim.mockResolvedValueOnce(null);
+  if (legacyFallback) claim.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
   claim.mockResolvedValueOnce(runtimeLease).mockImplementation(() => {
     state.runtime?.stop();
     return Promise.resolve(null);
   });
   vi.spyOn(client, 'claim').mockImplementation(claim);
   vi.spyOn(client, 'heartbeat').mockResolvedValue();
-  vi.spyOn(client, 'configuration').mockResolvedValue(configuration);
+  vi.spyOn(client, 'configuration').mockResolvedValue(runtimeConfiguration);
   const serialize = vi.spyOn(client, 'serializeSubmission').mockReturnValue('{"stable":true}');
   const renew = vi.fn().mockResolvedValue('2099-10-14T08:00:30.000Z');
   const submit = vi.fn().mockResolvedValue(undefined);
   const executorAbort = vi.fn();
-  const executor: HttpExecutor = {
-    execute(input) {
-      return new Promise((resolve, reject) => {
+  const execute = vi.fn<HttpExecutor['execute']>(
+    (input) =>
+      new Promise((resolve, reject) => {
         const complete = () => {
           input.signal.removeEventListener('abort', cancel);
           resolve({
@@ -207,11 +251,13 @@ function runtimeFixture(
           reject(new DOMException('Aborted.', 'AbortError'));
         };
         input.signal.addEventListener('abort', cancel, { once: true });
-      });
-    },
+      }),
+  );
+  const executor: HttpExecutor = {
+    execute: (input) => execute(input),
   };
-  const runtime = new ProbeAgentRuntime(client, config, executor);
+  const runtime = new ProbeAgentRuntime(client, config, executor, tcpConnector);
   state.runtime = runtime;
-  return { client, runtime, claim, serialize, renew, submit, executorAbort };
+  return { client, runtime, claim, serialize, renew, submit, executorAbort, execute };
 }
 import { getEventListeners } from 'node:events';

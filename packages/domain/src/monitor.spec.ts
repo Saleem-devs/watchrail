@@ -27,6 +27,7 @@ describe('createMonitor', () => {
   });
   it('normalizes input and applies server-owned defaults', () => {
     expect(createMonitor({ name: '  API  ', url: 'https://example.com/health' })).toEqual({
+      type: 'HTTP',
       name: 'API',
       url: 'https://example.com/health',
       ...MONITOR_DEFAULTS,
@@ -49,7 +50,7 @@ describe('createMonitor', () => {
 
   it('accepts supported HTTPS certificate-expiry policies and rejects them for HTTP endpoints', () => {
     expect(
-      createMonitor({
+      createHttpMonitor({
         name: 'API',
         url: 'https://example.com',
         tlsPolicy: { type: 'MINIMUM_VALIDITY', days: 30 },
@@ -57,14 +58,14 @@ describe('createMonitor', () => {
     ).toEqual({ type: 'MINIMUM_VALIDITY', days: 30 });
 
     expect(() =>
-      createMonitor({
+      createHttpMonitor({
         name: 'API',
         url: 'http://example.com',
         tlsPolicy: { type: 'MINIMUM_VALIDITY', days: 30 },
       }),
     ).toThrow(MonitorInputError);
     expect(() =>
-      createMonitor({
+      createHttpMonitor({
         name: 'API',
         url: 'https://example.com',
         tlsPolicy: { type: 'MINIMUM_VALIDITY', days: 31 },
@@ -74,7 +75,7 @@ describe('createMonitor', () => {
 
   it('normalizes assertions and rejects retained assertion secrets during creation', () => {
     expect(
-      createMonitor({
+      createHttpMonitor({
         name: 'API',
         url: 'https://example.com',
         assertions: {
@@ -90,7 +91,7 @@ describe('createMonitor', () => {
     });
 
     expect(() =>
-      createMonitor({
+      createHttpMonitor({
         name: 'API',
         url: 'https://example.com',
         assertions: {
@@ -104,7 +105,7 @@ describe('createMonitor', () => {
 
   it('normalizes request headers and rejects retained secrets during creation', () => {
     expect(
-      createMonitor({
+      createHttpMonitor({
         name: 'API',
         url: 'https://example.com',
         requestHeaders: [{ name: 'Authorization', sensitive: false, value: 'Bearer secret' }],
@@ -138,7 +139,7 @@ describe('createMonitor', () => {
   });
 
   it('normalizes an exact status policy into a unique deterministic order', () => {
-    const monitor = createMonitor({
+    const monitor = createHttpMonitor({
       name: 'API',
       url: 'https://example.com',
       statusPolicy: { type: 'EXACT', statusCodes: [404, 200, 404, 204] },
@@ -158,6 +159,12 @@ describe('createMonitor', () => {
     );
   });
 });
+
+function createHttpMonitor(command: Parameters<typeof createMonitor>[0]) {
+  const monitor = createMonitor(command);
+  if (monitor.type !== 'HTTP') throw new Error('Expected an HTTP monitor.');
+  return monitor;
+}
 
 describe('monitor scheduling settings', () => {
   it.each([60, 86_400])('accepts interval boundary %i', (intervalSeconds) => {

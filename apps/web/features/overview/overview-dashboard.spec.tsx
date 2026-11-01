@@ -10,7 +10,9 @@ function monitor(overrides: Partial<Monitor> & Pick<Monitor, 'id' | 'name'>): Mo
   return {
     id,
     name,
+    type: 'HTTP',
     url: `https://${id}.example.com`,
+    configuration: { type: 'HTTP', url: `https://${id}.example.com` },
     method: 'GET',
     lifecycleState: 'ENABLED',
     timeoutMs: 10_000,
@@ -101,7 +103,7 @@ describe('OverviewDashboard', () => {
     expect(within(metrics).getByText('3')).toBeInTheDocument();
     expect(within(metrics).getByText('1 paused')).toBeInTheDocument();
     expect(within(metrics).getByText('97.00%')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Response time trends' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Latency trends' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Latest daily average' })).toBeInTheDocument();
     expect(screen.getByText('12 samples')).toBeInTheDocument();
     expect(screen.getByText('8 samples')).toBeInTheDocument();
@@ -140,7 +142,7 @@ describe('OverviewDashboard', () => {
 
     expect(screen.getByText('Average 7-day uptime').nextElementSibling).toHaveTextContent('—');
     expect(
-      screen.getByText('No scheduled response-time evidence has been recorded yet.'),
+      screen.getByText('No scheduled latency evidence has been recorded yet.'),
     ).toBeInTheDocument();
     expect(screen.getByText('No comparison available yet.')).toBeInTheDocument();
     expect(screen.getByText('No monitors yet')).toBeInTheDocument();

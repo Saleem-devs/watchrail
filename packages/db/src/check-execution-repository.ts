@@ -32,22 +32,42 @@ import {
   type CheckExecutionResultRecord,
 } from './schema.js';
 
-export interface ClaimedCheckExecution {
+interface ClaimedCheckExecutionBase {
   assignmentId: string;
   claimToken: string;
   attemptNumber: number;
-  url: string;
-  method: HttpMethod;
   timeoutMs: number;
-  followRedirects: boolean;
-  statusPolicy: HttpStatusPolicy;
   organizationId: string;
   monitorId: string;
+}
+
+export interface ClaimedHttpCheckExecution extends ClaimedCheckExecutionBase {
+  type: 'HTTP';
+  url: string;
+  method: HttpMethod;
+  followRedirects: boolean;
+  statusPolicy: HttpStatusPolicy;
   requestHeaders: readonly StoredRequestHeader[];
   requestBody: HttpRequestBody;
   assertions: ResponseAssertionConfigurationV1;
   tlsPolicy?: TlsCertificatePolicy;
 }
+
+export interface ClaimedTcpCheckExecution extends ClaimedCheckExecutionBase {
+  type: 'TCP';
+  host: string;
+  port: number;
+  assertions?: never;
+  requestHeaders?: never;
+  requestBody?: never;
+  statusPolicy?: never;
+  tlsPolicy?: never;
+  url?: never;
+  method?: never;
+  followRedirects?: never;
+}
+
+export type ClaimedCheckExecution = ClaimedHttpCheckExecution | ClaimedTcpCheckExecution;
 
 export type CheckExecutionClaimResult =
   | { state: 'CLAIMED'; execution: ClaimedCheckExecution }
@@ -85,6 +105,9 @@ export class CheckExecutionRepository {
             or ${checkExecutionAssignments.claimExpiresAt} <= now()
           `,
           attemptCount: checkExecutionAssignments.attemptCount,
+          type: monitorConfigurationVersions.type,
+          tcpHost: monitorConfigurationVersions.tcpHost,
+          tcpPort: monitorConfigurationVersions.tcpPort,
           url: monitorConfigurationVersions.url,
           method: monitorConfigurationVersions.method,
           timeoutMs: monitorConfigurationVersions.timeoutMs,
@@ -143,22 +166,26 @@ export class CheckExecutionRepository {
 
       return {
         state: 'CLAIMED',
-        execution: {
-          assignmentId: candidate.assignmentId,
-          claimToken: claimed.claimToken,
-          attemptNumber: claimed.attemptNumber,
-          url: candidate.url,
-          method: candidate.method,
-          timeoutMs: candidate.timeoutMs,
-          followRedirects: candidate.followRedirects,
-          statusPolicy: candidate.statusPolicy,
-          organizationId: candidate.organizationId,
-          monitorId: candidate.monitorId,
-          requestHeaders: candidate.requestHeaders,
-          requestBody: candidate.requestBody,
-          assertions: candidate.assertions,
-          tlsPolicy: candidate.tlsPolicy,
-        },
+        execution:
+          candidate.type === 'TCP'
+            ? createClaimedTcpExecution(candidate, claimed.claimToken, claimed.attemptNumber)
+            : {
+                type: 'HTTP',
+                assignmentId: candidate.assignmentId,
+                claimToken: claimed.claimToken,
+                attemptNumber: claimed.attemptNumber,
+                url: candidate.url,
+                method: candidate.method,
+                timeoutMs: candidate.timeoutMs,
+                followRedirects: candidate.followRedirects,
+                statusPolicy: candidate.statusPolicy,
+                organizationId: candidate.organizationId,
+                monitorId: candidate.monitorId,
+                requestHeaders: candidate.requestHeaders,
+                requestBody: candidate.requestBody,
+                assertions: candidate.assertions,
+                tlsPolicy: candidate.tlsPolicy,
+              },
       };
     });
   }
@@ -205,6 +232,34 @@ export class CheckExecutionRepository {
       return true;
     });
   }
+}
+
+function createClaimedTcpExecution(
+  candidate: {
+    assignmentId: string;
+    tcpHost: string | null;
+    tcpPort: number | null;
+    timeoutMs: number;
+    organizationId: string;
+    monitorId: string;
+  },
+  claimToken: string,
+  attemptNumber: number,
+): ClaimedTcpCheckExecution {
+  if (candidate.tcpHost === null || candidate.tcpPort === null) {
+    throw new Error('TCP execution configuration is incomplete.');
+  }
+  return {
+    type: 'TCP',
+    assignmentId: candidate.assignmentId,
+    claimToken,
+    attemptNumber,
+    host: candidate.tcpHost,
+    port: candidate.tcpPort,
+    timeoutMs: candidate.timeoutMs,
+    organizationId: candidate.organizationId,
+    monitorId: candidate.monitorId,
+  };
 }
 
 export async function finalizeCheckExecution(

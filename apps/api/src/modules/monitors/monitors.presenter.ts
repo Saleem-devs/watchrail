@@ -26,6 +26,8 @@ export interface MonitorResponse {
   id: string;
   projectId: string;
   name: string;
+  type: 'HTTP' | 'TCP';
+  configuration: { type: 'HTTP'; url: string } | { type: 'TCP'; host: string; port: number };
   url: string;
   method: string;
   lifecycleState: string;
@@ -119,6 +121,15 @@ export function toResponse(
     projectId: monitor.projectId,
     uptime,
     name: monitor.name,
+    type: monitor.type,
+    configuration:
+      monitor.type === 'TCP'
+        ? {
+            type: 'TCP',
+            host: requireTcpField(monitor.tcpHost, 'host'),
+            port: requireTcpField(monitor.tcpPort, 'port'),
+          }
+        : { type: 'HTTP', url: monitor.url },
     url: monitor.url,
     method: monitor.method,
     lifecycleState: monitor.lifecycleState,
@@ -139,6 +150,11 @@ export function toResponse(
       : null,
     incidentState: toIncidentStateResponse(incidentState),
   };
+}
+
+function requireTcpField<T>(value: T | null, field: string): T {
+  if (value === null) throw new Error(`Stored TCP monitor ${field} is missing.`);
+  return value;
 }
 
 export function toIncidentStateResponse(state: CurrentIncidentState) {

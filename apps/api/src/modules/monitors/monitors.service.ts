@@ -20,6 +20,7 @@ import {
   ProjectRepository,
   ArchivedMonitorLifecycleError,
   MonitorUpdateNotFoundError,
+  MonitorProtocolMismatchError,
   MonitorLocationUnavailableError,
   type CheckRoundRecord,
   type CheckHistoryDetail,
@@ -49,11 +50,13 @@ import {
   normalizeRequestHeaderUpdates,
   parseHttpMonitorSettings,
   parseHttpStatusPolicy,
+  parseTcpMonitorSettings,
   parseMonitorConfigurationUpdate,
   parseMonitorLifecycleSettings,
   parseMonitorLocationSettings,
   parseMonitorScheduleSettings,
   RequestHeaderInputError,
+  TcpMonitorInputError,
 } from '@watchrail/domain';
 import type { CreateMonitorCommand } from '@watchrail/domain';
 import { storeRequestHeaders } from '@watchrail/http-header-security';
@@ -83,6 +86,16 @@ export class MonitorsService {
       await this.assertProject(context, projectId);
       const monitor = createMonitor(command);
       const monitorId = randomUUID();
+      if (monitor.type === 'TCP') {
+        return await this.monitors.create(
+          context.organizationId,
+          monitorId,
+          monitor,
+          [],
+          EMPTY_ASSERTION_CONFIGURATION,
+          projectId,
+        );
+      }
       const requestHeaders = storeRequestHeaders(
         monitor.requestHeaders,
         [],
@@ -161,6 +174,9 @@ export class MonitorsService {
       if (error instanceof MonitorUpdateNotFoundError) {
         throw new NotFoundException({ code: 'MONITOR_NOT_FOUND', message: error.message });
       }
+      if (error instanceof MonitorProtocolMismatchError) {
+        throw new ConflictException({ code: 'MONITOR_PROTOCOL_MISMATCH', message: error.message });
+      }
       if (error instanceof Error && error.message.startsWith('Cannot retain missing sensitive')) {
         throw new BadRequestException({
           code: 'VALIDATION_FAILED',
@@ -203,6 +219,9 @@ export class MonitorsService {
       }
       if (error instanceof MonitorUpdateNotFoundError) {
         throw new NotFoundException({ code: 'MONITOR_NOT_FOUND', message: error.message });
+      }
+      if (error instanceof MonitorProtocolMismatchError) {
+        throw new ConflictException({ code: 'MONITOR_PROTOCOL_MISMATCH', message: error.message });
       }
       throw error;
     }
@@ -387,6 +406,35 @@ export class MonitorsService {
       if (error instanceof MonitorUpdateNotFoundError) {
         throw new NotFoundException({ code: 'MONITOR_NOT_FOUND', message: error.message });
       }
+      if (error instanceof MonitorProtocolMismatchError) {
+        throw new ConflictException({ code: 'MONITOR_PROTOCOL_MISMATCH', message: error.message });
+      }
+      throw error;
+    }
+  }
+
+  async updateTcpSettings(
+    context: RequestContext,
+    monitorId: string,
+    value: unknown,
+  ): Promise<MonitorRecord> {
+    try {
+      const settings = parseTcpMonitorSettings(value);
+      return await this.monitors.updateTcpSettings(context.organizationId, monitorId, settings);
+    } catch (error) {
+      if (error instanceof MonitorInputError || error instanceof TcpMonitorInputError) {
+        throw new BadRequestException({
+          code: 'VALIDATION_FAILED',
+          message: error.message,
+          fields: error.fields,
+        });
+      }
+      if (error instanceof MonitorUpdateNotFoundError) {
+        throw new NotFoundException({ code: 'MONITOR_NOT_FOUND', message: error.message });
+      }
+      if (error instanceof MonitorProtocolMismatchError) {
+        throw new ConflictException({ code: 'MONITOR_PROTOCOL_MISMATCH', message: error.message });
+      }
       throw error;
     }
   }
@@ -447,6 +495,9 @@ export class MonitorsService {
       if (error instanceof MonitorUpdateNotFoundError) {
         throw new NotFoundException({ code: 'MONITOR_NOT_FOUND', message: error.message });
       }
+      if (error instanceof MonitorProtocolMismatchError) {
+        throw new ConflictException({ code: 'MONITOR_PROTOCOL_MISMATCH', message: error.message });
+      }
       if (error instanceof Error && error.message.startsWith('Cannot retain missing sensitive')) {
         throw new BadRequestException({
           code: 'VALIDATION_FAILED',
@@ -480,6 +531,9 @@ export class MonitorsService {
       }
       if (error instanceof MonitorUpdateNotFoundError) {
         throw new NotFoundException({ code: 'MONITOR_NOT_FOUND', message: error.message });
+      }
+      if (error instanceof MonitorProtocolMismatchError) {
+        throw new ConflictException({ code: 'MONITOR_PROTOCOL_MISMATCH', message: error.message });
       }
       throw error;
     }

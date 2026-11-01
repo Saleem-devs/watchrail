@@ -15,9 +15,11 @@ const filters: Array<{ value: TriggerFilter; label: string }> = [
 export function MonitorResponseTimeChart({
   page,
   loading,
+  protocol = 'HTTP',
 }: {
   page: HistoryPage | undefined;
   loading: boolean;
+  protocol?: 'HTTP' | 'TCP';
 }) {
   const [filter, setFilter] = useState<TriggerFilter>('ALL');
   const points = useMemo(() => responseTimePoints(page, filter), [page, filter]);
@@ -26,15 +28,17 @@ export function MonitorResponseTimeChart({
     <section className="overflow-hidden rounded-rail-panel border border-rail-border bg-rail-raised">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rail-border px-5 py-4 sm:px-6">
         <div>
-          <h2 className="m-0 text-sm font-semibold text-rail-text">Response times</h2>
+          <h2 className="m-0 text-sm font-semibold text-rail-text">Latency</h2>
           <p className="mt-1 mb-0 text-xs text-rail-muted">
-            Total HTTP response duration from the latest recorded checks.
+            {protocol === 'TCP'
+              ? 'Connection establishment time from the latest recorded checks.'
+              : 'Total HTTP response duration from the latest recorded checks.'}
           </p>
         </div>
         <div
           className="flex items-center gap-4 border-b border-rail-border"
           role="group"
-          aria-label="Filter response times by check type"
+          aria-label="Filter latency by check type"
         >
           {filters.map((option) => (
             <Button
@@ -60,16 +64,16 @@ export function MonitorResponseTimeChart({
             className="flex min-h-64 items-center justify-center text-xs text-rail-muted"
             role="status"
           >
-            Loading response-time evidence…
+            Loading latency evidence…
           </div>
         ) : points.length < 2 ? (
           <div className="flex min-h-64 flex-col items-center justify-center text-center">
             <strong className="text-sm font-medium text-rail-text">
-              Not enough response-time evidence yet
+              Not enough latency evidence yet
             </strong>
             <p className="mt-1 mb-0 max-w-sm text-xs leading-5 text-rail-muted">
               Watchrail needs at least two completed {filter === 'ALL' ? '' : filter.toLowerCase()}{' '}
-              checks with response timings to draw a trend.
+              checks with latency evidence to draw a trend.
             </p>
           </div>
         ) : (
@@ -135,12 +139,12 @@ function ResponseTimePlot({ points }: { points: ResponseTimePoint[] }) {
     Math.floor(((points.length - 1) * 2) / 3),
     points.length - 1,
   ]);
-  const summary = `${points.length} response-time measurements. Latest ${Math.round(
+  const summary = `${points.length} latency measurements. Latest ${Math.round(
     points.at(-1)?.responseTimeMs ?? 0,
   )} milliseconds. Slowest ${Math.round(maximum)} milliseconds.`;
 
   return (
-    <figure className="m-0 overflow-x-auto" aria-label="Response time trend">
+    <figure className="m-0 overflow-x-auto" aria-label="Latency trend">
       <p className="sr-only">{summary}</p>
       <svg
         viewBox={`0 0 ${width} ${height}`}
@@ -227,7 +231,7 @@ function ResponseTimePlot({ points }: { points: ResponseTimePoint[] }) {
         <span className="flex flex-wrap items-center gap-4">
           <span className="inline-flex items-center gap-1.5">
             <span className="size-2 rounded-full bg-rail-accent" aria-hidden="true" />
-            Response time
+            Latency
           </span>
           {points.some((point) => point.outcome === 'FAIL') ? (
             <span className="inline-flex items-center gap-1.5">

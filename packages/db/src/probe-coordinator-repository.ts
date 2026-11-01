@@ -60,6 +60,9 @@ export interface ProbeExecutionConfigurationRecord {
   requiredEngineVersion: string;
   organizationId: string;
   monitorId: string;
+  type: 'HTTP' | 'TCP';
+  tcpHost: string | null;
+  tcpPort: number | null;
   url: string;
   method: string;
   timeoutMs: number;
@@ -124,6 +127,9 @@ export class ProbeCoordinatorRepository {
           requiredEngineVersion: checkExecutionAssignments.requiredEngineVersion,
           organizationId: monitorConfigurationVersions.organizationId,
           monitorId: monitorConfigurationVersions.monitorId,
+          type: monitorConfigurationVersions.type,
+          tcpHost: monitorConfigurationVersions.tcpHost,
+          tcpPort: monitorConfigurationVersions.tcpPort,
           url: monitorConfigurationVersions.url,
           method: monitorConfigurationVersions.method,
           timeoutMs: monitorConfigurationVersions.timeoutMs,
@@ -183,6 +189,9 @@ export class ProbeCoordinatorRepository {
         requiredEngineVersion: row.requiredEngineVersion,
         organizationId: row.organizationId,
         monitorId: row.monitorId,
+        type: row.type,
+        tcpHost: row.tcpHost,
+        tcpPort: row.tcpPort,
         url: row.url,
         method: row.method,
         timeoutMs: row.timeoutMs,

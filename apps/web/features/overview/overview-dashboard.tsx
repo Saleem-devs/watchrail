@@ -83,7 +83,7 @@ export function OverviewDashboard({
           <div className="flex flex-wrap items-start justify-between gap-3 border-b border-rail-border px-4 py-3">
             <div>
               <h2 id="response-times-heading" className="m-0 text-sm font-medium text-rail-text">
-                Response time trends
+                Latency trends
               </h2>
               <p className="mt-1 mb-0 text-xs text-rail-muted">
                 Daily averages from completed scheduled checks over the last seven UTC days
@@ -133,7 +133,7 @@ function ResponseTimeChart({
   if (loading && !data) {
     return (
       <div className="grid min-h-72 place-items-center px-4 py-8" role="status">
-        <span className="text-sm text-rail-muted">Loading response-time history…</span>
+        <span className="text-sm text-rail-muted">Loading latency history…</span>
       </div>
     );
   }
@@ -157,7 +157,7 @@ function ResponseTimeChart({
   if (!data || data.series.length === 0) {
     return (
       <div className="px-4 py-3">
-        <EmptyInsight>No scheduled response-time evidence has been recorded yet.</EmptyInsight>
+        <EmptyInsight>No scheduled latency evidence has been recorded yet.</EmptyInsight>
       </div>
     );
   }
@@ -182,10 +182,10 @@ function ResponseTimeChart({
           role="img"
           aria-labelledby="response-chart-title response-chart-description"
         >
-          <title id="response-chart-title">Seven-day response-time trends</title>
+          <title id="response-chart-title">Seven-day latency trends</title>
           <desc id="response-chart-description">
-            Daily average response time in milliseconds for up to four monitors. Missing days are
-            shown as gaps.
+            Daily average latency in milliseconds for up to four monitors. Missing days are shown as
+            gaps.
           </desc>
           {yTicks.map((ratio) => {
             const y = plot.top + plot.height * (1 - ratio);
@@ -270,7 +270,7 @@ function ResponseTimeChart({
           <tr>
             <th scope="col">Monitor</th>
             <th scope="col">Date</th>
-            <th scope="col">Average response time</th>
+            <th scope="col">Average latency</th>
             <th scope="col">Samples</th>
           </tr>
         </thead>

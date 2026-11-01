@@ -47,8 +47,8 @@ describe('remaining API route contracts', () => {
       ...routes(MonitorUptimeController),
       ...routes(MonitorHistoryController),
     ];
-    expect(observed).toHaveLength(21);
-    expect(new Set(observed.map((item) => item.route)).size).toBe(21);
+    expect(observed).toHaveLength(22);
+    expect(new Set(observed.map((item) => item.route)).size).toBe(22);
     expect(observed.every((item) => typeof item.permission === 'string')).toBe(true);
     expect(observed).toContainEqual({
       route: 'POST monitors',
@@ -61,6 +61,10 @@ describe('remaining API route contracts', () => {
     expect(observed).toContainEqual({
       route: 'POST monitors/:monitorId/test-configuration',
       permission: 'monitor:execute',
+    });
+    expect(observed).toContainEqual({
+      route: 'PATCH monitors/:monitorId/tcp-settings',
+      permission: 'monitor:update',
     });
     expect(observed).toContainEqual({
       route: 'GET monitors/:monitorId/uptime',

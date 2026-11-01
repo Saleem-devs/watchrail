@@ -6,6 +6,7 @@ import type {
   IncidentHistoryPage,
   IncidentState,
   ManualRound,
+  Monitor,
 } from './types';
 import { formatMilliseconds, formatRatio, humanize } from './formatting';
 import { AssertionDiagnostics, diagnosticFailureLabel } from './assertion-diagnostics';
@@ -76,25 +77,36 @@ function DiagnosticOutcomeSummary({
   stage,
   statusCode,
   assertionEvaluation,
+  protocol = 'HTTP',
 }: {
   outcome: 'PASS' | 'FAIL' | 'UNKNOWN';
   reason: string;
   stage: string;
   statusCode: number | null;
   assertionEvaluation: AssertionEvaluation;
+  protocol?: Monitor['type'];
 }) {
-  const httpOutcome: DiagnosticOutcome =
-    (reason === 'CERTIFICATE_EXPIRING' || reason === 'CERTIFICATE_EVIDENCE_UNAVAILABLE') &&
-    statusCode !== null
-      ? 'PASS'
-      : stage !== 'HTTP' || statusCode === null
-        ? 'NO_RESPONSE'
-        : outcome;
+  const executionOutcome: DiagnosticOutcome =
+    protocol === 'TCP'
+      ? outcome
+      : (reason === 'CERTIFICATE_EXPIRING' || reason === 'CERTIFICATE_EVIDENCE_UNAVAILABLE') &&
+          statusCode !== null
+        ? 'PASS'
+        : stage !== 'HTTP' || statusCode === null
+          ? 'NO_RESPONSE'
+          : outcome;
   const health = singleLocationHealth(outcome, reason, assertionEvaluation.outcome);
   return (
-    <dl className="grid gap-px border-t border-rail-border bg-rail-border sm:grid-cols-3">
-      <DiagnosticSignal label="HTTP execution" outcome={httpOutcome} />
-      <DiagnosticSignal label="Response validation" outcome={assertionEvaluation.outcome} />
+    <dl
+      className={`grid gap-px border-t border-rail-border bg-rail-border ${protocol === 'HTTP' ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}
+    >
+      <DiagnosticSignal
+        label={protocol === 'HTTP' ? 'HTTP execution' : 'TCP connection'}
+        outcome={executionOutcome}
+      />
+      {protocol === 'HTTP' ? (
+        <DiagnosticSignal label="Response validation" outcome={assertionEvaluation.outcome} />
+      ) : null}
       <DiagnosticSignal label="Monitoring health" outcome={health} />
     </dl>
   );
@@ -114,9 +126,11 @@ function DiagnosticSignal({ label, outcome }: { label: string; outcome: Diagnost
 export function ManualDiagnostic({
   round,
   error,
+  protocol = 'HTTP',
 }: {
   round: ManualRound | undefined;
   error: string | undefined;
+  protocol?: Monitor['type'];
 }) {
   if (error) {
     return (
@@ -181,8 +195,20 @@ export function ManualDiagnostic({
         <OutcomeBadge outcome={monitoringHealth} />
       </div>
       <dl className="grid grid-cols-2 gap-px bg-rail-border sm:grid-cols-4">
-        <Metric label="HTTP" value={result.statusCode?.toString() ?? 'No response'} />
-        <Metric label="Response" value={formatMilliseconds(result.responseTimeMs)} />
+        <Metric
+          label={protocol === 'HTTP' ? 'HTTP' : 'Connection'}
+          value={
+            protocol === 'HTTP'
+              ? (result.statusCode?.toString() ?? 'No response')
+              : result.reason === 'CONNECTED'
+                ? 'Established'
+                : 'Failed'
+          }
+        />
+        <Metric
+          label={protocol === 'HTTP' ? 'Response' : 'Connect latency'}
+          value={formatMilliseconds(result.responseTimeMs)}
+        />
         <Metric label="Attempt" value={formatMilliseconds(result.attemptDurationMs)} />
         <Metric label="Checked" value={new Date(result.checkedAt).toLocaleTimeString()} />
       </dl>
@@ -192,28 +218,35 @@ export function ManualDiagnostic({
         stage={result.stage}
         statusCode={result.statusCode}
         assertionEvaluation={assertionEvaluation}
+        protocol={protocol}
       />
       <div className="border-t border-rail-border px-4 py-3 text-xs">
         <p className="m-0 font-medium text-rail-text">
-          {diagnosticFailureLabel({
-            outcome: result.outcome,
-            stage: result.stage,
-            reason: result.reason,
-            statusCode: result.statusCode,
-            assertionEvaluation,
-          })}
+          {protocol === 'TCP'
+            ? tcpDiagnosticLabel(result.reason)
+            : diagnosticFailureLabel({
+                outcome: result.outcome,
+                stage: result.stage,
+                reason: result.reason,
+                statusCode: result.statusCode,
+                assertionEvaluation,
+              })}
         </p>
         <p className="mt-1 mb-0 text-rail-subtle">
           {humanize(result.stage)} · {humanize(result.reason)}
         </p>
       </div>
-      <AssertionDiagnostics evaluation={assertionEvaluation} />
-      <TlsCertificateEvidencePanel
-        certificates={result.tlsCertificates}
-        observedAt={result.checkedAt}
-      />
-      {result.redirects.length > 0 ? <RedirectPath redirects={result.redirects} /> : null}
-      <EvidenceRetentionNotice />
+      {protocol === 'HTTP' ? (
+        <>
+          <AssertionDiagnostics evaluation={assertionEvaluation} />
+          <TlsCertificateEvidencePanel
+            certificates={result.tlsCertificates}
+            observedAt={result.checkedAt}
+          />
+          {result.redirects.length > 0 ? <RedirectPath redirects={result.redirects} /> : null}
+          <EvidenceRetentionNotice />
+        </>
+      ) : null}
     </section>
   );
 }
@@ -257,6 +290,25 @@ function EvidenceRetentionNotice() {
       inspect bounded, redacted response evidence.
     </p>
   );
+}
+
+function tcpDiagnosticLabel(reason: string): string {
+  switch (reason) {
+    case 'CONNECTED':
+      return 'TCP connection established.';
+    case 'CONNECTION_REFUSED':
+      return 'The target actively refused the TCP connection.';
+    case 'HOST_UNREACHABLE':
+      return 'The target network or host could not be reached.';
+    case 'CONNECTION_TIMEOUT':
+      return 'The TCP connection did not complete before the timeout.';
+    case 'NAME_NOT_FOUND':
+      return 'The target hostname could not be resolved.';
+    case 'PROHIBITED_DESTINATION':
+      return 'The resolved target is blocked by Watchrail network safety policy.';
+    default:
+      return 'The TCP check could not produce authoritative connection evidence.';
+  }
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
@@ -359,6 +411,7 @@ export function CheckHistory({
   expandedRoundIds,
   loadingRoundIds,
   onToggleRound,
+  protocol = 'HTTP',
 }: {
   page: HistoryPage | undefined;
   loading: boolean;
@@ -367,6 +420,7 @@ export function CheckHistory({
   expandedRoundIds: Set<string>;
   loadingRoundIds: Set<string>;
   onToggleRound: (roundId: string) => void;
+  protocol?: Monitor['type'];
 }) {
   if (!page && loading) {
     return (
@@ -448,7 +502,7 @@ export function CheckHistory({
                 />
               ) : null}
               {isExpanded && detail?.result && detail.result.kind !== 'MULTI_LOCATION' ? (
-                <HistoricalSingleLocationEvidence result={detail.result} />
+                <HistoricalSingleLocationEvidence result={detail.result} protocol={protocol} />
               ) : null}
             </li>
           );
@@ -467,8 +521,10 @@ export function CheckHistory({
 
 function HistoricalSingleLocationEvidence({
   result,
+  protocol,
 }: {
   result: Extract<NonNullable<ManualRound['result']>, { kind?: 'SINGLE_LOCATION' }>;
+  protocol: Monitor['type'];
 }) {
   const assertionEvaluation = result.assertionEvaluation ?? {
     contractVersion: 1 as const,
@@ -478,8 +534,20 @@ function HistoricalSingleLocationEvidence({
   return (
     <div className="mt-3 overflow-hidden rounded-rail-panel border border-rail-border bg-rail-sidebar/45">
       <dl className="grid grid-cols-2 gap-px bg-rail-border sm:grid-cols-4">
-        <Metric label="HTTP" value={result.statusCode?.toString() ?? 'No response'} />
-        <Metric label="Response" value={formatMilliseconds(result.responseTimeMs)} />
+        <Metric
+          label={protocol === 'HTTP' ? 'HTTP' : 'Connection'}
+          value={
+            protocol === 'HTTP'
+              ? (result.statusCode?.toString() ?? 'No response')
+              : result.reason === 'CONNECTED'
+                ? 'Established'
+                : 'Failed'
+          }
+        />
+        <Metric
+          label={protocol === 'HTTP' ? 'Response' : 'Connect latency'}
+          value={formatMilliseconds(result.responseTimeMs)}
+        />
         <Metric label="Attempt" value={formatMilliseconds(result.attemptDurationMs)} />
         <Metric label="Checked" value={new Date(result.checkedAt).toLocaleTimeString()} />
       </dl>
@@ -489,23 +557,30 @@ function HistoricalSingleLocationEvidence({
         stage={result.stage}
         statusCode={result.statusCode}
         assertionEvaluation={assertionEvaluation}
+        protocol={protocol}
       />
       <p className="m-0 border-t border-rail-border px-4 py-3 text-xs text-rail-subtle">
-        {diagnosticFailureLabel({
-          outcome: result.outcome,
-          stage: result.stage,
-          reason: result.reason,
-          statusCode: result.statusCode,
-          assertionEvaluation,
-        })}
+        {protocol === 'TCP'
+          ? tcpDiagnosticLabel(result.reason)
+          : diagnosticFailureLabel({
+              outcome: result.outcome,
+              stage: result.stage,
+              reason: result.reason,
+              statusCode: result.statusCode,
+              assertionEvaluation,
+            })}
       </p>
-      <AssertionDiagnostics evaluation={assertionEvaluation} />
-      <TlsCertificateEvidencePanel
-        certificates={result.tlsCertificates}
-        observedAt={result.checkedAt}
-      />
-      {result.redirects.length > 0 ? <RedirectPath redirects={result.redirects} /> : null}
-      <EvidenceRetentionNotice />
+      {protocol === 'HTTP' ? (
+        <>
+          <AssertionDiagnostics evaluation={assertionEvaluation} />
+          <TlsCertificateEvidencePanel
+            certificates={result.tlsCertificates}
+            observedAt={result.checkedAt}
+          />
+          {result.redirects.length > 0 ? <RedirectPath redirects={result.redirects} /> : null}
+          <EvidenceRetentionNotice />
+        </>
+      ) : null}
     </div>
   );
 }

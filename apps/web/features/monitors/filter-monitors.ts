@@ -72,7 +72,11 @@ export function filterMonitors(
     const matchesQuery =
       !needle ||
       monitor.name.toLowerCase().includes(needle) ||
-      monitor.url.toLowerCase().includes(needle);
+      monitor.url.toLowerCase().includes(needle) ||
+      (monitor.configuration?.type === 'TCP' &&
+        `${monitor.configuration.host}:${monitor.configuration.port}`
+          .toLowerCase()
+          .includes(needle));
     return matchesCondition && matchesQuery;
   });
 }

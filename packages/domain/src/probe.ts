@@ -5,8 +5,10 @@ export const PROBE_ATTEMPT_STATUSES = ['LEASED', 'SUBMITTED', 'EXPIRED', 'REJECT
 
 export const LOCAL_PROBE_LOCATION = 'local';
 export const HTTP_EXECUTION_POLICY_VERSION = 'http-v1';
+export const TCP_EXECUTION_POLICY_VERSION = 'tcp-v1';
 export const LEGACY_HTTP_ENGINE_VERSION = 'watchrail-http-v1';
 export const HTTP_ENGINE_VERSION = 'watchrail-http-v2';
+export const TCP_ENGINE_VERSION = 'watchrail-tcp-v1';
 export const SUPPORTED_HTTP_ENGINE_VERSIONS = [
   LEGACY_HTTP_ENGINE_VERSION,
   HTTP_ENGINE_VERSION,
@@ -48,13 +50,19 @@ export function probeEngineSupports(
   return (
     agentEngineVersion === requiredEngineVersion ||
     (agentEngineVersion === HTTP_ENGINE_VERSION &&
-      requiredEngineVersion === LEGACY_HTTP_ENGINE_VERSION)
+      requiredEngineVersion === LEGACY_HTTP_ENGINE_VERSION) ||
+    (agentEngineVersion === TCP_ENGINE_VERSION &&
+      (requiredEngineVersion === HTTP_ENGINE_VERSION ||
+        requiredEngineVersion === LEGACY_HTTP_ENGINE_VERSION))
   );
 }
 
 export function requiredEngineVersionsForAgent(agentEngineVersion: string): readonly string[] {
   if (agentEngineVersion === HTTP_ENGINE_VERSION) {
     return [HTTP_ENGINE_VERSION, LEGACY_HTTP_ENGINE_VERSION];
+  }
+  if (agentEngineVersion === TCP_ENGINE_VERSION) {
+    return [TCP_ENGINE_VERSION, HTTP_ENGINE_VERSION, LEGACY_HTTP_ENGINE_VERSION];
   }
   return [agentEngineVersion];
 }
@@ -63,13 +71,20 @@ export function agentEngineVersionsForRequirement(
   requiredEngineVersion: string,
 ): readonly string[] {
   if (requiredEngineVersion === LEGACY_HTTP_ENGINE_VERSION) {
-    return [LEGACY_HTTP_ENGINE_VERSION, HTTP_ENGINE_VERSION];
+    return [LEGACY_HTTP_ENGINE_VERSION, HTTP_ENGINE_VERSION, TCP_ENGINE_VERSION];
+  }
+  if (requiredEngineVersion === HTTP_ENGINE_VERSION) {
+    return [HTTP_ENGINE_VERSION, TCP_ENGINE_VERSION];
   }
   return [requiredEngineVersion];
 }
 
 export function isSupportedHttpEngineVersion(value: string | null): boolean {
-  return value !== null && SUPPORTED_HTTP_ENGINE_VERSIONS.some((version) => version === value);
+  return (
+    value !== null &&
+    (value === TCP_ENGINE_VERSION ||
+      SUPPORTED_HTTP_ENGINE_VERSIONS.some((version) => version === value))
+  );
 }
 
 export function assertProbeEngineVersion(value: unknown): asserts value is string {

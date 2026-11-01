@@ -15,6 +15,7 @@ import {
   type NewMonitor,
   type MonitorLifecycleState,
   type StoredRequestHeader,
+  type TcpMonitorSettings,
 } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
 import {
@@ -58,18 +59,22 @@ export class MonitorRepository {
           organizationId,
           projectId,
           name: monitor.name,
-          url: monitor.url,
-          method: monitor.method,
+          type: monitor.type,
+          tcpHost: monitor.type === 'TCP' ? monitor.host : null,
+          tcpPort: monitor.type === 'TCP' ? monitor.port : null,
+          url: monitor.type === 'HTTP' ? monitor.url : '',
+          method: monitor.type === 'HTTP' ? monitor.method : 'GET',
           lifecycleState: monitor.lifecycleState,
           timeoutMs: monitor.timeoutMs,
           intervalSeconds: monitor.intervalSeconds,
           nextCheckAt: sql`clock_timestamp() + (${monitor.intervalSeconds} * interval '1 second')`,
-          followRedirects: monitor.followRedirects,
-          statusPolicy: monitor.statusPolicy,
+          followRedirects: monitor.type === 'HTTP' ? monitor.followRedirects : false,
+          statusPolicy:
+            monitor.type === 'HTTP' ? monitor.statusPolicy : { type: 'ANY_2XX' as const },
           requestHeaders,
-          requestBody: monitor.requestBody,
+          requestBody: monitor.type === 'HTTP' ? monitor.requestBody : { type: 'NONE' as const },
           assertions,
-          tlsPolicy: monitor.tlsPolicy,
+          tlsPolicy: monitor.type === 'HTTP' ? monitor.tlsPolicy : { type: 'DISABLED' as const },
           locations: monitor.locations,
         })
         .returning();
@@ -82,6 +87,9 @@ export class MonitorRepository {
         organizationId,
         monitorId: created.id,
         versionNumber: 1,
+        type: created.type,
+        tcpHost: created.tcpHost,
+        tcpPort: created.tcpPort,
 
         url: created.url,
         method: created.method,
@@ -206,6 +214,7 @@ export class MonitorRepository {
         .for('update');
 
       if (!monitor) throw new MonitorUpdateNotFoundError();
+      if (monitor.type !== 'HTTP') throw new MonitorProtocolMismatchError('HTTP');
 
       const [configuration] = await tx
         .select()
@@ -233,6 +242,9 @@ export class MonitorRepository {
         organizationId,
         monitorId,
         versionNumber: configuration.versionNumber + 1,
+        type: configuration.type,
+        tcpHost: configuration.tcpHost,
+        tcpPort: configuration.tcpPort,
         url: configuration.url,
         method: configuration.method,
         timeoutMs: configuration.timeoutMs,
@@ -264,6 +276,7 @@ export class MonitorRepository {
         .for('update');
 
       if (!monitor) throw new MonitorUpdateNotFoundError();
+      if (monitor.type !== 'HTTP') throw new MonitorProtocolMismatchError('HTTP');
 
       const [configuration] = await tx
         .select()
@@ -292,6 +305,9 @@ export class MonitorRepository {
         organizationId,
         monitorId,
         versionNumber: configuration.versionNumber + 1,
+        type: configuration.type,
+        tcpHost: configuration.tcpHost,
+        tcpPort: configuration.tcpPort,
         url: configuration.url,
         method: configuration.method,
         timeoutMs: configuration.timeoutMs,
@@ -327,6 +343,7 @@ export class MonitorRepository {
         .limit(1)
         .for('update');
       if (!monitor) throw new MonitorUpdateNotFoundError();
+      if (monitor.type !== 'HTTP') throw new MonitorProtocolMismatchError('HTTP');
 
       const [configuration] = await tx
         .select()
@@ -368,6 +385,9 @@ export class MonitorRepository {
         organizationId,
         monitorId,
         versionNumber: configuration.versionNumber + 1,
+        type: configuration.type,
+        tcpHost: configuration.tcpHost,
+        tcpPort: configuration.tcpPort,
         ...settings,
         tlsPolicy,
         intervalSeconds: configuration.intervalSeconds,
@@ -394,6 +414,7 @@ export class MonitorRepository {
         .for('update');
 
       if (!monitor) throw new MonitorUpdateNotFoundError();
+      if (monitor.type !== 'HTTP') throw new MonitorProtocolMismatchError('HTTP');
 
       const [configuration] = await tx
         .select()
@@ -427,6 +448,9 @@ export class MonitorRepository {
         organizationId,
         monitorId,
         versionNumber: configuration.versionNumber + 1,
+        type: configuration.type,
+        tcpHost: configuration.tcpHost,
+        tcpPort: configuration.tcpPort,
         ...settings,
         tlsPolicy,
         intervalSeconds: configuration.intervalSeconds,
@@ -436,6 +460,69 @@ export class MonitorRepository {
         locations: configuration.locations,
       });
 
+      return updated;
+    });
+  }
+
+  async updateTcpSettings(
+    organizationId: string,
+    monitorId: string,
+    settings: TcpMonitorSettings,
+  ): Promise<MonitorRecord> {
+    return this.db.transaction(async (tx) => {
+      const [monitor] = await tx
+        .select()
+        .from(monitors)
+        .where(and(eq(monitors.id, monitorId), eq(monitors.organizationId, organizationId)))
+        .limit(1)
+        .for('update');
+      if (!monitor) throw new MonitorUpdateNotFoundError();
+      if (monitor.type !== 'TCP') throw new MonitorProtocolMismatchError('TCP');
+
+      const [configuration] = await tx
+        .select()
+        .from(monitorConfigurationVersions)
+        .where(
+          and(
+            eq(monitorConfigurationVersions.monitorId, monitorId),
+            eq(monitorConfigurationVersions.organizationId, organizationId),
+          ),
+        )
+        .orderBy(desc(monitorConfigurationVersions.versionNumber))
+        .limit(1);
+      if (!configuration) throw new Error('Monitor has no configuration version.');
+
+      const [updated] = await tx
+        .update(monitors)
+        .set({
+          tcpHost: settings.host,
+          tcpPort: settings.port,
+          timeoutMs: settings.timeoutMs,
+          updatedAt: sql`now()`,
+        })
+        .where(and(eq(monitors.id, monitorId), eq(monitors.organizationId, organizationId)))
+        .returning();
+      if (!updated) throw new Error('The monitor update returned no record.');
+
+      await tx.insert(monitorConfigurationVersions).values({
+        organizationId,
+        monitorId,
+        versionNumber: configuration.versionNumber + 1,
+        type: 'TCP',
+        tcpHost: settings.host,
+        tcpPort: settings.port,
+        url: configuration.url,
+        method: configuration.method,
+        timeoutMs: settings.timeoutMs,
+        intervalSeconds: configuration.intervalSeconds,
+        followRedirects: configuration.followRedirects,
+        statusPolicy: configuration.statusPolicy,
+        requestHeaders: configuration.requestHeaders,
+        requestBody: configuration.requestBody,
+        assertions: configuration.assertions,
+        tlsPolicy: configuration.tlsPolicy,
+        locations: configuration.locations,
+      });
       return updated;
     });
   }
@@ -456,6 +543,7 @@ export class MonitorRepository {
         .limit(1)
         .for('update');
       if (!monitor) throw new MonitorUpdateNotFoundError();
+      if (monitor.type !== 'HTTP') throw new MonitorProtocolMismatchError('HTTP');
 
       const [configuration] = await tx
         .select()
@@ -488,6 +576,9 @@ export class MonitorRepository {
         organizationId,
         monitorId,
         versionNumber: configuration.versionNumber + 1,
+        type: configuration.type,
+        tcpHost: configuration.tcpHost,
+        tcpPort: configuration.tcpPort,
         url: configuration.url,
         method: configuration.method,
         timeoutMs: configuration.timeoutMs,
@@ -551,6 +642,9 @@ export class MonitorRepository {
         organizationId,
         monitorId,
         versionNumber: configuration.versionNumber + 1,
+        type: configuration.type,
+        tcpHost: configuration.tcpHost,
+        tcpPort: configuration.tcpPort,
         url: configuration.url,
         method: configuration.method,
         timeoutMs: configuration.timeoutMs,
@@ -631,6 +725,9 @@ export class MonitorRepository {
         organizationId,
         monitorId,
         versionNumber: configuration.versionNumber + 1,
+        type: configuration.type,
+        tcpHost: configuration.tcpHost,
+        tcpPort: configuration.tcpPort,
         url: configuration.url,
         method: configuration.method,
         timeoutMs: configuration.timeoutMs,
@@ -725,5 +822,12 @@ export class MonitorLocationUnavailableError extends Error {
   constructor() {
     super('Remote probe location is unavailable.');
     this.name = 'MonitorLocationUnavailableError';
+  }
+}
+
+export class MonitorProtocolMismatchError extends Error {
+  constructor(protocol: 'HTTP' | 'TCP') {
+    super(`This operation requires a ${protocol} monitor.`);
+    this.name = 'MonitorProtocolMismatchError';
   }
 }

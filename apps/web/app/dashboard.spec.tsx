@@ -107,6 +107,62 @@ describe('Dashboard', () => {
     );
   });
 
+  it('creates a TCP monitor with protocol-specific fields and no HTTP payload', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: {
+              id: 'tcp-monitor-1',
+              type: 'TCP',
+              name: 'Primary database',
+              url: '',
+              configuration: { type: 'TCP', host: 'db.example.com', port: 5432 },
+              method: 'GET',
+              lifecycleState: 'ENABLED',
+              timeoutMs: 8_000,
+              followRedirects: false,
+              statusPolicy: { type: 'ANY_2XX' },
+              locations: ['local'],
+              createdAt: new Date().toISOString(),
+            },
+          }),
+          { status: 201 },
+        ),
+      );
+
+    render(<Dashboard view="create" />);
+    await screen.findByRole('heading', { name: 'Create monitor' });
+    await userEvent.click(screen.getByText('TCP port'));
+    expect(screen.queryByRole('button', { name: 'Test configuration' })).not.toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText('Monitor name'), 'Primary database');
+    await userEvent.type(await screen.findByLabelText(/Hostname or IP address/), 'db.example.com');
+    const port = screen.getByLabelText('Port');
+    await userEvent.clear(port);
+    await userEvent.type(port, '5432');
+    const timeout = screen.getByLabelText(/Timeout/);
+    await userEvent.clear(timeout);
+    await userEvent.type(timeout, '8');
+    await userEvent.click(screen.getByRole('button', { name: 'Save monitor' }));
+
+    const request = fetchMock.mock.calls.at(-1)?.[1];
+    if (typeof request?.body !== 'string') throw new Error('Expected a JSON request body.');
+    expect(JSON.parse(request.body)).toEqual({
+      type: 'TCP',
+      name: 'Primary database',
+      host: 'db.example.com',
+      port: 5432,
+      timeoutMs: 8_000,
+      locations: ['local'],
+      lifecycleState: 'ENABLED',
+    });
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Primary database is ready for its first check.',
+    );
+  });
+
   it('presents a paused monitor neutrally despite a successful historical check', async () => {
     const monitor = {
       id: 'paused-monitor',

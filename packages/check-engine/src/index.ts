@@ -1,4 +1,6 @@
 export { executeHttpCheck } from './http-check.js';
+export { executeTcpCheck } from './tcp-check.js';
+export { NodeTcpConnector } from './node-tcp-connector.js';
 export { evaluateHeaderAssertions, notEvaluateHeaderAssertions } from './header-assertions.js';
 export { combineAssertionEvaluations } from './assertion-evaluation.js';
 export {
@@ -27,6 +29,7 @@ export {
   type ResolvedHttpTarget,
   type ValidatedAddress,
 } from './safe-http-target.js';
+export { resolveSafeNetworkTarget, type ResolvedNetworkTarget } from './safe-network-target.js';
 export {
   UndiciPinnedHttpTransport,
   createPinnedLookup,
@@ -67,3 +70,11 @@ export type {
   HttpPolicyRejection,
   HttpRedirectFailure,
 } from './types.js';
+export type {
+  TcpCheckDependencies,
+  TcpCheckInput,
+  TcpCheckResult,
+  TcpConnectInput,
+  TcpConnectResult,
+  TcpConnector,
+} from './tcp-types.js';

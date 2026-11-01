@@ -236,7 +236,9 @@ function ActionMenu<Row>({
         return;
       }
       if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
-      const items = [...(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
+      const items = [
+        ...(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []),
+      ];
       if (items.length === 0) return;
       event.preventDefault();
       const currentIndex = items.indexOf(document.activeElement as HTMLElement);
@@ -282,13 +284,7 @@ function ActionMenu<Row>({
         }`;
         const href = action.href?.(row);
         return href ? (
-          <Link
-            key={action.id}
-            href={href}
-            role="menuitem"
-            className={className}
-            onClick={onClose}
-          >
+          <Link key={action.id} href={href} role="menuitem" className={className} onClick={onClose}>
             {action.label}
           </Link>
         ) : (

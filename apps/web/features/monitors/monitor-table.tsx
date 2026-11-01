@@ -28,15 +28,21 @@ function monitorColumns(origin: string, projectId?: string): Array<DataTableColu
           >
             {monitor.name}
           </Link>
-          <a
-            href={monitor.url}
-            target="_blank"
-            rel="noreferrer"
-            aria-label={`Open ${monitor.name} endpoint in a new tab`}
-            className="mt-0.5 block max-w-xs truncate text-xs text-rail-muted no-underline hover:text-rail-text hover:underline"
-          >
-            {monitor.url}
-          </a>
+          {monitor.configuration?.type === 'TCP' ? (
+            <span className="mt-0.5 block max-w-xs truncate text-xs text-rail-muted">
+              {monitor.configuration.host}:{monitor.configuration.port}
+            </span>
+          ) : (
+            <a
+              href={monitor.url}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={`Open ${monitor.name} endpoint in a new tab`}
+              className="mt-0.5 block max-w-xs truncate text-xs text-rail-muted no-underline hover:text-rail-text hover:underline"
+            >
+              {monitor.url}
+            </a>
+          )}
         </div>
       ),
     },
@@ -54,7 +60,7 @@ function monitorColumns(origin: string, projectId?: string): Array<DataTableColu
     },
     {
       id: 'response',
-      header: 'Latest response',
+      header: 'Latest latency',
       className: 'text-rail-subtle tabular-nums',
       cell: (monitor) =>
         monitor.lifecycleState === 'PAUSED' || monitor.currentCheck?.responseTimeMs == null

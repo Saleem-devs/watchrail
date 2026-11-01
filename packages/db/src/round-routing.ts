@@ -3,6 +3,8 @@ import {
   HTTP_ENGINE_VERSION,
   HTTP_EXECUTION_POLICY_VERSION,
   LEGACY_HTTP_ENGINE_VERSION,
+  TCP_ENGINE_VERSION,
+  TCP_EXECUTION_POLICY_VERSION,
   normalizeLocationSnapshot,
   parseTlsCertificatePolicy,
 } from '@watchrail/domain';
@@ -94,6 +96,10 @@ export async function createPreparedRoutedAssignments(
     input.organizationId,
     input.roundId,
   );
+  const executionPolicyVersion =
+    requiredEngineVersion === TCP_ENGINE_VERSION
+      ? TCP_EXECUTION_POLICY_VERSION
+      : HTTP_EXECUTION_POLICY_VERSION;
   const remoteLocationIds = locations.filter((location) => location !== 'local');
   if (remoteLocationIds.length > 0) {
     const remoteLocations = await tx
@@ -116,7 +122,7 @@ export async function createPreparedRoutedAssignments(
       roundId: input.roundId,
       location,
       probeLocationId: location === 'local' ? null : location,
-      executionPolicyVersion: HTTP_EXECUTION_POLICY_VERSION,
+      executionPolicyVersion,
       requiredEngineVersion,
       status: 'PENDING' as const,
     })),
@@ -136,7 +142,10 @@ async function requiredEngineVersionForRound(
   roundId: string,
 ): Promise<string> {
   const [configuration] = await tx
-    .select({ tlsPolicy: monitorConfigurationVersions.tlsPolicy })
+    .select({
+      type: monitorConfigurationVersions.type,
+      tlsPolicy: monitorConfigurationVersions.tlsPolicy,
+    })
     .from(checkRounds)
     .innerJoin(
       monitorConfigurationVersions,
@@ -145,6 +154,7 @@ async function requiredEngineVersionForRound(
     .where(and(eq(checkRounds.organizationId, organizationId), eq(checkRounds.id, roundId)))
     .limit(1);
   if (!configuration) throw new MonitorLocationInvariantError();
+  if (configuration.type === 'TCP') return TCP_ENGINE_VERSION;
   return parseTlsCertificatePolicy(configuration.tlsPolicy).type === 'DISABLED'
     ? LEGACY_HTTP_ENGINE_VERSION
     : HTTP_ENGINE_VERSION;
