@@ -188,6 +188,90 @@ describe('monitor API', () => {
     ]);
   });
 
+  it('creates and updates a DNS monitor with protocol-specific configuration versions', async () => {
+    const created = await request(app.getHttpServer())
+      .post(`/api/monitors?projectId=${projectId}`)
+      .send({
+        type: 'DNS',
+        name: 'Public API DNS',
+        dnsName: 'API.EXAMPLE.COM.',
+        dnsRecordType: 'A',
+        dnsExpectedValues: ['203.0.113.10'],
+        timeoutMs: 8_000,
+        locations: ['local'],
+      })
+      .expect(201);
+
+    expect(created.body.data).toMatchObject({
+      type: 'DNS',
+      name: 'Public API DNS',
+      configuration: {
+        type: 'DNS',
+        name: 'api.example.com',
+        recordType: 'A',
+        expectedValues: ['203.0.113.10'],
+      },
+      timeoutMs: 8_000,
+      locations: ['local'],
+    });
+
+    const monitorId = created.body.data.id as string;
+    const updated = await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/dns-settings`)
+      .send({
+        name: 'mail.example.com',
+        recordType: 'MX',
+        expectedValues: ['10 mx.example.com.'],
+        timeoutMs: 5_000,
+      })
+      .expect(200);
+    expect(updated.body.data).toMatchObject({
+      type: 'DNS',
+      configuration: {
+        type: 'DNS',
+        name: 'mail.example.com',
+        recordType: 'MX',
+        expectedValues: ['10 mx.example.com'],
+      },
+      timeoutMs: 5_000,
+    });
+
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/tcp-settings`)
+      .send({ host: 'example.com', port: 53, timeoutMs: 5_000 })
+      .expect(409);
+
+    const versions = await database.$client.query<{
+      type: string;
+      dns_name: string;
+      dns_record_type: string;
+      dns_expected_values: string[];
+      timeout_ms: number;
+    }>(
+      `select type, dns_name, dns_record_type, dns_expected_values, timeout_ms
+       from monitor_configuration_versions
+       where monitor_id=$1
+       order by version_number`,
+      [monitorId],
+    );
+    expect(versions.rows).toEqual([
+      {
+        type: 'DNS',
+        dns_name: 'api.example.com',
+        dns_record_type: 'A',
+        dns_expected_values: ['203.0.113.10'],
+        timeout_ms: 8_000,
+      },
+      {
+        type: 'DNS',
+        dns_name: 'mail.example.com',
+        dns_record_type: 'MX',
+        dns_expected_values: ['10 mx.example.com'],
+        timeout_ms: 5_000,
+      },
+    ]);
+  });
+
   it('replaces the immutable execution location with an owned active remote location', async () => {
     const monitor = await request(app.getHttpServer())
       .post(`/api/monitors?projectId=${projectId}`)
@@ -849,6 +933,7 @@ describe('monitor API', () => {
     );
     expect(claim.state).toBe('CLAIMED');
     if (claim.state !== 'CLAIMED') throw new Error('Expected old round claim.');
+    if (claim.execution.type !== 'HTTP') throw new Error('Expected HTTP execution configuration.');
     expect(claim.execution.assertions).toEqual(stored.rows[1]?.assertions);
   });
 

@@ -60,9 +60,12 @@ export interface ProbeExecutionConfigurationRecord {
   requiredEngineVersion: string;
   organizationId: string;
   monitorId: string;
-  type: 'HTTP' | 'TCP';
+  type: 'HTTP' | 'TCP' | 'DNS';
   tcpHost: string | null;
   tcpPort: number | null;
+  dnsName: string | null;
+  dnsRecordType: 'A' | 'AAAA' | 'CNAME' | 'MX' | 'TXT' | 'NS' | null;
+  dnsExpectedValues: string[];
   url: string;
   method: string;
   timeoutMs: number;
@@ -130,6 +133,9 @@ export class ProbeCoordinatorRepository {
           type: monitorConfigurationVersions.type,
           tcpHost: monitorConfigurationVersions.tcpHost,
           tcpPort: monitorConfigurationVersions.tcpPort,
+          dnsName: monitorConfigurationVersions.dnsName,
+          dnsRecordType: monitorConfigurationVersions.dnsRecordType,
+          dnsExpectedValues: monitorConfigurationVersions.dnsExpectedValues,
           url: monitorConfigurationVersions.url,
           method: monitorConfigurationVersions.method,
           timeoutMs: monitorConfigurationVersions.timeoutMs,
@@ -192,6 +198,9 @@ export class ProbeCoordinatorRepository {
         type: row.type,
         tcpHost: row.tcpHost,
         tcpPort: row.tcpPort,
+        dnsName: row.dnsName,
+        dnsRecordType: row.dnsRecordType,
+        dnsExpectedValues: row.dnsExpectedValues,
         url: row.url,
         method: row.method,
         timeoutMs: row.timeoutMs,
@@ -790,6 +799,7 @@ function diagnosticSummaryFromResult(result: AuthoritativeCheckResult) {
     ...(result.tlsCertificates === undefined
       ? {}
       : { tlsCertificates: [...result.tlsCertificates] }),
+    ...(result.dnsAnswers === undefined ? {} : { dnsAnswers: [...result.dnsAnswers] }),
   } as const;
 }
 
@@ -1036,6 +1046,7 @@ function sameResult(
     stored.checkedAt.getTime() === result.checkedAt.getTime() &&
     isDeepStrictEqual(stored.redirects, result.redirects) &&
     isDeepStrictEqual(stored.assertionEvaluation, result.assertionEvaluation) &&
-    isDeepStrictEqual(stored.tlsCertificates, result.tlsCertificates ?? [])
+    isDeepStrictEqual(stored.tlsCertificates, result.tlsCertificates ?? []) &&
+    isDeepStrictEqual(stored.dnsAnswers, result.dnsAnswers ?? [])
   );
 }

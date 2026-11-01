@@ -6,9 +6,11 @@ export const PROBE_ATTEMPT_STATUSES = ['LEASED', 'SUBMITTED', 'EXPIRED', 'REJECT
 export const LOCAL_PROBE_LOCATION = 'local';
 export const HTTP_EXECUTION_POLICY_VERSION = 'http-v1';
 export const TCP_EXECUTION_POLICY_VERSION = 'tcp-v1';
+export const DNS_EXECUTION_POLICY_VERSION = 'dns-v1';
 export const LEGACY_HTTP_ENGINE_VERSION = 'watchrail-http-v1';
 export const HTTP_ENGINE_VERSION = 'watchrail-http-v2';
 export const TCP_ENGINE_VERSION = 'watchrail-tcp-v1';
+export const DNS_ENGINE_VERSION = 'watchrail-dns-v1';
 export const SUPPORTED_HTTP_ENGINE_VERSIONS = [
   LEGACY_HTTP_ENGINE_VERSION,
   HTTP_ENGINE_VERSION,
@@ -53,6 +55,10 @@ export function probeEngineSupports(
       requiredEngineVersion === LEGACY_HTTP_ENGINE_VERSION) ||
     (agentEngineVersion === TCP_ENGINE_VERSION &&
       (requiredEngineVersion === HTTP_ENGINE_VERSION ||
+        requiredEngineVersion === LEGACY_HTTP_ENGINE_VERSION)) ||
+    (agentEngineVersion === DNS_ENGINE_VERSION &&
+      (requiredEngineVersion === TCP_ENGINE_VERSION ||
+        requiredEngineVersion === HTTP_ENGINE_VERSION ||
         requiredEngineVersion === LEGACY_HTTP_ENGINE_VERSION))
   );
 }
@@ -64,6 +70,14 @@ export function requiredEngineVersionsForAgent(agentEngineVersion: string): read
   if (agentEngineVersion === TCP_ENGINE_VERSION) {
     return [TCP_ENGINE_VERSION, HTTP_ENGINE_VERSION, LEGACY_HTTP_ENGINE_VERSION];
   }
+  if (agentEngineVersion === DNS_ENGINE_VERSION) {
+    return [
+      DNS_ENGINE_VERSION,
+      TCP_ENGINE_VERSION,
+      HTTP_ENGINE_VERSION,
+      LEGACY_HTTP_ENGINE_VERSION,
+    ];
+  }
   return [agentEngineVersion];
 }
 
@@ -71,10 +85,18 @@ export function agentEngineVersionsForRequirement(
   requiredEngineVersion: string,
 ): readonly string[] {
   if (requiredEngineVersion === LEGACY_HTTP_ENGINE_VERSION) {
-    return [LEGACY_HTTP_ENGINE_VERSION, HTTP_ENGINE_VERSION, TCP_ENGINE_VERSION];
+    return [
+      LEGACY_HTTP_ENGINE_VERSION,
+      HTTP_ENGINE_VERSION,
+      TCP_ENGINE_VERSION,
+      DNS_ENGINE_VERSION,
+    ];
   }
   if (requiredEngineVersion === HTTP_ENGINE_VERSION) {
-    return [HTTP_ENGINE_VERSION, TCP_ENGINE_VERSION];
+    return [HTTP_ENGINE_VERSION, TCP_ENGINE_VERSION, DNS_ENGINE_VERSION];
+  }
+  if (requiredEngineVersion === TCP_ENGINE_VERSION) {
+    return [TCP_ENGINE_VERSION, DNS_ENGINE_VERSION];
   }
   return [requiredEngineVersion];
 }
@@ -83,6 +105,7 @@ export function isSupportedHttpEngineVersion(value: string | null): boolean {
   return (
     value !== null &&
     (value === TCP_ENGINE_VERSION ||
+      value === DNS_ENGINE_VERSION ||
       SUPPORTED_HTTP_ENGINE_VERSIONS.some((version) => version === value))
   );
 }

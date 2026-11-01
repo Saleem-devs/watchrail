@@ -1,9 +1,10 @@
-import type { HttpExecutor, TcpConnector } from '@watchrail/check-engine';
+import type { DnsQueryResolver, HttpExecutor, TcpConnector } from '@watchrail/check-engine';
 import type { ProbeExecutionConfigurationV1, ProbeLeaseReferenceV1 } from '@watchrail/contracts';
 import {
   HTTP_ENGINE_VERSION,
   LEGACY_HTTP_ENGINE_VERSION,
   TCP_ENGINE_VERSION,
+  DNS_ENGINE_VERSION,
 } from '@watchrail/domain';
 import { describe, expect, it, vi } from 'vitest';
 import { ProbeCoordinatorClient, ProbeCoordinatorError } from './coordinator-client.js';
@@ -83,9 +84,10 @@ describe('ProbeAgentRuntime', () => {
 
     await runtime.run();
 
-    expect(claim).toHaveBeenNthCalledWith(1, TCP_ENGINE_VERSION, expect.any(AbortSignal));
-    expect(claim).toHaveBeenNthCalledWith(2, HTTP_ENGINE_VERSION, expect.any(AbortSignal));
-    expect(claim).toHaveBeenNthCalledWith(3, LEGACY_HTTP_ENGINE_VERSION, expect.any(AbortSignal));
+    expect(claim).toHaveBeenNthCalledWith(1, DNS_ENGINE_VERSION, expect.any(AbortSignal));
+    expect(claim).toHaveBeenNthCalledWith(2, TCP_ENGINE_VERSION, expect.any(AbortSignal));
+    expect(claim).toHaveBeenNthCalledWith(3, HTTP_ENGINE_VERSION, expect.any(AbortSignal));
+    expect(claim).toHaveBeenNthCalledWith(4, LEGACY_HTTP_ENGINE_VERSION, expect.any(AbortSignal));
     expect(submit).toHaveBeenCalledOnce();
   });
 
@@ -123,6 +125,44 @@ describe('ProbeAgentRuntime', () => {
       tcpLease,
       TCP_ENGINE_VERSION,
       expect.objectContaining({ reason: 'CONNECTED', connectionTimeMs: 23 }),
+    );
+  });
+
+  it('executes DNS assignments with the DNS engine', async () => {
+    const dnsConfiguration: ProbeExecutionConfigurationV1 = {
+      contractVersion: 1,
+      type: 'DNS',
+      assignmentId: lease.assignmentId,
+      attemptId: lease.attemptId,
+      configurationVersionId: lease.configurationVersionId,
+      configurationVersionNumber: lease.configurationVersionNumber,
+      executionPolicyVersion: 'dns-v1',
+      requiredEngineVersion: DNS_ENGINE_VERSION,
+      name: 'api.example.com',
+      recordType: 'A',
+      expectedValues: ['203.0.113.10'],
+      timeoutMs: 8_000,
+    };
+    const dnsLease = {
+      ...lease,
+      executionPolicyVersion: 'dns-v1',
+      requiredEngineVersion: DNS_ENGINE_VERSION,
+    };
+    const resolve = vi.fn().mockResolvedValue(['203.0.113.10']);
+    const resolver: DnsQueryResolver = { resolve };
+    const fixture = runtimeFixture(dnsLease, 1, false, dnsConfiguration, undefined, resolver);
+    vi.spyOn(fixture.client, 'submitSerialized').mockImplementation(fixture.submit);
+
+    await fixture.runtime.run();
+
+    expect(fixture.execute).not.toHaveBeenCalled();
+    expect(resolve).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'api.example.com', recordType: 'A' }),
+    );
+    expect(fixture.serialize).toHaveBeenCalledWith(
+      dnsLease,
+      DNS_ENGINE_VERSION,
+      expect.objectContaining({ reason: 'RECORDS_MATCHED', answers: ['203.0.113.10'] }),
     );
   });
 
@@ -214,11 +254,14 @@ function runtimeFixture(
   legacyFallback = false,
   runtimeConfiguration: ProbeExecutionConfigurationV1 = configuration,
   tcpConnector?: TcpConnector,
+  dnsResolver?: DnsQueryResolver,
 ) {
   const client = new ProbeCoordinatorClient('https://coordinator.example', 'm'.repeat(43));
   const state: { runtime?: ProbeAgentRuntime } = {};
   const claim = vi.fn();
-  if (legacyFallback) claim.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+  if (legacyFallback) {
+    claim.mockResolvedValueOnce(null).mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+  }
   claim.mockResolvedValueOnce(runtimeLease).mockImplementation(() => {
     state.runtime?.stop();
     return Promise.resolve(null);
@@ -256,7 +299,7 @@ function runtimeFixture(
   const executor: HttpExecutor = {
     execute: (input) => execute(input),
   };
-  const runtime = new ProbeAgentRuntime(client, config, executor, tcpConnector);
+  const runtime = new ProbeAgentRuntime(client, config, executor, tcpConnector, dnsResolver);
   state.runtime = runtime;
   return { client, runtime, claim, serialize, renew, submit, executorAbort, execute };
 }

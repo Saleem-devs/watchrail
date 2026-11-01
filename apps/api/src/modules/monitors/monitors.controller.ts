@@ -161,6 +161,21 @@ export class MonitorsController {
     return { data: await this.toMonitorResponse(request, monitor) };
   }
 
+  @Patch(':monitorId/dns-settings')
+  @RequirePermission(PERMISSIONS.MONITOR_UPDATE)
+  async updateDnsSettings(
+    @Req() request: RequestWithContext,
+    @Param('monitorId') monitorId: string,
+    @Body() body: unknown,
+  ): Promise<{ data: MonitorResponse }> {
+    const monitor = await this.monitors.updateDnsSettings(
+      request.watchrailContext,
+      monitorId,
+      body,
+    );
+    return { data: await this.toMonitorResponse(request, monitor) };
+  }
+
   @Patch(':monitorId/configuration')
   @RequirePermission(PERMISSIONS.MONITOR_UPDATE)
   async updateConfiguration(

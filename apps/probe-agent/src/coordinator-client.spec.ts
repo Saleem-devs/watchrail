@@ -106,6 +106,29 @@ describe('ProbeCoordinatorClient', () => {
     );
     await expect(client.claim('watchrail-http-v1')).rejects.toBeInstanceOf(ProbeCoordinatorError);
   });
+
+  it('honors coordinator backpressure without abandoning an idempotent request', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(new Response(null, { status: 429, headers: { 'retry-after': '1' } }))
+        .mockResolvedValueOnce(new Response(null, { status: 204 }));
+      const client = new ProbeCoordinatorClient(
+        'https://coordinator.example',
+        'm'.repeat(43),
+        fetcher,
+      );
+
+      const claim = client.claim('watchrail-dns-v1');
+      await vi.runAllTimersAsync();
+
+      await expect(claim).resolves.toBeNull();
+      expect(fetcher).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 function listen(server: Server): Promise<void> {

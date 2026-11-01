@@ -43,6 +43,7 @@ import { MonitorForm } from '../features/monitors/monitor-form';
 import { responseAssertionsFromForm } from '../features/monitors/response-assertions';
 import {
   httpConfigurationTestFromForm,
+  dnsSettingsFromForm,
   requiresStateChangingMethodConfirmation,
   requestBodyFromForm,
   requestHeadersFromForm,
@@ -67,6 +68,17 @@ import type {
 } from '../features/monitors/types';
 
 const multiLocationUiEnabled = process.env.NEXT_PUBLIC_MULTI_LOCATION_EXECUTION_ENABLED === 'true';
+
+function monitorTargetLabel(monitor: Monitor | undefined): string {
+  if (!monitor) return 'Health, incidents, evidence, and configuration.';
+  if (monitor.configuration.type === 'TCP') {
+    return `${monitor.configuration.host}:${monitor.configuration.port}`;
+  }
+  if (monitor.configuration.type === 'DNS') {
+    return `${monitor.configuration.recordType} ${monitor.configuration.name}`;
+  }
+  return monitor.url;
+}
 
 type DashboardView = 'legacy' | 'overview' | 'monitors' | 'create' | 'detail' | 'edit';
 
@@ -329,7 +341,9 @@ export function Dashboard({
 
     const form = event.currentTarget;
     const formData = new FormData(form);
-    const monitorType = formData.get('monitorType') === 'TCP' ? 'TCP' : 'HTTP';
+    const requestedType = formData.get('monitorType');
+    const monitorType: Monitor['type'] =
+      requestedType === 'TCP' || requestedType === 'DNS' ? requestedType : 'HTTP';
 
     try {
       const response = await fetch(
@@ -346,21 +360,32 @@ export function Dashboard({
                   locations: [formData.get('location')],
                   lifecycleState: formData.get('lifecycleState'),
                 }
-              : {
-                  type: 'HTTP',
-                  name: formData.get('name'),
-                  url: urlFromMonitorForm(formData),
-                  statusPolicy: statusPolicyFromForm(formData),
-                  tlsPolicy: tlsPolicyFromForm(formData),
-                  method: formData.get('method'),
-                  timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
-                  followRedirects: formData.get('followRedirects') === 'on',
-                  locations: [formData.get('location')],
-                  lifecycleState: formData.get('lifecycleState'),
-                  requestHeaders: requestHeadersFromForm(formData),
-                  requestBody: requestBodyFromForm(formData),
-                  assertions: responseAssertionsFromForm(formData),
-                },
+              : monitorType === 'DNS'
+                ? {
+                    type: 'DNS',
+                    name: formData.get('name'),
+                    dnsName: dnsSettingsFromForm(formData).name,
+                    dnsRecordType: dnsSettingsFromForm(formData).recordType,
+                    dnsExpectedValues: dnsSettingsFromForm(formData).expectedValues,
+                    timeoutMs: dnsSettingsFromForm(formData).timeoutMs,
+                    locations: [formData.get('location')],
+                    lifecycleState: formData.get('lifecycleState'),
+                  }
+                : {
+                    type: 'HTTP',
+                    name: formData.get('name'),
+                    url: urlFromMonitorForm(formData),
+                    statusPolicy: statusPolicyFromForm(formData),
+                    tlsPolicy: tlsPolicyFromForm(formData),
+                    method: formData.get('method'),
+                    timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
+                    followRedirects: formData.get('followRedirects') === 'on',
+                    locations: [formData.get('location')],
+                    lifecycleState: formData.get('lifecycleState'),
+                    requestHeaders: requestHeadersFromForm(formData),
+                    requestBody: requestBodyFromForm(formData),
+                    assertions: responseAssertionsFromForm(formData),
+                  },
           ),
         },
       );
@@ -396,21 +421,23 @@ export function Dashboard({
     const requests: Array<{ path: string; body: Record<string, unknown> }> = [
       monitorType === 'TCP'
         ? { path: 'tcp-settings', body: tcpSettingsFromForm(formData) }
-        : {
-            path: 'configuration',
-            body: {
-              httpSettings: {
-                url: urlFromMonitorForm(formData),
-                method: formData.get('method'),
-                timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
-                followRedirects: formData.get('followRedirects') === 'on',
-                requestBody: requestBodyFromForm(formData),
-                tlsPolicy: tlsPolicyFromForm(formData),
+        : monitorType === 'DNS'
+          ? { path: 'dns-settings', body: dnsSettingsFromForm(formData) }
+          : {
+              path: 'configuration',
+              body: {
+                httpSettings: {
+                  url: urlFromMonitorForm(formData),
+                  method: formData.get('method'),
+                  timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
+                  followRedirects: formData.get('followRedirects') === 'on',
+                  requestBody: requestBodyFromForm(formData),
+                  tlsPolicy: tlsPolicyFromForm(formData),
+                },
+                requestHeaders: requestHeadersFromForm(formData),
+                assertions: responseAssertionsFromForm(formData),
               },
-              requestHeaders: requestHeadersFromForm(formData),
-              assertions: responseAssertionsFromForm(formData),
             },
-          },
       { path: 'name', body: { name: formData.get('name') } },
       ...(monitorType === 'HTTP'
         ? [{ path: 'status-policy', body: { statusPolicy: statusPolicyFromForm(formData) } }]
@@ -454,7 +481,7 @@ export function Dashboard({
     const form = document.getElementById('monitor-form');
     if (!(form instanceof HTMLFormElement) || !form.reportValidity()) return;
     const methodValue = new FormData(form).get('method');
-    if (new FormData(form).get('monitorType') === 'TCP') return;
+    if (new FormData(form).get('monitorType') !== 'HTTP') return;
     const method = typeof methodValue === 'string' ? methodValue : 'GET';
     if (requiresStateChangingMethodConfirmation(method)) {
       setStateChangingTestMethod(method);
@@ -654,6 +681,38 @@ export function Dashboard({
       );
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Could not update TCP settings.');
+    } finally {
+      setUpdatingSettingsIds((current) => {
+        const next = new Set(current);
+        next.delete(monitorId);
+        return next;
+      });
+    }
+  }
+
+  async function updateDnsSettings(
+    monitorId: string,
+    event: FormEvent<HTMLFormElement>,
+  ): Promise<void> {
+    event.preventDefault();
+    const settings = dnsSettingsFromForm(new FormData(event.currentTarget));
+    setUpdatingSettingsIds((current) => new Set(current).add(monitorId));
+    setActionError(undefined);
+    try {
+      const response = await fetch(`/api/monitors/${monitorId}/dns-settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(settings),
+      });
+      const body = (await response.json()) as { data?: Monitor } & ApiError;
+      if (!response.ok || !body.data) {
+        throw new Error(body.fields?.dnsSettings?.[0] ?? 'Could not update DNS settings.');
+      }
+      setMonitors((current) =>
+        current.map((monitor) => (monitor.id === monitorId ? (body.data as Monitor) : monitor)),
+      );
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Could not update DNS settings.');
     } finally {
       setUpdatingSettingsIds((current) => {
         const next = new Set(current);
@@ -993,7 +1052,7 @@ export function Dashboard({
             actions={
               detailMonitor ? (
                 <>
-                  {detailMonitor.type !== 'TCP' ? (
+                  {detailMonitor.type === 'HTTP' ? (
                     <Button
                       variant="secondary"
                       disabled={isTestingConfiguration || isSubmitting}
@@ -1022,11 +1081,7 @@ export function Dashboard({
           <PageHeader
             backLink={{ href: backPath, label: 'Back' }}
             title={detailMonitor?.name ?? 'Monitor details'}
-            description={
-              detailMonitor?.configuration?.type === 'TCP'
-                ? `${detailMonitor.configuration.host}:${detailMonitor.configuration.port}`
-                : (detailMonitor?.url ?? 'Health, incidents, evidence, and configuration.')
-            }
+            description={monitorTargetLabel(detailMonitor)}
             actions={
               detailMonitor ? (
                 <>
@@ -1246,6 +1301,10 @@ export function Dashboard({
                               <span className="block max-w-full truncate text-sm text-rail-subtle">
                                 {monitor.configuration.host}:{monitor.configuration.port}
                               </span>
+                            ) : monitor.configuration?.type === 'DNS' ? (
+                              <span className="block max-w-full truncate text-sm text-rail-subtle">
+                                {monitor.configuration.recordType} {monitor.configuration.name}
+                              </span>
                             ) : (
                               <a
                                 href={monitor.url}
@@ -1271,7 +1330,7 @@ export function Dashboard({
                             {monitor.type ?? 'HTTP'}
                           </span>
                           <span>{monitor.timeoutMs / 1000}s timeout</span>
-                          {monitor.type !== 'TCP' ? (
+                          {(monitor.type ?? 'HTTP') === 'HTTP' ? (
                             <>
                               <span>{monitor.method}</span>
                               <span>
@@ -1386,6 +1445,9 @@ export function Dashboard({
                             onUpdateTcpSettings={(event) =>
                               void updateTcpSettings(monitor.id, event)
                             }
+                            onUpdateDnsSettings={(event) =>
+                              void updateDnsSettings(monitor.id, event)
+                            }
                             onUpdateStatusPolicy={(event) =>
                               void updateStatusPolicy(monitor.id, event)
                             }
@@ -1400,7 +1462,7 @@ export function Dashboard({
           ) : null}
           {view === 'create' ? (
             <MonitorForm
-              key={`${createdMonitor?.id ?? 'new-monitor'}-${createMonitorType}`}
+              key={createdMonitor?.id ?? 'new-monitor'}
               mode="create"
               errors={fieldErrors}
               submitting={isSubmitting}
@@ -1579,7 +1641,7 @@ function MonitorDetailView({
             <div className="border-b border-rail-border px-5 py-4 sm:px-6">
               <h2 className="m-0 text-sm font-semibold text-rail-text">Latest diagnostic</h2>
               <p className="mt-1 mb-0 text-xs text-rail-muted">
-                Authoritative HTTP and regional evidence from the latest manual check.
+                Protocol-specific evidence from the latest manual check.
               </p>
             </div>
             <div className="p-5 sm:p-6 [&>.manual-diagnostic]:mt-0 [&>p]:mt-0 [&>p]:border-t-0 [&>p]:pt-0">
@@ -1693,11 +1755,24 @@ function MonitorDetailView({
                   <DetailRow label="Host" value={monitor.configuration.host} />
                   <DetailRow label="Port" value={String(monitor.configuration.port)} />
                 </>
+              ) : monitor.configuration?.type === 'DNS' ? (
+                <>
+                  <DetailRow label="DNS name" value={monitor.configuration.name} />
+                  <DetailRow label="Record type" value={monitor.configuration.recordType} />
+                  <DetailRow
+                    label="Expected answers"
+                    value={
+                      monitor.configuration.expectedValues.length > 0
+                        ? monitor.configuration.expectedValues.join(', ')
+                        : 'Any answer'
+                    }
+                  />
+                </>
               ) : (
                 <DetailRow label="Method" value={monitor.method} />
               )}
               <DetailRow label="Timeout" value={`${monitor.timeoutMs / 1000} seconds`} />
-              {monitor.type !== 'TCP' ? (
+              {(monitor.type ?? 'HTTP') === 'HTTP' ? (
                 <>
                   <DetailRow
                     label="Redirects"
@@ -1785,6 +1860,7 @@ function MonitorConfiguration({
   onUpdateLocation,
   onUpdateHttpSettings,
   onUpdateTcpSettings,
+  onUpdateDnsSettings,
   onUpdateStatusPolicy,
 }: {
   monitor: Monitor;
@@ -1795,6 +1871,7 @@ function MonitorConfiguration({
   onUpdateLocation: (event: FormEvent<HTMLFormElement>) => void;
   onUpdateHttpSettings: (event: FormEvent<HTMLFormElement>) => void;
   onUpdateTcpSettings: (event: FormEvent<HTMLFormElement>) => void;
+  onUpdateDnsSettings: (event: FormEvent<HTMLFormElement>) => void;
   onUpdateStatusPolicy: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   const configurationRef = useRef<HTMLDetailsElement>(null);
@@ -1857,7 +1934,7 @@ function MonitorConfiguration({
             Save location
           </button>
         </Form>
-        {monitor.type !== 'TCP' ? (
+        {(monitor.type ?? 'HTTP') === 'HTTP' ? (
           <Form className="status-policy-form" onSubmit={onUpdateHttpSettings}>
             <label>
               URL
@@ -1892,7 +1969,7 @@ function MonitorConfiguration({
               {updatingSettings ? 'Saving…' : 'Save HTTP settings'}
             </button>
           </Form>
-        ) : (
+        ) : monitor.configuration?.type === 'TCP' ? (
           <Form className="status-policy-form" onSubmit={onUpdateTcpSettings}>
             <label>
               Hostname or IP address
@@ -1934,8 +2011,55 @@ function MonitorConfiguration({
               {updatingSettings ? 'Saving…' : 'Save TCP settings'}
             </button>
           </Form>
-        )}
-        {monitor.type !== 'TCP' ? (
+        ) : monitor.configuration?.type === 'DNS' ? (
+          <Form className="status-policy-form" onSubmit={onUpdateDnsSettings}>
+            <label>
+              DNS name
+              <input
+                name="dnsName"
+                type="text"
+                defaultValue={monitor.configuration.name}
+                autoComplete="off"
+                required
+              />
+            </label>
+            <label>
+              Record type
+              <Select name="dnsRecordType" defaultValue={monitor.configuration.recordType}>
+                {['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS'].map((recordType) => (
+                  <option key={recordType} value={recordType}>
+                    {recordType}
+                  </option>
+                ))}
+              </Select>
+            </label>
+            <label>
+              Expected answers
+              <input
+                name="dnsExpectedValue"
+                type="text"
+                defaultValue={monitor.configuration.expectedValues.join(', ')}
+                placeholder="Optional; comma-separated"
+                autoComplete="off"
+              />
+            </label>
+            <label>
+              Timeout (seconds)
+              <input
+                name="timeoutSeconds"
+                type="number"
+                min="1"
+                max="30"
+                step="1"
+                defaultValue={monitor.timeoutMs / 1_000}
+              />
+            </label>
+            <button className="quiet-button" type="submit" disabled={updatingSettings}>
+              {updatingSettings ? 'Saving…' : 'Save DNS settings'}
+            </button>
+          </Form>
+        ) : null}
+        {(monitor.type ?? 'HTTP') === 'HTTP' ? (
           <Form className="status-policy-form" onSubmit={onUpdateStatusPolicy}>
             <label>
               Expected status

@@ -32,6 +32,10 @@ function monitorColumns(origin: string, projectId?: string): Array<DataTableColu
             <span className="mt-0.5 block max-w-xs truncate text-xs text-rail-muted">
               {monitor.configuration.host}:{monitor.configuration.port}
             </span>
+          ) : monitor.configuration?.type === 'DNS' ? (
+            <span className="mt-0.5 block max-w-xs truncate text-xs text-rail-muted">
+              {monitor.configuration.recordType} {monitor.configuration.name}
+            </span>
           ) : (
             <a
               href={monitor.url}

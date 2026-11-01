@@ -26,8 +26,16 @@ export interface MonitorResponse {
   id: string;
   projectId: string;
   name: string;
-  type: 'HTTP' | 'TCP';
-  configuration: { type: 'HTTP'; url: string } | { type: 'TCP'; host: string; port: number };
+  type: 'HTTP' | 'TCP' | 'DNS';
+  configuration:
+    | { type: 'HTTP'; url: string }
+    | { type: 'TCP'; host: string; port: number }
+    | {
+        type: 'DNS';
+        name: string;
+        recordType: 'A' | 'AAAA' | 'CNAME' | 'MX' | 'TXT' | 'NS';
+        expectedValues: string[];
+      };
   url: string;
   method: string;
   lifecycleState: string;
@@ -83,6 +91,7 @@ export interface CheckRoundResponse {
         redirects: HttpRedirectHop[];
         assertionEvaluation: AssertionEvaluationV1;
         tlsCertificates?: TlsCertificateEvidenceV1[];
+        dnsAnswers?: string[];
         checkedAt: string;
       }
     | {
@@ -129,7 +138,14 @@ export function toResponse(
             host: requireTcpField(monitor.tcpHost, 'host'),
             port: requireTcpField(monitor.tcpPort, 'port'),
           }
-        : { type: 'HTTP', url: monitor.url },
+        : monitor.type === 'DNS'
+          ? {
+              type: 'DNS',
+              name: requireDnsField(monitor.dnsName, 'name'),
+              recordType: requireDnsField(monitor.dnsRecordType, 'record type'),
+              expectedValues: monitor.dnsExpectedValues,
+            }
+          : { type: 'HTTP', url: monitor.url },
     url: monitor.url,
     method: monitor.method,
     lifecycleState: monitor.lifecycleState,
@@ -154,6 +170,11 @@ export function toResponse(
 
 function requireTcpField<T>(value: T | null, field: string): T {
   if (value === null) throw new Error(`Stored TCP monitor ${field} is missing.`);
+  return value;
+}
+
+function requireDnsField<T>(value: T | null, field: string): T {
+  if (value === null) throw new Error(`Stored DNS monitor ${field} is missing.`);
   return value;
 }
 
@@ -326,6 +347,7 @@ function toSingleLocationDetailResponse(
     redirects: result.redirects,
     assertionEvaluation: result.assertionEvaluation,
     ...(result.tlsCertificates.length === 0 ? {} : { tlsCertificates: result.tlsCertificates }),
+    ...(result.dnsAnswers.length === 0 ? {} : { dnsAnswers: result.dnsAnswers }),
     checkedAt: result.checkedAt.toISOString(),
   };
 }

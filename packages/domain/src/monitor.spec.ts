@@ -38,6 +38,17 @@ describe('createMonitor', () => {
     });
   });
 
+  it('rejects protocol-specific configuration on an HTTP monitor', () => {
+    expect(() =>
+      createMonitor({
+        type: 'HTTP',
+        name: 'API',
+        url: 'https://example.com',
+        dnsName: 'example.com',
+      }),
+    ).toThrow(MonitorInputError);
+  });
+
   it('accepts an optional creation interval and rejects invalid values', () => {
     expect(
       createMonitor({ name: 'API', url: 'https://example.com', intervalSeconds: 300 })

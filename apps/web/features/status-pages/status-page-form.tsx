@@ -17,6 +17,16 @@ import type {
   WorkspaceStatusPage,
 } from './types';
 
+function monitorTarget(monitor: StatusPageMonitor): string {
+  if (monitor.configuration.type === 'TCP') {
+    return `${monitor.configuration.host}:${monitor.configuration.port}`;
+  }
+  if (monitor.configuration.type === 'DNS') {
+    return `${monitor.configuration.recordType} ${monitor.configuration.name}`;
+  }
+  return monitor.url;
+}
+
 const formId = 'status-page-form';
 
 export function StatusPageForm({
@@ -348,7 +358,7 @@ export function StatusPageForm({
                                 {monitor.name}
                               </span>
                               <span className="mt-0.5 block truncate text-xs text-rail-muted">
-                                {monitor.url}
+                                {monitorTarget(monitor)}
                               </span>
                             </span>
                             <span

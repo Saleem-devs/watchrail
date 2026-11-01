@@ -10,6 +10,12 @@ import {
   type TlsCertificatePolicy,
 } from './tls.js';
 import { parseTcpMonitorSettings, TcpMonitorInputError } from './tcp.js';
+import {
+  DNS_MONITOR_DEFAULTS,
+  DnsMonitorInputError,
+  parseDnsMonitorSettings,
+  type DnsRecordType,
+} from './dns.js';
 
 export const HTTP_METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] as const;
 export const HTTP_MONITOR_METHODS = [
@@ -22,7 +28,7 @@ export const HTTP_MONITOR_METHODS = [
   'OPTIONS',
 ] as const;
 export const MONITOR_LIFECYCLE_STATES = ['ENABLED', 'PAUSED', 'ARCHIVED'] as const;
-export const MONITOR_TYPES = ['HTTP', 'TCP'] as const;
+export const MONITOR_TYPES = ['HTTP', 'TCP', 'DNS'] as const;
 export const MONITOR_LOCATIONS = ['local'] as const;
 export const MONITOR_INTERVAL_LIMITS = {
   minimumSeconds: 60,
@@ -68,6 +74,9 @@ export interface CreateMonitorCommand {
   url?: unknown;
   host?: unknown;
   port?: unknown;
+  dnsName?: unknown;
+  dnsRecordType?: unknown;
+  dnsExpectedValues?: unknown;
   statusPolicy?: unknown;
   tlsPolicy?: unknown;
   method?: unknown;
@@ -107,13 +116,24 @@ export interface NewTcpMonitor extends NewMonitorBase {
   port: number;
 }
 
-export type NewMonitor = NewHttpMonitor | NewTcpMonitor;
+export interface NewDnsMonitor extends NewMonitorBase {
+  type: 'DNS';
+  dnsName: string;
+  dnsRecordType: DnsRecordType;
+  dnsExpectedValues: string[];
+}
+
+export type NewMonitor = NewHttpMonitor | NewTcpMonitor | NewDnsMonitor;
 
 export interface MonitorFieldErrors {
   name?: string[];
   type?: string[];
   host?: string[];
   port?: string[];
+  dnsName?: string[];
+  dnsRecordType?: string[];
+  dnsExpectedValues?: string[];
+  dnsSettings?: string[];
   url?: string[];
   statusPolicy?: string[];
   tlsPolicy?: string[];
@@ -236,6 +256,7 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
   const name = normalizeName(command.name, fields);
   const type = normalizeMonitorType(command.type, fields);
   if (type === 'TCP') return createTcpMonitor(command, name, fields);
+  if (type === 'DNS') return createDnsMonitor(command, name, fields);
   const url = normalizeUrl(command.url, fields);
   const statusPolicy = normalizeStatusPolicy(command.statusPolicy, fields);
   const tlsPolicy = normalizeTlsPolicy(command.tlsPolicy, url, fields, true);
@@ -266,6 +287,18 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
   const assertions = normalizeAssertions(command.assertions, fields);
   const intervalSeconds = normalizeIntervalSeconds(command.intervalSeconds, fields, true);
 
+  if (
+    [
+      command.host,
+      command.port,
+      command.dnsName,
+      command.dnsRecordType,
+      command.dnsExpectedValues,
+    ].some((value) => value !== undefined)
+  ) {
+    fields.type = ['HTTP monitors cannot include TCP or DNS configuration.'];
+  }
+
   if (Object.keys(fields).length > 0) throw new MonitorInputError(fields);
 
   return {
@@ -282,6 +315,73 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
     requestHeaders,
     requestBody,
     assertions,
+    locations,
+  };
+}
+
+function createDnsMonitor(
+  command: CreateMonitorCommand,
+  name: string,
+  fields: MonitorFieldErrors,
+): NewDnsMonitor {
+  let settings: {
+    name: string;
+    recordType: DnsRecordType;
+    expectedValues: string[];
+    timeoutMs: number;
+  } = {
+    name: '',
+    recordType: DNS_MONITOR_DEFAULTS.recordType,
+    expectedValues: [],
+    timeoutMs: DNS_MONITOR_DEFAULTS.timeoutMs,
+  };
+  try {
+    settings = parseDnsMonitorSettings({
+      name: command.dnsName,
+      recordType: command.dnsRecordType ?? DNS_MONITOR_DEFAULTS.recordType,
+      expectedValues: command.dnsExpectedValues ?? DNS_MONITOR_DEFAULTS.expectedValues,
+      timeoutMs: command.timeoutMs ?? DNS_MONITOR_DEFAULTS.timeoutMs,
+    });
+  } catch (error) {
+    if (!(error instanceof DnsMonitorInputError)) throw error;
+    Object.assign(fields, error.fields);
+  }
+  const lifecycleState = normalizeInitialLifecycleState(command.lifecycleState, fields);
+  const intervalSeconds = normalizeIntervalSeconds(command.intervalSeconds, fields, true);
+  let locations: string[] = [...MONITOR_DEFAULTS.locations];
+  if (command.locations !== undefined) {
+    try {
+      locations = parseMonitorLocationSettings({ locations: command.locations }).locations;
+    } catch (error) {
+      if (error instanceof MonitorInputError) Object.assign(fields, error.fields);
+      else throw error;
+    }
+  }
+  const incompatibleFields = [
+    command.url,
+    command.host,
+    command.port,
+    command.statusPolicy,
+    command.tlsPolicy,
+    command.method,
+    command.followRedirects,
+    command.requestHeaders,
+    command.requestBody,
+    command.assertions,
+  ];
+  if (incompatibleFields.some((value) => value !== undefined)) {
+    fields.type = ['DNS monitors cannot include HTTP or TCP configuration.'];
+  }
+  if (Object.keys(fields).length > 0) throw new MonitorInputError(fields);
+  return {
+    type: 'DNS',
+    name,
+    dnsName: settings.name,
+    dnsRecordType: settings.recordType,
+    dnsExpectedValues: settings.expectedValues,
+    timeoutMs: settings.timeoutMs,
+    lifecycleState,
+    intervalSeconds,
     locations,
   };
 }
@@ -318,6 +418,9 @@ function createTcpMonitor(
     }
   }
   const httpOnlyFields = [
+    command.dnsName,
+    command.dnsRecordType,
+    command.dnsExpectedValues,
     command.url,
     command.statusPolicy,
     command.tlsPolicy,
@@ -328,7 +431,7 @@ function createTcpMonitor(
     command.assertions,
   ];
   if (httpOnlyFields.some((value) => value !== undefined)) {
-    fields.type = ['TCP monitors cannot include HTTP-only configuration.'];
+    fields.type = ['TCP monitors cannot include HTTP or DNS configuration.'];
   }
   if (Object.keys(fields).length > 0) throw new MonitorInputError(fields);
   return {
@@ -346,7 +449,7 @@ function createTcpMonitor(
 function normalizeMonitorType(value: unknown, fields: MonitorFieldErrors): MonitorType {
   if (value === undefined) return 'HTTP';
   if (typeof value !== 'string' || !MONITOR_TYPES.includes(value as MonitorType)) {
-    fields.type = ['Choose HTTP or TCP.'];
+    fields.type = ['Choose HTTP, TCP, or DNS.'];
     return 'HTTP';
   }
   return value as MonitorType;

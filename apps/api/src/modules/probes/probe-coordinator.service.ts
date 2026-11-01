@@ -49,6 +49,25 @@ export class ProbeCoordinatorService {
       this.coordinator.configuration(machine, attemptId, token),
     );
     if (!stored) throw staleLease();
+    if (stored.type === 'DNS') {
+      if (stored.dnsName === null || stored.dnsRecordType === null) {
+        throw new Error('Stored DNS execution configuration is incomplete.');
+      }
+      return parseProbeExecutionConfiguration({
+        contractVersion: 1,
+        type: 'DNS',
+        assignmentId: stored.assignmentId,
+        attemptId: stored.attemptId,
+        configurationVersionId: stored.configurationVersionId,
+        configurationVersionNumber: stored.configurationVersionNumber,
+        executionPolicyVersion: stored.executionPolicyVersion,
+        requiredEngineVersion: stored.requiredEngineVersion,
+        name: stored.dnsName,
+        recordType: stored.dnsRecordType,
+        expectedValues: stored.dnsExpectedValues,
+        timeoutMs: stored.timeoutMs,
+      });
+    }
     if (stored.type === 'TCP') {
       if (stored.tcpHost === null || stored.tcpPort === null) {
         throw new Error('Stored TCP execution configuration is incomplete.');
@@ -215,6 +234,16 @@ function parseClaimToken(value: string | undefined): string {
 }
 
 function parseResult(value: unknown): AuthoritativeCheckResult {
+  const dnsResultKeys = [
+    'answers',
+    'attemptDurationMs',
+    'checkedAt',
+    'outcome',
+    'queryTimeMs',
+    'reason',
+    'stage',
+  ];
+  if (hasExactKeys(value, dnsResultKeys)) return parseDnsResult(value);
   const tcpResultKeys = [
     'attemptDurationMs',
     'checkedAt',
@@ -294,6 +323,46 @@ function parseResult(value: unknown): AuthoritativeCheckResult {
   };
 }
 
+function parseDnsResult(value: Record<string, unknown>): AuthoritativeCheckResult {
+  const reason = String(value.reason);
+  if (
+    ![
+      'RECORDS_MATCHED',
+      'NO_RECORDS',
+      'RECORD_MISMATCH',
+      'NAME_NOT_FOUND',
+      'DNS_TIMEOUT',
+      'INTERNAL_ERROR',
+    ].includes(reason) ||
+    !['PASS', 'FAIL', 'UNKNOWN'].includes(String(value.outcome)) ||
+    !['DNS', 'PROBE'].includes(String(value.stage)) ||
+    !isNullableNonNegativeNumber(value.queryTimeMs) ||
+    !isNonNegativeNumber(value.attemptDurationMs) ||
+    !isDnsAnswers(value.answers) ||
+    !isCanonicalTimestamp(value.checkedAt)
+  ) {
+    badRequest();
+  }
+  const expected = expectedClassification(reason);
+  if (value.outcome !== expected.outcome || value.stage !== expected.stage) badRequest();
+  const hasCompletedQuery = ['RECORDS_MATCHED', 'NO_RECORDS', 'RECORD_MISMATCH'].includes(reason);
+  if (hasCompletedQuery !== (value.queryTimeMs !== null)) badRequest();
+  if (reason === 'RECORDS_MATCHED' && value.answers.length === 0) badRequest();
+  return {
+    outcome: value.outcome as AuthoritativeCheckResult['outcome'],
+    stage: value.stage as AuthoritativeCheckResult['stage'],
+    reason: value.reason as AuthoritativeCheckResult['reason'],
+    statusCode: null,
+    responseTimeMs: value.queryTimeMs,
+    attemptDurationMs: value.attemptDurationMs,
+    redirects: [],
+    assertionEvaluation: { contractVersion: 1, outcome: 'PASS', diagnostics: [] },
+    tlsCertificates: [],
+    dnsAnswers: value.answers,
+    checkedAt: new Date(value.checkedAt),
+  };
+}
+
 function parseTcpResult(value: Record<string, unknown>): AuthoritativeCheckResult {
   const reason = String(value.reason);
   if (
@@ -334,6 +403,10 @@ function parseTcpResult(value: Record<string, unknown>): AuthoritativeCheckResul
 function expectedClassification(reason: string): { outcome: string; stage: string } {
   if (reason === 'COMPLETED') return { outcome: 'PASS', stage: 'HTTP' };
   if (reason === 'CONNECTED') return { outcome: 'PASS', stage: 'CONNECT' };
+  if (reason === 'RECORDS_MATCHED') return { outcome: 'PASS', stage: 'DNS' };
+  if (['NO_RECORDS', 'RECORD_MISMATCH', 'DNS_TIMEOUT'].includes(reason)) {
+    return { outcome: 'FAIL', stage: 'DNS' };
+  }
   if (
     [
       'UNEXPECTED_STATUS',
@@ -438,4 +511,12 @@ function isCanonicalTimestamp(value: unknown): value is string {
   if (typeof value !== 'string') return false;
   const parsed = new Date(value);
   return !Number.isNaN(parsed.valueOf()) && parsed.toISOString() === value;
+}
+
+function isDnsAnswers(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= 32 &&
+    value.every((item) => typeof item === 'string' && item.length > 0 && item.length <= 512)
+  );
 }

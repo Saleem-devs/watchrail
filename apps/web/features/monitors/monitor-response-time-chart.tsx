@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { Button } from '../../components/ui/button';
 import type { HistoryPage, ManualRound } from './types';
+import type { Monitor } from './types';
 
 type TriggerFilter = 'ALL' | ManualRound['trigger'];
 
@@ -19,7 +20,7 @@ export function MonitorResponseTimeChart({
 }: {
   page: HistoryPage | undefined;
   loading: boolean;
-  protocol?: 'HTTP' | 'TCP';
+  protocol?: Monitor['type'];
 }) {
   const [filter, setFilter] = useState<TriggerFilter>('ALL');
   const points = useMemo(() => responseTimePoints(page, filter), [page, filter]);
@@ -32,7 +33,9 @@ export function MonitorResponseTimeChart({
           <p className="mt-1 mb-0 text-xs text-rail-muted">
             {protocol === 'TCP'
               ? 'Connection establishment time from the latest recorded checks.'
-              : 'Total HTTP response duration from the latest recorded checks.'}
+              : protocol === 'DNS'
+                ? 'DNS query duration from the latest recorded checks.'
+                : 'Total HTTP response duration from the latest recorded checks.'}
           </p>
         </div>
         <div

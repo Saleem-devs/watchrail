@@ -1,6 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { executeHttpCheck, executeTcpCheck, NodeTcpConnector } from '@watchrail/check-engine';
-import type { HttpCheckResult, HttpExecutor, TcpConnector } from '@watchrail/check-engine';
+import {
+  executeDnsCheck,
+  executeHttpCheck,
+  executeTcpCheck,
+  NodeDnsQueryResolver,
+  NodeTcpConnector,
+} from '@watchrail/check-engine';
+import type {
+  DnsQueryResolver,
+  HttpCheckResult,
+  HttpExecutor,
+  TcpConnector,
+} from '@watchrail/check-engine';
 import type { ExecuteCheckRoundJobV1 } from '@watchrail/contracts';
 import type { CheckExecutionRepository } from '@watchrail/db';
 import {
@@ -45,6 +56,7 @@ export class CheckRoundJobHandler implements CheckJobHandler {
     private readonly headerEncryptionKeyring: HeaderEncryptionKeyring,
     private readonly assertionEncryptionKeyring: AssertionEncryptionKeyring,
     private readonly tcpConnector: TcpConnector = new NodeTcpConnector(),
+    private readonly dnsResolver: DnsQueryResolver = new NodeDnsQueryResolver(),
   ) {}
 
   async handle(payload: ExecuteCheckRoundJobV1): Promise<void> {
@@ -59,6 +71,36 @@ export class CheckRoundJobHandler implements CheckJobHandler {
 
     if (claim.state === 'BUSY') {
       throw new CheckExecutionAlreadyClaimedError();
+    }
+
+    if (claim.execution.type === 'DNS') {
+      const dnsResult = await executeDnsCheck(
+        {
+          name: claim.execution.name,
+          recordType: claim.execution.recordType,
+          expectedValues: claim.execution.expectedValues,
+          timeoutMs: claim.execution.timeoutMs,
+        },
+        { resolver: this.dnsResolver },
+      );
+      const completed = await this.executions.complete(
+        claim.execution.assignmentId,
+        claim.execution.claimToken,
+        {
+          outcome: dnsResult.outcome,
+          stage: dnsResult.stage,
+          reason: dnsResult.reason,
+          statusCode: null,
+          responseTimeMs: dnsResult.queryTimeMs,
+          attemptDurationMs: dnsResult.attemptDurationMs,
+          redirects: [],
+          assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
+          dnsAnswers: dnsResult.answers,
+          checkedAt: dnsResult.checkedAt,
+        },
+      );
+      if (!completed) throw new CheckExecutionClaimLostError();
+      return;
     }
 
     if (claim.execution.type === 'TCP') {

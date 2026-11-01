@@ -13,6 +13,7 @@ import type { FieldErrors, Monitor } from './types';
 import type { ConfigurationTestResult } from './types';
 import { ConfigurationTestPanel } from './configuration-test-result';
 import { TlsCertificatePolicyField } from './tls-certificate-policy-field';
+import { DnsExpectedValuesField } from './dns-expected-values-field';
 
 export interface MonitorFormValues {
   type: Monitor['type'];
@@ -63,8 +64,9 @@ export function MonitorForm({
     initialValues?.statusPolicy.type ?? 'ANY_2XX',
   );
   const [method, setMethod] = useState(initialValues?.method ?? 'GET');
-  const monitorType =
-    mode === 'create' ? (selectedType ?? 'HTTP') : (initialValues?.type ?? 'HTTP');
+  const [monitorType, setMonitorType] = useState<Monitor['type']>(
+    mode === 'create' ? (selectedType ?? 'HTTP') : (initialValues?.type ?? 'HTTP'),
+  );
   const [httpsEndpoint, setHttpsEndpoint] = useState(
     (initialValues?.url ?? '').trim().toLowerCase().startsWith('https://'),
   );
@@ -76,6 +78,7 @@ export function MonitorForm({
   const hostHelpId = `${id}-host-help`;
 
   function selectMonitorType(type: Monitor['type']): void {
+    setMonitorType(type);
     onTypeChange?.(type);
     onConfigurationChange();
   }
@@ -105,25 +108,38 @@ export function MonitorForm({
               {mode === 'create' ? (
                 <fieldset className="m-0 grid gap-2 border-0 p-0">
                   <legend className="p-0 text-xs font-medium text-rail-subtle">Protocol</legend>
-                  <div className="grid grid-cols-2 gap-2 sm:max-w-md">
-                    {(['HTTP', 'TCP'] as const).map((type) => (
-                      <label
+                  <div className="grid gap-2 sm:max-w-2xl sm:grid-cols-3">
+                    {(['HTTP', 'TCP', 'DNS'] as const).map((type) => (
+                      <button
                         key={type}
+                        type="button"
+                        aria-pressed={monitorType === type}
                         onClick={() => selectMonitorType(type)}
-                        className="flex min-h-10 cursor-pointer items-center gap-2.5 rounded-rail-control border border-rail-border bg-rail-surface px-3 text-sm font-medium text-rail-text hover:border-rail-border-strong has-[:checked]:border-rail-accent has-[:checked]:bg-rail-accent/5"
+                        className="flex min-h-10 cursor-pointer items-center gap-2.5 rounded-rail-control border border-rail-border bg-rail-surface px-3 text-left text-sm font-medium text-rail-text hover:border-rail-border-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rail-accent aria-pressed:border-rail-accent aria-pressed:bg-rail-accent/5"
                       >
-                        <Input
-                          type="radio"
-                          name="monitorType"
-                          value={type}
-                          checked={monitorType === type}
-                          onChange={() => selectMonitorType(type)}
-                          className="size-4"
-                        />
-                        {type === 'HTTP' ? 'HTTP endpoint' : 'TCP port'}
-                      </label>
+                        <span
+                          aria-hidden="true"
+                          className={`grid size-4 shrink-0 place-items-center rounded-full border ${
+                            monitorType === type
+                              ? 'border-rail-accent'
+                              : 'border-rail-border-strong'
+                          }`}
+                        >
+                          <span
+                            className={`size-2 rounded-full bg-rail-accent ${
+                              monitorType === type ? 'opacity-100' : 'opacity-0'
+                            }`}
+                          />
+                        </span>
+                        {type === 'HTTP'
+                          ? 'HTTP endpoint'
+                          : type === 'TCP'
+                            ? 'TCP port'
+                            : 'DNS record'}
+                      </button>
                     ))}
                   </div>
+                  <input type="hidden" name="monitorType" value={monitorType} />
                 </fieldset>
               ) : (
                 <input type="hidden" name="monitorType" value={monitorType} />
@@ -185,7 +201,7 @@ export function MonitorForm({
                     </span>
                   )}
                 </label>
-              ) : (
+              ) : monitorType === 'TCP' ? (
                 <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_9rem]">
                   <label
                     className="grid gap-1.5 text-xs font-medium text-rail-subtle"
@@ -241,6 +257,72 @@ export function MonitorForm({
                     />
                     {errors.port ? (
                       <span className="font-normal text-rail-danger">{errors.port[0]}</span>
+                    ) : null}
+                  </label>
+                </div>
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_10rem]">
+                  <label
+                    className="grid gap-1.5 text-xs font-medium text-rail-subtle"
+                    htmlFor={`${id}-dns-name`}
+                  >
+                    DNS name
+                    <Input
+                      id={`${id}-dns-name`}
+                      name="dnsName"
+                      type="text"
+                      defaultValue={
+                        initialValues?.configuration?.type === 'DNS'
+                          ? initialValues.configuration.name
+                          : ''
+                      }
+                      placeholder="api.example.com"
+                      autoComplete="off"
+                      spellCheck={false}
+                      required
+                      aria-describedby={
+                        errors.dnsName ? `${id}-dns-name-error` : `${id}-dns-name-help`
+                      }
+                      aria-invalid={Boolean(errors.dnsName)}
+                    />
+                    {errors.dnsName ? (
+                      <span className="font-normal text-rail-danger" id={`${id}-dns-name-error`}>
+                        {errors.dnsName[0]}
+                      </span>
+                    ) : (
+                      <span
+                        className="font-normal leading-5 text-rail-muted"
+                        id={`${id}-dns-name-help`}
+                      >
+                        Enter a hostname without a protocol, path, or trailing dot.
+                      </span>
+                    )}
+                  </label>
+                  <label
+                    className="grid content-start gap-1.5 text-xs font-medium text-rail-subtle"
+                    htmlFor={`${id}-dns-record-type`}
+                  >
+                    Record type
+                    <Select
+                      id={`${id}-dns-record-type`}
+                      name="dnsRecordType"
+                      defaultValue={
+                        initialValues?.configuration?.type === 'DNS'
+                          ? initialValues.configuration.recordType
+                          : 'A'
+                      }
+                      aria-invalid={Boolean(errors.dnsRecordType)}
+                    >
+                      {['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS'].map((recordType) => (
+                        <option key={recordType} value={recordType}>
+                          {recordType}
+                        </option>
+                      ))}
+                    </Select>
+                    {errors.dnsRecordType ? (
+                      <span className="font-normal text-rail-danger">
+                        {errors.dnsRecordType[0]}
+                      </span>
                     ) : null}
                   </label>
                 </div>
@@ -352,7 +434,7 @@ export function MonitorForm({
                 {...(errors.assertions?.[0] ? { error: errors.assertions[0] } : {})}
               />
             </>
-          ) : (
+          ) : monitorType === 'TCP' ? (
             <section className="px-5 py-5 sm:px-6">
               <h2 className="m-0 text-sm font-semibold text-rail-text">Connection check</h2>
               <p className="mt-1 mb-0 max-w-2xl text-xs leading-5 text-rail-muted">
@@ -363,6 +445,27 @@ export function MonitorForm({
                 <p className="mt-3 mb-0 text-xs text-rail-danger">{errors.tcpSettings[0]}</p>
               ) : null}
             </section>
+          ) : (
+            <>
+              <section className="px-5 py-5 sm:px-6">
+                <h2 className="m-0 text-sm font-semibold text-rail-text">DNS lookup</h2>
+                <p className="mt-1 mb-0 max-w-2xl text-xs leading-5 text-rail-muted">
+                  Watchrail resolves the selected record type and measures the full lookup time.
+                  Authoritative failures and answer mismatches affect monitor health.
+                </p>
+                {errors.dnsSettings ? (
+                  <p className="mt-3 mb-0 text-xs text-rail-danger">{errors.dnsSettings[0]}</p>
+                ) : null}
+              </section>
+              <DnsExpectedValuesField
+                initialValues={
+                  initialValues?.configuration.type === 'DNS'
+                    ? initialValues.configuration.expectedValues
+                    : []
+                }
+                {...(errors.dnsExpectedValues?.[0] ? { error: errors.dnsExpectedValues[0] } : {})}
+              />
+            </>
           )}
         </div>
 

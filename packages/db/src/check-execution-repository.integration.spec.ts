@@ -68,6 +68,21 @@ describe('CheckExecutionRepository', () => {
     return new ManualRoundRepository(connection.db).create(organizationId, monitor.id);
   }
 
+  async function createDnsRound() {
+    const monitor = await new MonitorRepository(connection.db).create(
+      organizationId,
+      createMonitor({
+        type: 'DNS',
+        name: 'API DNS',
+        dnsName: 'api.example.com',
+        dnsRecordType: 'A',
+        dnsExpectedValues: ['203.0.113.10'],
+        timeoutMs: 8_000,
+      }),
+    );
+    return new ManualRoundRepository(connection.db).create(organizationId, monitor.id);
+  }
+
   it('claims the local assignment with its immutable configuration', async () => {
     const round = await createRound();
 
@@ -113,6 +128,7 @@ describe('CheckExecutionRepository', () => {
       },
     });
     if (claim.state !== 'CLAIMED') throw new Error('Expected a TCP execution claim.');
+    if (claim.execution.type !== 'TCP') throw new Error('Expected TCP execution configuration.');
     expect(claim.execution.url).toBeUndefined();
     expect(claim.execution.statusPolicy).toBeUndefined();
   });
@@ -150,6 +166,50 @@ describe('CheckExecutionRepository', () => {
       statusCode: null,
       responseTimeMs: 18,
       attemptDurationMs: 24,
+      checkedAt,
+    });
+  });
+
+  it('persists and reloads a successful DNS result with bounded answer evidence', async () => {
+    const round = await createDnsRound();
+    const claim = await repository.claim(round.id, 45_000);
+    if (claim.state !== 'CLAIMED' || claim.execution.type !== 'DNS') {
+      throw new Error('Expected a DNS execution claim.');
+    }
+    expect(claim.execution).toMatchObject({
+      name: 'api.example.com',
+      recordType: 'A',
+      expectedValues: ['203.0.113.10'],
+    });
+
+    const checkedAt = new Date('2026-11-01T09:20:00.000Z');
+    await expect(
+      repository.complete(claim.execution.assignmentId, claim.execution.claimToken, {
+        outcome: 'PASS',
+        stage: 'DNS',
+        reason: 'RECORDS_MATCHED',
+        statusCode: null,
+        responseTimeMs: 12,
+        attemptDurationMs: 14,
+        redirects: [],
+        assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
+        tlsCertificates: [],
+        dnsAnswers: ['203.0.113.10'],
+        checkedAt,
+      }),
+    ).resolves.toBe(true);
+
+    const stored = await new CheckHistoryRepository(connection.db).findForMonitor(
+      organizationId,
+      round.monitorId,
+      round.id,
+    );
+    expect(stored?.result).toMatchObject({
+      outcome: 'PASS',
+      stage: 'DNS',
+      reason: 'RECORDS_MATCHED',
+      responseTimeMs: 12,
+      dnsAnswers: ['203.0.113.10'],
       checkedAt,
     });
   });
