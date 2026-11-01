@@ -267,6 +267,20 @@
       "when": 1793521481437,
       "tag": "0037_faulty_celestials",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1793524366070,
+      "tag": "0038_pale_sentinels",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1793527679344,
+      "tag": "0039_damp_gorilla_man",
+      "breakpoints": true
     }
   ]
 }

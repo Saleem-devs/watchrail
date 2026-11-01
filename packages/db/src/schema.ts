@@ -27,6 +27,7 @@ import {
   EXECUTION_ASSIGNMENT_STATUSES,
   HTTP_METHODS,
   MONITOR_LIFECYCLE_STATES,
+  MONITOR_TYPES,
   PROBE_AGENT_STATUSES,
   PROBE_ATTEMPT_STATUSES,
   PROBE_CREDENTIAL_STATUSES,
@@ -50,6 +51,7 @@ import {
 export const httpMethodEnum = pgEnum('http_method', HTTP_METHODS);
 
 export const monitorLifecycleEnum = pgEnum('monitor_lifecycle_state', MONITOR_LIFECYCLE_STATES);
+export const monitorTypeEnum = pgEnum('monitor_type', MONITOR_TYPES);
 
 export const checkRoundTriggerEnum = pgEnum('check_round_trigger', CHECK_ROUND_TRIGGERS);
 
@@ -72,10 +74,13 @@ export const checkResultStageEnum = pgEnum('check_result_stage', [
 
 export const checkResultReasonEnum = pgEnum('check_result_reason', [
   'COMPLETED',
+  'CONNECTED',
   'UNEXPECTED_STATUS',
   'REQUEST_TIMEOUT',
   'NAME_NOT_FOUND',
   'CONNECTION_REFUSED',
+  'HOST_UNREACHABLE',
+  'CONNECTION_TIMEOUT',
   'CERTIFICATE_EXPIRED',
   'CERTIFICATE_NOT_YET_VALID',
   'CERTIFICATE_HOSTNAME_MISMATCH',
@@ -364,6 +369,9 @@ export const monitors = pgTable(
     projectId: uuid('project_id').notNull(),
 
     name: varchar('name', { length: 120 }).notNull(),
+    type: monitorTypeEnum('type').notNull().default('HTTP'),
+    tcpHost: text('tcp_host'),
+    tcpPort: integer('tcp_port'),
 
     // Current projection.
     //
@@ -414,6 +422,14 @@ export const monitors = pgTable(
     check('monitors_name_not_blank', sql`length(btrim(${table.name})) > 0`),
 
     check('monitors_url_length', sql`length(${table.url}) <= 2048`),
+    check(
+      'monitors_protocol_configuration',
+      sql`(
+        (${table.type} = 'HTTP' and ${table.tcpHost} is null and ${table.tcpPort} is null)
+        or
+        (${table.type} = 'TCP' and length(btrim(${table.tcpHost})) > 0 and ${table.tcpPort} between 1 and 65535)
+      )`,
+    ),
 
     check('monitors_timeout_range', sql`${table.timeoutMs} between 1000 and 30000`),
     check('monitors_interval_range', sql`${table.intervalSeconds} between 60 and 86400`),
@@ -539,6 +555,9 @@ export const monitorConfigurationVersions = pgTable(
     monitorId: uuid('monitor_id').notNull(),
 
     versionNumber: integer('version_number').notNull(),
+    type: monitorTypeEnum('type').notNull().default('HTTP'),
+    tcpHost: text('tcp_host'),
+    tcpPort: integer('tcp_port'),
 
     url: text('url').notNull(),
     method: httpMethodEnum('method').notNull(),
@@ -593,6 +612,14 @@ export const monitorConfigurationVersions = pgTable(
     check('monitor_configuration_versions_version_positive', sql`${table.versionNumber} > 0`),
 
     check('monitor_configuration_versions_url_length', sql`length(${table.url}) <= 2048`),
+    check(
+      'monitor_configuration_versions_protocol_configuration',
+      sql`(
+        (${table.type} = 'HTTP' and ${table.tcpHost} is null and ${table.tcpPort} is null)
+        or
+        (${table.type} = 'TCP' and length(btrim(${table.tcpHost})) > 0 and ${table.tcpPort} between 1 and 65535)
+      )`,
+    ),
 
     check(
       'monitor_configuration_versions_timeout_range',
@@ -977,7 +1004,11 @@ export const checkExecutionResults = pgTable(
 
     check(
       'check_execution_results_response_evidence_consistent',
-      sql`(${table.statusCode} is null) = (${table.responseTimeMs} is null)`,
+      sql`(
+        ((${table.statusCode} is null) = (${table.responseTimeMs} is null))
+        or
+        (${table.statusCode} is null and ${table.responseTimeMs} is not null and ${table.stage} = 'CONNECT' and ${table.reason} = 'CONNECTED')
+      )`,
     ),
 
     check(

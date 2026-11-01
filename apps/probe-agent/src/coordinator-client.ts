@@ -5,7 +5,7 @@ import {
   type ProbeLeaseReferenceV1,
   type ProbeResultSubmissionReferenceV1,
 } from '@watchrail/contracts';
-import type { HttpCheckResult } from '@watchrail/check-engine';
+import type { HttpCheckResult, TcpCheckResult } from '@watchrail/check-engine';
 
 export class ProbeCoordinatorError extends Error {
   constructor(
@@ -98,7 +98,7 @@ export class ProbeCoordinatorClient {
   serializeSubmission(
     lease: ProbeLeaseReferenceV1,
     engineVersion: string,
-    result: HttpCheckResult,
+    result: HttpCheckResult | TcpCheckResult,
   ): string {
     return JSON.stringify({
       reference: reference(lease, engineVersion),

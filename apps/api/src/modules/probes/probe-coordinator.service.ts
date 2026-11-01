@@ -49,6 +49,24 @@ export class ProbeCoordinatorService {
       this.coordinator.configuration(machine, attemptId, token),
     );
     if (!stored) throw staleLease();
+    if (stored.type === 'TCP') {
+      if (stored.tcpHost === null || stored.tcpPort === null) {
+        throw new Error('Stored TCP execution configuration is incomplete.');
+      }
+      return parseProbeExecutionConfiguration({
+        contractVersion: 1,
+        type: 'TCP',
+        assignmentId: stored.assignmentId,
+        attemptId: stored.attemptId,
+        configurationVersionId: stored.configurationVersionId,
+        configurationVersionNumber: stored.configurationVersionNumber,
+        executionPolicyVersion: stored.executionPolicyVersion,
+        requiredEngineVersion: stored.requiredEngineVersion,
+        host: stored.tcpHost,
+        port: stored.tcpPort,
+        timeoutMs: stored.timeoutMs,
+      });
+    }
     if (!isHttpMonitorMethod(stored.method)) {
       throw new Error('Stored remote execution method is unsupported.');
     }
@@ -91,6 +109,7 @@ export class ProbeCoordinatorService {
       ),
     });
     if (stored.requiredEngineVersion !== LEGACY_HTTP_ENGINE_VERSION) return resolved;
+    if ('type' in resolved) throw new Error('Legacy HTTP assignment resolved as TCP.');
     const legacyConfiguration = { ...resolved };
     delete legacyConfiguration.tlsPolicy;
     return legacyConfiguration;
@@ -196,6 +215,15 @@ function parseClaimToken(value: string | undefined): string {
 }
 
 function parseResult(value: unknown): AuthoritativeCheckResult {
+  const tcpResultKeys = [
+    'attemptDurationMs',
+    'checkedAt',
+    'connectionTimeMs',
+    'outcome',
+    'reason',
+    'stage',
+  ];
+  if (hasExactKeys(value, tcpResultKeys)) return parseTcpResult(value);
   const resultKeys = [
     'assertionEvaluation',
     'attemptDurationMs',
@@ -214,10 +242,13 @@ function parseResult(value: unknown): AuthoritativeCheckResult {
     !['DNS', 'CONNECT', 'TLS', 'HTTP', 'PROBE'].includes(String(value.stage)) ||
     ![
       'COMPLETED',
+      'CONNECTED',
       'UNEXPECTED_STATUS',
       'REQUEST_TIMEOUT',
       'NAME_NOT_FOUND',
       'CONNECTION_REFUSED',
+      'HOST_UNREACHABLE',
+      'CONNECTION_TIMEOUT',
       'CERTIFICATE_EXPIRED',
       'CERTIFICATE_NOT_YET_VALID',
       'CERTIFICATE_HOSTNAME_MISMATCH',
@@ -236,7 +267,7 @@ function parseResult(value: unknown): AuthoritativeCheckResult {
     !isNullableStatusCode(value.statusCode) ||
     !isNullableNonNegativeNumber(value.responseTimeMs) ||
     !isNonNegativeNumber(value.attemptDurationMs) ||
-    (value.statusCode === null) !== (value.responseTimeMs === null) ||
+    !hasValidTimingEvidence(value.reason, value.statusCode, value.responseTimeMs) ||
     !isCanonicalTimestamp(value.checkedAt)
   ) {
     badRequest();
@@ -263,8 +294,46 @@ function parseResult(value: unknown): AuthoritativeCheckResult {
   };
 }
 
+function parseTcpResult(value: Record<string, unknown>): AuthoritativeCheckResult {
+  const reason = String(value.reason);
+  if (
+    ![
+      'CONNECTED',
+      'NAME_NOT_FOUND',
+      'CONNECTION_REFUSED',
+      'HOST_UNREACHABLE',
+      'CONNECTION_TIMEOUT',
+      'PROHIBITED_DESTINATION',
+      'INTERNAL_ERROR',
+    ].includes(reason) ||
+    !['PASS', 'FAIL', 'UNKNOWN'].includes(String(value.outcome)) ||
+    !['DNS', 'CONNECT', 'PROBE'].includes(String(value.stage)) ||
+    !isNullableNonNegativeNumber(value.connectionTimeMs) ||
+    !isNonNegativeNumber(value.attemptDurationMs) ||
+    !isCanonicalTimestamp(value.checkedAt)
+  ) {
+    badRequest();
+  }
+  const expected = expectedClassification(reason);
+  if (value.outcome !== expected.outcome || value.stage !== expected.stage) badRequest();
+  if ((reason === 'CONNECTED') !== (value.connectionTimeMs !== null)) badRequest();
+  return {
+    outcome: value.outcome as AuthoritativeCheckResult['outcome'],
+    stage: value.stage as AuthoritativeCheckResult['stage'],
+    reason: value.reason as AuthoritativeCheckResult['reason'],
+    statusCode: null,
+    responseTimeMs: value.connectionTimeMs,
+    attemptDurationMs: value.attemptDurationMs,
+    redirects: [],
+    assertionEvaluation: { contractVersion: 1, outcome: 'PASS', diagnostics: [] },
+    tlsCertificates: [],
+    checkedAt: new Date(value.checkedAt),
+  };
+}
+
 function expectedClassification(reason: string): { outcome: string; stage: string } {
   if (reason === 'COMPLETED') return { outcome: 'PASS', stage: 'HTTP' };
+  if (reason === 'CONNECTED') return { outcome: 'PASS', stage: 'CONNECT' };
   if (
     [
       'UNEXPECTED_STATUS',
@@ -280,7 +349,13 @@ function expectedClassification(reason: string): { outcome: string; stage: strin
   }
   if (reason === 'NAME_NOT_FOUND') return { outcome: 'FAIL', stage: 'DNS' };
   if (reason === 'PROHIBITED_DESTINATION') return { outcome: 'UNKNOWN', stage: 'DNS' };
-  if (reason === 'CONNECTION_REFUSED') return { outcome: 'FAIL', stage: 'CONNECT' };
+  if (
+    reason === 'CONNECTION_REFUSED' ||
+    reason === 'HOST_UNREACHABLE' ||
+    reason === 'CONNECTION_TIMEOUT'
+  ) {
+    return { outcome: 'FAIL', stage: 'CONNECT' };
+  }
   if (
     [
       'CERTIFICATE_EXPIRED',
@@ -297,6 +372,22 @@ function expectedClassification(reason: string): { outcome: string; stage: strin
     return { outcome: 'UNKNOWN', stage: 'TLS' };
   }
   return { outcome: 'UNKNOWN', stage: 'PROBE' };
+}
+
+function hasValidTimingEvidence(
+  reason: unknown,
+  statusCode: unknown,
+  responseTimeMs: unknown,
+): boolean {
+  if (reason === 'CONNECTED') return statusCode === null && isNonNegativeNumber(responseTimeMs);
+  if (
+    reason === 'CONNECTION_REFUSED' ||
+    reason === 'HOST_UNREACHABLE' ||
+    reason === 'CONNECTION_TIMEOUT'
+  ) {
+    return statusCode === null && responseTimeMs === null;
+  }
+  return (statusCode === null) === (responseTimeMs === null);
 }
 
 function staleLease(): ConflictException {

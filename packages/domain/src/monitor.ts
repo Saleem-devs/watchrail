@@ -9,6 +9,7 @@ import {
   TlsCertificatePolicyError,
   type TlsCertificatePolicy,
 } from './tls.js';
+import { parseTcpMonitorSettings, TcpMonitorInputError } from './tcp.js';
 
 export const HTTP_METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] as const;
 export const HTTP_MONITOR_METHODS = [
@@ -21,6 +22,7 @@ export const HTTP_MONITOR_METHODS = [
   'OPTIONS',
 ] as const;
 export const MONITOR_LIFECYCLE_STATES = ['ENABLED', 'PAUSED', 'ARCHIVED'] as const;
+export const MONITOR_TYPES = ['HTTP', 'TCP'] as const;
 export const MONITOR_LOCATIONS = ['local'] as const;
 export const MONITOR_INTERVAL_LIMITS = {
   minimumSeconds: 60,
@@ -30,6 +32,7 @@ export const MONITOR_INTERVAL_LIMITS = {
 export type HttpMethod = (typeof HTTP_METHODS)[number];
 export type HttpMonitorMethod = (typeof HTTP_MONITOR_METHODS)[number];
 export type MonitorLifecycleState = (typeof MONITOR_LIFECYCLE_STATES)[number];
+export type MonitorType = (typeof MONITOR_TYPES)[number];
 export type HttpStatusPolicy = { type: 'ANY_2XX' } | { type: 'EXACT'; statusCodes: number[] };
 export type HttpRequestBody =
   | { type: 'NONE' }
@@ -61,7 +64,10 @@ export const MONITOR_DEFAULTS = {
 
 export interface CreateMonitorCommand {
   name: unknown;
-  url: unknown;
+  type?: unknown;
+  url?: unknown;
+  host?: unknown;
+  port?: unknown;
   statusPolicy?: unknown;
   tlsPolicy?: unknown;
   method?: unknown;
@@ -75,24 +81,39 @@ export interface CreateMonitorCommand {
   intervalSeconds?: unknown;
 }
 
-export interface NewMonitor {
+interface NewMonitorBase {
   name: string;
-  url: string;
-  method: HttpMonitorMethod;
   lifecycleState: MonitorLifecycleState;
   timeoutMs: number;
   intervalSeconds: number;
+  locations: string[];
+}
+
+export interface NewHttpMonitor extends NewMonitorBase {
+  type: 'HTTP';
+  url: string;
+  method: HttpMonitorMethod;
   followRedirects: boolean;
   statusPolicy: HttpStatusPolicy;
   tlsPolicy: TlsCertificatePolicy;
   requestHeaders: RequestHeaderUpdate[];
   requestBody: HttpRequestBody;
   assertions: ResponseAssertions;
-  locations: string[];
 }
+
+export interface NewTcpMonitor extends NewMonitorBase {
+  type: 'TCP';
+  host: string;
+  port: number;
+}
+
+export type NewMonitor = NewHttpMonitor | NewTcpMonitor;
 
 export interface MonitorFieldErrors {
   name?: string[];
+  type?: string[];
+  host?: string[];
+  port?: string[];
   url?: string[];
   statusPolicy?: string[];
   tlsPolicy?: string[];
@@ -213,6 +234,8 @@ export function isHttpMonitorMethod(value: unknown): value is HttpMonitorMethod 
 export function createMonitor(command: CreateMonitorCommand): NewMonitor {
   const fields: MonitorFieldErrors = {};
   const name = normalizeName(command.name, fields);
+  const type = normalizeMonitorType(command.type, fields);
+  if (type === 'TCP') return createTcpMonitor(command, name, fields);
   const url = normalizeUrl(command.url, fields);
   const statusPolicy = normalizeStatusPolicy(command.statusPolicy, fields);
   const tlsPolicy = normalizeTlsPolicy(command.tlsPolicy, url, fields, true);
@@ -246,6 +269,7 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
   if (Object.keys(fields).length > 0) throw new MonitorInputError(fields);
 
   return {
+    type: 'HTTP',
     name,
     url,
     method,
@@ -260,6 +284,72 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
     assertions,
     locations,
   };
+}
+
+function createTcpMonitor(
+  command: CreateMonitorCommand,
+  name: string,
+  fields: MonitorFieldErrors,
+): NewTcpMonitor {
+  let settings: { host: string; port: number; timeoutMs: number } = {
+    host: '',
+    port: 443,
+    timeoutMs: MONITOR_DEFAULTS.timeoutMs,
+  };
+  try {
+    settings = parseTcpMonitorSettings({
+      host: command.host,
+      port: command.port,
+      timeoutMs: command.timeoutMs ?? MONITOR_DEFAULTS.timeoutMs,
+    });
+  } catch (error) {
+    if (!(error instanceof TcpMonitorInputError)) throw error;
+    Object.assign(fields, error.fields);
+  }
+  const lifecycleState = normalizeInitialLifecycleState(command.lifecycleState, fields);
+  const intervalSeconds = normalizeIntervalSeconds(command.intervalSeconds, fields, true);
+  let locations: string[] = [...MONITOR_DEFAULTS.locations];
+  if (command.locations !== undefined) {
+    try {
+      locations = parseMonitorLocationSettings({ locations: command.locations }).locations;
+    } catch (error) {
+      if (error instanceof MonitorInputError) Object.assign(fields, error.fields);
+      else throw error;
+    }
+  }
+  const httpOnlyFields = [
+    command.url,
+    command.statusPolicy,
+    command.tlsPolicy,
+    command.method,
+    command.followRedirects,
+    command.requestHeaders,
+    command.requestBody,
+    command.assertions,
+  ];
+  if (httpOnlyFields.some((value) => value !== undefined)) {
+    fields.type = ['TCP monitors cannot include HTTP-only configuration.'];
+  }
+  if (Object.keys(fields).length > 0) throw new MonitorInputError(fields);
+  return {
+    type: 'TCP',
+    name,
+    host: settings.host,
+    port: settings.port,
+    timeoutMs: settings.timeoutMs,
+    lifecycleState,
+    intervalSeconds,
+    locations,
+  };
+}
+
+function normalizeMonitorType(value: unknown, fields: MonitorFieldErrors): MonitorType {
+  if (value === undefined) return 'HTTP';
+  if (typeof value !== 'string' || !MONITOR_TYPES.includes(value as MonitorType)) {
+    fields.type = ['Choose HTTP or TCP.'];
+    return 'HTTP';
+  }
+  return value as MonitorType;
 }
 
 export interface MonitorScheduleSettings {

@@ -11,7 +11,12 @@ function monitor(
   return {
     id: name,
     name,
+    type: 'HTTP',
     url: `https://${name.toLowerCase().replaceAll(' ', '-')}.example.com/health`,
+    configuration: {
+      type: 'HTTP',
+      url: `https://${name.toLowerCase().replaceAll(' ', '-')}.example.com/health`,
+    },
     method: 'GET',
     lifecycleState: state,
     timeoutMs: 10_000,

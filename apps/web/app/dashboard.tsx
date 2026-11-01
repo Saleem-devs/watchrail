@@ -47,6 +47,7 @@ import {
   requestBodyFromForm,
   requestHeadersFromForm,
   tlsPolicyFromForm,
+  tcpSettingsFromForm,
   urlFromMonitorForm,
 } from '../features/monitors/monitor-form-serialization';
 import { HTTP_METHODS } from '../features/monitors/http-method-options';
@@ -117,6 +118,7 @@ export function Dashboard({
   const [configurationTestError, setConfigurationTestError] = useState<string>();
   const [isTestingConfiguration, setIsTestingConfiguration] = useState(false);
   const [stateChangingTestMethod, setStateChangingTestMethod] = useState<string>();
+  const [createMonitorType, setCreateMonitorType] = useState<Monitor['type']>('HTTP');
   const [manualRounds, setManualRounds] = useState<Record<string, ManualRound>>({});
   const [runningMonitorIds, setRunningMonitorIds] = useState<Set<string>>(() => new Set());
   const [runErrors, setRunErrors] = useState<Record<string, string>>({});
@@ -327,7 +329,7 @@ export function Dashboard({
 
     const form = event.currentTarget;
     const formData = new FormData(form);
-    const statusPolicy = statusPolicyFromForm(formData);
+    const monitorType = formData.get('monitorType') === 'TCP' ? 'TCP' : 'HTTP';
 
     try {
       const response = await fetch(
@@ -335,20 +337,31 @@ export function Dashboard({
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({
-            name: formData.get('name'),
-            url: urlFromMonitorForm(formData),
-            statusPolicy,
-            tlsPolicy: tlsPolicyFromForm(formData),
-            method: formData.get('method'),
-            timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
-            followRedirects: formData.get('followRedirects') === 'on',
-            locations: [formData.get('location')],
-            lifecycleState: formData.get('lifecycleState'),
-            requestHeaders: requestHeadersFromForm(formData),
-            requestBody: requestBodyFromForm(formData),
-            assertions: responseAssertionsFromForm(formData),
-          }),
+          body: JSON.stringify(
+            monitorType === 'TCP'
+              ? {
+                  type: 'TCP',
+                  name: formData.get('name'),
+                  ...tcpSettingsFromForm(formData),
+                  locations: [formData.get('location')],
+                  lifecycleState: formData.get('lifecycleState'),
+                }
+              : {
+                  type: 'HTTP',
+                  name: formData.get('name'),
+                  url: urlFromMonitorForm(formData),
+                  statusPolicy: statusPolicyFromForm(formData),
+                  tlsPolicy: tlsPolicyFromForm(formData),
+                  method: formData.get('method'),
+                  timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
+                  followRedirects: formData.get('followRedirects') === 'on',
+                  locations: [formData.get('location')],
+                  lifecycleState: formData.get('lifecycleState'),
+                  requestHeaders: requestHeadersFromForm(formData),
+                  requestBody: requestBodyFromForm(formData),
+                  assertions: responseAssertionsFromForm(formData),
+                },
+          ),
         },
       );
 
@@ -379,24 +392,29 @@ export function Dashboard({
     setFieldErrors({});
 
     const formData = new FormData(event.currentTarget);
+    const monitorType = detailMonitor?.type ?? 'HTTP';
     const requests: Array<{ path: string; body: Record<string, unknown> }> = [
-      {
-        path: 'configuration',
-        body: {
-          httpSettings: {
-            url: urlFromMonitorForm(formData),
-            method: formData.get('method'),
-            timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
-            followRedirects: formData.get('followRedirects') === 'on',
-            requestBody: requestBodyFromForm(formData),
-            tlsPolicy: tlsPolicyFromForm(formData),
+      monitorType === 'TCP'
+        ? { path: 'tcp-settings', body: tcpSettingsFromForm(formData) }
+        : {
+            path: 'configuration',
+            body: {
+              httpSettings: {
+                url: urlFromMonitorForm(formData),
+                method: formData.get('method'),
+                timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
+                followRedirects: formData.get('followRedirects') === 'on',
+                requestBody: requestBodyFromForm(formData),
+                tlsPolicy: tlsPolicyFromForm(formData),
+              },
+              requestHeaders: requestHeadersFromForm(formData),
+              assertions: responseAssertionsFromForm(formData),
+            },
           },
-          requestHeaders: requestHeadersFromForm(formData),
-          assertions: responseAssertionsFromForm(formData),
-        },
-      },
       { path: 'name', body: { name: formData.get('name') } },
-      { path: 'status-policy', body: { statusPolicy: statusPolicyFromForm(formData) } },
+      ...(monitorType === 'HTTP'
+        ? [{ path: 'status-policy', body: { statusPolicy: statusPolicyFromForm(formData) } }]
+        : []),
       { path: 'locations', body: { locations: [formData.get('location')] } },
       { path: 'lifecycle', body: { lifecycleState: formData.get('lifecycleState') } },
     ];
@@ -436,6 +454,7 @@ export function Dashboard({
     const form = document.getElementById('monitor-form');
     if (!(form instanceof HTMLFormElement) || !form.reportValidity()) return;
     const methodValue = new FormData(form).get('method');
+    if (new FormData(form).get('monitorType') === 'TCP') return;
     const method = typeof methodValue === 'string' ? methodValue : 'GET';
     if (requiresStateChangingMethodConfirmation(method)) {
       setStateChangingTestMethod(method);
@@ -603,6 +622,38 @@ export function Dashboard({
       );
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Could not update HTTP settings.');
+    } finally {
+      setUpdatingSettingsIds((current) => {
+        const next = new Set(current);
+        next.delete(monitorId);
+        return next;
+      });
+    }
+  }
+
+  async function updateTcpSettings(
+    monitorId: string,
+    event: FormEvent<HTMLFormElement>,
+  ): Promise<void> {
+    event.preventDefault();
+    const settings = tcpSettingsFromForm(new FormData(event.currentTarget));
+    setUpdatingSettingsIds((current) => new Set(current).add(monitorId));
+    setActionError(undefined);
+    try {
+      const response = await fetch(`/api/monitors/${monitorId}/tcp-settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(settings),
+      });
+      const body = (await response.json()) as { data?: Monitor } & ApiError;
+      if (!response.ok || !body.data) {
+        throw new Error(body.fields?.tcpSettings?.[0] ?? 'Could not update TCP settings.');
+      }
+      setMonitors((current) =>
+        current.map((monitor) => (monitor.id === monitorId ? (body.data as Monitor) : monitor)),
+      );
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Could not update TCP settings.');
     } finally {
       setUpdatingSettingsIds((current) => {
         const next = new Set(current);
@@ -906,13 +957,15 @@ export function Dashboard({
                 </>
               ) : view === 'create' ? (
                 <>
-                  <Button
-                    variant="secondary"
-                    disabled={isTestingConfiguration || isSubmitting}
-                    onClick={beginConfigurationTest}
-                  >
-                    {isTestingConfiguration ? 'Testing…' : 'Test configuration'}
-                  </Button>
+                  {createMonitorType === 'HTTP' ? (
+                    <Button
+                      variant="secondary"
+                      disabled={isTestingConfiguration || isSubmitting}
+                      onClick={beginConfigurationTest}
+                    >
+                      {isTestingConfiguration ? 'Testing…' : 'Test configuration'}
+                    </Button>
+                  ) : null}
                   <Link
                     href={`${projectBase}/monitors`}
                     className={actionClassName({ variant: 'quiet' })}
@@ -936,17 +989,19 @@ export function Dashboard({
           <PageHeader
             backLink={{ href: detailPath, label: 'Back to monitor' }}
             title={detailMonitor ? `Edit ${detailMonitor.name}` : 'Edit monitor'}
-            description="Update the endpoint, response policy, and execution settings."
+            description="Update the target and execution settings."
             actions={
               detailMonitor ? (
                 <>
-                  <Button
-                    variant="secondary"
-                    disabled={isTestingConfiguration || isSubmitting}
-                    onClick={beginConfigurationTest}
-                  >
-                    {isTestingConfiguration ? 'Testing…' : 'Test configuration'}
-                  </Button>
+                  {detailMonitor.type !== 'TCP' ? (
+                    <Button
+                      variant="secondary"
+                      disabled={isTestingConfiguration || isSubmitting}
+                      onClick={beginConfigurationTest}
+                    >
+                      {isTestingConfiguration ? 'Testing…' : 'Test configuration'}
+                    </Button>
+                  ) : null}
                   <Link href={detailPath} className={actionClassName({ variant: 'quiet' })}>
                     Cancel
                   </Link>
@@ -967,7 +1022,11 @@ export function Dashboard({
           <PageHeader
             backLink={{ href: backPath, label: 'Back' }}
             title={detailMonitor?.name ?? 'Monitor details'}
-            description={detailMonitor?.url ?? 'Health, incidents, evidence, and configuration.'}
+            description={
+              detailMonitor?.configuration?.type === 'TCP'
+                ? `${detailMonitor.configuration.host}:${detailMonitor.configuration.port}`
+                : (detailMonitor?.url ?? 'Health, incidents, evidence, and configuration.')
+            }
             actions={
               detailMonitor ? (
                 <>
@@ -1097,7 +1156,8 @@ export function Dashboard({
                   </div>
                   <h3 className="m-0 text-base font-semibold text-rail-text">No monitors yet</h3>
                   <p className="mt-1 mb-0 max-w-sm text-sm leading-6 text-rail-subtle">
-                    Add an HTTP endpoint to begin collecting availability and diagnostic evidence.
+                    Add an HTTP endpoint or TCP service to begin collecting availability and
+                    diagnostic evidence.
                   </p>
                 </div>
               ) : visibleMonitors.length === 0 ? (
@@ -1182,14 +1242,20 @@ export function Dashboard({
                                 )}
                               />
                             </div>
-                            <a
-                              href={monitor.url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="block max-w-full truncate text-sm text-rail-subtle underline decoration-rail-border-strong underline-offset-4 hover:text-rail-text"
-                            >
-                              {monitor.url}
-                            </a>
+                            {monitor.configuration?.type === 'TCP' ? (
+                              <span className="block max-w-full truncate text-sm text-rail-subtle">
+                                {monitor.configuration.host}:{monitor.configuration.port}
+                              </span>
+                            ) : (
+                              <a
+                                href={monitor.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="block max-w-full truncate text-sm text-rail-subtle underline decoration-rail-border-strong underline-offset-4 hover:text-rail-text"
+                              >
+                                {monitor.url}
+                              </a>
+                            )}
                           </div>
                           <Button
                             variant="secondary"
@@ -1201,12 +1267,19 @@ export function Dashboard({
                           </Button>
                         </div>
                         <div className="flex flex-wrap gap-x-4 gap-y-2 border-b border-rail-border px-5 py-3 text-xs text-rail-muted">
-                          <span className="font-medium text-rail-subtle">{monitor.method}</span>
-                          <span>{monitor.timeoutMs / 1000}s timeout</span>
-                          <span>
-                            {monitor.followRedirects ? 'follow redirects' : 'redirects final'}
+                          <span className="font-medium text-rail-subtle">
+                            {monitor.type ?? 'HTTP'}
                           </span>
-                          <span>{statusPolicyLabel(monitor.statusPolicy)}</span>
+                          <span>{monitor.timeoutMs / 1000}s timeout</span>
+                          {monitor.type !== 'TCP' ? (
+                            <>
+                              <span>{monitor.method}</span>
+                              <span>
+                                {monitor.followRedirects ? 'follow redirects' : 'redirects final'}
+                              </span>
+                              <span>{statusPolicyLabel(monitor.statusPolicy)}</span>
+                            </>
+                          ) : null}
                           <span>{monitor.locations.join(', ')}</span>
                         </div>
                         <div className="p-5">
@@ -1238,6 +1311,7 @@ export function Dashboard({
                           <ManualDiagnostic
                             round={manualRounds[monitor.id]}
                             error={runErrors[monitor.id]}
+                            protocol={monitor.type ?? 'HTTP'}
                           />
                           <IncidentSummary state={monitor.incidentState} />
                           <dl
@@ -1296,6 +1370,7 @@ export function Dashboard({
                               onToggleRound={(roundId) =>
                                 void toggleHistoryRound(monitor.id, roundId)
                               }
+                              protocol={monitor.type ?? 'HTTP'}
                             />
                           ) : null}
                           <MonitorConfiguration
@@ -1307,6 +1382,9 @@ export function Dashboard({
                             onUpdateLocation={(event) => void updateLocation(monitor.id, event)}
                             onUpdateHttpSettings={(event) =>
                               void updateHttpSettings(monitor.id, event)
+                            }
+                            onUpdateTcpSettings={(event) =>
+                              void updateTcpSettings(monitor.id, event)
                             }
                             onUpdateStatusPolicy={(event) =>
                               void updateStatusPolicy(monitor.id, event)
@@ -1322,7 +1400,7 @@ export function Dashboard({
           ) : null}
           {view === 'create' ? (
             <MonitorForm
-              key={createdMonitor?.id ?? 'new-monitor'}
+              key={`${createdMonitor?.id ?? 'new-monitor'}-${createMonitorType}`}
               mode="create"
               errors={fieldErrors}
               submitting={isSubmitting}
@@ -1335,6 +1413,8 @@ export function Dashboard({
                 setConfigurationTestError(undefined);
               }}
               onConfigurationChange={invalidateConfigurationTest}
+              onTypeChange={setCreateMonitorType}
+              selectedType={createMonitorType}
             />
           ) : null}
           {view === 'edit' && detailMonitor ? (
@@ -1487,7 +1567,11 @@ function MonitorDetailView({
         </dl>
       </section>
 
-      <MonitorResponseTimeChart page={checkHistory} loading={checkHistoryLoading} />
+      <MonitorResponseTimeChart
+        page={checkHistory}
+        loading={checkHistoryLoading}
+        protocol={monitor.type ?? 'HTTP'}
+      />
 
       <div className="grid min-w-0 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="grid min-w-0 gap-6">
@@ -1521,7 +1605,11 @@ function MonitorDetailView({
                   />
                 </dl>
               ) : null}
-              <ManualDiagnostic round={manualRound} error={runError} />
+              <ManualDiagnostic
+                round={manualRound}
+                error={runError}
+                protocol={monitor.type ?? 'HTTP'}
+              />
             </div>
           </section>
 
@@ -1585,6 +1673,7 @@ function MonitorDetailView({
                     expandedRoundIds={expandedHistoryRoundIds}
                     loadingRoundIds={loadingHistoryRoundIds}
                     onToggleRound={onToggleHistoryRound}
+                    protocol={monitor.type ?? 'HTTP'}
                   />
                 </div>
               ) : null}
@@ -1598,13 +1687,28 @@ function MonitorDetailView({
               <h2 className="m-0 text-sm font-semibold text-rail-text">Monitor settings</h2>
             </div>
             <dl className="m-0 divide-y divide-rail-border px-5">
-              <DetailRow label="Method" value={monitor.method} />
+              <DetailRow label="Protocol" value={monitor.type ?? 'HTTP'} />
+              {monitor.configuration?.type === 'TCP' ? (
+                <>
+                  <DetailRow label="Host" value={monitor.configuration.host} />
+                  <DetailRow label="Port" value={String(monitor.configuration.port)} />
+                </>
+              ) : (
+                <DetailRow label="Method" value={monitor.method} />
+              )}
               <DetailRow label="Timeout" value={`${monitor.timeoutMs / 1000} seconds`} />
-              <DetailRow
-                label="Redirects"
-                value={monitor.followRedirects ? 'Followed' : 'Final response only'}
-              />
-              <DetailRow label="Expected status" value={statusPolicyLabel(monitor.statusPolicy)} />
+              {monitor.type !== 'TCP' ? (
+                <>
+                  <DetailRow
+                    label="Redirects"
+                    value={monitor.followRedirects ? 'Followed' : 'Final response only'}
+                  />
+                  <DetailRow
+                    label="Expected status"
+                    value={statusPolicyLabel(monitor.statusPolicy)}
+                  />
+                </>
+              ) : null}
               <DetailRow
                 label="Locations"
                 value={monitor.locations.length > 0 ? monitor.locations.join(', ') : 'None'}
@@ -1680,6 +1784,7 @@ function MonitorConfiguration({
   onLoadProbeLocations,
   onUpdateLocation,
   onUpdateHttpSettings,
+  onUpdateTcpSettings,
   onUpdateStatusPolicy,
 }: {
   monitor: Monitor;
@@ -1689,6 +1794,7 @@ function MonitorConfiguration({
   onLoadProbeLocations: () => void;
   onUpdateLocation: (event: FormEvent<HTMLFormElement>) => void;
   onUpdateHttpSettings: (event: FormEvent<HTMLFormElement>) => void;
+  onUpdateTcpSettings: (event: FormEvent<HTMLFormElement>) => void;
   onUpdateStatusPolicy: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   const configurationRef = useRef<HTMLDetailsElement>(null);
@@ -1751,64 +1857,110 @@ function MonitorConfiguration({
             Save location
           </button>
         </Form>
-        <Form className="status-policy-form" onSubmit={onUpdateHttpSettings}>
-          <label>
-            URL
-            <input name="url" type="url" defaultValue={monitor.url} required />
-          </label>
-          <label>
-            Method
-            <Select name="method" defaultValue={monitor.method}>
-              {HTTP_METHODS.map((method) => (
-                <option key={method} value={method}>
-                  {method}
-                </option>
-              ))}
-            </Select>
-          </label>
-          <label>
-            Timeout (seconds)
+        {monitor.type !== 'TCP' ? (
+          <Form className="status-policy-form" onSubmit={onUpdateHttpSettings}>
+            <label>
+              URL
+              <input name="url" type="url" defaultValue={monitor.url} required />
+            </label>
+            <label>
+              Method
+              <Select name="method" defaultValue={monitor.method}>
+                {HTTP_METHODS.map((method) => (
+                  <option key={method} value={method}>
+                    {method}
+                  </option>
+                ))}
+              </Select>
+            </label>
+            <label>
+              Timeout (seconds)
+              <input
+                name="timeoutSeconds"
+                type="number"
+                min="1"
+                max="30"
+                step="1"
+                defaultValue={monitor.timeoutMs / 1_000}
+              />
+            </label>
+            <label>
+              <Checkbox name="followRedirects" defaultChecked={monitor.followRedirects} />
+              Follow redirects
+            </label>
+            <button className="quiet-button" type="submit" disabled={updatingSettings}>
+              {updatingSettings ? 'Saving…' : 'Save HTTP settings'}
+            </button>
+          </Form>
+        ) : (
+          <Form className="status-policy-form" onSubmit={onUpdateTcpSettings}>
+            <label>
+              Hostname or IP address
+              <input
+                name="host"
+                type="text"
+                defaultValue={
+                  monitor.configuration?.type === 'TCP' ? monitor.configuration.host : ''
+                }
+                autoComplete="off"
+                required
+              />
+            </label>
+            <label>
+              Port
+              <input
+                name="port"
+                type="number"
+                min="1"
+                max="65535"
+                defaultValue={
+                  monitor.configuration?.type === 'TCP' ? monitor.configuration.port : 443
+                }
+                required
+              />
+            </label>
+            <label>
+              Timeout (seconds)
+              <input
+                name="timeoutSeconds"
+                type="number"
+                min="1"
+                max="30"
+                step="1"
+                defaultValue={monitor.timeoutMs / 1_000}
+              />
+            </label>
+            <button className="quiet-button" type="submit" disabled={updatingSettings}>
+              {updatingSettings ? 'Saving…' : 'Save TCP settings'}
+            </button>
+          </Form>
+        )}
+        {monitor.type !== 'TCP' ? (
+          <Form className="status-policy-form" onSubmit={onUpdateStatusPolicy}>
+            <label>
+              Expected status
+              <Select name="statusPolicyMode" defaultValue={monitor.statusPolicy.type}>
+                <option value="ANY_2XX">Any 2xx response</option>
+                <option value="EXACT">Specific status codes</option>
+              </Select>
+            </label>
             <input
-              name="timeoutSeconds"
-              type="number"
-              min="1"
-              max="30"
-              step="1"
-              defaultValue={monitor.timeoutMs / 1_000}
+              name="statusCodes"
+              type="text"
+              inputMode="numeric"
+              placeholder="200, 204"
+              defaultValue={
+                monitor.statusPolicy.type === 'EXACT'
+                  ? monitor.statusPolicy.statusCodes.join(', ')
+                  : ''
+              }
+              aria-label={`Specific status codes for ${monitor.name}`}
             />
-          </label>
-          <label>
-            <Checkbox name="followRedirects" defaultChecked={monitor.followRedirects} />
-            Follow redirects
-          </label>
-          <button className="quiet-button" type="submit" disabled={updatingSettings}>
-            {updatingSettings ? 'Saving…' : 'Save HTTP settings'}
-          </button>
-        </Form>
-        <Form className="status-policy-form" onSubmit={onUpdateStatusPolicy}>
-          <label>
-            Expected status
-            <Select name="statusPolicyMode" defaultValue={monitor.statusPolicy.type}>
-              <option value="ANY_2XX">Any 2xx response</option>
-              <option value="EXACT">Specific status codes</option>
-            </Select>
-          </label>
-          <input
-            name="statusCodes"
-            type="text"
-            inputMode="numeric"
-            placeholder="200, 204"
-            defaultValue={
-              monitor.statusPolicy.type === 'EXACT'
-                ? monitor.statusPolicy.statusCodes.join(', ')
-                : ''
-            }
-            aria-label={`Specific status codes for ${monitor.name}`}
-          />
-          <button className="quiet-button" type="submit" disabled={updatingPolicy}>
-            {updatingPolicy ? 'Saving…' : 'Save policy'}
-          </button>
-        </Form>
+            <button className="quiet-button" type="submit" disabled={updatingPolicy}>
+              {updatingPolicy ? 'Saving…' : 'Save policy'}
+            </button>
+          </Form>
+        ) : null}
       </div>
     </details>
   );

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Logger } from '@nestjs/common';
-import type { HttpExecutor } from '@watchrail/check-engine';
+import type { HttpExecutor, TcpConnector } from '@watchrail/check-engine';
 import type { CheckExecutionRepository } from '@watchrail/db';
 import { encryptHeaderValue, type HeaderEncryptionKeyring } from '@watchrail/http-header-security';
 import {
@@ -20,6 +20,7 @@ const payload = {
 } as const;
 
 const claimedExecution = {
+  type: 'HTTP',
   assignmentId: '22222222-2222-4222-8222-222222222222',
   claimToken: '33333333-3333-4333-8333-333333333333',
   attemptNumber: 1,
@@ -45,6 +46,7 @@ function createHandler(
   executions: CheckExecutionRepository,
   executor: HttpExecutor,
   encryptionKeyring: HeaderEncryptionKeyring = keyring,
+  tcpConnector?: TcpConnector,
 ) {
   return new CheckRoundJobHandler(
     executions,
@@ -52,6 +54,7 @@ function createHandler(
     45_000,
     encryptionKeyring,
     assertionKeyring,
+    tcpConnector,
   );
 }
 
@@ -104,6 +107,45 @@ describe('CheckRoundJobHandler', () => {
         reason: 'COMPLETED',
         statusCode: 200,
         responseTimeMs: 12,
+      }),
+    );
+  });
+
+  it('executes TCP claims through the protocol-specific connector', async () => {
+    const { executions, executor, claim, complete, execute } = createDependencies();
+    claim.mockResolvedValue({
+      state: 'CLAIMED',
+      execution: {
+        type: 'TCP',
+        assignmentId: claimedExecution.assignmentId,
+        claimToken: claimedExecution.claimToken,
+        attemptNumber: 1,
+        organizationId: claimedExecution.organizationId,
+        monitorId: claimedExecution.monitorId,
+        host: '93.184.216.34',
+        port: 5432,
+        timeoutMs: 8_000,
+      },
+    });
+    const connect = vi.fn().mockResolvedValue({ type: 'CONNECTED', connectionTimeMs: 18 });
+    const connector: TcpConnector = { connect };
+    complete.mockResolvedValue(true);
+
+    await createHandler(executions, executor, keyring, connector).handle(payload);
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(connect).toHaveBeenCalledWith(
+      expect.objectContaining({ host: '93.184.216.34', port: 5432 }),
+    );
+    expect(complete).toHaveBeenCalledWith(
+      claimedExecution.assignmentId,
+      claimedExecution.claimToken,
+      expect.objectContaining({
+        outcome: 'PASS',
+        stage: 'CONNECT',
+        reason: 'CONNECTED',
+        statusCode: null,
+        responseTimeMs: 18,
       }),
     );
   });
@@ -165,7 +207,7 @@ describe('CheckRoundJobHandler', () => {
       state: 'CLAIMED',
       execution: {
         ...claimedExecution,
-        statusPolicy: { type: 'EXACT', statusCodes: [404] },
+        statusPolicy: { type: 'EXACT' as const, statusCodes: [404] },
       },
     });
     execute.mockResolvedValue({
@@ -196,7 +238,7 @@ describe('CheckRoundJobHandler', () => {
         requestHeaders: [
           {
             name: 'authorization',
-            sensitive: true,
+            sensitive: true as const,
             encryptedValue: encryptHeaderValue(
               'Bearer secret',
               {
@@ -240,7 +282,7 @@ describe('CheckRoundJobHandler', () => {
         requestHeaders: [
           {
             name: 'authorization',
-            sensitive: true,
+            sensitive: true as const,
             encryptedValue: sentinel,
           },
         ] as never,
@@ -325,7 +367,7 @@ describe('CheckRoundJobHandler', () => {
         requestHeaders: [
           {
             name: 'authorization',
-            sensitive: true,
+            sensitive: true as const,
             encryptedValue: { ...encryptedValue, authTag: Buffer.alloc(16).toString('base64url') },
           },
         ],
@@ -358,7 +400,7 @@ describe('CheckRoundJobHandler', () => {
       state: 'CLAIMED',
       execution: {
         ...claimedExecution,
-        requestHeaders: [{ name: 'authorization', sensitive: true, encryptedValue }],
+        requestHeaders: [{ name: 'authorization', sensitive: true as const, encryptedValue }],
       },
     });
     const unexpected = new TypeError('unexpected keyring implementation failure');

@@ -520,4 +520,143 @@ describe('assertion diagnostic presentation', () => {
     expect(screen.getByText('lagos')).toBeInTheDocument();
     expect(screen.getByText('$.status')).toBeInTheDocument();
   });
+
+  it('presents regional TCP evidence without HTTP-only diagnostics', () => {
+    render(
+      <ManualDiagnostic
+        protocol="TCP"
+        round={{
+          id: 'tcp-multi',
+          monitorId: 'monitor',
+          trigger: 'MANUAL',
+          status: 'COMPLETED',
+          assignmentStatus: 'COMPLETED',
+          createdAt: '2026-10-31T12:00:00.000Z',
+          result: {
+            kind: 'MULTI_LOCATION',
+            outcome: 'UP',
+            counts: { selected: 1, pass: 1, confirmedFail: 0, unknown: 0, conclusive: 1 },
+            coverage: { numerator: 1, denominator: 1 },
+            reachability: { numerator: 1, denominator: 1 },
+            finalizedAt: '2026-10-31T12:00:00.000Z',
+            regions: [
+              {
+                location: 'lagos',
+                phase: 'TERMINAL',
+                outcome: 'PASS',
+                terminalReason: null,
+                executions: [
+                  {
+                    id: 'tcp-execution',
+                    role: 'PRIMARY',
+                    diagnosticSummary: {
+                      stage: 'CONNECT',
+                      reason: 'CONNECTED',
+                      statusCode: null,
+                      responseTimeMs: 18,
+                      attemptDurationMs: 20,
+                      checkedAt: '2026-10-31T12:00:00.000Z',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        }}
+        error={undefined}
+      />,
+    );
+
+    expect(screen.getByText('Primary connection').parentElement).toHaveTextContent('Established');
+    expect(screen.getByText('Connect latency').parentElement).toHaveTextContent('18 ms');
+    expect(screen.queryByText(/HTTP response unavailable/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Response validation/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Response headers and body were not retained/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it('presents a blocked regional TCP destination as indeterminate', () => {
+    render(
+      <ManualDiagnostic
+        protocol="TCP"
+        round={{
+          id: 'tcp-blocked',
+          monitorId: 'monitor',
+          trigger: 'MANUAL',
+          status: 'COMPLETED',
+          assignmentStatus: 'COMPLETED',
+          createdAt: '2026-10-31T12:00:00.000Z',
+          result: {
+            kind: 'MULTI_LOCATION',
+            outcome: 'UNKNOWN',
+            counts: { selected: 1, pass: 0, confirmedFail: 0, unknown: 1, conclusive: 0 },
+            coverage: { numerator: 1, denominator: 1 },
+            reachability: null,
+            finalizedAt: '2026-10-31T12:00:00.000Z',
+            regions: [
+              {
+                location: 'lagos',
+                phase: 'TERMINAL',
+                outcome: 'UNKNOWN',
+                terminalReason: 'INDETERMINATE',
+                executions: [
+                  {
+                    id: 'tcp-blocked-execution',
+                    role: 'PRIMARY',
+                    diagnosticSummary: {
+                      stage: 'DNS',
+                      reason: 'PROHIBITED_DESTINATION',
+                      statusCode: null,
+                      responseTimeMs: null,
+                      attemptDurationMs: 1,
+                      checkedAt: '2026-10-31T12:00:00.000Z',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        }}
+        error={undefined}
+      />,
+    );
+
+    expect(screen.getByText('Primary connection').parentElement).toHaveTextContent('Indeterminate');
+    expect(screen.queryByText(/^Failed$/i)).not.toBeInTheDocument();
+  });
+
+  it('presents an indeterminate TCP result without calling the connection failed', () => {
+    render(
+      <ManualDiagnostic
+        protocol="TCP"
+        round={{
+          id: 'tcp-unknown',
+          monitorId: 'monitor',
+          trigger: 'MANUAL',
+          status: 'COMPLETED',
+          assignmentStatus: 'COMPLETED',
+          createdAt: '2026-10-31T12:00:00.000Z',
+          result: {
+            outcome: 'UNKNOWN',
+            stage: 'PROBE',
+            reason: 'PROBE_UNAVAILABLE',
+            statusCode: null,
+            responseTimeMs: null,
+            attemptDurationMs: 20,
+            redirects: [],
+            checkedAt: '2026-10-31T12:00:00.000Z',
+          },
+        }}
+        error={undefined}
+      />,
+    );
+
+    expect(screen.getByText('Connection').parentElement).toHaveTextContent('Indeterminate');
+    expect(screen.getByText('TCP connection').parentElement).toHaveTextContent('Unknown');
+    expect(screen.queryByText(/^Failed$/i)).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/could not produce authoritative connection evidence/i),
+    ).toBeInTheDocument();
+  });
 });

@@ -128,6 +128,66 @@ describe('monitor API', () => {
     expect(listed.body.data[0].id).toBe(created.body.data.id);
   });
 
+  it('creates and updates a TCP monitor without exposing HTTP configuration', async () => {
+    const created = await request(app.getHttpServer())
+      .post(`/api/monitors?projectId=${projectId}`)
+      .send({
+        type: 'TCP',
+        name: 'Primary database',
+        host: 'DB.EXAMPLE.COM',
+        port: 5432,
+        timeoutMs: 8_000,
+        locations: ['local'],
+      })
+      .expect(201);
+
+    expect(created.body.data).toMatchObject({
+      type: 'TCP',
+      name: 'Primary database',
+      configuration: { type: 'TCP', host: 'db.example.com', port: 5432 },
+      timeoutMs: 8_000,
+      locations: ['local'],
+    });
+
+    const monitorId = created.body.data.id as string;
+    const updated = await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/tcp-settings`)
+      .send({ host: 'cache.example.com', port: 6379, timeoutMs: 5_000 })
+      .expect(200);
+    expect(updated.body.data).toMatchObject({
+      type: 'TCP',
+      configuration: { type: 'TCP', host: 'cache.example.com', port: 6379 },
+      timeoutMs: 5_000,
+    });
+
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/http-settings`)
+      .send({
+        url: 'https://example.com',
+        method: 'GET',
+        timeoutMs: 5_000,
+        followRedirects: true,
+      })
+      .expect(409);
+
+    const versions = await database.$client.query<{
+      type: string;
+      tcp_host: string;
+      tcp_port: number;
+      timeout_ms: number;
+    }>(
+      `select type, tcp_host, tcp_port, timeout_ms
+       from monitor_configuration_versions
+       where monitor_id=$1
+       order by version_number`,
+      [monitorId],
+    );
+    expect(versions.rows).toEqual([
+      { type: 'TCP', tcp_host: 'db.example.com', tcp_port: 5432, timeout_ms: 8_000 },
+      { type: 'TCP', tcp_host: 'cache.example.com', tcp_port: 6379, timeout_ms: 5_000 },
+    ]);
+  });
+
   it('replaces the immutable execution location with an owned active remote location', async () => {
     const monitor = await request(app.getHttpServer())
       .post(`/api/monitors?projectId=${projectId}`)

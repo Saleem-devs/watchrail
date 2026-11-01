@@ -1,17 +1,25 @@
 import {
   executeHttpCheck,
+  executeTcpCheck,
   NodeHttpExecutor,
+  NodeTcpConnector,
   type HttpCheckResult,
   type HttpExecutor,
+  type TcpConnector,
 } from '@watchrail/check-engine';
 import {
   HTTP_ENGINE_VERSION,
   LEGACY_HTTP_ENGINE_VERSION,
+  TCP_ENGINE_VERSION,
   PROBE_MAX_EXECUTION_MS,
   parseResponseAssertions,
   probeEngineSupports,
 } from '@watchrail/domain';
-import type { ProbeLeaseReferenceV1 } from '@watchrail/contracts';
+import type {
+  ProbeExecutionConfigurationV1,
+  ProbeLeaseReferenceV1,
+  TcpProbeExecutionConfigurationV1,
+} from '@watchrail/contracts';
 import { ProbeCoordinatorError } from './coordinator-client.js';
 import type { ProbeCoordinatorClient } from './coordinator-client.js';
 import type { ProbeAgentConfig } from './config.js';
@@ -25,6 +33,7 @@ export class ProbeAgentRuntime {
     private readonly client: ProbeCoordinatorClient,
     private readonly config: ProbeAgentConfig,
     private readonly executor: HttpExecutor = new NodeHttpExecutor(),
+    private readonly tcpConnector: TcpConnector = new NodeTcpConnector(),
   ) {}
 
   async run(): Promise<void> {
@@ -82,29 +91,22 @@ export class ProbeAgentRuntime {
         configuration.configurationVersionNumber !== lease.configurationVersionNumber ||
         configuration.executionPolicyVersion !== lease.executionPolicyVersion ||
         configuration.requiredEngineVersion !== lease.requiredEngineVersion ||
-        !probeEngineSupports(HTTP_ENGINE_VERSION, configuration.requiredEngineVersion)
+        !probeEngineSupports(TCP_ENGINE_VERSION, configuration.requiredEngineVersion)
       ) {
         throw new ProbeCoordinatorError('INVALID');
       }
-      const assertions = parseResponseAssertions(configuration.assertions, configuration.method);
-      const result = await executeHttpCheck(
-        {
-          url: configuration.url,
-          method: configuration.method,
-          timeoutMs: configuration.timeoutMs,
-          followRedirects: configuration.followRedirects,
-          statusPolicy: configuration.statusPolicy,
-          tlsPolicy: configuration.tlsPolicy ?? { type: 'DISABLED' },
-          requestHeaders: configuration.requestHeaders,
-          requestBody: configuration.requestBody,
-          headerAssertions: assertions.headers,
-          textBodyAssertions: assertions.textBody,
-          jsonBodyAssertions: assertions.jsonBody,
-        },
-        { executor: this.executor, signal: abort.signal },
-      );
+      const result = isTcpConfiguration(configuration)
+        ? await executeTcpCheck(
+            {
+              host: configuration.host,
+              port: configuration.port,
+              timeoutMs: configuration.timeoutMs,
+            },
+            { connector: this.tcpConnector, signal: abort.signal },
+          )
+        : await executeHttpConfiguration(configuration, this.executor, abort.signal);
       const submissionResult =
-        lease.requiredEngineVersion === LEGACY_HTTP_ENGINE_VERSION
+        lease.requiredEngineVersion === LEGACY_HTTP_ENGINE_VERSION && 'statusCode' in result
           ? withoutTlsEvidence(result)
           : result;
       const serialized = this.client.serializeSubmission(
@@ -182,7 +184,7 @@ export class ProbeAgentRuntime {
     while (!this.stopping) {
       try {
         await this.client.heartbeat(
-          HTTP_ENGINE_VERSION,
+          TCP_ENGINE_VERSION,
           this.config.heartbeatIntervalMs,
           this.lifecycleAbort.signal,
         );
@@ -199,11 +201,46 @@ export class ProbeAgentRuntime {
   }
 
   private async claimCompatibleLease(): Promise<ProbeLeaseReferenceV1 | null> {
+    const tcpLease = await this.client.claim(TCP_ENGINE_VERSION, this.lifecycleAbort.signal);
+    if (tcpLease) return tcpLease;
     const currentLease = await this.client.claim(HTTP_ENGINE_VERSION, this.lifecycleAbort.signal);
     if (currentLease) return currentLease;
 
     return this.client.claim(LEGACY_HTTP_ENGINE_VERSION, this.lifecycleAbort.signal);
   }
+}
+
+function isTcpConfiguration(
+  configuration: ProbeExecutionConfigurationV1,
+): configuration is TcpProbeExecutionConfigurationV1 {
+  return 'type' in configuration && configuration.type === 'TCP';
+}
+
+async function executeHttpConfiguration(
+  configuration: Exclude<
+    Awaited<ReturnType<ProbeCoordinatorClient['configuration']>>,
+    { type: 'TCP' }
+  >,
+  executor: HttpExecutor,
+  signal: AbortSignal,
+): Promise<HttpCheckResult> {
+  const assertions = parseResponseAssertions(configuration.assertions, configuration.method);
+  return executeHttpCheck(
+    {
+      url: configuration.url,
+      method: configuration.method,
+      timeoutMs: configuration.timeoutMs,
+      followRedirects: configuration.followRedirects,
+      statusPolicy: configuration.statusPolicy,
+      tlsPolicy: configuration.tlsPolicy ?? { type: 'DISABLED' },
+      requestHeaders: configuration.requestHeaders,
+      requestBody: configuration.requestBody,
+      headerAssertions: assertions.headers,
+      textBodyAssertions: assertions.textBody,
+      jsonBodyAssertions: assertions.jsonBody,
+    },
+    { executor, signal },
+  );
 }
 
 function withoutTlsEvidence(result: HttpCheckResult): HttpCheckResult {

@@ -37,7 +37,7 @@ export interface ProbeHeartbeatV1 {
   heartbeatIntervalMs: number;
 }
 
-export interface ProbeExecutionConfigurationV1 {
+export interface HttpProbeExecutionConfigurationV1 {
   contractVersion: 1;
   assignmentId: string;
   attemptId: string;
@@ -64,6 +64,23 @@ export interface ProbeExecutionConfigurationV1 {
     jsonBody: unknown[];
   };
 }
+
+export interface TcpProbeExecutionConfigurationV1 {
+  contractVersion: 1;
+  type: 'TCP';
+  assignmentId: string;
+  attemptId: string;
+  configurationVersionId: string;
+  configurationVersionNumber: number;
+  executionPolicyVersion: string;
+  requiredEngineVersion: string;
+  host: string;
+  port: number;
+  timeoutMs: number;
+}
+
+export type ProbeExecutionConfigurationV1 =
+  HttpProbeExecutionConfigurationV1 | TcpProbeExecutionConfigurationV1;
 
 export class InvalidProbeCoordinatorContractError extends Error {
   constructor() {
@@ -154,6 +171,42 @@ export function parseProbeHeartbeat(value: unknown): ProbeHeartbeatV1 {
 }
 
 export function parseProbeExecutionConfiguration(value: unknown): ProbeExecutionConfigurationV1 {
+  const tcpKeys = [
+    'assignmentId',
+    'attemptId',
+    'configurationVersionId',
+    'configurationVersionNumber',
+    'contractVersion',
+    'executionPolicyVersion',
+    'host',
+    'port',
+    'requiredEngineVersion',
+    'timeoutMs',
+    'type',
+  ];
+  if (hasExactKeys(value, tcpKeys) && value.type === 'TCP') {
+    if (
+      value.contractVersion !== PROBE_COORDINATOR_CONTRACT_VERSION ||
+      !isUuid(value.assignmentId) ||
+      !isUuid(value.attemptId) ||
+      !isUuid(value.configurationVersionId) ||
+      !isPositiveInteger(value.configurationVersionNumber) ||
+      !isVersion(value.executionPolicyVersion) ||
+      !isVersion(value.requiredEngineVersion) ||
+      typeof value.host !== 'string' ||
+      value.host.length === 0 ||
+      value.host.length > 253 ||
+      !Number.isInteger(value.port) ||
+      Number(value.port) < 1 ||
+      Number(value.port) > 65_535 ||
+      !Number.isInteger(value.timeoutMs) ||
+      Number(value.timeoutMs) < 1_000 ||
+      Number(value.timeoutMs) > 30_000
+    ) {
+      throw new InvalidProbeCoordinatorContractError();
+    }
+    return value as unknown as TcpProbeExecutionConfigurationV1;
+  }
   const legacyKeys = [
     'assertions',
     'assignmentId',
@@ -198,9 +251,9 @@ export function parseProbeExecutionConfiguration(value: unknown): ProbeExecution
     throw new InvalidProbeCoordinatorContractError();
   }
   return {
-    ...(value as unknown as ProbeExecutionConfigurationV1),
+    ...(value as unknown as HttpProbeExecutionConfigurationV1),
     tlsPolicy: Object.hasOwn(value, 'tlsPolicy')
-      ? (value.tlsPolicy as NonNullable<ProbeExecutionConfigurationV1['tlsPolicy']>)
+      ? (value.tlsPolicy as NonNullable<HttpProbeExecutionConfigurationV1['tlsPolicy']>)
       : { type: 'DISABLED' },
   };
 }

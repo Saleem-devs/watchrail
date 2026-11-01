@@ -54,6 +54,20 @@ describe('CheckExecutionRepository', () => {
     return new ManualRoundRepository(connection.db).create(organizationId, monitor.id);
   }
 
+  async function createTcpRound() {
+    const monitor = await new MonitorRepository(connection.db).create(
+      organizationId,
+      createMonitor({
+        type: 'TCP',
+        name: 'Primary database',
+        host: 'db.example.com',
+        port: 5432,
+        timeoutMs: 8_000,
+      }),
+    );
+    return new ManualRoundRepository(connection.db).create(organizationId, monitor.id);
+  }
+
   it('claims the local assignment with its immutable configuration', async () => {
     const round = await createRound();
 
@@ -82,6 +96,62 @@ describe('CheckExecutionRepository', () => {
     });
     expect(assignment?.claimToken).toEqual(expect.any(String));
     expect(assignment?.claimExpiresAt).toBeInstanceOf(Date);
+  });
+
+  it('claims TCP assignments with only their protocol-specific configuration', async () => {
+    const round = await createTcpRound();
+    const claim = await repository.claim(round.id, 45_000);
+
+    expect(claim).toMatchObject({
+      state: 'CLAIMED',
+      execution: {
+        type: 'TCP',
+        attemptNumber: 1,
+        host: 'db.example.com',
+        port: 5432,
+        timeoutMs: 8_000,
+      },
+    });
+    if (claim.state !== 'CLAIMED') throw new Error('Expected a TCP execution claim.');
+    expect(claim.execution.url).toBeUndefined();
+    expect(claim.execution.statusPolicy).toBeUndefined();
+  });
+
+  it('persists and reloads a successful TCP connection result', async () => {
+    const round = await createTcpRound();
+    const claim = await repository.claim(round.id, 45_000);
+    if (claim.state !== 'CLAIMED') throw new Error('Expected a TCP execution claim.');
+
+    const checkedAt = new Date('2026-11-01T09:15:00.000Z');
+    await expect(
+      repository.complete(claim.execution.assignmentId, claim.execution.claimToken, {
+        outcome: 'PASS',
+        stage: 'CONNECT',
+        reason: 'CONNECTED',
+        statusCode: null,
+        responseTimeMs: 18,
+        attemptDurationMs: 24,
+        redirects: [],
+        assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
+        tlsCertificates: [],
+        checkedAt,
+      }),
+    ).resolves.toBe(true);
+
+    const stored = await new CheckHistoryRepository(connection.db).findForMonitor(
+      organizationId,
+      round.monitorId,
+      round.id,
+    );
+    expect(stored?.result).toMatchObject({
+      outcome: 'PASS',
+      stage: 'CONNECT',
+      reason: 'CONNECTED',
+      statusCode: null,
+      responseTimeMs: 18,
+      attemptDurationMs: 24,
+      checkedAt,
+    });
   });
 
   it('allows only one concurrent claimant', async () => {

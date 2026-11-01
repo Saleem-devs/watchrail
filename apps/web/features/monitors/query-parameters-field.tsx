@@ -21,10 +21,7 @@ export function QueryParametersField({ initialUrl }: { initialUrl?: string | und
   const nextId = useRef(initialParameters.length);
 
   function addParameter() {
-    setRows((current) => [
-      ...current,
-      { id: `new-${nextId.current++}`, name: '', value: '' },
-    ]);
+    setRows((current) => [...current, { id: `new-${nextId.current++}`, name: '', value: '' }]);
   }
 
   return (

@@ -108,4 +108,25 @@ describe('probe coordinator contracts', () => {
       }),
     ).toMatchObject({ tlsPolicy: { type: 'DISABLED' } });
   });
+
+  it('parses an exact protocol-specific TCP execution configuration', () => {
+    const configuration = {
+      contractVersion: 1,
+      type: 'TCP',
+      assignmentId,
+      attemptId,
+      configurationVersionId,
+      configurationVersionNumber: 8,
+      executionPolicyVersion: 'tcp-v1',
+      requiredEngineVersion: 'watchrail-tcp-v1',
+      host: 'db.example.com',
+      port: 5432,
+      timeoutMs: 8_000,
+    } as const;
+
+    expect(parseProbeExecutionConfiguration(configuration)).toEqual(configuration);
+    expect(() =>
+      parseProbeExecutionConfiguration({ ...configuration, url: 'https://example.com' }),
+    ).toThrow(InvalidProbeCoordinatorContractError);
+  });
 });

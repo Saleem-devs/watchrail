@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { executeHttpCheck } from '@watchrail/check-engine';
-import type { HttpCheckResult, HttpExecutor } from '@watchrail/check-engine';
+import { executeHttpCheck, executeTcpCheck, NodeTcpConnector } from '@watchrail/check-engine';
+import type { HttpCheckResult, HttpExecutor, TcpConnector } from '@watchrail/check-engine';
 import type { ExecuteCheckRoundJobV1 } from '@watchrail/contracts';
 import type { CheckExecutionRepository } from '@watchrail/db';
 import {
@@ -44,6 +44,7 @@ export class CheckRoundJobHandler implements CheckJobHandler {
     private readonly leaseDurationMs: number,
     private readonly headerEncryptionKeyring: HeaderEncryptionKeyring,
     private readonly assertionEncryptionKeyring: AssertionEncryptionKeyring,
+    private readonly tcpConnector: TcpConnector = new NodeTcpConnector(),
   ) {}
 
   async handle(payload: ExecuteCheckRoundJobV1): Promise<void> {
@@ -58,6 +59,34 @@ export class CheckRoundJobHandler implements CheckJobHandler {
 
     if (claim.state === 'BUSY') {
       throw new CheckExecutionAlreadyClaimedError();
+    }
+
+    if (claim.execution.type === 'TCP') {
+      const tcpResult = await executeTcpCheck(
+        {
+          host: claim.execution.host,
+          port: claim.execution.port,
+          timeoutMs: claim.execution.timeoutMs,
+        },
+        { connector: this.tcpConnector },
+      );
+      const completed = await this.executions.complete(
+        claim.execution.assignmentId,
+        claim.execution.claimToken,
+        {
+          outcome: tcpResult.outcome,
+          stage: tcpResult.stage,
+          reason: tcpResult.reason,
+          statusCode: null,
+          responseTimeMs: tcpResult.connectionTimeMs,
+          attemptDurationMs: tcpResult.attemptDurationMs,
+          redirects: [],
+          assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
+          checkedAt: tcpResult.checkedAt,
+        },
+      );
+      if (!completed) throw new CheckExecutionClaimLostError();
+      return;
     }
 
     let result: HttpCheckResult = internalExecutionFailureResult();

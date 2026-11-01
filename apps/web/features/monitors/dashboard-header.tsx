@@ -10,11 +10,11 @@ const copy = {
   },
   monitors: {
     title: 'Monitors',
-    description: 'Search and manage every endpoint in this project.',
+    description: 'Search and manage every monitored service in this project.',
   },
   create: {
     title: 'Create monitor',
-    description: 'Add an HTTP endpoint and define its initial availability policy.',
+    description: 'Add an HTTP endpoint or TCP service and define how Watchrail checks it.',
   },
 } as const;
 

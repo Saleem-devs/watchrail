@@ -15,8 +15,10 @@ import { ConfigurationTestPanel } from './configuration-test-result';
 import { TlsCertificatePolicyField } from './tls-certificate-policy-field';
 
 export interface MonitorFormValues {
+  type: Monitor['type'];
   name: string;
   url: string;
+  configuration: Monitor['configuration'];
   statusPolicy: Monitor['statusPolicy'];
   tlsPolicy?: Monitor['tlsPolicy'];
   method: Monitor['method'];
@@ -40,6 +42,8 @@ export function MonitorForm({
   testError,
   onDismissTest,
   onConfigurationChange,
+  onTypeChange,
+  selectedType,
 }: {
   mode: 'create' | 'edit';
   initialValues?: MonitorFormValues;
@@ -51,12 +55,16 @@ export function MonitorForm({
   testError?: string | undefined;
   onDismissTest: () => void;
   onConfigurationChange: () => void;
+  onTypeChange?: (type: Monitor['type']) => void;
+  selectedType?: Monitor['type'];
 }) {
   const id = useId();
   const [policyMode, setPolicyMode] = useState<'ANY_2XX' | 'EXACT'>(
     initialValues?.statusPolicy.type ?? 'ANY_2XX',
   );
   const [method, setMethod] = useState(initialValues?.method ?? 'GET');
+  const monitorType =
+    mode === 'create' ? (selectedType ?? 'HTTP') : (initialValues?.type ?? 'HTTP');
   const [httpsEndpoint, setHttpsEndpoint] = useState(
     (initialValues?.url ?? '').trim().toLowerCase().startsWith('https://'),
   );
@@ -65,6 +73,12 @@ export function MonitorForm({
   const urlErrorId = `${id}-url-error`;
   const policyHelpId = `${id}-policy-help`;
   const policyErrorId = `${id}-policy-error`;
+  const hostHelpId = `${id}-host-help`;
+
+  function selectMonitorType(type: Monitor['type']): void {
+    onTypeChange?.(type);
+    onConfigurationChange();
+  }
 
   return (
     <Form
@@ -83,11 +97,37 @@ export function MonitorForm({
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_18rem]">
         <div className="overflow-hidden rounded-rail-panel border border-rail-border bg-rail-raised">
           <section className="border-b border-rail-border px-5 py-5 sm:px-6">
-            <h2 className="m-0 text-sm font-semibold text-rail-text">Endpoint</h2>
+            <h2 className="m-0 text-sm font-semibold text-rail-text">Target</h2>
             <p className="mt-1 mb-0 text-xs leading-5 text-rail-muted">
-              Name the service and provide the HTTP endpoint Watchrail should monitor.
+              Name the service and provide the network target Watchrail should monitor.
             </p>
             <div className="mt-5 grid gap-5">
+              {mode === 'create' ? (
+                <fieldset className="m-0 grid gap-2 border-0 p-0">
+                  <legend className="p-0 text-xs font-medium text-rail-subtle">Protocol</legend>
+                  <div className="grid grid-cols-2 gap-2 sm:max-w-md">
+                    {(['HTTP', 'TCP'] as const).map((type) => (
+                      <label
+                        key={type}
+                        onClick={() => selectMonitorType(type)}
+                        className="flex min-h-10 cursor-pointer items-center gap-2.5 rounded-rail-control border border-rail-border bg-rail-surface px-3 text-sm font-medium text-rail-text hover:border-rail-border-strong has-[:checked]:border-rail-accent has-[:checked]:bg-rail-accent/5"
+                      >
+                        <Input
+                          type="radio"
+                          name="monitorType"
+                          value={type}
+                          checked={monitorType === type}
+                          onChange={() => selectMonitorType(type)}
+                          className="size-4"
+                        />
+                        {type === 'HTTP' ? 'HTTP endpoint' : 'TCP port'}
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+              ) : (
+                <input type="hidden" name="monitorType" value={monitorType} />
+              )}
               <label
                 className="grid gap-1.5 text-xs font-medium text-rail-subtle"
                 htmlFor={`${id}-name`}
@@ -112,138 +152,218 @@ export function MonitorForm({
                 ) : null}
               </label>
 
-              <label
-                className="grid gap-1.5 text-xs font-medium text-rail-subtle"
-                htmlFor={`${id}-url`}
-              >
-                HTTP(S) URL
-                <Input
-                  id={`${id}-url`}
-                  name="url"
-                  type="url"
-                  defaultValue={endpointBaseUrl(initialValues?.url)}
-                  placeholder="https://status.watchrail.app/health"
-                  inputMode="url"
-                  autoComplete="url"
-                  required
-                  aria-describedby={errors.url ? urlErrorId : urlHelpId}
-                  aria-invalid={Boolean(errors.url)}
-                  onChange={(event) =>
-                    setHttpsEndpoint(event.target.value.trim().toLowerCase().startsWith('https://'))
-                  }
-                />
-                {errors.url ? (
-                  <span className="font-normal text-rail-danger" id={urlErrorId}>
-                    {errors.url[0]}
-                  </span>
-                ) : (
-                  <span className="font-normal leading-5 text-rail-muted" id={urlHelpId}>
-                    Use a publicly reachable HTTP or HTTPS endpoint.
-                  </span>
-                )}
-              </label>
+              {monitorType === 'HTTP' ? (
+                <label
+                  className="grid gap-1.5 text-xs font-medium text-rail-subtle"
+                  htmlFor={`${id}-url`}
+                >
+                  HTTP(S) URL
+                  <Input
+                    id={`${id}-url`}
+                    name="url"
+                    type="url"
+                    defaultValue={endpointBaseUrl(initialValues?.url)}
+                    placeholder="https://status.watchrail.app/health"
+                    inputMode="url"
+                    autoComplete="url"
+                    required
+                    aria-describedby={errors.url ? urlErrorId : urlHelpId}
+                    aria-invalid={Boolean(errors.url)}
+                    onChange={(event) =>
+                      setHttpsEndpoint(
+                        event.target.value.trim().toLowerCase().startsWith('https://'),
+                      )
+                    }
+                  />
+                  {errors.url ? (
+                    <span className="font-normal text-rail-danger" id={urlErrorId}>
+                      {errors.url[0]}
+                    </span>
+                  ) : (
+                    <span className="font-normal leading-5 text-rail-muted" id={urlHelpId}>
+                      Use a publicly reachable HTTP or HTTPS endpoint.
+                    </span>
+                  )}
+                </label>
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_9rem]">
+                  <label
+                    className="grid gap-1.5 text-xs font-medium text-rail-subtle"
+                    htmlFor={`${id}-host`}
+                  >
+                    Hostname or IP address
+                    <Input
+                      id={`${id}-host`}
+                      name="host"
+                      type="text"
+                      defaultValue={
+                        initialValues?.configuration?.type === 'TCP'
+                          ? initialValues.configuration.host
+                          : ''
+                      }
+                      placeholder="database.internal"
+                      autoComplete="off"
+                      spellCheck={false}
+                      required
+                      aria-describedby={errors.host ? `${id}-host-error` : hostHelpId}
+                      aria-invalid={Boolean(errors.host)}
+                    />
+                    {errors.host ? (
+                      <span className="font-normal text-rail-danger" id={`${id}-host-error`}>
+                        {errors.host[0]}
+                      </span>
+                    ) : (
+                      <span className="font-normal leading-5 text-rail-muted" id={hostHelpId}>
+                        Enter a host without a protocol, path, or credentials.
+                      </span>
+                    )}
+                  </label>
+                  <label
+                    className="grid content-start gap-1.5 text-xs font-medium text-rail-subtle"
+                    htmlFor={`${id}-port`}
+                  >
+                    Port
+                    <Input
+                      id={`${id}-port`}
+                      name="port"
+                      type="number"
+                      min="1"
+                      max="65535"
+                      step="1"
+                      defaultValue={
+                        initialValues?.configuration?.type === 'TCP'
+                          ? initialValues.configuration.port
+                          : 443
+                      }
+                      inputMode="numeric"
+                      required
+                      aria-invalid={Boolean(errors.port)}
+                    />
+                    {errors.port ? (
+                      <span className="font-normal text-rail-danger">{errors.port[0]}</span>
+                    ) : null}
+                  </label>
+                </div>
+              )}
             </div>
           </section>
 
-          <QueryParametersField initialUrl={initialValues?.url} />
+          {monitorType === 'HTTP' ? (
+            <>
+              <QueryParametersField initialUrl={initialValues?.url} />
 
-          <fieldset className="m-0 border-0 px-5 py-5 sm:px-6">
-            <legend className="p-0 text-sm font-semibold text-rail-text">Expected response</legend>
-            <p className="mt-1 mb-0 text-xs leading-5 text-rail-muted" id={policyHelpId}>
-              Choose which HTTP responses count as an available service.
-            </p>
-            <div className="mt-4 grid gap-2 sm:grid-cols-2">
-              <label className="flex min-h-20 cursor-pointer items-start gap-3 rounded-rail-control border border-rail-border bg-rail-surface px-4 py-3 hover:border-rail-border-strong has-[:checked]:border-rail-accent has-[:checked]:bg-rail-accent/5">
-                <Input
-                  name="statusPolicyMode"
-                  type="radio"
-                  value="ANY_2XX"
-                  checked={policyMode === 'ANY_2XX'}
-                  onChange={() => setPolicyMode('ANY_2XX')}
-                  aria-describedby={policyHelpId}
-                  className="mt-0.5 size-4 shrink-0"
-                />
-                <span>
-                  <strong className="block text-sm font-medium text-rail-text">
-                    Any 2xx response
-                  </strong>
-                  <span className="mt-1 block text-xs leading-5 text-rail-muted">
-                    Accept every successful HTTP response.
-                  </span>
-                </span>
-              </label>
-              <label className="flex min-h-20 cursor-pointer items-start gap-3 rounded-rail-control border border-rail-border bg-rail-surface px-4 py-3 hover:border-rail-border-strong has-[:checked]:border-rail-accent has-[:checked]:bg-rail-accent/5">
-                <Input
-                  name="statusPolicyMode"
-                  type="radio"
-                  value="EXACT"
-                  checked={policyMode === 'EXACT'}
-                  onChange={() => setPolicyMode('EXACT')}
-                  aria-describedby={policyHelpId}
-                  className="mt-0.5 size-4 shrink-0"
-                />
-                <span>
-                  <strong className="block text-sm font-medium text-rail-text">
-                    Specific status codes
-                  </strong>
-                  <span className="mt-1 block text-xs leading-5 text-rail-muted">
-                    Accept only the codes you provide.
-                  </span>
-                </span>
-              </label>
-            </div>
-            {policyMode === 'EXACT' ? (
-              <label
-                className="mt-4 grid max-w-sm gap-1.5 text-xs font-medium text-rail-subtle"
-                htmlFor={`${id}-status-codes`}
-              >
-                Accepted status codes
-                <Input
-                  id={`${id}-status-codes`}
-                  name="statusCodes"
-                  type="text"
-                  inputMode="numeric"
-                  defaultValue={
-                    initialValues?.statusPolicy.type === 'EXACT'
-                      ? initialValues.statusPolicy.statusCodes.join(', ')
-                      : ''
-                  }
-                  placeholder="200, 204"
-                  required
-                  aria-describedby={errors.statusPolicy ? policyErrorId : policyHelpId}
-                  aria-invalid={Boolean(errors.statusPolicy)}
-                />
-                {errors.statusPolicy ? (
-                  <span className="font-normal text-rail-danger" id={policyErrorId}>
-                    {errors.statusPolicy[0]}
-                  </span>
+              <fieldset className="m-0 border-0 px-5 py-5 sm:px-6">
+                <legend className="p-0 text-sm font-semibold text-rail-text">
+                  Expected response
+                </legend>
+                <p className="mt-1 mb-0 text-xs leading-5 text-rail-muted" id={policyHelpId}>
+                  Choose which HTTP responses count as an available service.
+                </p>
+                <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                  <label className="flex min-h-20 cursor-pointer items-start gap-3 rounded-rail-control border border-rail-border bg-rail-surface px-4 py-3 hover:border-rail-border-strong has-[:checked]:border-rail-accent has-[:checked]:bg-rail-accent/5">
+                    <Input
+                      name="statusPolicyMode"
+                      type="radio"
+                      value="ANY_2XX"
+                      checked={policyMode === 'ANY_2XX'}
+                      onChange={() => setPolicyMode('ANY_2XX')}
+                      aria-describedby={policyHelpId}
+                      className="mt-0.5 size-4 shrink-0"
+                    />
+                    <span>
+                      <strong className="block text-sm font-medium text-rail-text">
+                        Any 2xx response
+                      </strong>
+                      <span className="mt-1 block text-xs leading-5 text-rail-muted">
+                        Accept every successful HTTP response.
+                      </span>
+                    </span>
+                  </label>
+                  <label className="flex min-h-20 cursor-pointer items-start gap-3 rounded-rail-control border border-rail-border bg-rail-surface px-4 py-3 hover:border-rail-border-strong has-[:checked]:border-rail-accent has-[:checked]:bg-rail-accent/5">
+                    <Input
+                      name="statusPolicyMode"
+                      type="radio"
+                      value="EXACT"
+                      checked={policyMode === 'EXACT'}
+                      onChange={() => setPolicyMode('EXACT')}
+                      aria-describedby={policyHelpId}
+                      className="mt-0.5 size-4 shrink-0"
+                    />
+                    <span>
+                      <strong className="block text-sm font-medium text-rail-text">
+                        Specific status codes
+                      </strong>
+                      <span className="mt-1 block text-xs leading-5 text-rail-muted">
+                        Accept only the codes you provide.
+                      </span>
+                    </span>
+                  </label>
+                </div>
+                {policyMode === 'EXACT' ? (
+                  <label
+                    className="mt-4 grid max-w-sm gap-1.5 text-xs font-medium text-rail-subtle"
+                    htmlFor={`${id}-status-codes`}
+                  >
+                    Accepted status codes
+                    <Input
+                      id={`${id}-status-codes`}
+                      name="statusCodes"
+                      type="text"
+                      inputMode="numeric"
+                      defaultValue={
+                        initialValues?.statusPolicy.type === 'EXACT'
+                          ? initialValues.statusPolicy.statusCodes.join(', ')
+                          : ''
+                      }
+                      placeholder="200, 204"
+                      required
+                      aria-describedby={errors.statusPolicy ? policyErrorId : policyHelpId}
+                      aria-invalid={Boolean(errors.statusPolicy)}
+                    />
+                    {errors.statusPolicy ? (
+                      <span className="font-normal text-rail-danger" id={policyErrorId}>
+                        {errors.statusPolicy[0]}
+                      </span>
+                    ) : null}
+                  </label>
                 ) : null}
-              </label>
-            ) : null}
-          </fieldset>
+              </fieldset>
 
-          <TlsCertificatePolicyField
-            initialPolicy={initialValues?.tlsPolicy ?? { type: 'DISABLED' }}
-            httpsEndpoint={httpsEndpoint}
-            {...(errors.tlsPolicy?.[0] ? { error: errors.tlsPolicy[0] } : {})}
-          />
+              <TlsCertificatePolicyField
+                initialPolicy={initialValues?.tlsPolicy ?? { type: 'DISABLED' }}
+                httpsEndpoint={httpsEndpoint}
+                {...(errors.tlsPolicy?.[0] ? { error: errors.tlsPolicy[0] } : {})}
+              />
 
-          <RequestHeadersField
-            initialHeaders={initialValues?.requestHeaders ?? []}
-            {...(errors.requestHeaders?.[0] ? { error: errors.requestHeaders[0] } : {})}
-          />
-          <RequestBodyField
-            method={method}
-            initialBody={initialValues?.requestBody ?? { type: 'NONE' }}
-            {...(errors.requestBody?.[0] ? { error: errors.requestBody[0] } : {})}
-          />
-          <ResponseAssertionsField
-            method={method}
-            {...(initialValues?.assertions
-              ? { initialConfiguration: initialValues.assertions }
-              : {})}
-            {...(errors.assertions?.[0] ? { error: errors.assertions[0] } : {})}
-          />
+              <RequestHeadersField
+                initialHeaders={initialValues?.requestHeaders ?? []}
+                {...(errors.requestHeaders?.[0] ? { error: errors.requestHeaders[0] } : {})}
+              />
+              <RequestBodyField
+                method={method}
+                initialBody={initialValues?.requestBody ?? { type: 'NONE' }}
+                {...(errors.requestBody?.[0] ? { error: errors.requestBody[0] } : {})}
+              />
+              <ResponseAssertionsField
+                method={method}
+                {...(initialValues?.assertions
+                  ? { initialConfiguration: initialValues.assertions }
+                  : {})}
+                {...(errors.assertions?.[0] ? { error: errors.assertions[0] } : {})}
+              />
+            </>
+          ) : (
+            <section className="px-5 py-5 sm:px-6">
+              <h2 className="m-0 text-sm font-semibold text-rail-text">Connection check</h2>
+              <p className="mt-1 mb-0 max-w-2xl text-xs leading-5 text-rail-muted">
+                Watchrail resolves the target and measures how long a TCP connection takes to
+                establish. It does not send application data after connecting.
+              </p>
+              {errors.tcpSettings ? (
+                <p className="mt-3 mb-0 text-xs text-rail-danger">{errors.tcpSettings[0]}</p>
+              ) : null}
+            </section>
+          )}
         </div>
 
         <aside
@@ -261,24 +381,26 @@ export function MonitorForm({
             </p>
           </div>
           <div className="grid gap-4 px-5 py-5">
-            <label className="grid gap-1.5 text-xs font-medium text-rail-subtle">
-              Method
-              <Select
-                name="method"
-                value={method}
-                onChange={(event) => setMethod(event.target.value)}
-                aria-invalid={Boolean(errors.method)}
-              >
-                {HTTP_METHODS.map((httpMethod) => (
-                  <option key={httpMethod} value={httpMethod}>
-                    {httpMethod}
-                  </option>
-                ))}
-              </Select>
-              {errors.method ? (
-                <span className="font-normal text-rail-danger">{errors.method[0]}</span>
-              ) : null}
-            </label>
+            {monitorType === 'HTTP' ? (
+              <label className="grid gap-1.5 text-xs font-medium text-rail-subtle">
+                Method
+                <Select
+                  name="method"
+                  value={method}
+                  onChange={(event) => setMethod(event.target.value)}
+                  aria-invalid={Boolean(errors.method)}
+                >
+                  {HTTP_METHODS.map((httpMethod) => (
+                    <option key={httpMethod} value={httpMethod}>
+                      {httpMethod}
+                    </option>
+                  ))}
+                </Select>
+                {errors.method ? (
+                  <span className="font-normal text-rail-danger">{errors.method[0]}</span>
+                ) : null}
+              </label>
+            ) : null}
             <label className="grid gap-1.5 text-xs font-medium text-rail-subtle">
               Timeout
               <div className="relative">
@@ -328,15 +450,17 @@ export function MonitorForm({
                 <span className="font-normal text-rail-danger">{errors.lifecycleState[0]}</span>
               ) : null}
             </label>
-            <label className="flex min-h-10 cursor-pointer items-center gap-2.5 rounded-rail-control border border-rail-border px-3 text-xs font-medium text-rail-subtle hover:border-rail-border-strong">
-              <Checkbox
-                name="followRedirects"
-                defaultChecked={initialValues?.followRedirects ?? true}
-                aria-invalid={Boolean(errors.followRedirects)}
-              />
-              Follow redirects
-            </label>
-            {errors.followRedirects ? (
+            {monitorType === 'HTTP' ? (
+              <label className="flex min-h-10 cursor-pointer items-center gap-2.5 rounded-rail-control border border-rail-border px-3 text-xs font-medium text-rail-subtle hover:border-rail-border-strong">
+                <Checkbox
+                  name="followRedirects"
+                  defaultChecked={initialValues?.followRedirects ?? true}
+                  aria-invalid={Boolean(errors.followRedirects)}
+                />
+                Follow redirects
+              </label>
+            ) : null}
+            {monitorType === 'HTTP' && errors.followRedirects ? (
               <span className="-mt-2 text-xs text-rail-danger">{errors.followRedirects[0]}</span>
             ) : null}
           </div>
