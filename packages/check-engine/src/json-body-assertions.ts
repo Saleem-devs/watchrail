@@ -26,7 +26,15 @@ type UnavailableBodyReason = Extract<
 
 type JsonSelectorSegment = { type: 'PROPERTY'; key: string } | { type: 'INDEX'; digits: string };
 
-type JsonSelectorResolution = { state: 'FOUND'; value: StrictJsonValue } | { state: 'MISSING' };
+export type JsonSelectorResolution =
+  { state: 'FOUND'; value: StrictJsonValue } | { state: 'MISSING' };
+
+export function resolveJsonSelector(
+  root: StrictJsonValue,
+  selector: string,
+): JsonSelectorResolution {
+  return resolveSelector(root, parseSelector(selector));
+}
 
 export function evaluateJsonBodyAssertions(
   assertions: readonly JsonBodyAssertion[],
@@ -47,7 +55,7 @@ export function evaluateJsonBodyAssertions(
   if (parsed.status === 'FAILED') return failedParseEvaluation(assertions, parsed);
 
   const diagnostics = assertions.map((assertion, index): AssertionDiagnostic => {
-    const resolution = resolveSelector(parsed.value, parseSelector(assertion.selector));
+    const resolution = resolveJsonSelector(parsed.value, assertion.selector);
     const result = evaluateAssertion(assertion, resolution);
     return {
       index,

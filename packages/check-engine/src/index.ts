@@ -1,6 +1,7 @@
 export { executeHttpCheck } from './http-check.js';
 export { executeTcpCheck } from './tcp-check.js';
 export { executeDnsCheck } from './dns-check.js';
+export { executeApiWorkflow } from './api-workflow-check.js';
 export { NodeDnsQueryResolver } from './node-dns-query-resolver.js';
 export { NodeTcpConnector } from './node-tcp-connector.js';
 export { evaluateHeaderAssertions, notEvaluateHeaderAssertions } from './header-assertions.js';
@@ -12,6 +13,8 @@ export {
 export {
   evaluateJsonBodyAssertions,
   notEvaluateJsonBodyAssertions,
+  resolveJsonSelector,
+  type JsonSelectorResolution,
 } from './json-body-assertions.js';
 export {
   parseStrictJson,
@@ -87,3 +90,15 @@ export type {
   DnsQueryInput,
   DnsQueryResolver,
 } from './dns-types.js';
+export {
+  API_WORKFLOW_LIMITS,
+  type ApiWorkflowDependencies,
+  type ApiWorkflowExtraction,
+  type ApiWorkflowExtractionDiagnostic,
+  type ApiWorkflowInput,
+  type ApiWorkflowResult,
+  type ApiWorkflowExecutedStepResult,
+  type ApiWorkflowSkippedStepResult,
+  type ApiWorkflowStep,
+  type ApiWorkflowStepResult,
+} from './api-workflow-types.js';
