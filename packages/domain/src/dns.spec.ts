@@ -2,6 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { DnsMonitorInputError, parseDnsMonitorSettings } from './dns.js';
 
 describe('parseDnsMonitorSettings', () => {
+  it('canonicalizes equivalent IPv6 expected answers', () => {
+    expect(
+      parseDnsMonitorSettings({
+        name: 'ipv6.example.com',
+        recordType: 'AAAA',
+        expectedValues: ['2001:0DB8:0:0:0:0:0:1', '2001:db8::1'],
+        timeoutMs: 10_000,
+      }).expectedValues,
+    ).toEqual(['2001:db8::1']);
+  });
+
   it('normalizes a complete DNS configuration', () => {
     expect(
       parseDnsMonitorSettings({

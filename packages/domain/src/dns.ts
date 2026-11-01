@@ -62,6 +62,9 @@ export function parseDnsMonitorSettings(value: unknown): DnsMonitorSettings {
 
 export function normalizeDnsAnswer(recordType: DnsRecordType, value: string): string {
   const trimmed = value.trim();
+  if (recordType === 'AAAA') {
+    return normalizeIpv6Address(trimmed);
+  }
   if (recordType === 'CNAME' || recordType === 'NS') {
     return trimmed.toLowerCase().replace(/\.$/u, '');
   }
@@ -71,6 +74,15 @@ export function normalizeDnsAnswer(recordType: DnsRecordType, value: string): st
     return `${Number(match[1])} ${String(match[2]).toLowerCase().replace(/\.$/u, '')}`;
   }
   return trimmed;
+}
+
+function normalizeIpv6Address(value: string): string {
+  try {
+    const hostname = new URL(`http://[${value}]/`).hostname;
+    return hostname.slice(1, -1);
+  } catch {
+    return value.toLowerCase();
+  }
 }
 
 function normalizeDnsName(value: unknown, fields: DnsMonitorFieldErrors): string {

@@ -67,6 +67,27 @@ describe('executeDnsCheck', () => {
     });
   });
 
+  it('matches equivalent expanded and compressed IPv6 answers', async () => {
+    const resolver: DnsQueryResolver = {
+      resolve: vi.fn().mockResolvedValue(['2001:db8::1']),
+    };
+    await expect(
+      executeDnsCheck(
+        {
+          name: 'ipv6.example.com',
+          recordType: 'AAAA',
+          expectedValues: ['2001:0DB8:0:0:0:0:0:1'],
+          timeoutMs: 10_000,
+        },
+        { resolver, clock: createClock() },
+      ),
+    ).resolves.toMatchObject({
+      outcome: 'PASS',
+      reason: 'RECORDS_MATCHED',
+      answers: ['2001:db8::1'],
+    });
+  });
+
   it('matches against the complete answer set while retaining bounded evidence', async () => {
     const answers = Array.from(
       { length: 40 },
@@ -120,8 +141,12 @@ describe('executeDnsCheck', () => {
 
   it('enforces the query deadline', async () => {
     vi.useFakeTimers();
+    let resolverSignal: AbortSignal | undefined;
     const resolver: DnsQueryResolver = {
-      resolve: vi.fn(() => new Promise<string[]>(() => undefined)),
+      resolve: vi.fn((input) => {
+        resolverSignal = input.signal;
+        return new Promise<string[]>(() => undefined);
+      }),
     };
     const result = executeDnsCheck(
       { name: 'example.com', recordType: 'A', expectedValues: [], timeoutMs: 1_000 },
@@ -133,6 +158,35 @@ describe('executeDnsCheck', () => {
       stage: 'DNS',
       reason: 'DNS_TIMEOUT',
     });
+    expect(resolverSignal?.aborted).toBe(true);
     vi.useRealTimers();
+  });
+
+  it('propagates caller cancellation to the resolver', async () => {
+    const caller = new AbortController();
+    let resolverSignal: AbortSignal | undefined;
+    const resolver: DnsQueryResolver = {
+      resolve: vi.fn((input) => {
+        resolverSignal = input.signal;
+        return new Promise<string[]>((_, reject) => {
+          input.signal.addEventListener('abort', () => reject(new Error('cancelled')), {
+            once: true,
+          });
+        });
+      }),
+    };
+    const result = executeDnsCheck(
+      { name: 'example.com', recordType: 'A', expectedValues: [], timeoutMs: 10_000 },
+      { resolver, clock: createClock(), signal: caller.signal },
+    );
+
+    caller.abort(new Error('round cancelled'));
+
+    await expect(result).resolves.toMatchObject({
+      outcome: 'UNKNOWN',
+      stage: 'PROBE',
+      reason: 'INTERNAL_ERROR',
+    });
+    expect(resolverSignal?.aborted).toBe(true);
   });
 });

@@ -347,7 +347,8 @@ function parseDnsResult(value: Record<string, unknown>): AuthoritativeCheckResul
   if (value.outcome !== expected.outcome || value.stage !== expected.stage) badRequest();
   const hasCompletedQuery = ['RECORDS_MATCHED', 'NO_RECORDS', 'RECORD_MISMATCH'].includes(reason);
   if (hasCompletedQuery !== (value.queryTimeMs !== null)) badRequest();
-  if (reason === 'RECORDS_MATCHED' && value.answers.length === 0) badRequest();
+  const hasAnswerEvidence = value.answers.length > 0;
+  if (['RECORDS_MATCHED', 'RECORD_MISMATCH'].includes(reason) !== hasAnswerEvidence) badRequest();
   return {
     outcome: value.outcome as AuthoritativeCheckResult['outcome'],
     stage: value.stage as AuthoritativeCheckResult['stage'],
