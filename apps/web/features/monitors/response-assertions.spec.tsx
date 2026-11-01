@@ -576,6 +576,56 @@ describe('assertion diagnostic presentation', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('presents a blocked regional TCP destination as indeterminate', () => {
+    render(
+      <ManualDiagnostic
+        protocol="TCP"
+        round={{
+          id: 'tcp-blocked',
+          monitorId: 'monitor',
+          trigger: 'MANUAL',
+          status: 'COMPLETED',
+          assignmentStatus: 'COMPLETED',
+          createdAt: '2026-10-31T12:00:00.000Z',
+          result: {
+            kind: 'MULTI_LOCATION',
+            outcome: 'UNKNOWN',
+            counts: { selected: 1, pass: 0, confirmedFail: 0, unknown: 1, conclusive: 0 },
+            coverage: { numerator: 1, denominator: 1 },
+            reachability: null,
+            finalizedAt: '2026-10-31T12:00:00.000Z',
+            regions: [
+              {
+                location: 'lagos',
+                phase: 'TERMINAL',
+                outcome: 'UNKNOWN',
+                terminalReason: 'INDETERMINATE',
+                executions: [
+                  {
+                    id: 'tcp-blocked-execution',
+                    role: 'PRIMARY',
+                    diagnosticSummary: {
+                      stage: 'DNS',
+                      reason: 'PROHIBITED_DESTINATION',
+                      statusCode: null,
+                      responseTimeMs: null,
+                      attemptDurationMs: 1,
+                      checkedAt: '2026-10-31T12:00:00.000Z',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        }}
+        error={undefined}
+      />,
+    );
+
+    expect(screen.getByText('Primary connection').parentElement).toHaveTextContent('Indeterminate');
+    expect(screen.queryByText(/^Failed$/i)).not.toBeInTheDocument();
+  });
+
   it('presents an indeterminate TCP result without calling the connection failed', () => {
     render(
       <ManualDiagnostic

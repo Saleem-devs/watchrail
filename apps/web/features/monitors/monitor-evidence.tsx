@@ -326,13 +326,9 @@ function tcpConnectionState(
 function regionalTcpConnectionState(reason: string): 'Established' | 'Failed' | 'Indeterminate' {
   if (reason === 'CONNECTED') return 'Established';
   if (
-    [
-      'CONNECTION_REFUSED',
-      'HOST_UNREACHABLE',
-      'CONNECTION_TIMEOUT',
-      'NAME_NOT_FOUND',
-      'PROHIBITED_DESTINATION',
-    ].includes(reason)
+    ['CONNECTION_REFUSED', 'HOST_UNREACHABLE', 'CONNECTION_TIMEOUT', 'NAME_NOT_FOUND'].includes(
+      reason,
+    )
   ) {
     return 'Failed';
   }
