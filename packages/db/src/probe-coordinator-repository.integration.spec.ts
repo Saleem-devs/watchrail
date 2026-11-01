@@ -1,6 +1,11 @@
 import { resolve } from 'node:path';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { createMonitor, EMPTY_ASSERTION_EVALUATION, HTTP_ENGINE_VERSION } from '@watchrail/domain';
+import {
+  createMonitor,
+  EMPTY_ASSERTION_EVALUATION,
+  HTTP_ENGINE_VERSION,
+  LEGACY_HTTP_ENGINE_VERSION,
+} from '@watchrail/domain';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createDatabaseConnection, type DatabaseConnection } from './client.js';
 import type { AuthoritativeCheckResult } from './check-execution-repository.js';
@@ -50,7 +55,7 @@ describe('probe coordinator repository', () => {
       lease: {
         assignmentId: fixture.assignmentId,
         attemptNumber: 1,
-        requiredEngineVersion: HTTP_ENGINE_VERSION,
+        requiredEngineVersion: LEGACY_HTTP_ENGINE_VERSION,
       },
     });
     expect(claimed?.state === 'CLAIMED' && claimed.lease.claimToken).toMatch(

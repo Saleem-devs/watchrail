@@ -102,12 +102,10 @@ export function ConfigurationTestPanel({
 }
 
 function configurationTestOutcome(signals: ConfigurationTestResult['signals']): SignalOutcome {
-  const outcomes = [
-    signals.transport,
-    signals.statusPolicy,
-    signals.assertions,
-    signals.tlsCertificate ?? 'NOT_EVALUATED',
-  ];
+  const outcomes = [signals.transport, signals.statusPolicy, signals.assertions];
+  if (signals.tlsCertificate && signals.tlsCertificate !== 'NOT_EVALUATED') {
+    outcomes.push(signals.tlsCertificate);
+  }
   if (outcomes.includes('FAIL')) return 'FAIL';
   if (outcomes.every((outcome) => outcome === 'PASS')) return 'PASS';
   return 'UNKNOWN';

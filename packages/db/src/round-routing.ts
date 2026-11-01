@@ -2,12 +2,16 @@ import { eq, and, inArray } from 'drizzle-orm';
 import {
   HTTP_ENGINE_VERSION,
   HTTP_EXECUTION_POLICY_VERSION,
+  LEGACY_HTTP_ENGINE_VERSION,
   normalizeLocationSnapshot,
+  parseTlsCertificatePolicy,
 } from '@watchrail/domain';
 import {
   checkExecutionAssignments,
+  checkRounds,
   checkRoundLocations,
   checkRoundOutbox,
+  monitorConfigurationVersions,
   probeLocations,
 } from './schema.js';
 import { createExecuteCheckRoundJob } from '@watchrail/contracts';
@@ -85,6 +89,11 @@ export async function createPreparedRoutedAssignments(
   input: { organizationId: string; roundId: string; locations: readonly string[] },
 ): Promise<void> {
   const locations = normalizeLocationSnapshot(input.locations);
+  const requiredEngineVersion = await requiredEngineVersionForRound(
+    tx,
+    input.organizationId,
+    input.roundId,
+  );
   const remoteLocationIds = locations.filter((location) => location !== 'local');
   if (remoteLocationIds.length > 0) {
     const remoteLocations = await tx
@@ -108,7 +117,7 @@ export async function createPreparedRoutedAssignments(
       location,
       probeLocationId: location === 'local' ? null : location,
       executionPolicyVersion: HTTP_EXECUTION_POLICY_VERSION,
-      requiredEngineVersion: HTTP_ENGINE_VERSION,
+      requiredEngineVersion,
       status: 'PENDING' as const,
     })),
   );
@@ -119,4 +128,24 @@ export async function createPreparedRoutedAssignments(
       payload: createExecuteCheckRoundJob(input.roundId),
     });
   }
+}
+
+async function requiredEngineVersionForRound(
+  tx: Transaction,
+  organizationId: string,
+  roundId: string,
+): Promise<string> {
+  const [configuration] = await tx
+    .select({ tlsPolicy: monitorConfigurationVersions.tlsPolicy })
+    .from(checkRounds)
+    .innerJoin(
+      monitorConfigurationVersions,
+      eq(monitorConfigurationVersions.id, checkRounds.monitorConfigurationVersionId),
+    )
+    .where(and(eq(checkRounds.organizationId, organizationId), eq(checkRounds.id, roundId)))
+    .limit(1);
+  if (!configuration) throw new MonitorLocationInvariantError();
+  return parseTlsCertificatePolicy(configuration.tlsPolicy).type === 'DISABLED'
+    ? LEGACY_HTTP_ENGINE_VERSION
+    : HTTP_ENGINE_VERSION;
 }

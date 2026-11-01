@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import {
   EMPTY_ASSERTION_CONFIGURATION,
-  DISABLED_TLS_CERTIFICATE_POLICY,
+  MonitorInputError,
   assertAssertionsCompatibleWithMethod,
   normalizeLocationSnapshot,
   parseStoredAssertionConfiguration,
@@ -319,7 +319,6 @@ export class MonitorRepository {
       method: HttpMonitorMethod,
     ) => ResponseAssertionConfigurationV1,
   ): Promise<MonitorRecord> {
-    const tlsPolicy = settings.tlsPolicy ?? DISABLED_TLS_CERTIFICATE_POLICY;
     return this.db.transaction(async (tx) => {
       const [monitor] = await tx
         .select()
@@ -341,6 +340,9 @@ export class MonitorRepository {
         .orderBy(desc(monitorConfigurationVersions.versionNumber))
         .limit(1);
       if (!configuration) throw new Error('Monitor has no configuration version.');
+
+      const tlsPolicy = settings.tlsPolicy ?? configuration.tlsPolicy;
+      assertTlsPolicyUrlCompatibility(tlsPolicy, settings.url);
 
       const requestHeaders = updateRequestHeaders(configuration.requestHeaders);
       const assertions = updateAssertions(
@@ -383,7 +385,6 @@ export class MonitorRepository {
     monitorId: string,
     settings: HttpMonitorSettings,
   ): Promise<MonitorRecord> {
-    const tlsPolicy = settings.tlsPolicy ?? DISABLED_TLS_CERTIFICATE_POLICY;
     return this.db.transaction(async (tx) => {
       const [monitor] = await tx
         .select()
@@ -407,6 +408,9 @@ export class MonitorRepository {
         .limit(1);
 
       if (!configuration) throw new Error('Monitor has no configuration version.');
+
+      const tlsPolicy = settings.tlsPolicy ?? configuration.tlsPolicy;
+      assertTlsPolicyUrlCompatibility(tlsPolicy, settings.url);
 
       const assertions = parseStoredAssertionConfiguration(configuration.assertions).assertions;
       assertAssertionsCompatibleWithMethod(settings.method, assertions);
@@ -679,6 +683,14 @@ export class MonitorRepository {
         .returning();
       if (!updated) throw new Error('The monitor update returned no record.');
       return updated;
+    });
+  }
+}
+
+function assertTlsPolicyUrlCompatibility(policy: { type: string }, url: string): void {
+  if (policy.type !== 'DISABLED' && !url.startsWith('https://')) {
+    throw new MonitorInputError({
+      tlsPolicy: ['Certificate expiry monitoring requires an HTTPS URL.'],
     });
   }
 }

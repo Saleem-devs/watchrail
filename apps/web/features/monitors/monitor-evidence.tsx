@@ -84,7 +84,11 @@ function DiagnosticOutcomeSummary({
   assertionEvaluation: AssertionEvaluation;
 }) {
   const httpOutcome: DiagnosticOutcome =
-    stage !== 'HTTP' || statusCode === null ? 'NO_RESPONSE' : outcome;
+    reason === 'CERTIFICATE_EXPIRING' && statusCode !== null
+      ? 'PASS'
+      : stage !== 'HTTP' || statusCode === null
+        ? 'NO_RESPONSE'
+        : outcome;
   const health = singleLocationHealth(outcome, reason, assertionEvaluation.outcome);
   return (
     <dl className="grid gap-px border-t border-rail-border bg-rail-border sm:grid-cols-3">
@@ -193,6 +197,7 @@ export function ManualDiagnostic({
           {diagnosticFailureLabel({
             outcome: result.outcome,
             stage: result.stage,
+            reason: result.reason,
             statusCode: result.statusCode,
             assertionEvaluation,
           })}
@@ -488,6 +493,7 @@ function HistoricalSingleLocationEvidence({
         {diagnosticFailureLabel({
           outcome: result.outcome,
           stage: result.stage,
+          reason: result.reason,
           statusCode: result.statusCode,
           assertionEvaluation,
         })}

@@ -14,9 +14,11 @@ import {
   type ProbeResultSubmissionReferenceV1,
 } from '@watchrail/contracts';
 import {
+  LEGACY_HTTP_ENGINE_VERSION,
   parseHttpRedirectHops,
   parseHttpStatusPolicy,
   parseStoredAssertionEvaluation,
+  parseTlsCertificatePolicy,
   parseTlsCertificateEvidenceList,
 } from '@watchrail/domain';
 import { resolveRequestHeaders } from '@watchrail/http-header-security';
@@ -54,6 +56,13 @@ export class ProbeCoordinatorService {
       organizationId: stored.organizationId,
       monitorId: stored.monitorId,
     };
+    const tlsPolicy = parseTlsCertificatePolicy(stored.tlsPolicy);
+    if (
+      stored.requiredEngineVersion === LEGACY_HTTP_ENGINE_VERSION &&
+      tlsPolicy.type !== 'DISABLED'
+    ) {
+      throw new Error('A legacy probe assignment cannot execute a TLS certificate policy.');
+    }
     const resolved = parseProbeExecutionConfiguration({
       contractVersion: 1,
       assignmentId: stored.assignmentId,
@@ -67,7 +76,7 @@ export class ProbeCoordinatorService {
       timeoutMs: stored.timeoutMs,
       followRedirects: stored.followRedirects,
       statusPolicy: parseHttpStatusPolicy(stored.statusPolicy),
-      tlsPolicy: stored.tlsPolicy,
+      tlsPolicy,
       requestHeaders: resolveRequestHeaders(
         stored.requestHeaders,
         context,
@@ -81,7 +90,10 @@ export class ProbeCoordinatorService {
         this.config.assertionEncryptionKeyring,
       ),
     });
-    return resolved;
+    if (stored.requiredEngineVersion !== LEGACY_HTTP_ENGINE_VERSION) return resolved;
+    const legacyConfiguration = { ...resolved };
+    delete legacyConfiguration.tlsPolicy;
+    return legacyConfiguration;
   }
 
   async claim(machine: ProbeMachineIdentity, body: unknown) {

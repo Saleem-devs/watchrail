@@ -1,5 +1,6 @@
 import type { HttpExecutor } from '@watchrail/check-engine';
 import type { ProbeExecutionConfigurationV1, ProbeLeaseReferenceV1 } from '@watchrail/contracts';
+import { HTTP_ENGINE_VERSION, LEGACY_HTTP_ENGINE_VERSION } from '@watchrail/domain';
 import { describe, expect, it, vi } from 'vitest';
 import { ProbeCoordinatorClient, ProbeCoordinatorError } from './coordinator-client.js';
 import type { ProbeAgentConfig } from './config.js';
@@ -59,11 +60,27 @@ describe('ProbeAgentRuntime', () => {
   });
 
   it('renews a slow check and submits its result', async () => {
-    const { client, runtime, submit, renew } = runtimeFixture();
+    const { client, runtime, serialize, submit, renew } = runtimeFixture();
     vi.spyOn(client, 'renew').mockImplementation(renew);
     vi.spyOn(client, 'submitSerialized').mockImplementation(submit);
     await runtime.run();
-    expect(renew).toHaveBeenCalled();
+    expect(renew).toHaveBeenCalledWith(lease, LEGACY_HTTP_ENGINE_VERSION, expect.any(AbortSignal));
+    expect(serialize).toHaveBeenCalledWith(
+      lease,
+      LEGACY_HTTP_ENGINE_VERSION,
+      expect.not.objectContaining({ tlsCertificates: expect.anything() }),
+    );
+    expect(submit).toHaveBeenCalledOnce();
+  });
+
+  it('falls back to the legacy claim contract when a pre-upgrade coordinator has no v2 work', async () => {
+    const { client, runtime, claim, submit } = runtimeFixture(lease, 1, true);
+    vi.spyOn(client, 'submitSerialized').mockImplementation(submit);
+
+    await runtime.run();
+
+    expect(claim).toHaveBeenNthCalledWith(1, HTTP_ENGINE_VERSION, expect.any(AbortSignal));
+    expect(claim).toHaveBeenNthCalledWith(2, LEGACY_HTTP_ENGINE_VERSION, expect.any(AbortSignal));
     expect(submit).toHaveBeenCalledOnce();
   });
 
@@ -149,20 +166,23 @@ describe('ProbeAgentRuntime', () => {
   });
 });
 
-function runtimeFixture(runtimeLease: ProbeLeaseReferenceV1 = lease, executionDelayMs = 25) {
+function runtimeFixture(
+  runtimeLease: ProbeLeaseReferenceV1 = lease,
+  executionDelayMs = 25,
+  legacyFallback = false,
+) {
   const client = new ProbeCoordinatorClient('https://coordinator.example', 'm'.repeat(43));
   const state: { runtime?: ProbeAgentRuntime } = {};
-  const claim = vi
-    .fn()
-    .mockResolvedValueOnce(runtimeLease)
-    .mockImplementation(() => {
-      state.runtime?.stop();
-      return Promise.resolve(null);
-    });
+  const claim = vi.fn();
+  if (legacyFallback) claim.mockResolvedValueOnce(null);
+  claim.mockResolvedValueOnce(runtimeLease).mockImplementation(() => {
+    state.runtime?.stop();
+    return Promise.resolve(null);
+  });
   vi.spyOn(client, 'claim').mockImplementation(claim);
   vi.spyOn(client, 'heartbeat').mockResolvedValue();
   vi.spyOn(client, 'configuration').mockResolvedValue(configuration);
-  vi.spyOn(client, 'serializeSubmission').mockReturnValue('{"stable":true}');
+  const serialize = vi.spyOn(client, 'serializeSubmission').mockReturnValue('{"stable":true}');
   const renew = vi.fn().mockResolvedValue('2099-10-14T08:00:30.000Z');
   const submit = vi.fn().mockResolvedValue(undefined);
   const executorAbort = vi.fn();
@@ -192,6 +212,6 @@ function runtimeFixture(runtimeLease: ProbeLeaseReferenceV1 = lease, executionDe
   };
   const runtime = new ProbeAgentRuntime(client, config, executor);
   state.runtime = runtime;
-  return { client, runtime, renew, submit, executorAbort };
+  return { client, runtime, claim, serialize, renew, submit, executorAbort };
 }
 import { getEventListeners } from 'node:events';

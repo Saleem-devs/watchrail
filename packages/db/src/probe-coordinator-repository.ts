@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { and, asc, eq, getTableColumns, lte, or, sql } from 'drizzle-orm';
+import { and, asc, eq, getTableColumns, inArray, lte, or, sql } from 'drizzle-orm';
 import type { ProbeLeaseReferenceV1, ProbeResultSubmissionReferenceV1 } from '@watchrail/contracts';
 import {
   EMPTY_ASSERTION_EVALUATION,
@@ -8,6 +8,9 @@ import {
   PROBE_MAX_ATTEMPTS,
   PROBE_MAX_EXECUTION_MS,
   PROBE_RESULT_CLOCK_SKEW_MS,
+  agentEngineVersionsForRequirement,
+  probeEngineSupports,
+  requiredEngineVersionsForAgent,
 } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
 import {
@@ -243,7 +246,9 @@ export class ProbeCoordinatorRepository {
               ),
             ),
             lte(checkExecutionAssignments.attemptCount, PROBE_MAX_ATTEMPTS - 1),
-            eq(checkExecutionAssignments.requiredEngineVersion, engineVersion),
+            inArray(checkExecutionAssignments.requiredEngineVersion, [
+              ...requiredEngineVersionsForAgent(engineVersion),
+            ]),
           ),
         )
         .orderBy(asc(checkExecutionAssignments.createdAt), asc(checkExecutionAssignments.id))
@@ -738,7 +743,9 @@ async function shouldWaitForDifferentConfirmationAgent(
         eq(probeAgents.organizationId, machine.organizationId),
         eq(probeAgents.locationId, machine.locationId),
         eq(probeAgents.status, 'ACTIVE'),
-        eq(probeAgents.engineVersion, requiredEngineVersion),
+        inArray(probeAgents.engineVersion, [
+          ...agentEngineVersionsForRequirement(requiredEngineVersion),
+        ]),
         sql`${probeAgents.id} <> ${machine.agentId}`,
         sql`${probeAgents.lastHeartbeatAt} is not null`,
         sql`${probeAgents.lastHeartbeatAt} >= clock_timestamp() - (${probeAgents.heartbeatIntervalMs} * 2 * interval '1 millisecond')`,
@@ -974,7 +981,7 @@ function isAuthoritativeAttempt(
     attempt.unexpired &&
     assignment.status === 'RUNNING' &&
     assignment.attemptCount === reference.attemptNumber &&
-    assignment.requiredEngineVersion === reference.engineVersion &&
+    probeEngineSupports(reference.engineVersion, assignment.requiredEngineVersion) &&
     assignment.unexpired,
   );
 }

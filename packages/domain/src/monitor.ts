@@ -396,10 +396,20 @@ export function parseHttpMonitorSettings(value: unknown): HttpMonitorSettings {
   const timeoutMs = normalizeTimeout(settings.timeoutMs, fields);
   const followRedirects = normalizeFollowRedirects(settings.followRedirects, fields);
   const requestBody = normalizeRequestBody(settings.requestBody, method, fields);
-  const tlsPolicy = normalizeTlsPolicy(settings.tlsPolicy, url, fields, true);
+  const tlsPolicy =
+    settings.tlsPolicy === undefined
+      ? undefined
+      : normalizeTlsPolicy(settings.tlsPolicy, url, fields, false);
 
   if (Object.keys(fields).length > 0) throw new MonitorInputError(fields);
-  return { url, method, timeoutMs, followRedirects, requestBody, tlsPolicy };
+  return {
+    url,
+    method,
+    timeoutMs,
+    followRedirects,
+    requestBody,
+    ...(tlsPolicy === undefined ? {} : { tlsPolicy }),
+  };
 }
 
 function normalizeTlsPolicy(

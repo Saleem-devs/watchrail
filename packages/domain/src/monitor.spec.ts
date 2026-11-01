@@ -194,7 +194,7 @@ describe('monitor scheduling settings', () => {
 });
 
 describe('parseHttpMonitorSettings', () => {
-  it('preserves legacy settings and accepts a validated TLS expiry policy', () => {
+  it('keeps legacy TLS policy omission distinguishable and accepts a validated policy', () => {
     expect(
       parseHttpMonitorSettings({
         url: 'https://example.com',
@@ -213,7 +213,7 @@ describe('parseHttpMonitorSettings', () => {
         timeoutMs: 5_000,
         followRedirects: true,
       }),
-    ).toMatchObject({ tlsPolicy: { type: 'DISABLED' } });
+    ).not.toHaveProperty('tlsPolicy');
   });
   it('accepts the complete strict HTTP settings contract', () => {
     expect(
@@ -229,7 +229,6 @@ describe('parseHttpMonitorSettings', () => {
       timeoutMs: 5_000,
       followRedirects: false,
       requestBody: { type: 'NONE' },
-      tlsPolicy: { type: 'DISABLED' },
     });
   });
 

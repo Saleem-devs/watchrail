@@ -952,6 +952,7 @@ describe('monitor API', () => {
         assertions: { headers: [], textBody: [], jsonBody: [] },
       })
       .expect(200);
+
     expect(updated.body.data).toMatchObject({
       method: 'HEAD',
       assertions: {
@@ -1006,6 +1007,20 @@ describe('monitor API', () => {
         assertions: { headers: [], textBody: [], jsonBody: [] },
       })
       .expect(200);
+
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/http-settings`)
+      .send({
+        url: 'https://example.com/ready',
+        method: 'GET',
+        timeoutMs: 9_000,
+        followRedirects: false,
+        requestBody: { type: 'NONE' },
+      })
+      .expect(200)
+      .expect(({ body }) =>
+        expect(body.data.tlsPolicy).toEqual({ type: 'MINIMUM_VALIDITY', days: 14 }),
+      );
 
     const persisted = await database.$client.query<{
       current_policy: unknown;

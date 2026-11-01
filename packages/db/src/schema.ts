@@ -31,7 +31,7 @@ import {
   PROBE_ATTEMPT_STATUSES,
   PROBE_CREDENTIAL_STATUSES,
   PROBE_LOCATION_STATUSES,
-  HTTP_ENGINE_VERSION,
+  LEGACY_HTTP_ENGINE_VERSION,
   HTTP_EXECUTION_POLICY_VERSION,
   type HttpStatusPolicy,
   type HttpRequestBody,
@@ -761,7 +761,7 @@ export const checkExecutionAssignments = pgTable(
       .default(HTTP_EXECUTION_POLICY_VERSION),
     requiredEngineVersion: varchar('required_engine_version', { length: 64 })
       .notNull()
-      .default(HTTP_ENGINE_VERSION),
+      .default(LEGACY_HTTP_ENGINE_VERSION),
 
     status: executionAssignmentStatusEnum('status').notNull().default('PENDING'),
 

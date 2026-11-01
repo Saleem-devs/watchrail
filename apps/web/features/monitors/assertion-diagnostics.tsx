@@ -16,15 +16,18 @@ const outcomeTone: Record<AssertionDiagnostic['outcome'], string> = {
 export function diagnosticFailureLabel({
   outcome,
   stage,
+  reason,
   statusCode,
   assertionEvaluation,
 }: {
   outcome: 'PASS' | 'FAIL' | 'UNKNOWN';
   stage: string;
+  reason?: string;
   statusCode: number | null;
   assertionEvaluation: AssertionEvaluation;
 }): string {
   if (assertionEvaluation.outcome === 'FAIL') return 'Response assertion failed';
+  if (reason === 'CERTIFICATE_EXPIRING') return 'Certificate expiry policy failed';
   if (outcome === 'UNKNOWN' || stage !== 'HTTP' || statusCode === null) {
     return 'Transport failure — no response was available to evaluate';
   }
