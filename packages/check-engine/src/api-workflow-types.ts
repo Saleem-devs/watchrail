@@ -28,7 +28,12 @@ export interface ApiWorkflowInput {
   initialVariables?: Readonly<Record<string, string>>;
 }
 
-type WithoutResponseEvidence<T> = T extends unknown ? Omit<T, 'responseEvidence'> : never;
+type SafeWorkflowHttpResult<T> = T extends unknown
+  ? Omit<T, 'responseEvidence' | 'redirects' | 'tlsCertificates'> & {
+      redirectCount: number;
+      tlsCertificateCount: number;
+    }
+  : never;
 
 export interface ApiWorkflowExtractionDiagnostic {
   variable: string;
@@ -49,7 +54,7 @@ export interface ApiWorkflowExecutedStepResult {
   name: string;
   position: number;
   status: 'EXECUTED';
-  result: WithoutResponseEvidence<HttpCheckResult>;
+  result: SafeWorkflowHttpResult<HttpCheckResult>;
   extractions: ApiWorkflowExtractionDiagnostic[];
 }
 

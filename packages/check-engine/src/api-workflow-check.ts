@@ -16,6 +16,8 @@ import type { CheckClock, HttpCheckInput, HttpCheckResult } from './types.js';
 
 const VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/u;
 const VARIABLE_REFERENCE = /\{\{([A-Za-z_][A-Za-z0-9_]{0,63})\}\}/gu;
+const VARIABLE_REFERENCE_AT_START = /^\{\{([A-Za-z_][A-Za-z0-9_]{0,63})\}\}/u;
+const URL_VARIABLE_MARKER = 'watchrail-variable-marker';
 
 const defaultClock: CheckClock = {
   now: () => new Date(),
@@ -225,19 +227,52 @@ function resolveRequestBody(
   if (body.type === 'JSON') {
     return {
       ...body,
-      value: JSON.stringify(substituteJsonStrings(JSON.parse(body.value), variables)),
+      value: substituteJsonBody(body.value, variables),
     };
   }
   return { ...body, value: substitute(body.value, variables) };
 }
 
-function substituteJsonStrings(value: unknown, variables: ReadonlyMap<string, string>): unknown {
-  if (typeof value === 'string') return substitute(value, variables);
-  if (Array.isArray(value)) return value.map((item) => substituteJsonStrings(item, variables));
-  if (typeof value !== 'object' || value === null) return value;
-  return Object.fromEntries(
-    Object.entries(value).map(([key, item]) => [key, substituteJsonStrings(item, variables)]),
-  );
+function substituteJsonBody(value: string, variables: ReadonlyMap<string, string>): string {
+  JSON.parse(value);
+  let output = '';
+  let inString = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]!;
+    if (!inString) {
+      if (character === '"') inString = true;
+      if (value.startsWith('{{', index)) {
+        throw new TypeError('API workflow JSON variables must appear inside JSON strings.');
+      }
+      output += character;
+      continue;
+    }
+    if (character === '\\') {
+      output += character;
+      const escaped = value[index + 1];
+      if (escaped !== undefined) {
+        output += escaped;
+        index += 1;
+      }
+      continue;
+    }
+    if (character === '"') {
+      inString = false;
+      output += character;
+      continue;
+    }
+    const reference = VARIABLE_REFERENCE_AT_START.exec(value.slice(index));
+    if (reference) {
+      const replacement = variables.get(reference[1]!);
+      if (replacement === undefined) throw new MissingWorkflowVariableError();
+      output += JSON.stringify(replacement).slice(1, -1);
+      index += reference[0].length - 1;
+      continue;
+    }
+    output += character;
+  }
+  JSON.parse(output);
+  return output;
 }
 
 function extractVariables(
@@ -315,9 +350,13 @@ function diagnostic(
 function withoutResponseEvidence(
   result: HttpCheckResult,
 ): Extract<ApiWorkflowStepResult, { status: 'EXECUTED' }>['result'] {
-  const { responseEvidence, ...safe } = result;
+  const { responseEvidence, redirects, tlsCertificates, ...safe } = result;
   void responseEvidence;
-  return safe;
+  return {
+    ...safe,
+    redirectCount: redirects.length,
+    tlsCertificateCount: tlsCertificates?.length ?? 0,
+  };
 }
 
 function substitute(value: string, variables: ReadonlyMap<string, string>): string {
@@ -379,12 +418,20 @@ function assertWorkflow(input: ApiWorkflowInput): void {
 }
 
 function assertUrlInterpolationSafe(url: string): void {
-  const schemeEnd = url.indexOf('://');
-  if (schemeEnd < 1) return;
-  const authorityStart = schemeEnd + 3;
-  const boundaryOffset = url.slice(authorityStart).search(/[/?#]/u);
-  const authorityEnd = boundaryOffset === -1 ? url.length : authorityStart + boundaryOffset;
-  if (url.slice(0, authorityEnd).includes('{{')) {
+  const templated = url.replace(VARIABLE_REFERENCE, URL_VARIABLE_MARKER);
+  let parsed: URL;
+  try {
+    parsed = new URL(templated);
+  } catch {
+    throw new TypeError('API workflow step URL is invalid.');
+  }
+  if (
+    parsed.protocol.includes(URL_VARIABLE_MARKER) ||
+    parsed.username.includes(URL_VARIABLE_MARKER) ||
+    parsed.password.includes(URL_VARIABLE_MARKER) ||
+    parsed.hostname.includes(URL_VARIABLE_MARKER) ||
+    parsed.port.includes(URL_VARIABLE_MARKER)
+  ) {
     throw new TypeError('API workflow variables cannot be interpolated into URL origins.');
   }
 }

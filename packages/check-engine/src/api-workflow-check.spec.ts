@@ -210,9 +210,12 @@ describe('executeApiWorkflow', () => {
       .fn<HttpExecutor['execute']>()
       .mockResolvedValueOnce(response(JSON.stringify({ value: 'quote: " and slash: \\' })))
       .mockImplementationOnce((input) => {
-        expect(new TextDecoder().decode(input.requestBody?.bytes)).toBe(
-          JSON.stringify({ message: 'quote: " and slash: \\' }),
-        );
+        const body = new TextDecoder().decode(input.requestBody?.bytes);
+        expect(body).toContain('"id":9007199254740993');
+        expect(JSON.parse(body)).toEqual({
+          id: 9007199254740992,
+          message: 'quote: " and slash: \\',
+        });
         return Promise.resolve(response());
       });
     const result = await executeApiWorkflow(
@@ -227,7 +230,10 @@ describe('executeApiWorkflow', () => {
             id: 'send',
             name: 'Send',
             method: 'POST',
-            requestBody: { type: 'JSON', value: '{"message":"{{value}}"}' },
+            requestBody: {
+              type: 'JSON',
+              value: '{"id":9007199254740993,"message":"{{value}}"}',
+            },
           }),
         ],
       },
@@ -238,19 +244,83 @@ describe('executeApiWorkflow', () => {
     expect(JSON.stringify(result)).not.toContain('quote:');
   });
 
-  it('rejects interpolation into URL origins so secrets cannot enter origin evidence', async () => {
+  it.each([
+    'https://{{tenant}}.example.com/health',
+    'https:{{tenant}}.example.com/health',
+    'https:/{{tenant}}.example.com/health',
+  ])('rejects origin interpolation in URL form %s', async (url) => {
     await expect(
       executeApiWorkflow(
         {
           initialVariables: { tenant: 'secret-subdomain' },
           steps: [
-            step({ id: 'first', name: 'First', url: 'https://{{tenant}}.example.com/health' }),
+            step({ id: 'first', name: 'First', url }),
             step({ id: 'second', name: 'Second' }),
           ],
         },
         { executor: { execute: vi.fn<HttpExecutor['execute']>() } },
       ),
     ).rejects.toThrow('cannot be interpolated into URL origins');
+  });
+
+  it('does not retain redirect origins that reflect an extracted secret', async () => {
+    const execute = vi
+      .fn<HttpExecutor['execute']>()
+      .mockResolvedValueOnce(response('{"token":"secret-token"}'))
+      .mockResolvedValueOnce({
+        ...response(),
+        redirects: [
+          {
+            sequence: 1,
+            statusCode: 302,
+            source: { targetId: 1, origin: 'https://api.example.com:443' },
+            destination: {
+              targetId: 2,
+              origin: 'https://secret-token.example.com:443',
+            },
+            responseTimeMs: 4,
+            headers: 'STRIPPED',
+          },
+        ],
+        tlsCertificates: [
+          {
+            contractVersion: 1,
+            origin: 'https://secret-token.example.com:443',
+            hostname: 'secret-token.example.com',
+            validFrom: '2026-01-01T00:00:00.000Z',
+            validTo: '2027-01-01T00:00:00.000Z',
+            fingerprint256:
+              'AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA',
+            subject: 'CN=secret-token.example.com',
+            issuer: 'CN=Example CA',
+            protocol: 'TLSv1.3',
+            cipher: 'TLS_AES_256_GCM_SHA384',
+          },
+        ],
+      });
+
+    const result = await executeApiWorkflow(
+      {
+        steps: [
+          step({
+            id: 'extract',
+            name: 'Extract',
+            extractions: [{ variable: 'token', selector: '$.token', sensitive: true }],
+          }),
+          step({ id: 'redirect', name: 'Redirect' }),
+        ],
+      },
+      { executor: { execute }, clock: createClock() },
+    );
+
+    expect(result.outcome).toBe('PASS');
+    const redirected = result.steps[1];
+    expect(redirected?.status).toBe('EXECUTED');
+    if (redirected?.status !== 'EXECUTED') throw new Error('Expected executed step.');
+    expect(redirected.result).toMatchObject({ redirectCount: 1, tlsCertificateCount: 1 });
+    expect(redirected.result).not.toHaveProperty('redirects');
+    expect(redirected.result).not.toHaveProperty('tlsCertificates');
+    expect(JSON.stringify(result)).not.toContain('secret-token');
   });
 
   it('includes the current and downstream steps when request preparation fails', async () => {
