@@ -39,12 +39,18 @@ export async function executeApiWorkflow(
     try {
       request = resolveStep(step, variables);
     } catch (error) {
-      if (!(error instanceof MissingWorkflowVariableError)) throw error;
-      steps.push(skippedStep(step, position, 'VARIABLE_UNAVAILABLE'));
+      const variableUnavailable = error instanceof MissingWorkflowVariableError;
+      steps.push(
+        skippedStep(
+          step,
+          position,
+          variableUnavailable ? 'VARIABLE_UNAVAILABLE' : 'EXECUTION_ERROR',
+        ),
+      );
       appendSkippedSteps(input.steps, position + 1, 'PREVIOUS_STEP_INDETERMINATE', steps);
       return terminalResult(
         'UNKNOWN',
-        'VARIABLE_UNAVAILABLE',
+        variableUnavailable ? 'VARIABLE_UNAVAILABLE' : 'INTERNAL_ERROR',
         step.id,
         checkedAt,
         elapsed(clock, startedAt),
@@ -63,6 +69,8 @@ export async function executeApiWorkflow(
         },
       );
     } catch {
+      steps.push(skippedStep(step, position, 'EXECUTION_ERROR'));
+      appendSkippedSteps(input.steps, position + 1, 'PREVIOUS_STEP_INDETERMINATE', steps);
       return terminalResult(
         'UNKNOWN',
         'INTERNAL_ERROR',
@@ -117,16 +125,30 @@ export async function executeApiWorkflow(
       result: safeResult,
       extractions: extraction.diagnostics,
     });
-    if (!extraction.succeeded) {
-      appendSkippedSteps(input.steps, position + 1, 'PREVIOUS_STEP_FAILED', steps);
-      return terminalResult(
-        'FAIL',
-        'EXTRACTION_FAILED',
-        step.id,
-        checkedAt,
-        elapsed(clock, startedAt),
+    if (extraction.state !== 'SUCCEEDED') {
+      appendSkippedSteps(
+        input.steps,
+        position + 1,
+        extraction.state === 'FAILED' ? 'PREVIOUS_STEP_FAILED' : 'PREVIOUS_STEP_INDETERMINATE',
         steps,
       );
+      return extraction.state === 'FAILED'
+        ? terminalResult(
+            'FAIL',
+            'EXTRACTION_FAILED',
+            step.id,
+            checkedAt,
+            elapsed(clock, startedAt),
+            steps,
+          )
+        : terminalResult(
+            'UNKNOWN',
+            'EXTRACTION_INDETERMINATE',
+            step.id,
+            checkedAt,
+            elapsed(clock, startedAt),
+            steps,
+          );
     }
   }
 
@@ -200,26 +222,44 @@ function resolveRequestBody(
       })),
     };
   }
+  if (body.type === 'JSON') {
+    return {
+      ...body,
+      value: JSON.stringify(substituteJsonStrings(JSON.parse(body.value), variables)),
+    };
+  }
   return { ...body, value: substitute(body.value, variables) };
+}
+
+function substituteJsonStrings(value: unknown, variables: ReadonlyMap<string, string>): unknown {
+  if (typeof value === 'string') return substitute(value, variables);
+  if (Array.isArray(value)) return value.map((item) => substituteJsonStrings(item, variables));
+  if (typeof value !== 'object' || value === null) return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [key, substituteJsonStrings(item, variables)]),
+  );
 }
 
 function extractVariables(
   extractions: readonly ApiWorkflowExtraction[],
   result: HttpCheckResult,
   variables: Map<string, string>,
-): { succeeded: boolean; diagnostics: ApiWorkflowExtractionDiagnostic[] } {
-  if (extractions.length === 0) return { succeeded: true, diagnostics: [] };
+): {
+  state: 'SUCCEEDED' | 'FAILED' | 'INDETERMINATE';
+  diagnostics: ApiWorkflowExtractionDiagnostic[];
+} {
+  if (extractions.length === 0) return { state: 'SUCCEEDED', diagnostics: [] };
   const body = result.responseEvidence?.body;
   if (body?.state !== 'CAPTURED') {
     return {
-      succeeded: false,
-      diagnostics: extractions.map((item) => diagnostic(item, 'FAILED', 'BODY_UNAVAILABLE')),
+      state: 'INDETERMINATE',
+      diagnostics: extractions.map((item) => diagnostic(item, 'NOT_EVALUATED', 'BODY_UNAVAILABLE')),
     };
   }
   const parsed = parseStrictJson(body.text);
   if (parsed.status === 'FAILED') {
     return {
-      succeeded: false,
+      state: 'FAILED',
       diagnostics: extractions.map((item) => diagnostic(item, 'FAILED', 'INVALID_JSON')),
     };
   }
@@ -230,14 +270,17 @@ function extractVariables(
     if (resolution.state === 'MISSING') return diagnostic(item, 'FAILED', 'VALUE_MISSING');
     const value = scalarText(resolution.value);
     if (value === null) return diagnostic(item, 'FAILED', 'NON_SCALAR_VALUE');
+    if (byteLength(value) > API_WORKFLOW_LIMITS.maximumVariableValueBytes) {
+      return diagnostic(item, 'FAILED', 'VALUE_TOO_LARGE');
+    }
     pending.set(item.variable, value);
     return diagnostic(item, 'CAPTURED', 'CAPTURED');
   });
   if (diagnostics.some((item) => item.outcome === 'FAILED')) {
-    return { succeeded: false, diagnostics };
+    return { state: 'FAILED', diagnostics };
   }
   for (const [name, value] of pending) variables.set(name, value);
-  return { succeeded: true, diagnostics };
+  return { state: 'SUCCEEDED', diagnostics };
 }
 
 function scalarText(value: StrictJsonValue): string | null {
@@ -272,7 +315,8 @@ function diagnostic(
 function withoutResponseEvidence(
   result: HttpCheckResult,
 ): Extract<ApiWorkflowStepResult, { status: 'EXECUTED' }>['result'] {
-  const { responseEvidence: _responseEvidence, ...safe } = result;
+  const { responseEvidence, ...safe } = result;
+  void responseEvidence;
   return safe;
 }
 
@@ -294,13 +338,23 @@ function assertWorkflow(input: ApiWorkflowInput): void {
     );
   }
   const stepIds = new Set<string>();
-  const variables = new Set(Object.keys(input.initialVariables ?? {}));
-  for (const name of variables) assertVariableName(name);
+  const initialVariables = Object.entries(input.initialVariables ?? {});
+  if (initialVariables.length > API_WORKFLOW_LIMITS.maximumInitialVariables) {
+    throw new RangeError('API workflow has too many initial variables.');
+  }
+  const variables = new Set(initialVariables.map(([name]) => name));
+  for (const [name, value] of initialVariables) {
+    assertVariableName(name);
+    if (byteLength(value) > API_WORKFLOW_LIMITS.maximumVariableValueBytes) {
+      throw new RangeError('API workflow variable value is too large.');
+    }
+  }
   for (const step of input.steps) {
     if (step.id.trim() === '' || step.name.trim() === '' || stepIds.has(step.id)) {
       throw new TypeError('API workflow steps require unique IDs and non-empty names.');
     }
     stepIds.add(step.id);
+    assertUrlInterpolationSafe(step.url);
     for (const reference of referencedVariables(step)) {
       if (!variables.has(reference)) {
         throw new TypeError(
@@ -317,7 +371,21 @@ function assertWorkflow(input: ApiWorkflowInput): void {
         throw new TypeError('API workflow extraction is invalid or redefines a variable.');
       }
       variables.add(extraction.variable);
+      if (variables.size > API_WORKFLOW_LIMITS.maximumVariables) {
+        throw new RangeError('API workflow defines too many variables.');
+      }
     }
+  }
+}
+
+function assertUrlInterpolationSafe(url: string): void {
+  const schemeEnd = url.indexOf('://');
+  if (schemeEnd < 1) return;
+  const authorityStart = schemeEnd + 3;
+  const boundaryOffset = url.slice(authorityStart).search(/[/?#]/u);
+  const authorityEnd = boundaryOffset === -1 ? url.length : authorityStart + boundaryOffset;
+  if (url.slice(0, authorityEnd).includes('{{')) {
+    throw new TypeError('API workflow variables cannot be interpolated into URL origins.');
   }
 }
 
@@ -374,6 +442,10 @@ function assertVariableName(name: string): void {
   if (!VARIABLE_NAME.test(name)) throw new TypeError('API workflow variable name is invalid.');
 }
 
+function byteLength(value: string): number {
+  return new TextEncoder().encode(value).length;
+}
+
 function terminalResult(
   outcome: 'FAIL',
   reason: 'STEP_FAILED' | 'EXTRACTION_FAILED',
@@ -384,7 +456,8 @@ function terminalResult(
 ): ApiWorkflowResult;
 function terminalResult(
   outcome: 'UNKNOWN',
-  reason: 'STEP_INDETERMINATE' | 'VARIABLE_UNAVAILABLE' | 'INTERNAL_ERROR',
+  reason:
+    'STEP_INDETERMINATE' | 'EXTRACTION_INDETERMINATE' | 'VARIABLE_UNAVAILABLE' | 'INTERNAL_ERROR',
   failedStepId: string,
   checkedAt: Date,
   attemptDurationMs: number,
@@ -412,7 +485,8 @@ function terminalResult(
   return {
     outcome,
     stage: 'WORKFLOW',
-    reason: reason as 'STEP_INDETERMINATE' | 'VARIABLE_UNAVAILABLE' | 'INTERNAL_ERROR',
+    reason: reason as
+      'STEP_INDETERMINATE' | 'EXTRACTION_INDETERMINATE' | 'VARIABLE_UNAVAILABLE' | 'INTERNAL_ERROR',
     failedStepId,
     checkedAt,
     attemptDurationMs,

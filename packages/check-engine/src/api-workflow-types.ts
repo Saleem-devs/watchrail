@@ -5,7 +5,10 @@ export const API_WORKFLOW_LIMITS = {
   minimumSteps: 2,
   maximumSteps: 10,
   maximumExtractionsPerStep: 16,
+  maximumInitialVariables: 32,
+  maximumVariables: 64,
   maximumVariableNameLength: 64,
+  maximumVariableValueBytes: 16 * 1024,
 } as const;
 
 export interface ApiWorkflowExtraction {
@@ -30,8 +33,14 @@ type WithoutResponseEvidence<T> = T extends unknown ? Omit<T, 'responseEvidence'
 export interface ApiWorkflowExtractionDiagnostic {
   variable: string;
   selector: string;
-  outcome: 'CAPTURED' | 'FAILED';
-  reason: 'CAPTURED' | 'BODY_UNAVAILABLE' | 'INVALID_JSON' | 'VALUE_MISSING' | 'NON_SCALAR_VALUE';
+  outcome: 'CAPTURED' | 'FAILED' | 'NOT_EVALUATED';
+  reason:
+    | 'CAPTURED'
+    | 'BODY_UNAVAILABLE'
+    | 'INVALID_JSON'
+    | 'VALUE_MISSING'
+    | 'NON_SCALAR_VALUE'
+    | 'VALUE_TOO_LARGE';
   sensitive: boolean;
 }
 
@@ -49,7 +58,11 @@ export interface ApiWorkflowSkippedStepResult {
   name: string;
   position: number;
   status: 'SKIPPED';
-  reason: 'VARIABLE_UNAVAILABLE' | 'PREVIOUS_STEP_FAILED' | 'PREVIOUS_STEP_INDETERMINATE';
+  reason:
+    | 'VARIABLE_UNAVAILABLE'
+    | 'EXECUTION_ERROR'
+    | 'PREVIOUS_STEP_FAILED'
+    | 'PREVIOUS_STEP_INDETERMINATE';
 }
 
 export type ApiWorkflowStepResult = ApiWorkflowExecutedStepResult | ApiWorkflowSkippedStepResult;
@@ -77,7 +90,11 @@ export type ApiWorkflowResult =
   | (ApiWorkflowResultBase & {
       outcome: 'UNKNOWN';
       stage: 'WORKFLOW';
-      reason: 'STEP_INDETERMINATE' | 'VARIABLE_UNAVAILABLE' | 'INTERNAL_ERROR';
+      reason:
+        | 'STEP_INDETERMINATE'
+        | 'EXTRACTION_INDETERMINATE'
+        | 'VARIABLE_UNAVAILABLE'
+        | 'INTERNAL_ERROR';
       failedStepId: string;
     });
 

@@ -164,6 +164,127 @@ describe('executeApiWorkflow', () => {
     expect(execute).toHaveBeenCalledOnce();
   });
 
+  it('is indeterminate when response evidence cannot be captured for extraction', async () => {
+    const execute = vi.fn<HttpExecutor['execute']>().mockResolvedValue({
+      type: 'RESPONSE',
+      statusCode: 200,
+      responseTimeMs: 12,
+      headers: [],
+      body: { state: 'UNAVAILABLE', reason: 'BODY_TOO_LARGE' },
+      redirects: [],
+    });
+    const result = await executeApiWorkflow(
+      {
+        steps: [
+          step({
+            id: 'extract',
+            name: 'Extract',
+            extractions: [{ variable: 'token', selector: '$.token', sensitive: true }],
+          }),
+          step({ id: 'next', name: 'Next' }),
+        ],
+      },
+      { executor: { execute }, clock: createClock() },
+    );
+
+    expect(result).toMatchObject({
+      outcome: 'UNKNOWN',
+      reason: 'EXTRACTION_INDETERMINATE',
+      failedStepId: 'extract',
+    });
+    const extraction = result.steps[0];
+    expect(extraction?.status).toBe('EXECUTED');
+    if (extraction?.status !== 'EXECUTED') throw new Error('Expected executed step.');
+    expect(extraction.extractions[0]).toMatchObject({
+      outcome: 'NOT_EVALUATED',
+      reason: 'BODY_UNAVAILABLE',
+    });
+    expect(result.steps[1]).toMatchObject({
+      status: 'SKIPPED',
+      reason: 'PREVIOUS_STEP_INDETERMINATE',
+    });
+  });
+
+  it('escapes extracted strings when interpolating JSON request bodies', async () => {
+    const execute = vi
+      .fn<HttpExecutor['execute']>()
+      .mockResolvedValueOnce(response(JSON.stringify({ value: 'quote: " and slash: \\' })))
+      .mockImplementationOnce((input) => {
+        expect(new TextDecoder().decode(input.requestBody?.bytes)).toBe(
+          JSON.stringify({ message: 'quote: " and slash: \\' }),
+        );
+        return Promise.resolve(response());
+      });
+    const result = await executeApiWorkflow(
+      {
+        steps: [
+          step({
+            id: 'extract',
+            name: 'Extract',
+            extractions: [{ variable: 'value', selector: '$.value', sensitive: true }],
+          }),
+          step({
+            id: 'send',
+            name: 'Send',
+            method: 'POST',
+            requestBody: { type: 'JSON', value: '{"message":"{{value}}"}' },
+          }),
+        ],
+      },
+      { executor: { execute }, clock: createClock() },
+    );
+
+    expect(result.outcome).toBe('PASS');
+    expect(JSON.stringify(result)).not.toContain('quote:');
+  });
+
+  it('rejects interpolation into URL origins so secrets cannot enter origin evidence', async () => {
+    await expect(
+      executeApiWorkflow(
+        {
+          initialVariables: { tenant: 'secret-subdomain' },
+          steps: [
+            step({ id: 'first', name: 'First', url: 'https://{{tenant}}.example.com/health' }),
+            step({ id: 'second', name: 'Second' }),
+          ],
+        },
+        { executor: { execute: vi.fn<HttpExecutor['execute']>() } },
+      ),
+    ).rejects.toThrow('cannot be interpolated into URL origins');
+  });
+
+  it('includes the current and downstream steps when request preparation fails', async () => {
+    const result = await executeApiWorkflow(
+      {
+        initialVariables: { value: 'safe' },
+        steps: [
+          step({
+            id: 'invalid-json',
+            name: 'Invalid JSON',
+            method: 'POST',
+            requestBody: { type: 'JSON', value: '{"value":"{{value}}"' },
+          }),
+          step({ id: 'later', name: 'Later' }),
+        ],
+      },
+      { executor: { execute: vi.fn<HttpExecutor['execute']>() }, clock: createClock() },
+    );
+
+    expect(result).toMatchObject({ outcome: 'UNKNOWN', reason: 'INTERNAL_ERROR' });
+    expect(result.steps).toEqual([
+      expect.objectContaining({
+        id: 'invalid-json',
+        status: 'SKIPPED',
+        reason: 'EXECUTION_ERROR',
+      }),
+      expect.objectContaining({
+        id: 'later',
+        status: 'SKIPPED',
+        reason: 'PREVIOUS_STEP_INDETERMINATE',
+      }),
+    ]);
+  });
+
   it('rejects a request that references a variable unavailable from an earlier step', async () => {
     const execute = vi.fn<HttpExecutor['execute']>();
     await expect(
@@ -230,5 +351,46 @@ describe('executeApiWorkflow', () => {
         dependencies,
       ),
     ).rejects.toThrow('redefines a variable');
+  });
+
+  it('bounds initial variable counts and extracted value sizes', async () => {
+    const dependencies = {
+      executor: { execute: vi.fn<HttpExecutor['execute']>().mockResolvedValue(response()) },
+    };
+    await expect(
+      executeApiWorkflow(
+        {
+          initialVariables: Object.fromEntries(
+            Array.from({ length: 33 }, (_, index) => [`variable_${index}`, 'value']),
+          ),
+          steps: [step({ id: 'one', name: 'One' }), step({ id: 'two', name: 'Two' })],
+        },
+        dependencies,
+      ),
+    ).rejects.toThrow('too many initial variables');
+
+    const oversized = 'x'.repeat(16 * 1024 + 1);
+    const execute = vi
+      .fn<HttpExecutor['execute']>()
+      .mockResolvedValue(response(JSON.stringify({ value: oversized })));
+    const result = await executeApiWorkflow(
+      {
+        steps: [
+          step({
+            id: 'extract',
+            name: 'Extract',
+            extractions: [{ variable: 'value', selector: '$.value', sensitive: true }],
+          }),
+          step({ id: 'later', name: 'Later' }),
+        ],
+      },
+      { executor: { execute } },
+    );
+    expect(result).toMatchObject({ outcome: 'FAIL', reason: 'EXTRACTION_FAILED' });
+    const extraction = result.steps[0];
+    expect(extraction?.status).toBe('EXECUTED');
+    if (extraction?.status !== 'EXECUTED') throw new Error('Expected executed step.');
+    expect(extraction.extractions[0]).toMatchObject({ reason: 'VALUE_TOO_LARGE' });
+    expect(JSON.stringify(result)).not.toContain(oversized);
   });
 });
