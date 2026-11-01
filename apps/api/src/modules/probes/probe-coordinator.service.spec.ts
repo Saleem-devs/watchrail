@@ -1,4 +1,4 @@
-import { ConflictException, Logger } from '@nestjs/common';
+import { BadRequestException, ConflictException, Logger } from '@nestjs/common';
 import type { ProbeCoordinatorRepository, ProbeMachineIdentity } from '@watchrail/db';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppConfig } from '../../config/config.js';
@@ -65,5 +65,35 @@ describe('ProbeCoordinatorService submission audit', () => {
       reason: 'NON_AUTHORITATIVE_LEASE',
     });
     expect(JSON.stringify(warn.mock.calls)).not.toContain(claimToken);
+  });
+
+  it.each([
+    ['NO_RECORDS', ['203.0.113.10']],
+    ['RECORD_MISMATCH', [] as string[]],
+    ['NAME_NOT_FOUND', ['203.0.113.10']],
+  ])('rejects contradictory answer evidence for %s', async (reason, contradictoryAnswers) => {
+    const classification =
+      reason === 'NAME_NOT_FOUND'
+        ? { outcome: 'FAIL', stage: 'DNS', queryTimeMs: null }
+        : { outcome: 'FAIL', stage: 'DNS', queryTimeMs: 12 };
+    await expect(
+      service.submit(machine, attemptId, claimToken, {
+        reference: {
+          contractVersion: 1,
+          assignmentId,
+          attemptId,
+          attemptNumber: 1,
+          engineVersion: 'watchrail-dns-v1',
+        },
+        result: {
+          ...classification,
+          reason,
+          answers: contradictoryAnswers,
+          attemptDurationMs: 15,
+          checkedAt: new Date().toISOString(),
+        },
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(submit).not.toHaveBeenCalled();
   });
 });

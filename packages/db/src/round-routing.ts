@@ -5,6 +5,8 @@ import {
   LEGACY_HTTP_ENGINE_VERSION,
   TCP_ENGINE_VERSION,
   TCP_EXECUTION_POLICY_VERSION,
+  DNS_ENGINE_VERSION,
+  DNS_EXECUTION_POLICY_VERSION,
   normalizeLocationSnapshot,
   parseTlsCertificatePolicy,
 } from '@watchrail/domain';
@@ -97,9 +99,11 @@ export async function createPreparedRoutedAssignments(
     input.roundId,
   );
   const executionPolicyVersion =
-    requiredEngineVersion === TCP_ENGINE_VERSION
-      ? TCP_EXECUTION_POLICY_VERSION
-      : HTTP_EXECUTION_POLICY_VERSION;
+    requiredEngineVersion === DNS_ENGINE_VERSION
+      ? DNS_EXECUTION_POLICY_VERSION
+      : requiredEngineVersion === TCP_ENGINE_VERSION
+        ? TCP_EXECUTION_POLICY_VERSION
+        : HTTP_EXECUTION_POLICY_VERSION;
   const remoteLocationIds = locations.filter((location) => location !== 'local');
   if (remoteLocationIds.length > 0) {
     const remoteLocations = await tx
@@ -155,6 +159,7 @@ async function requiredEngineVersionForRound(
     .limit(1);
   if (!configuration) throw new MonitorLocationInvariantError();
   if (configuration.type === 'TCP') return TCP_ENGINE_VERSION;
+  if (configuration.type === 'DNS') return DNS_ENGINE_VERSION;
   return parseTlsCertificatePolicy(configuration.tlsPolicy).type === 'DISABLED'
     ? LEGACY_HTTP_ENGINE_VERSION
     : HTTP_ENGINE_VERSION;

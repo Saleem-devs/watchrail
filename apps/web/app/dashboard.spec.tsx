@@ -163,6 +163,72 @@ describe('Dashboard', () => {
     );
   });
 
+  it('creates a DNS monitor with normalized protocol-specific fields', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: {
+              id: 'dns-monitor-1',
+              type: 'DNS',
+              name: 'Public API DNS',
+              url: '',
+              configuration: {
+                type: 'DNS',
+                name: 'api.example.com',
+                recordType: 'A',
+                expectedValues: ['203.0.113.10'],
+              },
+              method: 'GET',
+              lifecycleState: 'ENABLED',
+              timeoutMs: 8_000,
+              followRedirects: false,
+              statusPolicy: { type: 'ANY_2XX' },
+              locations: ['local'],
+              createdAt: new Date().toISOString(),
+            },
+          }),
+          { status: 201 },
+        ),
+      );
+
+    render(<Dashboard view="create" />);
+    await screen.findByRole('heading', { name: 'Create monitor' });
+    await userEvent.click(screen.getByRole('button', { name: 'DNS record' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'DNS record' })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      ),
+    );
+    expect(screen.queryByRole('button', { name: 'Test configuration' })).not.toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText('Monitor name'), 'Public API DNS');
+    await userEvent.type(await screen.findByLabelText(/DNS name/), 'api.example.com');
+    await userEvent.type(screen.getByLabelText('Expected DNS value 1'), '203.0.113.10');
+    const timeout = screen.getByLabelText(/Timeout/);
+    await userEvent.clear(timeout);
+    await userEvent.type(timeout, '8');
+    await userEvent.click(screen.getByRole('button', { name: 'Save monitor' }));
+
+    const request = fetchMock.mock.calls.at(-1)?.[1];
+    if (typeof request?.body !== 'string') throw new Error('Expected a JSON request body.');
+    expect(JSON.parse(request.body)).toEqual({
+      type: 'DNS',
+      name: 'Public API DNS',
+      dnsName: 'api.example.com',
+      dnsRecordType: 'A',
+      dnsExpectedValues: ['203.0.113.10'],
+      timeoutMs: 8_000,
+      locations: ['local'],
+      lifecycleState: 'ENABLED',
+    });
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Public API DNS is ready for its first check.',
+    );
+  });
+
   it('presents a paused monitor neutrally despite a successful historical check', async () => {
     const monitor = {
       id: 'paused-monitor',

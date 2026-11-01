@@ -187,6 +187,38 @@ describe('multi-location round persistence and prepared routing', () => {
     });
   });
 
+  it('routes DNS rounds only to DNS-capable probe agents', async () => {
+    const repository = new MonitorRepository(connection.db);
+    const monitor = await repository.create(
+      organizationA,
+      createMonitor({
+        type: 'DNS',
+        name: 'API DNS',
+        dnsName: 'api.example.com',
+        dnsRecordType: 'A',
+        dnsExpectedValues: ['203.0.113.10'],
+        timeoutMs: 8_000,
+      }),
+    );
+    const [location] = await connection.db
+      .insert(probeLocations)
+      .values({ organizationId: organizationA, name: 'Lagos', slug: 'lagos' })
+      .returning();
+    await repository.updateLocations(organizationA, monitor.id, [location!.id]);
+
+    const round = await new ManualRoundRepository(connection.db).create(organizationA, monitor.id);
+    const [assignment] = await connection.db
+      .select()
+      .from(checkExecutionAssignments)
+      .where(eq(checkExecutionAssignments.roundId, round.id));
+
+    expect(assignment).toMatchObject({
+      executionPolicyVersion: 'dns-v1',
+      requiredEngineVersion: 'watchrail-dns-v1',
+      location: location!.id,
+    });
+  });
+
   it('rejects a foreign organization location before appending a configuration version', async () => {
     const repository = new MonitorRepository(connection.db);
     const monitor = await repository.create(

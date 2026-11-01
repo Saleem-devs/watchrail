@@ -13,6 +13,19 @@ export function tcpSettingsFromForm(formData: FormData) {
   };
 }
 
+export function dnsSettingsFromForm(formData: FormData) {
+  return {
+    name: formEntryString(formData.get('dnsName') ?? undefined),
+    recordType: formEntryString(formData.get('dnsRecordType') ?? undefined),
+    expectedValues: formData
+      .getAll('dnsExpectedValue')
+      .flatMap((value) => formEntryString(value).split(','))
+      .map((value) => value.trim())
+      .filter(Boolean),
+    timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
+  };
+}
+
 export function httpConfigurationTestFromForm(formData: FormData) {
   return {
     httpSettings: {

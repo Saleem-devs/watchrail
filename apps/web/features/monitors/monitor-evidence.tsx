@@ -67,8 +67,13 @@ function singleLocationHealth(
   outcome: 'PASS' | 'FAIL' | 'UNKNOWN',
   reason: string,
   assertionOutcome: AssertionEvaluation['outcome'],
+  protocol: Monitor['type'] = 'HTTP',
 ): 'HEALTHY' | 'UNHEALTHY' | 'INDETERMINATE' {
-  return classifyScheduledObservation({ outcome, reason, assertionOutcome });
+  return classifyScheduledObservation({
+    outcome,
+    reason,
+    assertionOutcome: protocol === 'HTTP' ? assertionOutcome : 'PASS',
+  });
 }
 
 function DiagnosticOutcomeSummary({
@@ -87,7 +92,7 @@ function DiagnosticOutcomeSummary({
   protocol?: Monitor['type'];
 }) {
   const executionOutcome: DiagnosticOutcome =
-    protocol === 'TCP'
+    protocol !== 'HTTP'
       ? outcome
       : (reason === 'CERTIFICATE_EXPIRING' || reason === 'CERTIFICATE_EVIDENCE_UNAVAILABLE') &&
           statusCode !== null
@@ -95,13 +100,19 @@ function DiagnosticOutcomeSummary({
         : stage !== 'HTTP' || statusCode === null
           ? 'NO_RESPONSE'
           : outcome;
-  const health = singleLocationHealth(outcome, reason, assertionEvaluation.outcome);
+  const health = singleLocationHealth(outcome, reason, assertionEvaluation.outcome, protocol);
   return (
     <dl
       className={`grid gap-px border-t border-rail-border bg-rail-border ${protocol === 'HTTP' ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}
     >
       <DiagnosticSignal
-        label={protocol === 'HTTP' ? 'HTTP execution' : 'TCP connection'}
+        label={
+          protocol === 'HTTP'
+            ? 'HTTP execution'
+            : protocol === 'TCP'
+              ? 'TCP connection'
+              : 'DNS lookup'
+        }
         outcome={executionOutcome}
       />
       {protocol === 'HTTP' ? (
@@ -188,6 +199,7 @@ export function ManualDiagnostic({
     result.outcome,
     result.reason,
     assertionEvaluation.outcome,
+    protocol,
   );
 
   return (
@@ -202,15 +214,23 @@ export function ManualDiagnostic({
       </div>
       <dl className="grid grid-cols-2 gap-px bg-rail-border sm:grid-cols-4">
         <Metric
-          label={protocol === 'HTTP' ? 'HTTP' : 'Connection'}
+          label={protocol === 'HTTP' ? 'HTTP' : protocol === 'TCP' ? 'Connection' : 'DNS lookup'}
           value={
             protocol === 'HTTP'
               ? (result.statusCode?.toString() ?? 'No response')
-              : tcpConnectionState(result.outcome, result.reason)
+              : protocol === 'TCP'
+                ? tcpConnectionState(result.outcome, result.reason)
+                : dnsLookupState(result.outcome, result.reason)
           }
         />
         <Metric
-          label={protocol === 'HTTP' ? 'Response' : 'Connect latency'}
+          label={
+            protocol === 'HTTP'
+              ? 'Response'
+              : protocol === 'TCP'
+                ? 'Connect latency'
+                : 'Query latency'
+          }
           value={formatMilliseconds(result.responseTimeMs)}
         />
         <Metric label="Attempt" value={formatMilliseconds(result.attemptDurationMs)} />
@@ -228,13 +248,15 @@ export function ManualDiagnostic({
         <p className="m-0 font-medium text-rail-text">
           {protocol === 'TCP'
             ? tcpDiagnosticLabel(result.reason)
-            : diagnosticFailureLabel({
-                outcome: result.outcome,
-                stage: result.stage,
-                reason: result.reason,
-                statusCode: result.statusCode,
-                assertionEvaluation,
-              })}
+            : protocol === 'DNS'
+              ? dnsDiagnosticLabel(result.reason)
+              : diagnosticFailureLabel({
+                  outcome: result.outcome,
+                  stage: result.stage,
+                  reason: result.reason,
+                  statusCode: result.statusCode,
+                  assertionEvaluation,
+                })}
         </p>
         <p className="mt-1 mb-0 text-rail-subtle">
           {humanize(result.stage)} · {humanize(result.reason)}
@@ -250,6 +272,8 @@ export function ManualDiagnostic({
           {result.redirects.length > 0 ? <RedirectPath redirects={result.redirects} /> : null}
           <EvidenceRetentionNotice />
         </>
+      ) : protocol === 'DNS' ? (
+        <DnsAnswerEvidence answers={result.dnsAnswers} />
       ) : null}
     </section>
   );
@@ -335,6 +359,65 @@ function regionalTcpConnectionState(reason: string): 'Established' | 'Failed' | 
   return 'Indeterminate';
 }
 
+function dnsDiagnosticLabel(reason: string): string {
+  switch (reason) {
+    case 'RECORDS_MATCHED':
+      return 'DNS response matched the configured expectation.';
+    case 'NO_RECORDS':
+      return 'The lookup completed without an answer for this record type.';
+    case 'RECORD_MISMATCH':
+      return 'The DNS response did not contain every expected answer.';
+    case 'NAME_NOT_FOUND':
+      return 'The DNS name does not exist.';
+    case 'DNS_TIMEOUT':
+      return 'The DNS lookup did not complete before the timeout.';
+    case 'PROHIBITED_DESTINATION':
+      return 'The lookup was blocked by Watchrail network safety policy.';
+    default:
+      return 'The DNS check could not produce authoritative answer evidence.';
+  }
+}
+
+function dnsLookupState(
+  outcome: 'PASS' | 'FAIL' | 'UNKNOWN',
+  reason: string,
+): 'Matched' | 'Failed' | 'Indeterminate' {
+  if (outcome === 'UNKNOWN') return 'Indeterminate';
+  return outcome === 'PASS' && reason === 'RECORDS_MATCHED' ? 'Matched' : 'Failed';
+}
+
+function regionalDnsLookupState(reason: string): 'Matched' | 'Failed' | 'Indeterminate' {
+  if (reason === 'RECORDS_MATCHED') return 'Matched';
+  if (['NO_RECORDS', 'RECORD_MISMATCH', 'NAME_NOT_FOUND', 'DNS_TIMEOUT'].includes(reason)) {
+    return 'Failed';
+  }
+  return 'Indeterminate';
+}
+
+function DnsAnswerEvidence({ answers }: { answers?: string[] | undefined }) {
+  return (
+    <div className="border-t border-rail-border px-4 py-3">
+      <h5 className="m-0 text-xs font-semibold text-rail-text">Observed answers</h5>
+      {answers && answers.length > 0 ? (
+        <ul className="mt-2 mb-0 grid list-none gap-1.5 p-0" aria-label="Observed DNS answers">
+          {answers.map((answer, index) => (
+            <li
+              key={`${answer}-${index}`}
+              className="break-all rounded-rail-control border border-rail-border bg-rail-header px-2.5 py-2 font-mono text-xs text-rail-subtle"
+            >
+              {answer}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-1 mb-0 text-xs leading-5 text-rail-muted">
+          No bounded DNS answer evidence was retained for this execution.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0 bg-rail-header px-4 py-3">
@@ -412,6 +495,24 @@ function MultiLocationDiagnostic({
                           value={formatMilliseconds(execution.diagnosticSummary.responseTimeMs)}
                         />
                       </dl>
+                    ) : protocol === 'DNS' ? (
+                      <>
+                        <dl className="m-0 grid grid-cols-2 gap-px bg-rail-border">
+                          <Metric
+                            label={
+                              execution.role === 'PRIMARY'
+                                ? 'Primary lookup'
+                                : 'Confirmation lookup'
+                            }
+                            value={regionalDnsLookupState(execution.diagnosticSummary.reason)}
+                          />
+                          <Metric
+                            label="Query latency"
+                            value={formatMilliseconds(execution.diagnosticSummary.responseTimeMs)}
+                          />
+                        </dl>
+                        <DnsAnswerEvidence answers={execution.diagnosticSummary.dnsAnswers} />
+                      </>
                     ) : (
                       <p className="m-0 px-3 py-2 text-xs text-rail-muted">
                         {execution.role.toLowerCase()} · HTTP{' '}
@@ -498,6 +599,7 @@ export function CheckHistory({
                 singleResult.assertionOutcome ??
                   singleResult.assertionEvaluation?.outcome ??
                   'NOT_EVALUATED',
+                protocol,
               )
             : null;
           const singleAssertionFailed =
@@ -581,15 +683,23 @@ function HistoricalSingleLocationEvidence({
     <div className="mt-3 overflow-hidden rounded-rail-panel border border-rail-border bg-rail-sidebar/45">
       <dl className="grid grid-cols-2 gap-px bg-rail-border sm:grid-cols-4">
         <Metric
-          label={protocol === 'HTTP' ? 'HTTP' : 'Connection'}
+          label={protocol === 'HTTP' ? 'HTTP' : protocol === 'TCP' ? 'Connection' : 'DNS lookup'}
           value={
             protocol === 'HTTP'
               ? (result.statusCode?.toString() ?? 'No response')
-              : tcpConnectionState(result.outcome, result.reason)
+              : protocol === 'TCP'
+                ? tcpConnectionState(result.outcome, result.reason)
+                : dnsLookupState(result.outcome, result.reason)
           }
         />
         <Metric
-          label={protocol === 'HTTP' ? 'Response' : 'Connect latency'}
+          label={
+            protocol === 'HTTP'
+              ? 'Response'
+              : protocol === 'TCP'
+                ? 'Connect latency'
+                : 'Query latency'
+          }
           value={formatMilliseconds(result.responseTimeMs)}
         />
         <Metric label="Attempt" value={formatMilliseconds(result.attemptDurationMs)} />
@@ -606,13 +716,15 @@ function HistoricalSingleLocationEvidence({
       <p className="m-0 border-t border-rail-border px-4 py-3 text-xs text-rail-subtle">
         {protocol === 'TCP'
           ? tcpDiagnosticLabel(result.reason)
-          : diagnosticFailureLabel({
-              outcome: result.outcome,
-              stage: result.stage,
-              reason: result.reason,
-              statusCode: result.statusCode,
-              assertionEvaluation,
-            })}
+          : protocol === 'DNS'
+            ? dnsDiagnosticLabel(result.reason)
+            : diagnosticFailureLabel({
+                outcome: result.outcome,
+                stage: result.stage,
+                reason: result.reason,
+                statusCode: result.statusCode,
+                assertionEvaluation,
+              })}
       </p>
       {protocol === 'HTTP' ? (
         <>
@@ -624,6 +736,8 @@ function HistoricalSingleLocationEvidence({
           {result.redirects.length > 0 ? <RedirectPath redirects={result.redirects} /> : null}
           <EvidenceRetentionNotice />
         </>
+      ) : protocol === 'DNS' ? (
+        <DnsAnswerEvidence answers={result.dnsAnswers} />
       ) : null}
     </div>
   );

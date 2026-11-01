@@ -46,6 +46,7 @@ import {
   type ProbeObservationV1,
   type TlsCertificateEvidenceV1,
   type TlsCertificatePolicy,
+  type DnsRecordType,
 } from '@watchrail/domain';
 
 export const httpMethodEnum = pgEnum('http_method', HTTP_METHODS);
@@ -81,6 +82,10 @@ export const checkResultReasonEnum = pgEnum('check_result_reason', [
   'CONNECTION_REFUSED',
   'HOST_UNREACHABLE',
   'CONNECTION_TIMEOUT',
+  'RECORDS_MATCHED',
+  'NO_RECORDS',
+  'RECORD_MISMATCH',
+  'DNS_TIMEOUT',
   'CERTIFICATE_EXPIRED',
   'CERTIFICATE_NOT_YET_VALID',
   'CERTIFICATE_HOSTNAME_MISMATCH',
@@ -372,6 +377,9 @@ export const monitors = pgTable(
     type: monitorTypeEnum('type').notNull().default('HTTP'),
     tcpHost: text('tcp_host'),
     tcpPort: integer('tcp_port'),
+    dnsName: text('dns_name'),
+    dnsRecordType: varchar('dns_record_type', { length: 8 }).$type<DnsRecordType>(),
+    dnsExpectedValues: jsonb('dns_expected_values').$type<string[]>().notNull().default([]),
 
     // Current projection.
     //
@@ -425,9 +433,11 @@ export const monitors = pgTable(
     check(
       'monitors_protocol_configuration',
       sql`(
-        (${table.type} = 'HTTP' and ${table.tcpHost} is null and ${table.tcpPort} is null)
+        (${table.type}::text = 'HTTP' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null)
         or
-        (${table.type} = 'TCP' and length(btrim(${table.tcpHost})) > 0 and ${table.tcpPort} between 1 and 65535)
+        (${table.type}::text = 'TCP' and length(btrim(${table.tcpHost})) > 0 and ${table.tcpPort} between 1 and 65535 and ${table.dnsName} is null and ${table.dnsRecordType} is null)
+        or
+        (${table.type}::text = 'DNS' and ${table.tcpHost} is null and ${table.tcpPort} is null and length(btrim(${table.dnsName})) > 0 and ${table.dnsRecordType} in ('A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS'))
       )`,
     ),
 
@@ -471,6 +481,10 @@ export const monitors = pgTable(
     check('monitors_request_headers_array', sql`jsonb_typeof(${table.requestHeaders}) = 'array'`),
     check('monitors_request_body_object', sql`jsonb_typeof(${table.requestBody}) = 'object'`),
     check('monitors_assertions_object', sql`jsonb_typeof(${table.assertions}) = 'object'`),
+    check(
+      'monitors_dns_expected_values_array',
+      sql`jsonb_typeof(${table.dnsExpectedValues}) = 'array' and jsonb_array_length(${table.dnsExpectedValues}) <= 32`,
+    ),
   ],
 );
 
@@ -558,6 +572,9 @@ export const monitorConfigurationVersions = pgTable(
     type: monitorTypeEnum('type').notNull().default('HTTP'),
     tcpHost: text('tcp_host'),
     tcpPort: integer('tcp_port'),
+    dnsName: text('dns_name'),
+    dnsRecordType: varchar('dns_record_type', { length: 8 }).$type<DnsRecordType>(),
+    dnsExpectedValues: jsonb('dns_expected_values').$type<string[]>().notNull().default([]),
 
     url: text('url').notNull(),
     method: httpMethodEnum('method').notNull(),
@@ -615,9 +632,11 @@ export const monitorConfigurationVersions = pgTable(
     check(
       'monitor_configuration_versions_protocol_configuration',
       sql`(
-        (${table.type} = 'HTTP' and ${table.tcpHost} is null and ${table.tcpPort} is null)
+        (${table.type}::text = 'HTTP' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null)
         or
-        (${table.type} = 'TCP' and length(btrim(${table.tcpHost})) > 0 and ${table.tcpPort} between 1 and 65535)
+        (${table.type}::text = 'TCP' and length(btrim(${table.tcpHost})) > 0 and ${table.tcpPort} between 1 and 65535 and ${table.dnsName} is null and ${table.dnsRecordType} is null)
+        or
+        (${table.type}::text = 'DNS' and ${table.tcpHost} is null and ${table.tcpPort} is null and length(btrim(${table.dnsName})) > 0 and ${table.dnsRecordType} in ('A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS'))
       )`,
     ),
 
@@ -664,6 +683,10 @@ export const monitorConfigurationVersions = pgTable(
     check(
       'monitor_configuration_versions_assertions_object',
       sql`jsonb_typeof(${table.assertions}) = 'object'`,
+    ),
+    check(
+      'monitor_configuration_versions_dns_expected_values_array',
+      sql`jsonb_typeof(${table.dnsExpectedValues}) = 'array' and jsonb_array_length(${table.dnsExpectedValues}) <= 32`,
     ),
   ],
 );
@@ -974,6 +997,7 @@ export const checkExecutionResults = pgTable(
       .$type<TlsCertificateEvidenceV1[]>()
       .notNull()
       .default([]),
+    dnsAnswers: jsonb('dns_answers').$type<string[]>().notNull().default([]),
     checkedAt: timestamp('checked_at', { withTimezone: true }).notNull(),
 
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -1007,7 +1031,11 @@ export const checkExecutionResults = pgTable(
       sql`(
         ((${table.statusCode} is null) = (${table.responseTimeMs} is null))
         or
-        (${table.statusCode} is null and ${table.responseTimeMs} is not null and ${table.stage} = 'CONNECT' and ${table.reason} = 'CONNECTED')
+        (${table.statusCode} is null and ${table.responseTimeMs} is not null and (
+          (${table.stage} = 'CONNECT' and ${table.reason} = 'CONNECTED')
+          or
+          (${table.stage} = 'DNS' and ${table.reason}::text in ('RECORDS_MATCHED', 'NO_RECORDS', 'RECORD_MISMATCH'))
+        ))
       )`,
     ),
 
@@ -1031,6 +1059,10 @@ export const checkExecutionResults = pgTable(
     check(
       'check_execution_results_tls_certificates_array',
       sql`jsonb_typeof(${table.tlsCertificates}) = 'array'`,
+    ),
+    check(
+      'check_execution_results_dns_answers_array',
+      sql`jsonb_typeof(${table.dnsAnswers}) = 'array' and jsonb_array_length(${table.dnsAnswers}) <= 32`,
     ),
   ],
 );
@@ -1110,6 +1142,7 @@ export interface RegionalDiagnosticSummary {
   checkedAt: string;
   assertionEvaluation?: AssertionEvaluationV1;
   tlsCertificates?: TlsCertificateEvidenceV1[];
+  dnsAnswers?: string[];
 }
 
 export const checkRegionalEvaluations = pgTable(

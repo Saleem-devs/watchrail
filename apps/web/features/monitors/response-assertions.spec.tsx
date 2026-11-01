@@ -659,4 +659,90 @@ describe('assertion diagnostic presentation', () => {
       screen.getByText(/could not produce authoritative connection evidence/i),
     ).toBeInTheDocument();
   });
+
+  it('presents DNS lookup latency and bounded answer evidence without HTTP diagnostics', () => {
+    render(
+      <ManualDiagnostic
+        protocol="DNS"
+        round={{
+          id: 'dns-result',
+          monitorId: 'monitor',
+          trigger: 'MANUAL',
+          status: 'COMPLETED',
+          assignmentStatus: 'COMPLETED',
+          createdAt: '2026-11-01T12:00:00.000Z',
+          result: {
+            outcome: 'PASS',
+            stage: 'DNS',
+            reason: 'RECORDS_MATCHED',
+            statusCode: null,
+            responseTimeMs: 24,
+            attemptDurationMs: 26,
+            redirects: [],
+            dnsAnswers: ['203.0.113.10'],
+            checkedAt: '2026-11-01T12:00:00.000Z',
+          },
+        }}
+        error={undefined}
+      />,
+    );
+
+    expect(screen.getAllByText('DNS lookup')[0]?.parentElement).toHaveTextContent('Matched');
+    expect(screen.getByText('Query latency').parentElement).toHaveTextContent('24 ms');
+    expect(screen.getByText('203.0.113.10')).toBeInTheDocument();
+    expect(screen.queryByText(/Response validation/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/HTTP response/i)).not.toBeInTheDocument();
+  });
+
+  it('presents regional DNS answer mismatches as failed lookups', () => {
+    render(
+      <ManualDiagnostic
+        protocol="DNS"
+        round={{
+          id: 'dns-multi',
+          monitorId: 'monitor',
+          trigger: 'MANUAL',
+          status: 'COMPLETED',
+          assignmentStatus: 'COMPLETED',
+          createdAt: '2026-11-01T12:00:00.000Z',
+          result: {
+            kind: 'MULTI_LOCATION',
+            outcome: 'DOWN',
+            counts: { selected: 1, pass: 0, confirmedFail: 1, unknown: 0, conclusive: 1 },
+            coverage: { numerator: 1, denominator: 1 },
+            reachability: null,
+            finalizedAt: '2026-11-01T12:00:00.000Z',
+            regions: [
+              {
+                location: 'lagos',
+                phase: 'TERMINAL',
+                outcome: 'CONFIRMED_FAIL',
+                terminalReason: 'CONFIRMED_FAILURE',
+                executions: [
+                  {
+                    id: 'dns-execution',
+                    role: 'PRIMARY',
+                    diagnosticSummary: {
+                      stage: 'DNS',
+                      reason: 'RECORD_MISMATCH',
+                      statusCode: null,
+                      responseTimeMs: 31,
+                      attemptDurationMs: 33,
+                      dnsAnswers: ['203.0.113.11'],
+                      checkedAt: '2026-11-01T12:00:00.000Z',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        }}
+        error={undefined}
+      />,
+    );
+
+    expect(screen.getByText('Primary lookup').parentElement).toHaveTextContent('Failed');
+    expect(screen.getByText('Query latency').parentElement).toHaveTextContent('31 ms');
+    expect(screen.getByText('203.0.113.11')).toBeInTheDocument();
+  });
 });

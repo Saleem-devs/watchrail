@@ -20,6 +20,11 @@ export interface StatusPageMonitor {
   id: string;
   name: string;
   url: string;
+  type: 'HTTP' | 'TCP' | 'DNS';
+  configuration:
+    | { type: 'HTTP'; url: string }
+    | { type: 'TCP'; host: string; port: number }
+    | { type: 'DNS'; name: string; recordType: string; expectedValues: string[] };
   lifecycleState: 'ENABLED' | 'PAUSED';
   currentCheck: {
     availability: 'AVAILABLE' | 'UNAVAILABLE' | 'UNKNOWN';

@@ -1,16 +1,20 @@
 import {
   executeHttpCheck,
+  executeDnsCheck,
   executeTcpCheck,
+  NodeDnsQueryResolver,
   NodeHttpExecutor,
   NodeTcpConnector,
   type HttpCheckResult,
   type HttpExecutor,
+  type DnsQueryResolver,
   type TcpConnector,
 } from '@watchrail/check-engine';
 import {
   HTTP_ENGINE_VERSION,
   LEGACY_HTTP_ENGINE_VERSION,
   TCP_ENGINE_VERSION,
+  DNS_ENGINE_VERSION,
   PROBE_MAX_EXECUTION_MS,
   parseResponseAssertions,
   probeEngineSupports,
@@ -19,21 +23,25 @@ import type {
   ProbeExecutionConfigurationV1,
   ProbeLeaseReferenceV1,
   TcpProbeExecutionConfigurationV1,
+  DnsProbeExecutionConfigurationV1,
 } from '@watchrail/contracts';
 import { ProbeCoordinatorError } from './coordinator-client.js';
 import type { ProbeCoordinatorClient } from './coordinator-client.js';
 import type { ProbeAgentConfig } from './config.js';
 
 export class ProbeAgentRuntime {
+  private static readonly legacyClaimFallbackIntervalMs = 30_000;
   private stopping = false;
   private activeAbort: AbortController | null = null;
   private readonly lifecycleAbort = new AbortController();
+  private lastLegacyClaimFallbackAt = Number.NEGATIVE_INFINITY;
 
   constructor(
     private readonly client: ProbeCoordinatorClient,
     private readonly config: ProbeAgentConfig,
     private readonly executor: HttpExecutor = new NodeHttpExecutor(),
     private readonly tcpConnector: TcpConnector = new NodeTcpConnector(),
+    private readonly dnsResolver: DnsQueryResolver = new NodeDnsQueryResolver(),
   ) {}
 
   async run(): Promise<void> {
@@ -91,20 +99,30 @@ export class ProbeAgentRuntime {
         configuration.configurationVersionNumber !== lease.configurationVersionNumber ||
         configuration.executionPolicyVersion !== lease.executionPolicyVersion ||
         configuration.requiredEngineVersion !== lease.requiredEngineVersion ||
-        !probeEngineSupports(TCP_ENGINE_VERSION, configuration.requiredEngineVersion)
+        !probeEngineSupports(DNS_ENGINE_VERSION, configuration.requiredEngineVersion)
       ) {
         throw new ProbeCoordinatorError('INVALID');
       }
-      const result = isTcpConfiguration(configuration)
-        ? await executeTcpCheck(
+      const result = isDnsConfiguration(configuration)
+        ? await executeDnsCheck(
             {
-              host: configuration.host,
-              port: configuration.port,
+              name: configuration.name,
+              recordType: configuration.recordType,
+              expectedValues: configuration.expectedValues,
               timeoutMs: configuration.timeoutMs,
             },
-            { connector: this.tcpConnector, signal: abort.signal },
+            { resolver: this.dnsResolver, signal: abort.signal },
           )
-        : await executeHttpConfiguration(configuration, this.executor, abort.signal);
+        : isTcpConfiguration(configuration)
+          ? await executeTcpCheck(
+              {
+                host: configuration.host,
+                port: configuration.port,
+                timeoutMs: configuration.timeoutMs,
+              },
+              { connector: this.tcpConnector, signal: abort.signal },
+            )
+          : await executeHttpConfiguration(configuration, this.executor, abort.signal);
       const submissionResult =
         lease.requiredEngineVersion === LEGACY_HTTP_ENGINE_VERSION && 'statusCode' in result
           ? withoutTlsEvidence(result)
@@ -184,7 +202,7 @@ export class ProbeAgentRuntime {
     while (!this.stopping) {
       try {
         await this.client.heartbeat(
-          TCP_ENGINE_VERSION,
+          DNS_ENGINE_VERSION,
           this.config.heartbeatIntervalMs,
           this.lifecycleAbort.signal,
         );
@@ -201,6 +219,15 @@ export class ProbeAgentRuntime {
   }
 
   private async claimCompatibleLease(): Promise<ProbeLeaseReferenceV1 | null> {
+    const dnsLease = await this.client.claim(DNS_ENGINE_VERSION, this.lifecycleAbort.signal);
+    if (dnsLease) return dnsLease;
+
+    const now = Date.now();
+    if (now - this.lastLegacyClaimFallbackAt < ProbeAgentRuntime.legacyClaimFallbackIntervalMs) {
+      return null;
+    }
+    this.lastLegacyClaimFallbackAt = now;
+
     const tcpLease = await this.client.claim(TCP_ENGINE_VERSION, this.lifecycleAbort.signal);
     if (tcpLease) return tcpLease;
     const currentLease = await this.client.claim(HTTP_ENGINE_VERSION, this.lifecycleAbort.signal);
@@ -208,6 +235,12 @@ export class ProbeAgentRuntime {
 
     return this.client.claim(LEGACY_HTTP_ENGINE_VERSION, this.lifecycleAbort.signal);
   }
+}
+
+function isDnsConfiguration(
+  configuration: ProbeExecutionConfigurationV1,
+): configuration is DnsProbeExecutionConfigurationV1 {
+  return 'type' in configuration && configuration.type === 'DNS';
 }
 
 function isTcpConfiguration(
@@ -219,7 +252,7 @@ function isTcpConfiguration(
 async function executeHttpConfiguration(
   configuration: Exclude<
     Awaited<ReturnType<ProbeCoordinatorClient['configuration']>>,
-    { type: 'TCP' }
+    { type: 'TCP' } | { type: 'DNS' }
   >,
   executor: HttpExecutor,
   signal: AbortSignal,

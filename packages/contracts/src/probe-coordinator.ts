@@ -79,8 +79,25 @@ export interface TcpProbeExecutionConfigurationV1 {
   timeoutMs: number;
 }
 
+export interface DnsProbeExecutionConfigurationV1 {
+  contractVersion: 1;
+  type: 'DNS';
+  assignmentId: string;
+  attemptId: string;
+  configurationVersionId: string;
+  configurationVersionNumber: number;
+  executionPolicyVersion: string;
+  requiredEngineVersion: string;
+  name: string;
+  recordType: 'A' | 'AAAA' | 'CNAME' | 'MX' | 'TXT' | 'NS';
+  expectedValues: string[];
+  timeoutMs: number;
+}
+
 export type ProbeExecutionConfigurationV1 =
-  HttpProbeExecutionConfigurationV1 | TcpProbeExecutionConfigurationV1;
+  | HttpProbeExecutionConfigurationV1
+  | TcpProbeExecutionConfigurationV1
+  | DnsProbeExecutionConfigurationV1;
 
 export class InvalidProbeCoordinatorContractError extends Error {
   constructor() {
@@ -171,6 +188,46 @@ export function parseProbeHeartbeat(value: unknown): ProbeHeartbeatV1 {
 }
 
 export function parseProbeExecutionConfiguration(value: unknown): ProbeExecutionConfigurationV1 {
+  const dnsKeys = [
+    'assignmentId',
+    'attemptId',
+    'configurationVersionId',
+    'configurationVersionNumber',
+    'contractVersion',
+    'executionPolicyVersion',
+    'expectedValues',
+    'name',
+    'recordType',
+    'requiredEngineVersion',
+    'timeoutMs',
+    'type',
+  ];
+  if (hasExactKeys(value, dnsKeys) && value.type === 'DNS') {
+    if (
+      value.contractVersion !== PROBE_COORDINATOR_CONTRACT_VERSION ||
+      !isUuid(value.assignmentId) ||
+      !isUuid(value.attemptId) ||
+      !isUuid(value.configurationVersionId) ||
+      !isPositiveInteger(value.configurationVersionNumber) ||
+      !isVersion(value.executionPolicyVersion) ||
+      !isVersion(value.requiredEngineVersion) ||
+      typeof value.name !== 'string' ||
+      value.name.length === 0 ||
+      value.name.length > 253 ||
+      !['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS'].includes(String(value.recordType)) ||
+      !Array.isArray(value.expectedValues) ||
+      value.expectedValues.length > 32 ||
+      value.expectedValues.some(
+        (item) => typeof item !== 'string' || item.length === 0 || item.length > 512,
+      ) ||
+      !Number.isInteger(value.timeoutMs) ||
+      Number(value.timeoutMs) < 1_000 ||
+      Number(value.timeoutMs) > 30_000
+    ) {
+      throw new InvalidProbeCoordinatorContractError();
+    }
+    return value as unknown as DnsProbeExecutionConfigurationV1;
+  }
   const tcpKeys = [
     'assignmentId',
     'attemptId',

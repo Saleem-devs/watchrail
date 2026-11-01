@@ -14,6 +14,7 @@ import {
   type StoredRequestHeader,
   type TlsCertificateEvidenceV1,
   type TlsCertificatePolicy,
+  type DnsRecordType,
 } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
 import { applyAvailabilityObservation } from './availability-repository.js';
@@ -67,7 +68,15 @@ export interface ClaimedTcpCheckExecution extends ClaimedCheckExecutionBase {
   followRedirects?: never;
 }
 
-export type ClaimedCheckExecution = ClaimedHttpCheckExecution | ClaimedTcpCheckExecution;
+export interface ClaimedDnsCheckExecution extends ClaimedCheckExecutionBase {
+  type: 'DNS';
+  name: string;
+  recordType: DnsRecordType;
+  expectedValues: string[];
+}
+
+export type ClaimedCheckExecution =
+  ClaimedHttpCheckExecution | ClaimedTcpCheckExecution | ClaimedDnsCheckExecution;
 
 export type CheckExecutionClaimResult =
   | { state: 'CLAIMED'; execution: ClaimedCheckExecution }
@@ -85,6 +94,7 @@ export interface AuthoritativeCheckResult {
   redirects: readonly HttpRedirectHop[];
   assertionEvaluation: AssertionEvaluationV1;
   tlsCertificates?: readonly TlsCertificateEvidenceV1[];
+  dnsAnswers?: readonly string[];
   checkedAt: Date;
 }
 
@@ -108,6 +118,9 @@ export class CheckExecutionRepository {
           type: monitorConfigurationVersions.type,
           tcpHost: monitorConfigurationVersions.tcpHost,
           tcpPort: monitorConfigurationVersions.tcpPort,
+          dnsName: monitorConfigurationVersions.dnsName,
+          dnsRecordType: monitorConfigurationVersions.dnsRecordType,
+          dnsExpectedValues: monitorConfigurationVersions.dnsExpectedValues,
           url: monitorConfigurationVersions.url,
           method: monitorConfigurationVersions.method,
           timeoutMs: monitorConfigurationVersions.timeoutMs,
@@ -169,23 +182,25 @@ export class CheckExecutionRepository {
         execution:
           candidate.type === 'TCP'
             ? createClaimedTcpExecution(candidate, claimed.claimToken, claimed.attemptNumber)
-            : {
-                type: 'HTTP',
-                assignmentId: candidate.assignmentId,
-                claimToken: claimed.claimToken,
-                attemptNumber: claimed.attemptNumber,
-                url: candidate.url,
-                method: candidate.method,
-                timeoutMs: candidate.timeoutMs,
-                followRedirects: candidate.followRedirects,
-                statusPolicy: candidate.statusPolicy,
-                organizationId: candidate.organizationId,
-                monitorId: candidate.monitorId,
-                requestHeaders: candidate.requestHeaders,
-                requestBody: candidate.requestBody,
-                assertions: candidate.assertions,
-                tlsPolicy: candidate.tlsPolicy,
-              },
+            : candidate.type === 'DNS'
+              ? createClaimedDnsExecution(candidate, claimed.claimToken, claimed.attemptNumber)
+              : {
+                  type: 'HTTP',
+                  assignmentId: candidate.assignmentId,
+                  claimToken: claimed.claimToken,
+                  attemptNumber: claimed.attemptNumber,
+                  url: candidate.url,
+                  method: candidate.method,
+                  timeoutMs: candidate.timeoutMs,
+                  followRedirects: candidate.followRedirects,
+                  statusPolicy: candidate.statusPolicy,
+                  organizationId: candidate.organizationId,
+                  monitorId: candidate.monitorId,
+                  requestHeaders: candidate.requestHeaders,
+                  requestBody: candidate.requestBody,
+                  assertions: candidate.assertions,
+                  tlsPolicy: candidate.tlsPolicy,
+                },
       };
     });
   }
@@ -232,6 +247,36 @@ export class CheckExecutionRepository {
       return true;
     });
   }
+}
+
+function createClaimedDnsExecution(
+  candidate: {
+    assignmentId: string;
+    dnsName: string | null;
+    dnsRecordType: DnsRecordType | null;
+    dnsExpectedValues: string[];
+    timeoutMs: number;
+    organizationId: string;
+    monitorId: string;
+  },
+  claimToken: string,
+  attemptNumber: number,
+): ClaimedDnsCheckExecution {
+  if (candidate.dnsName === null || candidate.dnsRecordType === null) {
+    throw new Error('DNS execution configuration is incomplete.');
+  }
+  return {
+    type: 'DNS',
+    assignmentId: candidate.assignmentId,
+    claimToken,
+    attemptNumber,
+    name: candidate.dnsName,
+    recordType: candidate.dnsRecordType,
+    expectedValues: candidate.dnsExpectedValues,
+    timeoutMs: candidate.timeoutMs,
+    organizationId: candidate.organizationId,
+    monitorId: candidate.monitorId,
+  };
 }
 
 function createClaimedTcpExecution(
@@ -295,6 +340,7 @@ export async function finalizeCheckExecution(
     redirects,
     assertionEvaluation,
     tlsCertificates,
+    dnsAnswers: [...(input.result.dnsAnswers ?? [])],
     checkedAt: input.result.checkedAt,
   });
 

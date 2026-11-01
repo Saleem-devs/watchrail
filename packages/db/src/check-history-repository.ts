@@ -86,6 +86,7 @@ export interface CheckHistoryDetail extends Omit<CheckHistoryListItem, 'result'>
         redirects: HttpRedirectHop[];
         assertionEvaluation: AssertionEvaluationV1;
         tlsCertificates: TlsCertificateEvidenceV1[];
+        dnsAnswers: string[];
         checkedAt: Date;
       }
     | {
@@ -193,6 +194,7 @@ interface HistoryRow {
   redirects: HttpRedirectHop[] | null;
   assertionEvaluation: AssertionEvaluationV1 | null;
   tlsCertificates: TlsCertificateEvidenceV1[] | null;
+  dnsAnswers: string[] | null;
   checkedAt: Date | null;
 }
 
@@ -734,6 +736,7 @@ export class CheckHistoryRepository {
             redirects: parseHttpRedirectHops(row.redirects ?? []),
             assertionEvaluation: required(assertionEvaluation),
             tlsCertificates: parseTlsCertificateEvidenceList(row.tlsCertificates ?? []),
+            dnsAnswers: parseDnsAnswers(row.dnsAnswers ?? []),
             checkedAt: required(row.checkedAt),
           }
         : null,
@@ -776,6 +779,7 @@ const historySelection = {
   redirects: checkExecutionResults.redirects,
   assertionEvaluation: checkExecutionResults.assertionEvaluation,
   tlsCertificates: checkExecutionResults.tlsCertificates,
+  dnsAnswers: checkExecutionResults.dnsAnswers,
   checkedAt: checkExecutionResults.checkedAt,
 };
 
@@ -966,6 +970,7 @@ function parseRegionalDiagnosticSummary(value: unknown): RegionalDiagnosticSumma
     ...(Object.hasOwn(value, 'assertionEvaluation') ? ['assertionEvaluation'] : []),
     'attemptDurationMs',
     'checkedAt',
+    ...(Object.hasOwn(value, 'dnsAnswers') ? ['dnsAnswers'] : []),
     'reason',
     'responseTimeMs',
     'stage',
@@ -978,6 +983,7 @@ function parseRegionalDiagnosticSummary(value: unknown): RegionalDiagnosticSumma
   if (Object.hasOwn(value, 'tlsCertificates')) {
     parseTlsCertificateEvidenceList(value.tlsCertificates);
   }
+  if (Object.hasOwn(value, 'dnsAnswers')) parseDnsAnswers(value.dnsAnswers);
   const validStage = ['DNS', 'CONNECT', 'TLS', 'HTTP', 'PROBE'].includes(String(value.stage));
   const validTime = (candidate: unknown) =>
     candidate === null ||
@@ -1003,6 +1009,20 @@ function parseRegionalDiagnosticSummary(value: unknown): RegionalDiagnosticSumma
     throw new Error('Stored regional diagnostic summary is invalid.');
   }
   return value as unknown as RegionalDiagnosticSummary;
+}
+
+function parseDnsAnswers(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > 32) {
+    throw new Error('Stored DNS answer evidence is invalid.');
+  }
+  const items: unknown[] = value;
+  if (items.some((item) => typeof item !== 'string' || item.length === 0 || item.length > 512)) {
+    throw new Error('Stored DNS answer evidence is invalid.');
+  }
+  return items.map((item) => {
+    if (typeof item !== 'string') throw new Error('Stored DNS answer evidence is invalid.');
+    return item;
+  });
 }
 
 function required<T>(value: T | null): T {

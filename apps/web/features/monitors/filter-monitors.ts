@@ -76,6 +76,10 @@ export function filterMonitors(
       (monitor.configuration?.type === 'TCP' &&
         `${monitor.configuration.host}:${monitor.configuration.port}`
           .toLowerCase()
+          .includes(needle)) ||
+      (monitor.configuration?.type === 'DNS' &&
+        `${monitor.configuration.recordType} ${monitor.configuration.name}`
+          .toLowerCase()
           .includes(needle));
     return matchesCondition && matchesQuery;
   });

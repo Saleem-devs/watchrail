@@ -5,7 +5,7 @@ import {
   type ProbeLeaseReferenceV1,
   type ProbeResultSubmissionReferenceV1,
 } from '@watchrail/contracts';
-import type { HttpCheckResult, TcpCheckResult } from '@watchrail/check-engine';
+import type { DnsCheckResult, HttpCheckResult, TcpCheckResult } from '@watchrail/check-engine';
 
 export class ProbeCoordinatorError extends Error {
   constructor(
@@ -98,7 +98,7 @@ export class ProbeCoordinatorClient {
   serializeSubmission(
     lease: ProbeLeaseReferenceV1,
     engineVersion: string,
-    result: HttpCheckResult | TcpCheckResult,
+    result: HttpCheckResult | TcpCheckResult | DnsCheckResult,
   ): string {
     return JSON.stringify({
       reference: reference(lease, engineVersion),
@@ -107,28 +107,40 @@ export class ProbeCoordinatorClient {
   }
 
   private async request(path: string, init: RequestInit): Promise<Response> {
-    let response: Response;
-    try {
-      response = await this.fetcher(`${this.baseUrl}${path}`, {
-        ...init,
-        redirect: 'error',
-        signal: requestSignal(init.signal, this.requestTimeoutMs),
-        headers: {
-          authorization: `Bearer ${this.credential}`,
-          'content-type': 'application/json',
-          ...init.headers,
-        },
-      });
-    } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') throw error;
-      throw new ProbeCoordinatorError('TRANSIENT');
+    for (let retry = 0; retry <= 3; retry += 1) {
+      let response: Response;
+      try {
+        response = await this.fetcher(`${this.baseUrl}${path}`, {
+          ...init,
+          redirect: 'error',
+          signal: requestSignal(init.signal, this.requestTimeoutMs),
+          headers: {
+            authorization: `Bearer ${this.credential}`,
+            'content-type': 'application/json',
+            ...init.headers,
+          },
+        });
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') throw error;
+        throw new ProbeCoordinatorError('TRANSIENT');
+      }
+      if (response.ok) return response;
+      if (response.status === 401 || response.status === 403)
+        throw new ProbeCoordinatorError('AUTH');
+      if (response.status === 409) throw new ProbeCoordinatorError('STALE');
+      if (response.status === 429 && retry < 3) {
+        await waitForRetry(response.headers.get('retry-after'), init.signal);
+        continue;
+      }
+      if (response.status >= 500 || response.status === 429) {
+        throw new ProbeCoordinatorError(
+          'TRANSIENT',
+          `Probe coordinator returned ${response.status}.`,
+        );
+      }
+      throw new ProbeCoordinatorError('INVALID');
     }
-    if (response.ok) return response;
-    if (response.status === 401 || response.status === 403) throw new ProbeCoordinatorError('AUTH');
-    if (response.status === 409) throw new ProbeCoordinatorError('STALE');
-    if (response.status >= 500 || response.status === 429)
-      throw new ProbeCoordinatorError('TRANSIENT');
-    throw new ProbeCoordinatorError('INVALID');
+    throw new ProbeCoordinatorError('TRANSIENT');
   }
 }
 
@@ -171,6 +183,23 @@ export async function enrollProbeAgent(
 function requestSignal(external: AbortSignal | null | undefined, timeoutMs: number): AbortSignal {
   const timeout = AbortSignal.timeout(timeoutMs);
   return external ? AbortSignal.any([external, timeout]) : timeout;
+}
+
+function waitForRetry(retryAfter: string | null, signal: AbortSignal | null | undefined) {
+  const seconds = Number(retryAfter);
+  const delayMs = Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds, 60) * 1_000 : 1_000;
+  if (signal?.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, delayMs);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 function reference(

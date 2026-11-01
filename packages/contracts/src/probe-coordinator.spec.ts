@@ -129,4 +129,26 @@ describe('probe coordinator contracts', () => {
       parseProbeExecutionConfiguration({ ...configuration, url: 'https://example.com' }),
     ).toThrow(InvalidProbeCoordinatorContractError);
   });
+
+  it('parses an exact protocol-specific DNS execution configuration', () => {
+    const configuration = {
+      contractVersion: 1,
+      type: 'DNS',
+      assignmentId,
+      attemptId,
+      configurationVersionId,
+      configurationVersionNumber: 9,
+      executionPolicyVersion: 'dns-v1',
+      requiredEngineVersion: 'watchrail-dns-v1',
+      name: 'api.example.com',
+      recordType: 'A',
+      expectedValues: ['203.0.113.10'],
+      timeoutMs: 8_000,
+    } as const;
+
+    expect(parseProbeExecutionConfiguration(configuration)).toEqual(configuration);
+    expect(() =>
+      parseProbeExecutionConfiguration({ ...configuration, host: 'api.example.com' }),
+    ).toThrow(InvalidProbeCoordinatorContractError);
+  });
 });

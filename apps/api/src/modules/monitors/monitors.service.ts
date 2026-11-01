@@ -51,12 +51,14 @@ import {
   parseHttpMonitorSettings,
   parseHttpStatusPolicy,
   parseTcpMonitorSettings,
+  parseDnsMonitorSettings,
   parseMonitorConfigurationUpdate,
   parseMonitorLifecycleSettings,
   parseMonitorLocationSettings,
   parseMonitorScheduleSettings,
   RequestHeaderInputError,
   TcpMonitorInputError,
+  DnsMonitorInputError,
 } from '@watchrail/domain';
 import type { CreateMonitorCommand } from '@watchrail/domain';
 import { storeRequestHeaders } from '@watchrail/http-header-security';
@@ -86,7 +88,7 @@ export class MonitorsService {
       await this.assertProject(context, projectId);
       const monitor = createMonitor(command);
       const monitorId = randomUUID();
-      if (monitor.type === 'TCP') {
+      if (monitor.type !== 'HTTP') {
         return await this.monitors.create(
           context.organizationId,
           monitorId,
@@ -125,6 +127,32 @@ export class MonitorsService {
           message: error.message,
           fields: error instanceof MonitorInputError ? error.fields : { assertions: error.issues },
         });
+      }
+      throw error;
+    }
+  }
+
+  async updateDnsSettings(
+    context: RequestContext,
+    monitorId: string,
+    value: unknown,
+  ): Promise<MonitorRecord> {
+    try {
+      const settings = parseDnsMonitorSettings(value);
+      return await this.monitors.updateDnsSettings(context.organizationId, monitorId, settings);
+    } catch (error) {
+      if (error instanceof DnsMonitorInputError) {
+        throw new BadRequestException({
+          code: 'VALIDATION_FAILED',
+          message: error.message,
+          fields: error.fields,
+        });
+      }
+      if (error instanceof MonitorUpdateNotFoundError) {
+        throw new NotFoundException({ code: 'MONITOR_NOT_FOUND', message: error.message });
+      }
+      if (error instanceof MonitorProtocolMismatchError) {
+        throw new ConflictException({ code: 'MONITOR_PROTOCOL_MISMATCH', message: error.message });
       }
       throw error;
     }

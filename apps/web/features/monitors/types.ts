@@ -21,10 +21,18 @@ export interface TlsCertificateEvidence {
 export interface Monitor {
   id: string;
   projectId?: string;
-  type: 'HTTP' | 'TCP';
+  type: 'HTTP' | 'TCP' | 'DNS';
   name: string;
   url: string;
-  configuration: { type: 'HTTP'; url: string } | { type: 'TCP'; host: string; port: number };
+  configuration:
+    | { type: 'HTTP'; url: string }
+    | { type: 'TCP'; host: string; port: number }
+    | {
+        type: 'DNS';
+        name: string;
+        recordType: 'A' | 'AAAA' | 'CNAME' | 'MX' | 'TXT' | 'NS';
+        expectedValues: string[];
+      };
   method: string;
   lifecycleState: 'ENABLED' | 'PAUSED';
   timeoutMs: number;
@@ -102,6 +110,10 @@ export interface FieldErrors {
   host?: string[];
   port?: string[];
   tcpSettings?: string[];
+  dnsName?: string[];
+  dnsRecordType?: string[];
+  dnsExpectedValues?: string[];
+  dnsSettings?: string[];
   statusPolicy?: string[];
   method?: string[];
   timeoutMs?: string[];
@@ -203,6 +215,7 @@ export interface ManualRound {
         assertionOutcome?: AssertionEvaluation['outcome'];
         assertionEvaluation?: AssertionEvaluation;
         tlsCertificates?: TlsCertificateEvidence[];
+        dnsAnswers?: string[];
         checkedAt: string;
       }
     | {
@@ -235,6 +248,7 @@ export interface ManualRound {
               checkedAt: string;
               assertionEvaluation?: AssertionEvaluation;
               tlsCertificates?: TlsCertificateEvidence[];
+              dnsAnswers?: string[];
             } | null;
           }>;
         }>;
