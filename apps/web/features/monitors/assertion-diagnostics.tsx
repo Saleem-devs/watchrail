@@ -28,6 +28,9 @@ export function diagnosticFailureLabel({
 }): string {
   if (assertionEvaluation.outcome === 'FAIL') return 'Response assertion failed';
   if (reason === 'CERTIFICATE_EXPIRING') return 'Certificate expiry policy failed';
+  if (reason === 'CERTIFICATE_EVIDENCE_UNAVAILABLE') {
+    return 'Certificate evidence was unavailable';
+  }
   if (outcome === 'UNKNOWN' || stage !== 'HTTP' || statusCode === null) {
     return 'Transport failure — no response was available to evaluate';
   }

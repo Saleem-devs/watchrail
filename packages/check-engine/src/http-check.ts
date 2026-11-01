@@ -114,6 +114,7 @@ export async function executeHttpCheck(
 
     return classifyHttpExecution({
       execution,
+      url: input.url,
       statusPolicy: input.statusPolicy ?? { type: 'ANY_2XX' },
       headerAssertions: input.headerAssertions ?? [],
       textBodyAssertions,
@@ -203,6 +204,7 @@ function encodeRequestBody(
 
 function classifyHttpExecution(input: {
   execution: HttpExecutionResult;
+  url: string;
   statusPolicy: NonNullable<HttpCheckInput['statusPolicy']>;
   headerAssertions: NonNullable<HttpCheckInput['headerAssertions']>;
   textBodyAssertions: NonNullable<HttpCheckInput['textBodyAssertions']>;
@@ -214,6 +216,7 @@ function classifyHttpExecution(input: {
 }): HttpCheckResult {
   const {
     execution,
+    url,
     statusPolicy,
     headerAssertions,
     textBodyAssertions,
@@ -277,6 +280,28 @@ function classifyHttpExecution(input: {
     evaluateJsonBodyAssertions(jsonBodyAssertions, execution.body),
   );
 
+  if (
+    successful &&
+    assertionEvaluation.outcome !== 'FAIL' &&
+    !hasCompleteCertificateEvidence(tlsPolicy, url, execution.redirects, tlsCertificates)
+  ) {
+    return {
+      outcome: 'UNKNOWN',
+      stage: 'TLS',
+      reason: 'CERTIFICATE_EVIDENCE_UNAVAILABLE',
+      statusCode: execution.statusCode,
+      responseTimeMs: execution.responseTimeMs,
+      attemptDurationMs,
+      checkedAt,
+      redirects: execution.redirects,
+      ...tlsEvidence(tlsCertificates),
+      assertionEvaluation,
+      ...(captureResponseEvidence === true
+        ? { responseEvidence: { headers: execution.headers, body: execution.body } }
+        : {}),
+    };
+  }
+
   if (successful && certificateExpiresWithinPolicy(tlsPolicy, tlsCertificates, checkedAt)) {
     return {
       outcome: 'FAIL',
@@ -338,6 +363,28 @@ function certificateExpiresWithinPolicy(
   if (policy.type === 'DISABLED') return false;
   const threshold = checkedAt.getTime() + policy.days * 86_400_000;
   return certificates.some((certificate) => Date.parse(certificate.validTo) < threshold);
+}
+
+function hasCompleteCertificateEvidence(
+  policy: NonNullable<HttpCheckInput['tlsPolicy']>,
+  initialUrl: string,
+  redirects: HttpCheckResult['redirects'],
+  certificates: NonNullable<HttpCheckResult['tlsCertificates']>,
+): boolean {
+  if (policy.type === 'DISABLED') return true;
+  const requiredOrigins = new Set<string>();
+  addHttpsOrigin(requiredOrigins, initialUrl);
+  for (const redirect of redirects) {
+    addHttpsOrigin(requiredOrigins, redirect.source.origin);
+    if (redirect.destination) addHttpsOrigin(requiredOrigins, redirect.destination.origin);
+  }
+  const observedOrigins = new Set(certificates.map((certificate) => certificate.origin));
+  return [...requiredOrigins].every((origin) => observedOrigins.has(origin));
+}
+
+function addHttpsOrigin(origins: Set<string>, value: string): void {
+  const url = new URL(value);
+  if (url.protocol === 'https:') origins.add(url.origin);
 }
 
 function statusMatches(

@@ -20,7 +20,7 @@ export interface SafeTransientCheckResult {
     transport: 'PASS' | 'FAIL' | 'UNKNOWN';
     statusPolicy: 'PASS' | 'FAIL' | 'NOT_EVALUATED';
     assertions: 'PASS' | 'FAIL' | 'NOT_EVALUATED';
-    tlsCertificate: 'PASS' | 'FAIL' | 'NOT_EVALUATED';
+    tlsCertificate: 'PASS' | 'FAIL' | 'NOT_EVALUATED' | 'DISABLED';
   };
   response: {
     headers: Array<{ name: string; values: string[]; redacted: boolean }>;
@@ -60,11 +60,13 @@ export function toSafeTransientCheckResult(
             : 'FAIL',
       assertions: result.assertionEvaluation.outcome,
       tlsCertificate:
-        tlsPolicy.type === 'DISABLED' || !result.tlsCertificates?.length
-          ? 'NOT_EVALUATED'
-          : result.reason === 'CERTIFICATE_EXPIRING'
-            ? 'FAIL'
-            : 'PASS',
+        tlsPolicy.type === 'DISABLED'
+          ? 'DISABLED'
+          : result.reason === 'CERTIFICATE_EVIDENCE_UNAVAILABLE' || !result.tlsCertificates?.length
+            ? 'NOT_EVALUATED'
+            : result.reason === 'CERTIFICATE_EXPIRING'
+              ? 'FAIL'
+              : 'PASS',
     },
     response: sanitizeResponseEvidence(responseEvidence, method, secretValues),
   };
@@ -76,7 +78,8 @@ function transportOutcome(
   if (
     result.reason === 'COMPLETED' ||
     result.reason === 'UNEXPECTED_STATUS' ||
-    result.reason === 'CERTIFICATE_EXPIRING'
+    result.reason === 'CERTIFICATE_EXPIRING' ||
+    result.reason === 'CERTIFICATE_EVIDENCE_UNAVAILABLE'
   )
     return 'PASS';
   if (result.outcome === 'UNKNOWN') return 'UNKNOWN';

@@ -223,6 +223,7 @@ function parseResult(value: unknown): AuthoritativeCheckResult {
       'CERTIFICATE_HOSTNAME_MISMATCH',
       'CERTIFICATE_UNTRUSTED',
       'CERTIFICATE_EXPIRING',
+      'CERTIFICATE_EVIDENCE_UNAVAILABLE',
       'TLS_HANDSHAKE_FAILED',
       'PROHIBITED_DESTINATION',
       'REDIRECT_LOOP',
@@ -291,6 +292,9 @@ function expectedClassification(reason: string): { outcome: string; stage: strin
     ].includes(reason)
   ) {
     return { outcome: 'FAIL', stage: 'TLS' };
+  }
+  if (reason === 'CERTIFICATE_EVIDENCE_UNAVAILABLE') {
+    return { outcome: 'UNKNOWN', stage: 'TLS' };
   }
   return { outcome: 'UNKNOWN', stage: 'PROBE' };
 }

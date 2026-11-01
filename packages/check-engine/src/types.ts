@@ -142,6 +142,12 @@ export type HttpCheckResult =
         reason: 'CERTIFICATE_EXPIRING';
       })
   | (HttpCheckTiming &
+      HttpResponseEvidence & {
+        outcome: 'UNKNOWN';
+        stage: 'TLS';
+        reason: 'CERTIFICATE_EVIDENCE_UNAVAILABLE';
+      })
+  | (HttpCheckTiming &
       (HttpResponseEvidence | { statusCode: null; responseTimeMs: null }) & {
         outcome: 'FAIL';
         stage: 'HTTP';

@@ -16,7 +16,11 @@ export interface IncidentObservationInput {
 export function classifyScheduledObservation(
   input: IncidentObservationInput,
 ): ScheduledObservation {
-  if (input.reason === 'INTERNAL_ERROR' || input.reason === 'PROHIBITED_DESTINATION') {
+  if (
+    input.reason === 'INTERNAL_ERROR' ||
+    input.reason === 'PROHIBITED_DESTINATION' ||
+    input.reason === 'CERTIFICATE_EVIDENCE_UNAVAILABLE'
+  ) {
     return 'INDETERMINATE';
   }
 

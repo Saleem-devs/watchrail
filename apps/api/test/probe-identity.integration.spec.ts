@@ -419,6 +419,38 @@ describe('probe enrollment and machine credentials API', () => {
       requiredEngineVersion: 'watchrail-http-v2',
       tlsPolicy: { type: 'MINIMUM_VALIDITY', days: 14 },
     });
+    await expect(
+      coordinatorService.submit(machine, tlsLease.attemptId, tlsLease.claimToken, {
+        reference: {
+          contractVersion: 1,
+          assignmentId: tlsLease.assignmentId,
+          attemptId: tlsLease.attemptId,
+          attemptNumber: tlsLease.attemptNumber,
+          engineVersion: 'watchrail-http-v2',
+        },
+        result: {
+          outcome: 'UNKNOWN',
+          stage: 'TLS',
+          reason: 'CERTIFICATE_EVIDENCE_UNAVAILABLE',
+          statusCode: 200,
+          responseTimeMs: 20,
+          attemptDurationMs: 25,
+          redirects: [],
+          assertionEvaluation: { contractVersion: 1, outcome: 'PASS', diagnostics: [] },
+          checkedAt: new Date().toISOString(),
+        },
+      }),
+    ).resolves.toEqual({ state: 'ACCEPTED', duplicate: false });
+    const [storedTlsResult] = (
+      await database.$client.query<{ outcome: string; reason: string }>(
+        `select outcome, reason from check_execution_results where assignment_id = $1`,
+        [tlsLease.assignmentId],
+      )
+    ).rows;
+    expect(storedTlsResult).toEqual({
+      outcome: 'UNKNOWN',
+      reason: 'CERTIFICATE_EVIDENCE_UNAVAILABLE',
+    });
   });
 
   async function createLocation(slug: string): Promise<LocationResponse> {

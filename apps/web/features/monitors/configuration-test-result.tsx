@@ -4,13 +4,14 @@ import { formatMilliseconds, humanize } from './formatting';
 import type { ConfigurationTestResult, ManualRoundResultRedirect } from './types';
 import { TlsCertificateEvidencePanel } from './tls-certificate-evidence';
 
-type SignalOutcome = 'PASS' | 'FAIL' | 'UNKNOWN' | 'NOT_EVALUATED';
+type SignalOutcome = 'PASS' | 'FAIL' | 'UNKNOWN' | 'NOT_EVALUATED' | 'DISABLED';
 
 const tone: Record<SignalOutcome, string> = {
   PASS: 'border-rail-success/35 bg-rail-success/10 text-rail-success',
   FAIL: 'border-rail-danger/35 bg-rail-danger/10 text-rail-danger',
   UNKNOWN: 'border-rail-warning/35 bg-rail-warning/10 text-rail-warning',
   NOT_EVALUATED: 'border-rail-border-strong bg-rail-surface text-rail-subtle',
+  DISABLED: 'border-rail-border-strong bg-rail-surface text-rail-muted',
 };
 
 export function ConfigurationTestPanel({
@@ -103,7 +104,7 @@ export function ConfigurationTestPanel({
 
 function configurationTestOutcome(signals: ConfigurationTestResult['signals']): SignalOutcome {
   const outcomes = [signals.transport, signals.statusPolicy, signals.assertions];
-  if (signals.tlsCertificate && signals.tlsCertificate !== 'NOT_EVALUATED') {
+  if (signals.tlsCertificate && signals.tlsCertificate !== 'DISABLED') {
     outcomes.push(signals.tlsCertificate);
   }
   if (outcomes.includes('FAIL')) return 'FAIL';
@@ -138,7 +139,11 @@ function SignalBadge({ outcome }: { outcome: SignalOutcome }) {
     <span
       className={`inline-flex min-h-7 items-center rounded-rail-control border px-2 py-1 text-xs font-semibold ${tone[outcome]}`}
     >
-      {outcome === 'NOT_EVALUATED' ? 'Not evaluated' : humanize(outcome)}
+      {outcome === 'NOT_EVALUATED'
+        ? 'Not evaluated'
+        : outcome === 'DISABLED'
+          ? 'Disabled'
+          : humanize(outcome)}
     </span>
   );
 }

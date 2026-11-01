@@ -261,7 +261,7 @@ describe('response assertion configuration', () => {
             transport: 'PASS',
             statusPolicy: 'PASS',
             assertions: 'PASS',
-            tlsCertificate: 'NOT_EVALUATED',
+            tlsCertificate: 'DISABLED',
           },
           response: {
             headers: [],
@@ -273,6 +273,41 @@ describe('response assertion configuration', () => {
     );
 
     expect(screen.getByText('Configuration test').parentElement).toHaveTextContent(/pass/i);
+    expect(screen.getByText('TLS expiry').parentElement).toHaveTextContent(/disabled/i);
+  });
+
+  it('shows an unknown result when enabled TLS evidence was not evaluated', () => {
+    render(
+      <ConfigurationTestPanel
+        onDismiss={() => undefined}
+        result={{
+          result: {
+            outcome: 'UNKNOWN',
+            stage: 'TLS',
+            reason: 'CERTIFICATE_EVIDENCE_UNAVAILABLE',
+            statusCode: 200,
+            responseTimeMs: 18,
+            attemptDurationMs: 20,
+            checkedAt: '2026-10-31T20:00:00.000Z',
+            redirects: [],
+            assertionEvaluation: { contractVersion: 1, outcome: 'PASS', diagnostics: [] },
+          },
+          signals: {
+            transport: 'PASS',
+            statusPolicy: 'PASS',
+            assertions: 'PASS',
+            tlsCertificate: 'NOT_EVALUATED',
+          },
+          response: {
+            headers: [],
+            withheldHeaderCount: 0,
+            body: { state: 'UNAVAILABLE', reason: 'NOT_CAPTURED' },
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Configuration test').parentElement).toHaveTextContent(/unknown/i);
     expect(screen.getByText('TLS expiry').parentElement).toHaveTextContent(/not evaluated/i);
   });
 

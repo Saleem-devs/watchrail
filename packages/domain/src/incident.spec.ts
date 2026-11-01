@@ -11,6 +11,7 @@ describe('classifyIncidentObservation', () => {
     ['FAIL', 'REQUEST_TIMEOUT', 'PASS', 'UNHEALTHY'],
     ['UNKNOWN', 'INTERNAL_ERROR', 'PASS', 'INDETERMINATE'],
     ['UNKNOWN', 'PROHIBITED_DESTINATION', 'PASS', 'INDETERMINATE'],
+    ['UNKNOWN', 'CERTIFICATE_EVIDENCE_UNAVAILABLE', 'PASS', 'INDETERMINATE'],
     ['PASS', 'COMPLETED', 'NOT_EVALUATED', 'INDETERMINATE'],
   ] as const)('%s / %s / %s becomes %s', (outcome, reason, assertionOutcome, expected) => {
     expect(classifyIncidentObservation({ outcome, reason, assertionOutcome })).toBe(expected);

@@ -89,7 +89,7 @@ describe('transient response evidence', () => {
       transport: 'FAIL',
       statusPolicy: 'NOT_EVALUATED',
       assertions: 'NOT_EVALUATED',
-      tlsCertificate: 'NOT_EVALUATED',
+      tlsCertificate: 'DISABLED',
     });
   });
 
@@ -170,6 +170,32 @@ describe('transient response evidence', () => {
     });
   });
 
+  it('reports unavailable enabled certificate evidence as indeterminate', () => {
+    const result: HttpCheckResult = {
+      outcome: 'UNKNOWN',
+      stage: 'TLS',
+      reason: 'CERTIFICATE_EVIDENCE_UNAVAILABLE',
+      statusCode: 200,
+      responseTimeMs: 9,
+      attemptDurationMs: 10,
+      checkedAt: new Date('2026-10-31T20:00:00.000Z'),
+      redirects: [],
+      assertionEvaluation: { contractVersion: 1, outcome: 'PASS', diagnostics: [] },
+    };
+
+    expect(
+      toSafeTransientCheckResult(result, { type: 'ANY_2XX' }, 'GET', [], {
+        type: 'MINIMUM_VALIDITY',
+        days: 14,
+      }).signals,
+    ).toEqual({
+      transport: 'PASS',
+      statusPolicy: 'PASS',
+      assertions: 'PASS',
+      tlsCertificate: 'NOT_EVALUATED',
+    });
+  });
+
   it.each([
     ['REDIRECT_LOOP', 302],
     ['REQUEST_TIMEOUT', 200],
@@ -193,7 +219,7 @@ describe('transient response evidence', () => {
         transport: 'FAIL',
         statusPolicy: 'NOT_EVALUATED',
         assertions: 'NOT_EVALUATED',
-        tlsCertificate: 'NOT_EVALUATED',
+        tlsCertificate: 'DISABLED',
       });
     },
   );

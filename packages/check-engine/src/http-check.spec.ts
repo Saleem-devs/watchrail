@@ -115,6 +115,81 @@ describe('executeHttpCheck', () => {
     });
   });
 
+  it('returns UNKNOWN when certificate monitoring is enabled without certificate evidence', async () => {
+    const executor: HttpExecutor = {
+      execute: () =>
+        Promise.resolve({
+          type: 'RESPONSE',
+          statusCode: 200,
+          responseTimeMs: 20,
+          headers: [],
+          body: { state: 'NOT_REQUESTED' },
+          redirects: [],
+        }),
+    };
+
+    const result = await executeHttpCheck(
+      {
+        url: 'https://example.com',
+        method: 'GET',
+        followRedirects: true,
+        timeoutMs: 10_000,
+        tlsPolicy: { type: 'MINIMUM_VALIDITY', days: 7 },
+      },
+      { executor, clock: createClock() },
+    );
+
+    expect(result).toMatchObject({
+      outcome: 'UNKNOWN',
+      stage: 'TLS',
+      reason: 'CERTIFICATE_EVIDENCE_UNAVAILABLE',
+      statusCode: 200,
+    });
+  });
+
+  it('returns UNKNOWN when an HTTPS redirect chain has incomplete certificate evidence', async () => {
+    const executor: HttpExecutor = {
+      execute: () =>
+        Promise.resolve({
+          type: 'RESPONSE',
+          statusCode: 200,
+          responseTimeMs: 20,
+          headers: [],
+          body: { state: 'NOT_REQUESTED' },
+          redirects: [
+            {
+              sequence: 1,
+              statusCode: 302,
+              source: { targetId: 1, origin: 'https://example.com:443' },
+              destination: { targetId: 2, origin: 'https://www.example.com:443' },
+              responseTimeMs: 10,
+              headers: 'PRESERVED',
+            },
+          ],
+          tlsCertificates: [expiringCertificate],
+        }),
+    };
+
+    const result = await executeHttpCheck(
+      {
+        url: 'https://example.com',
+        method: 'GET',
+        followRedirects: true,
+        timeoutMs: 10_000,
+        tlsPolicy: { type: 'MINIMUM_VALIDITY', days: 7 },
+      },
+      { executor, clock: createClock() },
+    );
+
+    expect(result).toMatchObject({
+      outcome: 'UNKNOWN',
+      stage: 'TLS',
+      reason: 'CERTIFICATE_EVIDENCE_UNAVAILABLE',
+      statusCode: 200,
+      tlsCertificates: [expiringCertificate],
+    });
+  });
+
   it('does not apply certificate expiry thresholds when the TLS policy is disabled', async () => {
     const executor: HttpExecutor = {
       execute: () =>

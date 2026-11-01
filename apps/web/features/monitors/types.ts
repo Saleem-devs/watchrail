@@ -157,7 +157,7 @@ export interface ConfigurationTestResult {
     transport: 'PASS' | 'FAIL' | 'UNKNOWN';
     statusPolicy: 'PASS' | 'FAIL' | 'NOT_EVALUATED';
     assertions: 'PASS' | 'FAIL' | 'NOT_EVALUATED';
-    tlsCertificate?: 'PASS' | 'FAIL' | 'NOT_EVALUATED';
+    tlsCertificate?: 'PASS' | 'FAIL' | 'NOT_EVALUATED' | 'DISABLED';
   };
   response: {
     headers: Array<{ name: string; values: string[]; redacted: boolean }>;

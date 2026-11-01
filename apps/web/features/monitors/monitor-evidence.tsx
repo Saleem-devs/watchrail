@@ -84,7 +84,8 @@ function DiagnosticOutcomeSummary({
   assertionEvaluation: AssertionEvaluation;
 }) {
   const httpOutcome: DiagnosticOutcome =
-    reason === 'CERTIFICATE_EXPIRING' && statusCode !== null
+    (reason === 'CERTIFICATE_EXPIRING' || reason === 'CERTIFICATE_EVIDENCE_UNAVAILABLE') &&
+    statusCode !== null
       ? 'PASS'
       : stage !== 'HTTP' || statusCode === null
         ? 'NO_RESPONSE'
