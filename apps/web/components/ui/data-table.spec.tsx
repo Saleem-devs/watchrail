@@ -62,7 +62,8 @@ describe('DataTable', () => {
     expect(push).not.toHaveBeenCalled();
 
     vi.useRealTimers();
-    await userEvent.click(screen.getByRole('button', { name: 'Delete Production API' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Actions for Production API' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
     expect(onDelete).toHaveBeenCalledWith(rows[0]);
   });
 });

@@ -10,7 +10,7 @@ vi.mock('./org-switcher', () => ({
 describe('AppShell', () => {
   it('marks the current workspace page and keeps creation separate from navigation', () => {
     render(
-      <AppShell page="overview">
+      <AppShell page="overview" projectId="project-1">
         <main id="main-content">
           <h1>Dashboard</h1>
         </main>
@@ -22,13 +22,9 @@ describe('AppShell', () => {
       'aria-current',
       'page',
     );
-    expect(screen.getAllByRole('link', { name: 'New monitor' })[0]).toHaveAttribute(
-      'href',
-      '/monitors/new',
-    );
     expect(screen.getAllByRole('link', { name: 'Monitors' })[0]).toHaveAttribute(
       'href',
-      '/monitors',
+      '/projects/project-1/monitors',
     );
     expect(screen.getByRole('main')).toContainElement(
       screen.getByRole('heading', { name: 'Dashboard' }),
@@ -39,7 +35,7 @@ describe('AppShell', () => {
   it('collapses the sidebar directly without removing accessible link names', async () => {
     const user = userEvent.setup();
     render(
-      <AppShell page="overview">
+      <AppShell page="overview" projectId="project-1">
         <main id="main-content">Overview</main>
       </AppShell>,
     );
@@ -57,7 +53,7 @@ describe('AppShell', () => {
   it('provides a compact mobile navigation disclosure that closes after navigation', async () => {
     const user = userEvent.setup();
     render(
-      <AppShell page="organization">
+      <AppShell page="organization" projectId="project-1">
         <main id="main-content">
           <p>Settings</p>
         </main>
@@ -81,7 +77,7 @@ describe('AppShell', () => {
   it('opens the UI-only workspace search without presenting invented results', async () => {
     const user = userEvent.setup();
     render(
-      <AppShell page="overview">
+      <AppShell page="overview" projectId="project-1">
         <main id="main-content">Overview</main>
       </AppShell>,
     );

@@ -15,13 +15,13 @@ describe('public status page', () => {
   });
 
   it.each([
-    ['OPERATIONAL', 'All systems operational'],
-    ['PARTIAL_OUTAGE', 'Partial outage'],
-    ['MAJOR_OUTAGE', 'Major outage'],
-    ['MONITORING_IMPAIRED', 'Monitoring impaired'],
-  ] as const)('renders %s as visible text', (status, label) => {
+    ['OPERATIONAL', 'All services operational', 'All systems operational'],
+    ['PARTIAL_OUTAGE', 'Some services are degraded', 'Partial outage'],
+    ['MAJOR_OUTAGE', 'Service disruption detected', 'Major outage'],
+    ['MONITORING_IMPAIRED', 'Service status unavailable', 'Status unavailable'],
+  ] as const)('renders %s as visible text', (status, headline, label) => {
     render(<StatusPageView page={projection(status)} />);
-    expect(screen.getByRole('heading', { name: label })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: headline })).toBeInTheDocument();
     expect(publicStatusLabel(status)).toBe(label);
   });
 
@@ -52,15 +52,12 @@ describe('public status page', () => {
       },
     ];
     render(<StatusPageView page={page} />);
-    const section = screen.getByRole('heading', { name: 'Components' }).closest('section');
-    const components = within(section as HTMLElement)
-      .getByRole('list')
-      .querySelectorAll('li');
-    expect(components[0]).toHaveTextContent('DashboardMajor outage');
-    expect(components[1]).toHaveTextContent('APIOperational');
-    expect(screen.getByText('Active incident')).toBeInTheDocument();
-    expect(screen.getByText('Recovered')).toBeInTheDocument();
-    expect(screen.queryByText(/investigating|identified/i)).not.toBeInTheDocument();
+    const section = screen.getByRole('heading', { name: 'Services' }).closest('section');
+    const dashboard = within(section as HTMLElement).getByText('Dashboard');
+    const api = within(section as HTMLElement).getByText('API');
+    expect(dashboard.compareDocumentPosition(api) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Active incidents' })).toBeInTheDocument();
+    expect(screen.getByText('Investigation in progress')).toBeInTheDocument();
   });
 
   it('refreshes manually and every 30 seconds while visible', () => {

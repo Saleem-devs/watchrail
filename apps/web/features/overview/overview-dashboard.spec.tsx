@@ -97,7 +97,7 @@ describe('OverviewDashboard', () => {
       />,
     );
 
-    const metrics = screen.getByRole('region', { name: 'Workspace health' });
+    const metrics = screen.getByRole('region', { name: 'Project health' });
     expect(within(metrics).getByText('3')).toBeInTheDocument();
     expect(within(metrics).getByText('1 paused')).toBeInTheDocument();
     expect(within(metrics).getByText('97.00%')).toBeInTheDocument();

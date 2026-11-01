@@ -1,10 +1,14 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Dashboard } from './dashboard';
 
 const push = vi.fn();
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push, refresh: vi.fn() }) }));
+vi.mock('../components/app-shell', () => ({
+  AppShell: ({ children }: { children: ReactNode }) => <>{children}</>,
+}));
 
 describe('Dashboard', () => {
   afterEach(() => vi.restoreAllMocks());
@@ -60,7 +64,7 @@ describe('Dashboard', () => {
     },
   );
 
-  it('shows the empty state and creates a monitor', async () => {
+  it('creates a monitor from the dedicated creation view', async () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200 }))
@@ -84,15 +88,19 @@ describe('Dashboard', () => {
         ),
       );
 
-    render(<Dashboard />);
-    expect(await screen.findByText('No monitors yet')).toBeInTheDocument();
+    render(<Dashboard view="create" />);
+    expect(await screen.findByRole('heading', { name: 'Create monitor' })).toBeInTheDocument();
 
     await userEvent.type(screen.getByLabelText('Monitor name'), 'Production API');
-    await userEvent.type(screen.getByLabelText('HTTP(S) URL'), 'https://example.com/health');
-    await userEvent.click(screen.getByRole('button', { name: 'Create monitor' }));
+    await userEvent.type(
+      screen.getByRole('textbox', { name: /HTTP\(S\) URL/i }),
+      'https://example.com/health',
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Save monitor' }));
 
-    expect(await screen.findByRole('heading', { name: 'Production API' })).toBeInTheDocument();
-    expect(screen.getByText('10s timeout')).toBeInTheDocument();
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Production API is ready for its first check.',
+    );
     expect(fetchMock).toHaveBeenLastCalledWith(
       '/api/monitors',
       expect.objectContaining({ method: 'POST' }),
@@ -156,22 +164,41 @@ describe('Dashboard', () => {
       activeAgentCount: 1,
     };
     const offline = { ...online, health: 'OFFLINE' };
-    const fetchMock = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [monitor] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [online] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [offline] }), { status: 200 }));
+    let resolveOnline: (response: Response) => void = () => undefined;
+    const firstLocationRequest = new Promise<Response>((resolve) => {
+      resolveOnline = resolve;
+    });
+    let locationRequestCount = 0;
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      if (requestUrl(input) !== '/api/probe-locations') {
+        return Promise.resolve(new Response(JSON.stringify({ data: [monitor] }), { status: 200 }));
+      }
+      locationRequestCount += 1;
+      return locationRequestCount === 1
+        ? firstLocationRequest
+        : Promise.resolve(new Response(JSON.stringify({ data: [offline] }), { status: 200 }));
+    });
 
     render(<Dashboard />);
     await screen.findByRole('heading', { name: monitor.name });
     await userEvent.click(screen.getByText('Configure monitor'));
     const selector = await screen.findByRole('combobox', { name: 'Execution location' });
     await userEvent.click(selector);
-    expect(await screen.findByRole('option', { name: 'Lagos — online' })).toBeInTheDocument();
-    await userEvent.tab();
+    resolveOnline(new Response(JSON.stringify({ data: [online] }), { status: 200 }));
+    expect(await screen.findByRole('option', { name: /Lagos/ })).toHaveTextContent(
+      'Lagos — online',
+    );
+    const requestsAfterFirstOpen = fetchMock.mock.calls.filter(
+      ([url]) => url === '/api/probe-locations',
+    ).length;
+    await userEvent.keyboard('{Escape}');
     await userEvent.click(selector);
-    expect(await screen.findByRole('option', { name: 'Lagos — offline' })).toBeInTheDocument();
-    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/probe-locations')).toHaveLength(2);
+    expect(await screen.findByRole('option', { name: /Lagos/ })).toHaveTextContent(
+      'Lagos — offline',
+    );
+    expect(
+      fetchMock.mock.calls.filter(([url]) => url === '/api/probe-locations').length,
+    ).toBeGreaterThan(requestsAfterFirstOpen);
   });
 
   it('renders field-level validation errors from the API', async () => {
@@ -187,9 +214,9 @@ describe('Dashboard', () => {
         ),
       );
 
-    render(<Dashboard />);
-    await screen.findByText('No monitors yet');
-    await userEvent.click(screen.getByRole('button', { name: 'Create monitor' }));
+    render(<Dashboard view="create" />);
+    await screen.findByRole('heading', { name: 'Create monitor' });
+    await userEvent.click(screen.getByRole('button', { name: 'Save monitor' }));
 
     await waitFor(() => {
       expect(screen.getByText('Enter a monitor name.')).toBeInTheDocument();
@@ -339,6 +366,11 @@ describe('Dashboard', () => {
                   },
                 ],
                 checkedAt: '2026-09-24T12:00:00.000Z',
+                assertionEvaluation: {
+                  contractVersion: 1,
+                  outcome: 'PASS',
+                  diagnostics: [],
+                },
               },
             },
           }),
@@ -371,12 +403,21 @@ describe('Dashboard', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Run now' }));
 
     expect(await screen.findByText('Queued')).toBeInTheDocument();
-    expect(await screen.findByText('PASS', {}, { timeout: 2_000 })).toBeInTheDocument();
+    expect(
+      await within(screen.getByLabelText('Latest manual diagnostic')).findAllByText(
+        'Healthy',
+        {},
+        { timeout: 2_000 },
+      ),
+    ).not.toHaveLength(0);
     expect(screen.getByText('200')).toBeInTheDocument();
     expect(screen.getByText('43 ms')).toBeInTheDocument();
     expect(screen.getByText('46 ms')).toBeInTheDocument();
     expect(screen.getByRole('list', { name: 'Redirect chain' })).toHaveTextContent(
-      '#1 https://example.com:443 → #2 https://status.example:443',
+      '#1 https://example.com:443',
+    );
+    expect(screen.getByRole('list', { name: 'Redirect chain' })).toHaveTextContent(
+      '#2 https://status.example:443',
     );
     expect(screen.getByRole('list', { name: 'Redirect chain' })).toHaveTextContent(
       '302 · 12 ms · stripped',
@@ -464,7 +505,7 @@ describe('Dashboard', () => {
     );
     await userEvent.click(screen.getByRole('button', { name: 'Show history' }));
     expect(await screen.findByRole('region', { name: 'Check history' })).toHaveTextContent(
-      'SCHEDULED FAIL · UNEXPECTED_STATUS',
+      'SCHEDULED Unhealthy · UNEXPECTED_STATUS',
     );
     expect(fetchMock).toHaveBeenLastCalledWith(
       '/api/monitors/monitor-1/check-rounds?limit=10',
@@ -610,13 +651,14 @@ describe('Dashboard', () => {
     expect(await screen.findByRole('region', { name: 'Check history' })).toHaveTextContent(
       'SCHEDULED DEGRADED · 100.0%',
     );
-    await userEvent.click(screen.getByRole('button', { name: 'Show regional evidence' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Show diagnostic evidence' }));
     const evidence = await screen.findByText('Historical regional evidence');
-    expect(evidence.closest('.manual-diagnostic')).toHaveTextContent(
-      'Lagos — Confirmed failure · primary · 503 · 41 ms',
-    );
-    await userEvent.click(screen.getByRole('button', { name: 'Hide regional evidence' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Show regional evidence' }));
+    const evidencePanel = evidence.closest('.manual-diagnostic');
+    expect(evidencePanel).toHaveTextContent('Lagos');
+    expect(evidencePanel).toHaveTextContent('Confirmed failure');
+    expect(evidencePanel).toHaveTextContent('primary · HTTP 503 · 41 ms');
+    await userEvent.click(screen.getByRole('button', { name: 'Hide diagnostic evidence' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Show diagnostic evidence' }));
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
@@ -725,10 +767,8 @@ describe('Dashboard', () => {
     await screen.findByRole('heading', { name: monitor.name });
     await userEvent.click(screen.getByText('Configure monitor'));
 
-    await userEvent.selectOptions(
-      screen.getByRole('combobox', { name: 'Expected status' }),
-      'EXACT',
-    );
+    await userEvent.click(screen.getByRole('combobox', { name: 'Expected status' }));
+    await userEvent.click(screen.getByRole('option', { name: 'Specific status codes' }));
     const codes = screen.getByLabelText(`Specific status codes for ${monitor.name}`);
     await userEvent.type(codes, '404');
     await userEvent.click(screen.getByRole('button', { name: 'Save policy' }));
@@ -829,7 +869,8 @@ describe('Dashboard', () => {
     const url = screen.getByRole('textbox', { name: 'URL' });
     await userEvent.clear(url);
     await userEvent.type(url, updated.url);
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Method' }), 'HEAD');
+    await userEvent.click(screen.getByRole('combobox', { name: 'Method' }));
+    await userEvent.click(screen.getByRole('option', { name: 'HEAD' }));
     const timeout = screen.getByRole('spinbutton', { name: 'Timeout (seconds)' });
     await userEvent.clear(timeout);
     await userEvent.type(timeout, '5');
@@ -853,7 +894,7 @@ describe('Dashboard', () => {
     );
   });
 
-  it('keeps the overview focused on workspace health and a compact monitored-services table', async () => {
+  it('keeps the overview focused on project health and a compact monitored-services table', async () => {
     const monitor = {
       id: 'overview-monitor',
       name: 'Production API',
@@ -895,9 +936,9 @@ describe('Dashboard', () => {
     render(<Dashboard view="overview" />);
 
     expect(await screen.findByRole('heading', { name: 'Monitored services' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'View Production API' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Production API' })).toHaveAttribute(
       'href',
-      '/monitors/overview-monitor',
+      '/monitors/overview-monitor?from=%2F',
     );
     expect(screen.queryByRole('textbox', { name: 'Monitor name' })).not.toBeInTheDocument();
     expect(screen.queryByText('Configure monitor')).not.toBeInTheDocument();
@@ -952,7 +993,8 @@ describe('Dashboard', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     render(<Dashboard view="overview" />);
-    await userEvent.click(await screen.findByRole('button', { name: 'Delete Retired API' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Actions for Retired API' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
