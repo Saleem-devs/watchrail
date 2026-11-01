@@ -43,29 +43,31 @@ describe('OrgSwitcher', () => {
     const user = userEvent.setup();
     render(<OrgSwitcher />);
 
-    const trigger = await screen.findByRole('button', { name: /Watchrail/i });
+    await screen.findByRole('link', { name: 'Watchrail' });
+    const trigger = screen.getByRole('button', { name: 'Open workspace switcher' });
     await user.click(trigger);
 
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
-    const switcher = screen.getByRole('group', { name: 'Organization switcher' });
+    const switcher = screen.getByRole('menu', { name: 'Workspace switcher' });
     expect(switcher).toBeInTheDocument();
-    expect(within(switcher).getByRole('button', { name: 'Watchrail' })).toHaveAttribute(
-      'aria-pressed',
+    expect(within(switcher).getByRole('menuitemradio', { name: /Watchrail/ })).toHaveAttribute(
+      'aria-checked',
       'true',
     );
-    expect(screen.getByRole('link', { name: 'Organization settings' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Workspace settings' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Sign out' })).toBeInTheDocument();
   });
 
   it('closes on Escape and restores focus to the trigger', async () => {
     const user = userEvent.setup();
     render(<OrgSwitcher />);
 
-    const trigger = await screen.findByRole('button', { name: /Watchrail/i });
+    await screen.findByRole('link', { name: 'Watchrail' });
+    const trigger = screen.getByRole('button', { name: 'Open workspace switcher' });
     await user.click(trigger);
     await user.keyboard('{Escape}');
 
-    expect(screen.queryByRole('group', { name: 'Organization switcher' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menu', { name: 'Workspace switcher' })).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
   });
 
@@ -75,12 +77,13 @@ describe('OrgSwitcher', () => {
     setActive.mockResolvedValue({ data: {}, error: null });
     render(<OrgSwitcher reload={reload} />);
 
-    await user.click(await screen.findByRole('button', { name: /Watchrail/i }));
-    await user.click(screen.getByRole('button', { name: 'Operations' }));
+    await screen.findByRole('link', { name: 'Watchrail' });
+    await user.click(screen.getByRole('button', { name: 'Open workspace switcher' }));
+    await user.click(screen.getByRole('menuitemradio', { name: /Operations/ }));
 
     expect(setActive).toHaveBeenCalledWith({ organizationId: 'org-2' });
     expect(reload).toHaveBeenCalledOnce();
-    expect(screen.queryByRole('group', { name: 'Organization switcher' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menu', { name: 'Workspace switcher' })).not.toBeInTheDocument();
   });
 
   it('keeps the switcher open and announces a failed organization switch', async () => {
@@ -89,13 +92,14 @@ describe('OrgSwitcher', () => {
     setActive.mockResolvedValue({ data: null, error: { message: 'Forbidden' } });
     render(<OrgSwitcher reload={reload} />);
 
-    await user.click(await screen.findByRole('button', { name: /Watchrail/i }));
-    await user.click(screen.getByRole('button', { name: 'Operations' }));
+    await screen.findByRole('link', { name: 'Watchrail' });
+    await user.click(screen.getByRole('button', { name: 'Open workspace switcher' }));
+    await user.click(screen.getByRole('menuitemradio', { name: /Operations/ }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Could not switch organizations. Try again.',
     );
-    expect(screen.getByRole('group', { name: 'Organization switcher' })).toBeInTheDocument();
+    expect(screen.getByRole('menu', { name: 'Workspace switcher' })).toBeInTheDocument();
     expect(reload).not.toHaveBeenCalled();
   });
 });
