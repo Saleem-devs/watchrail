@@ -22,6 +22,7 @@ function response(
   discardBody = vi.fn(() => Promise.resolve()),
   headers: HttpTransportResponse['headers'] = [],
   captureEncodedBody = vi.fn(() => Promise.resolve(new Uint8Array())),
+  tlsCertificate?: HttpTransportResponse['tlsCertificate'],
 ) {
   return {
     statusCode,
@@ -29,6 +30,7 @@ function response(
     headers,
     captureEncodedBody,
     discardBody,
+    ...(tlsCertificate === undefined ? {} : { tlsCertificate }),
   } satisfies HttpTransportResponse;
 }
 
@@ -317,6 +319,52 @@ describe('NodeHttpExecutor', () => {
         },
       ],
     });
+  });
+
+  it('retains bounded certificate evidence for every HTTPS redirect hop', async () => {
+    const certificate = (hostname: string) => ({
+      contractVersion: 1 as const,
+      origin: `https://${hostname}`,
+      hostname,
+      validFrom: '2026-09-01T00:00:00.000Z',
+      validTo: '2027-09-01T00:00:00.000Z',
+      fingerprint256:
+        'BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB',
+      subject: `CN=${hostname}`,
+      issuer: 'CN=Example CA',
+      protocol: 'TLSv1.3',
+      cipher: 'TLS_AES_256_GCM_SHA384',
+    });
+    const request = vi
+      .fn<PinnedHttpTransport['request']>()
+      .mockResolvedValueOnce(
+        response(
+          302,
+          'https://www.example.com/final',
+          undefined,
+          [],
+          undefined,
+          certificate('example.com'),
+        ),
+      )
+      .mockResolvedValueOnce(
+        response(200, null, undefined, [], undefined, certificate('www.example.com')),
+      );
+
+    const result = await new NodeHttpExecutor({
+      resolver: publicResolver(),
+      transport: { request },
+    }).execute({
+      url: 'https://example.com',
+      method: 'GET',
+      signal: new AbortController().signal,
+      followRedirects: true,
+    });
+
+    expect(result.tlsCertificates?.map(({ hostname }) => hostname)).toEqual([
+      'example.com',
+      'www.example.com',
+    ]);
   });
 
   it('evaluates only final response headers after following redirects', async () => {

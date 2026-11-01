@@ -31,7 +31,7 @@ import {
   PROBE_ATTEMPT_STATUSES,
   PROBE_CREDENTIAL_STATUSES,
   PROBE_LOCATION_STATUSES,
-  HTTP_ENGINE_VERSION,
+  LEGACY_HTTP_ENGINE_VERSION,
   HTTP_EXECUTION_POLICY_VERSION,
   type HttpStatusPolicy,
   type HttpRequestBody,
@@ -43,6 +43,8 @@ import {
   EMPTY_ASSERTION_EVALUATION,
   type AggregateRoundDecisionV1,
   type ProbeObservationV1,
+  type TlsCertificateEvidenceV1,
+  type TlsCertificatePolicy,
 } from '@watchrail/domain';
 
 export const httpMethodEnum = pgEnum('http_method', HTTP_METHODS);
@@ -78,6 +80,8 @@ export const checkResultReasonEnum = pgEnum('check_result_reason', [
   'CERTIFICATE_NOT_YET_VALID',
   'CERTIFICATE_HOSTNAME_MISMATCH',
   'CERTIFICATE_UNTRUSTED',
+  'CERTIFICATE_EXPIRING',
+  'CERTIFICATE_EVIDENCE_UNAVAILABLE',
   'TLS_HANDSHAKE_FAILED',
   'PROHIBITED_DESTINATION',
   'REDIRECT_LOOP',
@@ -382,6 +386,10 @@ export const monitors = pgTable(
       .$type<ResponseAssertionConfigurationV1>()
       .notNull()
       .default(EMPTY_ASSERTION_CONFIGURATION),
+    tlsPolicy: jsonb('tls_policy')
+      .$type<TlsCertificatePolicy>()
+      .notNull()
+      .default({ type: 'DISABLED' }),
     locations: jsonb('locations').$type<string[]>().notNull().default(['local']),
 
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -547,6 +555,10 @@ export const monitorConfigurationVersions = pgTable(
       .$type<ResponseAssertionConfigurationV1>()
       .notNull()
       .default(EMPTY_ASSERTION_CONFIGURATION),
+    tlsPolicy: jsonb('tls_policy')
+      .$type<TlsCertificatePolicy>()
+      .notNull()
+      .default({ type: 'DISABLED' }),
 
     locations: jsonb('locations').$type<string[]>().notNull(),
 
@@ -750,7 +762,7 @@ export const checkExecutionAssignments = pgTable(
       .default(HTTP_EXECUTION_POLICY_VERSION),
     requiredEngineVersion: varchar('required_engine_version', { length: 64 })
       .notNull()
-      .default(HTTP_ENGINE_VERSION),
+      .default(LEGACY_HTTP_ENGINE_VERSION),
 
     status: executionAssignmentStatusEnum('status').notNull().default('PENDING'),
 
@@ -931,6 +943,10 @@ export const checkExecutionResults = pgTable(
       .$type<AssertionEvaluationV1>()
       .notNull()
       .default(EMPTY_ASSERTION_EVALUATION),
+    tlsCertificates: jsonb('tls_certificates')
+      .$type<TlsCertificateEvidenceV1[]>()
+      .notNull()
+      .default([]),
     checkedAt: timestamp('checked_at', { withTimezone: true }).notNull(),
 
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -980,6 +996,10 @@ export const checkExecutionResults = pgTable(
     check(
       'check_execution_results_assertion_evaluation_object',
       sql`jsonb_typeof(${table.assertionEvaluation}) = 'object'`,
+    ),
+    check(
+      'check_execution_results_tls_certificates_array',
+      sql`jsonb_typeof(${table.tlsCertificates}) = 'array'`,
     ),
   ],
 );
@@ -1058,6 +1078,7 @@ export interface RegionalDiagnosticSummary {
   attemptDurationMs: number;
   checkedAt: string;
   assertionEvaluation?: AssertionEvaluationV1;
+  tlsCertificates?: TlsCertificateEvidenceV1[];
 }
 
 export const checkRegionalEvaluations = pgTable(

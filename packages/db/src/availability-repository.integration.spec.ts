@@ -141,6 +141,20 @@ describe('daily availability accounting', () => {
     expect((await state()).currentState).toBe(expected);
   });
 
+  it('maps unavailable certificate evidence to UNKNOWN', async () => {
+    await complete(
+      (await scheduled()).id,
+      result({
+        outcome: 'UNKNOWN',
+        stage: 'TLS',
+        reason: 'CERTIFICATE_EVIDENCE_UNAVAILABLE',
+        statusCode: 200,
+        responseTimeMs: 5,
+      }),
+    );
+    expect((await state()).currentState).toBe('UNKNOWN');
+  });
+
   it('uses assertion health independently of the HTTP outcome', async () => {
     await complete(
       (await scheduled()).id,

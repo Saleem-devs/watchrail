@@ -50,6 +50,8 @@ export interface ProbeExecutionConfigurationV1 {
   timeoutMs: number;
   followRedirects: boolean;
   statusPolicy: { type: 'ANY_2XX' } | { type: 'EXACT'; statusCodes: number[] };
+  tlsPolicy?:
+    { type: 'DISABLED' } | { type: 'MINIMUM_VALIDITY'; days: 1 | 2 | 3 | 7 | 14 | 30 | 60 };
   requestHeaders: Array<{ name: string; value: string }>;
   requestBody:
     | { type: 'NONE' }
@@ -152,24 +154,26 @@ export function parseProbeHeartbeat(value: unknown): ProbeHeartbeatV1 {
 }
 
 export function parseProbeExecutionConfiguration(value: unknown): ProbeExecutionConfigurationV1 {
+  const legacyKeys = [
+    'assertions',
+    'assignmentId',
+    'attemptId',
+    'configurationVersionId',
+    'configurationVersionNumber',
+    'contractVersion',
+    'executionPolicyVersion',
+    'followRedirects',
+    'method',
+    'requestHeaders',
+    'requestBody',
+    'requiredEngineVersion',
+    'statusPolicy',
+    'timeoutMs',
+    'url',
+  ];
+  const currentKeys = [...legacyKeys, 'tlsPolicy'];
   if (
-    !hasExactKeys(value, [
-      'assertions',
-      'assignmentId',
-      'attemptId',
-      'configurationVersionId',
-      'configurationVersionNumber',
-      'contractVersion',
-      'executionPolicyVersion',
-      'followRedirects',
-      'method',
-      'requestHeaders',
-      'requestBody',
-      'requiredEngineVersion',
-      'statusPolicy',
-      'timeoutMs',
-      'url',
-    ]) ||
+    (!hasExactKeys(value, legacyKeys) && !hasExactKeys(value, currentKeys)) ||
     value.contractVersion !== PROBE_COORDINATOR_CONTRACT_VERSION ||
     !isUuid(value.assignmentId) ||
     !isUuid(value.attemptId) ||
@@ -186,13 +190,31 @@ export function parseProbeExecutionConfiguration(value: unknown): ProbeExecution
     Number(value.timeoutMs) > 30_000 ||
     typeof value.followRedirects !== 'boolean' ||
     !isStatusPolicy(value.statusPolicy) ||
+    (Object.hasOwn(value, 'tlsPolicy') && !isTlsPolicy(value.tlsPolicy)) ||
     !isRuntimeHeaders(value.requestHeaders) ||
     !isRequestBody(value.requestBody) ||
     !isRuntimeAssertions(value.assertions)
   ) {
     throw new InvalidProbeCoordinatorContractError();
   }
-  return value as unknown as ProbeExecutionConfigurationV1;
+  return {
+    ...(value as unknown as ProbeExecutionConfigurationV1),
+    tlsPolicy: Object.hasOwn(value, 'tlsPolicy')
+      ? (value.tlsPolicy as NonNullable<ProbeExecutionConfigurationV1['tlsPolicy']>)
+      : { type: 'DISABLED' },
+  };
+}
+
+function isTlsPolicy(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !('type' in value))
+    return false;
+  const policy = value as Record<string, unknown>;
+  if (policy.type === 'DISABLED') return hasExactKeys(policy, ['type']);
+  return (
+    policy.type === 'MINIMUM_VALIDITY' &&
+    hasExactKeys(policy, ['days', 'type']) &&
+    [1, 2, 3, 7, 14, 30, 60].includes(Number(policy.days))
+  );
 }
 
 function isRequestBody(value: unknown): boolean {

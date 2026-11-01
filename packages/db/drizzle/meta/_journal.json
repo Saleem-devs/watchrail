@@ -253,6 +253,20 @@
       "when": 1793466327183,
       "tag": "0035_talented_luminals",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1793491100258,
+      "tag": "0036_quick_magma",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1793521481437,
+      "tag": "0037_faulty_celestials",
+      "breakpoints": true
     }
   ]
 }

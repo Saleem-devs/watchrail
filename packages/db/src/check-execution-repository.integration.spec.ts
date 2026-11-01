@@ -142,6 +142,21 @@ describe('CheckExecutionRepository', () => {
         },
       ],
     };
+    const tlsCertificates = [
+      {
+        contractVersion: 1 as const,
+        origin: 'https://status.example',
+        hostname: 'status.example',
+        validFrom: '2026-09-01T00:00:00.000Z',
+        validTo: '2027-09-01T00:00:00.000Z',
+        fingerprint256:
+          'CC:CC:CC:CC:CC:CC:CC:CC:CC:CC:CC:CC:CC:CC:CC:CC:CC:CC:CC:CC:CC:CC:CC:CC:CC:CC:CC:CC:CC:CC:CC:CC',
+        subject: 'CN=status.example',
+        issuer: 'CN=Example CA',
+        protocol: 'TLSv1.3',
+        cipher: 'TLS_AES_256_GCM_SHA384',
+      },
+    ];
 
     await expect(
       repository.complete(claim.execution.assignmentId, claim.execution.claimToken, {
@@ -153,6 +168,7 @@ describe('CheckExecutionRepository', () => {
         attemptDurationMs: 14.25,
         redirects,
         assertionEvaluation,
+        tlsCertificates,
         checkedAt,
       }),
     ).resolves.toBe(true);
@@ -183,6 +199,7 @@ describe('CheckExecutionRepository', () => {
       attemptDurationMs: 14.25,
       redirects,
       assertionEvaluation,
+      tlsCertificates,
       checkedAt,
     });
     expect(completedRound?.status).toBe('COMPLETED');

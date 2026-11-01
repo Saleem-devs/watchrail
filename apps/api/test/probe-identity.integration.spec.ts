@@ -9,6 +9,7 @@ import {
   createDatabaseConnection,
   ensureDefaultProject,
   migrateDatabase,
+  ProbeCoordinatorRepository,
   ProbeIdentityRepository,
   type DatabaseConnection,
   type WatchrailDatabase,
@@ -16,6 +17,7 @@ import {
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module.js';
+import { ProbeCoordinatorService } from '../src/modules/probes/probe-coordinator.service.js';
 
 const organizationB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const developmentOrganizationId = '00000000-0000-4000-8000-000000000002';
@@ -31,6 +33,8 @@ describe('probe enrollment and machine credentials API', () => {
   let app: INestApplication;
   let container: StartedPostgreSqlContainer;
   let database: WatchrailDatabase;
+  let coordinator: ProbeCoordinatorRepository;
+  let coordinatorService: ProbeCoordinatorService;
   let projectId: string;
 
   beforeAll(async () => {
@@ -55,6 +59,8 @@ describe('probe enrollment and machine credentials API', () => {
     await migration.pool.end();
     const module = await Test.createTestingModule({ imports: [AppModule] }).compile();
     database = module.get<WatchrailDatabase>(getDrizzleToken());
+    coordinator = module.get(ProbeCoordinatorRepository);
+    coordinatorService = module.get(ProbeCoordinatorService);
     projectId = (await ensureDefaultProject(database, developmentOrganizationId)).id;
     app = module.createNestApplication();
     app.setGlobalPrefix('api');
@@ -278,7 +284,7 @@ describe('probe enrollment and machine credentials API', () => {
         .post('/api/probe-machine/enroll')
         .send({ enrollmentId: issued.id, token: issued.token })
         .expect(201)
-    ).body.data as { credential: string };
+    ).body.data as { agentId: string; credential: string };
     const monitor = (
       await request(app.getHttpServer())
         .post(`/api/monitors?projectId=${projectId}`)
@@ -336,6 +342,10 @@ describe('probe enrollment and machine credentials API', () => {
       requestHeaders: [{ name: 'authorization', value: `Bearer ${sentinel}` }],
       assertions: { headers: [], textBody: [], jsonBody: [] },
     });
+    expect(() =>
+      parsePreUpgradeExecutionConfiguration(executionConfiguration.body.data),
+    ).not.toThrow();
+    expect(executionConfiguration.body.data).not.toHaveProperty('tlsPolicy');
     expect(JSON.stringify(executionConfiguration.body)).not.toMatch(
       /encryptedValue|ciphertext|authTag|keyId/u,
     );
@@ -360,6 +370,87 @@ describe('probe enrollment and machine credentials API', () => {
       .send({ reference, result })
       .expect(201)
       .expect(({ body }) => expect(body.data).toEqual({ state: 'ACCEPTED', duplicate: true }));
+
+    const tlsMonitor = (
+      await request(app.getHttpServer())
+        .post(`/api/monitors?projectId=${projectId}`)
+        .send({
+          name: 'Remote TLS policy',
+          url: 'https://example.com/health',
+          tlsPolicy: { type: 'MINIMUM_VALIDITY', days: 14 },
+        })
+        .expect(201)
+    ).body.data as { id: string };
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${tlsMonitor.id}/locations`)
+      .send({ locations: [location.id] })
+      .expect(200);
+    await request(app.getHttpServer())
+      .post(`/api/monitors/${tlsMonitor.id}/check-rounds`)
+      .expect(202);
+
+    const [activeCredential] = (
+      await database.$client.query<{ id: string; version_number: number }>(
+        `select id, version_number from probe_agent_credentials
+         where agent_id = $1 and status = 'ACTIVE'`,
+        [enrolled.agentId],
+      )
+    ).rows;
+    const machine = {
+      agentId: enrolled.agentId,
+      organizationId: developmentOrganizationId,
+      locationId: location.id,
+      credentialId: activeCredential!.id,
+      credentialVersion: activeCredential!.version_number,
+    };
+    await expect(coordinator.claim(machine, 'watchrail-http-v1')).resolves.toEqual({
+      state: 'NO_WORK',
+    });
+    const tlsClaimed = await coordinator.claim(machine, 'watchrail-http-v2');
+    expect(tlsClaimed.state).toBe('CLAIMED');
+    if (tlsClaimed.state !== 'CLAIMED') throw new Error('Expected a v2 TLS probe lease.');
+    const tlsLease = tlsClaimed.lease;
+    const tlsConfiguration = await coordinatorService.configuration(
+      machine,
+      tlsLease.attemptId,
+      tlsLease.claimToken,
+    );
+    expect(tlsConfiguration).toMatchObject({
+      requiredEngineVersion: 'watchrail-http-v2',
+      tlsPolicy: { type: 'MINIMUM_VALIDITY', days: 14 },
+    });
+    await expect(
+      coordinatorService.submit(machine, tlsLease.attemptId, tlsLease.claimToken, {
+        reference: {
+          contractVersion: 1,
+          assignmentId: tlsLease.assignmentId,
+          attemptId: tlsLease.attemptId,
+          attemptNumber: tlsLease.attemptNumber,
+          engineVersion: 'watchrail-http-v2',
+        },
+        result: {
+          outcome: 'UNKNOWN',
+          stage: 'TLS',
+          reason: 'CERTIFICATE_EVIDENCE_UNAVAILABLE',
+          statusCode: 200,
+          responseTimeMs: 20,
+          attemptDurationMs: 25,
+          redirects: [],
+          assertionEvaluation: { contractVersion: 1, outcome: 'PASS', diagnostics: [] },
+          checkedAt: new Date().toISOString(),
+        },
+      }),
+    ).resolves.toEqual({ state: 'ACCEPTED', duplicate: false });
+    const [storedTlsResult] = (
+      await database.$client.query<{ outcome: string; reason: string }>(
+        `select outcome, reason from check_execution_results where assignment_id = $1`,
+        [tlsLease.assignmentId],
+      )
+    ).rows;
+    expect(storedTlsResult).toEqual({
+      outcome: 'UNKNOWN',
+      reason: 'CERTIFICATE_EVIDENCE_UNAVAILABLE',
+    });
   });
 
   async function createLocation(slug: string): Promise<LocationResponse> {
@@ -432,3 +523,35 @@ describe('probe enrollment and machine credentials API', () => {
     throw new Error(`Timed out waiting for ${applicationName} to block on the agent lock.`);
   }
 });
+
+// Frozen exact-key gate from dev before TLS support. This guards the actual
+// rolling-deployment failure mode: v1 agents reject any added wire field.
+function parsePreUpgradeExecutionConfiguration(value: unknown): void {
+  const expectedKeys = [
+    'assertions',
+    'assignmentId',
+    'attemptId',
+    'configurationVersionId',
+    'configurationVersionNumber',
+    'contractVersion',
+    'executionPolicyVersion',
+    'followRedirects',
+    'method',
+    'requestBody',
+    'requestHeaders',
+    'requiredEngineVersion',
+    'statusPolicy',
+    'timeoutMs',
+    'url',
+  ];
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Invalid pre-upgrade probe configuration.');
+  }
+  const keys = Object.keys(value).sort();
+  if (
+    keys.length !== expectedKeys.length ||
+    !keys.every((key, index) => key === expectedKeys[index])
+  ) {
+    throw new Error('Invalid pre-upgrade probe configuration.');
+  }
+}

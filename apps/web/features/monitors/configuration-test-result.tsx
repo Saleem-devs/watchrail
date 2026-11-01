@@ -2,14 +2,16 @@ import { Button } from '../../components/ui/button';
 import { AssertionDiagnostics } from './assertion-diagnostics';
 import { formatMilliseconds, humanize } from './formatting';
 import type { ConfigurationTestResult, ManualRoundResultRedirect } from './types';
+import { TlsCertificateEvidencePanel } from './tls-certificate-evidence';
 
-type SignalOutcome = 'PASS' | 'FAIL' | 'UNKNOWN' | 'NOT_EVALUATED';
+type SignalOutcome = 'PASS' | 'FAIL' | 'UNKNOWN' | 'NOT_EVALUATED' | 'DISABLED';
 
 const tone: Record<SignalOutcome, string> = {
   PASS: 'border-rail-success/35 bg-rail-success/10 text-rail-success',
   FAIL: 'border-rail-danger/35 bg-rail-danger/10 text-rail-danger',
   UNKNOWN: 'border-rail-warning/35 bg-rail-warning/10 text-rail-warning',
   NOT_EVALUATED: 'border-rail-border-strong bg-rail-surface text-rail-subtle',
+  DISABLED: 'border-rail-border-strong bg-rail-surface text-rail-muted',
 };
 
 export function ConfigurationTestPanel({
@@ -72,10 +74,11 @@ export function ConfigurationTestPanel({
         <Metric label="Attempt" value={formatMilliseconds(data.result.attemptDurationMs)} />
         <Metric label="Checked" value={new Date(data.result.checkedAt).toLocaleTimeString()} />
       </dl>
-      <dl className="grid gap-px border-t border-rail-border bg-rail-border sm:grid-cols-3">
+      <dl className="grid gap-px border-t border-rail-border bg-rail-border sm:grid-cols-2 lg:grid-cols-4">
         <Signal label="Transport" outcome={data.signals.transport} />
         <Signal label="Status policy" outcome={data.signals.statusPolicy} />
         <Signal label="Assertions" outcome={data.signals.assertions} />
+        <Signal label="TLS expiry" outcome={data.signals.tlsCertificate ?? 'NOT_EVALUATED'} />
       </dl>
 
       <div className="border-t border-rail-border px-5 py-3 text-xs">
@@ -83,6 +86,10 @@ export function ConfigurationTestPanel({
         <p className="mt-1 mb-0 text-rail-muted">{humanize(data.result.stage)} stage</p>
       </div>
       <AssertionDiagnostics evaluation={data.result.assertionEvaluation} />
+      <TlsCertificateEvidencePanel
+        certificates={data.result.tlsCertificates}
+        observedAt={data.result.checkedAt}
+      />
       {data.result.redirects.length > 0 ? (
         <RedirectEvidence redirects={data.result.redirects} />
       ) : null}
@@ -97,6 +104,9 @@ export function ConfigurationTestPanel({
 
 function configurationTestOutcome(signals: ConfigurationTestResult['signals']): SignalOutcome {
   const outcomes = [signals.transport, signals.statusPolicy, signals.assertions];
+  if (signals.tlsCertificate && signals.tlsCertificate !== 'DISABLED') {
+    outcomes.push(signals.tlsCertificate);
+  }
   if (outcomes.includes('FAIL')) return 'FAIL';
   if (outcomes.every((outcome) => outcome === 'PASS')) return 'PASS';
   return 'UNKNOWN';
@@ -129,7 +139,11 @@ function SignalBadge({ outcome }: { outcome: SignalOutcome }) {
     <span
       className={`inline-flex min-h-7 items-center rounded-rail-control border px-2 py-1 text-xs font-semibold ${tone[outcome]}`}
     >
-      {outcome === 'NOT_EVALUATED' ? 'Not evaluated' : humanize(outcome)}
+      {outcome === 'NOT_EVALUATED'
+        ? 'Not evaluated'
+        : outcome === 'DISABLED'
+          ? 'Disabled'
+          : humanize(outcome)}
     </span>
   );
 }

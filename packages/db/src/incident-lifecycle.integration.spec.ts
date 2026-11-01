@@ -154,6 +154,7 @@ describe('incident lifecycle', () => {
     await complete(first.id, unhealthy());
     await complete((await scheduledRound()).id, internalError());
     await complete((await scheduledRound()).id, prohibitedDestination());
+    await complete((await scheduledRound()).id, certificateEvidenceUnavailable());
     await complete((await scheduledRound()).id, notEvaluated());
     expect(await state()).toMatchObject({
       consecutiveFailures: 1,
@@ -357,6 +358,16 @@ function internalError(): AuthoritativeCheckResult {
 
 function prohibitedDestination(): AuthoritativeCheckResult {
   return result({ outcome: 'UNKNOWN', stage: 'DNS', reason: 'PROHIBITED_DESTINATION' });
+}
+
+function certificateEvidenceUnavailable(): AuthoritativeCheckResult {
+  return result({
+    outcome: 'UNKNOWN',
+    stage: 'TLS',
+    reason: 'CERTIFICATE_EVIDENCE_UNAVAILABLE',
+    statusCode: 200,
+    responseTimeMs: 5,
+  });
 }
 
 function notEvaluated(): AuthoritativeCheckResult {

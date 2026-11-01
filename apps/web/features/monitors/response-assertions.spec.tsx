@@ -57,6 +57,8 @@ describe('response assertion configuration', () => {
     formData.set('statusCodes', '200, 202');
     formData.set('requestBodyType', 'JSON');
     formData.set('requestBodyValue', '{"job":"sync"}');
+    formData.set('tlsExpiryEnabled', 'on');
+    formData.set('tlsExpiryDays', '14');
     formData.append('requestHeaderId', 'header-1');
     formData.append('requestHeaderName', 'Authorization');
     formData.append('requestHeaderValue', '');
@@ -71,6 +73,7 @@ describe('response assertion configuration', () => {
         timeoutMs: 8_000,
         followRedirects: true,
         requestBody: { type: 'JSON', value: '{"job":"sync"}' },
+        tlsPolicy: { type: 'MINIMUM_VALIDITY', days: 14 },
       },
       statusPolicy: { type: 'EXACT', statusCodes: [200, 202] },
       requestHeaders: [{ name: 'Authorization', sensitive: true, retain: true }],
@@ -238,6 +241,76 @@ describe('response assertion configuration', () => {
     expect(screen.getByText('Assertions').parentElement).toHaveTextContent(/not evaluated/i);
   });
 
+  it('does not let disabled TLS monitoring downgrade a successful configuration test', () => {
+    render(
+      <ConfigurationTestPanel
+        onDismiss={() => undefined}
+        result={{
+          result: {
+            outcome: 'PASS',
+            stage: 'HTTP',
+            reason: 'COMPLETED',
+            statusCode: 200,
+            responseTimeMs: 18,
+            attemptDurationMs: 20,
+            checkedAt: '2026-10-31T20:00:00.000Z',
+            redirects: [],
+            assertionEvaluation: { contractVersion: 1, outcome: 'PASS', diagnostics: [] },
+          },
+          signals: {
+            transport: 'PASS',
+            statusPolicy: 'PASS',
+            assertions: 'PASS',
+            tlsCertificate: 'DISABLED',
+          },
+          response: {
+            headers: [],
+            withheldHeaderCount: 0,
+            body: { state: 'UNAVAILABLE', reason: 'NOT_CAPTURED' },
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Configuration test').parentElement).toHaveTextContent(/pass/i);
+    expect(screen.getByText('TLS expiry').parentElement).toHaveTextContent(/disabled/i);
+  });
+
+  it('shows an unknown result when enabled TLS evidence was not evaluated', () => {
+    render(
+      <ConfigurationTestPanel
+        onDismiss={() => undefined}
+        result={{
+          result: {
+            outcome: 'UNKNOWN',
+            stage: 'TLS',
+            reason: 'CERTIFICATE_EVIDENCE_UNAVAILABLE',
+            statusCode: 200,
+            responseTimeMs: 18,
+            attemptDurationMs: 20,
+            checkedAt: '2026-10-31T20:00:00.000Z',
+            redirects: [],
+            assertionEvaluation: { contractVersion: 1, outcome: 'PASS', diagnostics: [] },
+          },
+          signals: {
+            transport: 'PASS',
+            statusPolicy: 'PASS',
+            assertions: 'PASS',
+            tlsCertificate: 'NOT_EVALUATED',
+          },
+          response: {
+            headers: [],
+            withheldHeaderCount: 0,
+            body: { state: 'UNAVAILABLE', reason: 'NOT_CAPTURED' },
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Configuration test').parentElement).toHaveTextContent(/unknown/i);
+    expect(screen.getByText('TLS expiry').parentElement).toHaveTextContent(/not evaluated/i);
+  });
+
   it('lets a user add a body assertion without exposing a separate test action', async () => {
     const user = userEvent.setup();
     render(<ResponseAssertionsField method="GET" />);
@@ -306,6 +379,37 @@ describe('assertion diagnostic presentation', () => {
         assertionEvaluation: failedEvaluation,
       }),
     ).toBe('Response assertion failed');
+  });
+
+  it('presents certificate expiry as a policy failure after a successful HTTP response', () => {
+    render(
+      <ManualDiagnostic
+        round={{
+          id: 'certificate-expiry',
+          monitorId: 'monitor',
+          trigger: 'MANUAL',
+          status: 'COMPLETED',
+          assignmentStatus: 'COMPLETED',
+          createdAt: '2026-10-31T12:00:00.000Z',
+          result: {
+            outcome: 'FAIL',
+            stage: 'TLS',
+            reason: 'CERTIFICATE_EXPIRING',
+            statusCode: 200,
+            responseTimeMs: 20,
+            attemptDurationMs: 22,
+            redirects: [],
+            assertionEvaluation: { contractVersion: 1, outcome: 'PASS', diagnostics: [] },
+            checkedAt: '2026-10-31T12:00:00.000Z',
+          },
+        }}
+        error={undefined}
+      />,
+    );
+
+    expect(screen.getByText('HTTP execution').parentElement).toHaveTextContent(/passed/i);
+    expect(screen.getByText('Certificate expiry policy failed')).toBeInTheDocument();
+    expect(screen.queryByText(/transport failure/i)).not.toBeInTheDocument();
   });
 
   it('presents assertion evidence for both single and multi-location results', () => {

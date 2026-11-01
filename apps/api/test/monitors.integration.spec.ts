@@ -952,6 +952,7 @@ describe('monitor API', () => {
         assertions: { headers: [], textBody: [], jsonBody: [] },
       })
       .expect(200);
+
     expect(updated.body.data).toMatchObject({
       method: 'HEAD',
       assertions: {
@@ -976,6 +977,66 @@ describe('monitor API', () => {
       version_number: 2,
       method: 'HEAD',
       assertions: { assertions: { textBody: [] } },
+    });
+  });
+
+  it('persists TLS expiry policy in the current monitor and immutable execution version', async () => {
+    const created = await request(app.getHttpServer())
+      .post(`/api/monitors?projectId=${projectId}`)
+      .send({
+        name: 'Certificate policy',
+        url: 'https://example.com',
+        tlsPolicy: { type: 'MINIMUM_VALIDITY', days: 30 },
+      })
+      .expect(201);
+    const monitorId = created.body.data.id as string;
+    expect(created.body.data.tlsPolicy).toEqual({ type: 'MINIMUM_VALIDITY', days: 30 });
+
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/configuration`)
+      .send({
+        httpSettings: {
+          url: 'https://example.com/health',
+          method: 'GET',
+          timeoutMs: 8_000,
+          followRedirects: true,
+          requestBody: { type: 'NONE' },
+          tlsPolicy: { type: 'MINIMUM_VALIDITY', days: 14 },
+        },
+        requestHeaders: [],
+        assertions: { headers: [], textBody: [], jsonBody: [] },
+      })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/http-settings`)
+      .send({
+        url: 'https://example.com/ready',
+        method: 'GET',
+        timeoutMs: 9_000,
+        followRedirects: false,
+        requestBody: { type: 'NONE' },
+      })
+      .expect(200)
+      .expect(({ body }) =>
+        expect(body.data.tlsPolicy).toEqual({ type: 'MINIMUM_VALIDITY', days: 14 }),
+      );
+
+    const persisted = await database.$client.query<{
+      current_policy: unknown;
+      execution_policy: unknown;
+    }>(
+      `select m.tls_policy as current_policy, v.tls_policy as execution_policy
+       from monitors m
+       join monitor_configuration_versions v on v.monitor_id = m.id
+       where m.id = $1
+       order by v.version_number desc
+       limit 1`,
+      [monitorId],
+    );
+    expect(persisted.rows[0]).toEqual({
+      current_policy: { type: 'MINIMUM_VALIDITY', days: 14 },
+      execution_policy: { type: 'MINIMUM_VALIDITY', days: 14 },
     });
   });
 

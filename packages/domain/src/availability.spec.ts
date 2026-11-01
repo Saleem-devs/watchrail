@@ -18,6 +18,7 @@ describe('availability semantics', () => {
     ['UNKNOWN', 'CERTIFICATE_UNTRUSTED', 'PASS', 'UNAVAILABLE'],
     ['UNKNOWN', 'INTERNAL_ERROR', 'PASS', 'UNKNOWN'],
     ['UNKNOWN', 'PROHIBITED_DESTINATION', 'PASS', 'UNKNOWN'],
+    ['UNKNOWN', 'CERTIFICATE_EVIDENCE_UNAVAILABLE', 'PASS', 'UNKNOWN'],
     ['PASS', 'COMPLETED', 'NOT_EVALUATED', 'UNKNOWN'],
   ] as const)(
     'maps scheduled observations to %s',

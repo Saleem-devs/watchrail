@@ -1,8 +1,15 @@
-import { executeHttpCheck, NodeHttpExecutor, type HttpExecutor } from '@watchrail/check-engine';
+import {
+  executeHttpCheck,
+  NodeHttpExecutor,
+  type HttpCheckResult,
+  type HttpExecutor,
+} from '@watchrail/check-engine';
 import {
   HTTP_ENGINE_VERSION,
+  LEGACY_HTTP_ENGINE_VERSION,
   PROBE_MAX_EXECUTION_MS,
   parseResponseAssertions,
+  probeEngineSupports,
 } from '@watchrail/domain';
 import type { ProbeLeaseReferenceV1 } from '@watchrail/contracts';
 import { ProbeCoordinatorError } from './coordinator-client.js';
@@ -26,7 +33,7 @@ export class ProbeAgentRuntime {
       let failures = 0;
       while (!this.stopping) {
         try {
-          const lease = await this.client.claim(HTTP_ENGINE_VERSION, this.lifecycleAbort.signal);
+          const lease = await this.claimCompatibleLease();
           if (!lease) {
             failures = 0;
             await waitForDelay(this.config.pollIntervalMs, this.lifecycleAbort.signal);
@@ -74,7 +81,8 @@ export class ProbeAgentRuntime {
         configuration.configurationVersionId !== lease.configurationVersionId ||
         configuration.configurationVersionNumber !== lease.configurationVersionNumber ||
         configuration.executionPolicyVersion !== lease.executionPolicyVersion ||
-        configuration.requiredEngineVersion !== HTTP_ENGINE_VERSION
+        configuration.requiredEngineVersion !== lease.requiredEngineVersion ||
+        !probeEngineSupports(HTTP_ENGINE_VERSION, configuration.requiredEngineVersion)
       ) {
         throw new ProbeCoordinatorError('INVALID');
       }
@@ -86,6 +94,7 @@ export class ProbeAgentRuntime {
           timeoutMs: configuration.timeoutMs,
           followRedirects: configuration.followRedirects,
           statusPolicy: configuration.statusPolicy,
+          tlsPolicy: configuration.tlsPolicy ?? { type: 'DISABLED' },
           requestHeaders: configuration.requestHeaders,
           requestBody: configuration.requestBody,
           headerAssertions: assertions.headers,
@@ -94,7 +103,15 @@ export class ProbeAgentRuntime {
         },
         { executor: this.executor, signal: abort.signal },
       );
-      const serialized = this.client.serializeSubmission(lease, HTTP_ENGINE_VERSION, result);
+      const submissionResult =
+        lease.requiredEngineVersion === LEGACY_HTTP_ENGINE_VERSION
+          ? withoutTlsEvidence(result)
+          : result;
+      const serialized = this.client.serializeSubmission(
+        lease,
+        lease.requiredEngineVersion,
+        submissionResult,
+      );
       await this.submitWithRetry(lease, serialized, abort, authority);
     } catch (error) {
       if (
@@ -146,7 +163,7 @@ export class ProbeAgentRuntime {
       await waitForDelay(this.config.renewalIntervalMs, abort.signal);
       if (abort.signal.aborted) return;
       try {
-        const renewed = await this.client.renew(lease, HTTP_ENGINE_VERSION, abort.signal);
+        const renewed = await this.client.renew(lease, lease.requiredEngineVersion, abort.signal);
         authority.expiresAt = Date.parse(renewed);
       } catch (error) {
         if (
@@ -180,6 +197,19 @@ export class ProbeAgentRuntime {
       await waitForDelay(this.config.heartbeatIntervalMs, this.lifecycleAbort.signal);
     }
   }
+
+  private async claimCompatibleLease(): Promise<ProbeLeaseReferenceV1 | null> {
+    const currentLease = await this.client.claim(HTTP_ENGINE_VERSION, this.lifecycleAbort.signal);
+    if (currentLease) return currentLease;
+
+    return this.client.claim(LEGACY_HTTP_ENGINE_VERSION, this.lifecycleAbort.signal);
+  }
+}
+
+function withoutTlsEvidence(result: HttpCheckResult): HttpCheckResult {
+  const legacyResult: HttpCheckResult = { ...result };
+  delete legacyResult.tlsCertificates;
+  return legacyResult;
 }
 
 export function waitForDelay(milliseconds: number, signal?: AbortSignal): Promise<void> {

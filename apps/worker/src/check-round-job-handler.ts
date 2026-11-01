@@ -110,6 +110,7 @@ export class CheckRoundJobHandler implements CheckJobHandler {
             timeoutMs: claim.execution.timeoutMs,
             followRedirects: claim.execution.followRedirects,
             statusPolicy: claim.execution.statusPolicy,
+            tlsPolicy: claim.execution.tlsPolicy ?? { type: 'DISABLED' },
             requestHeaders,
             requestBody: claim.execution.requestBody,
             headerAssertions: assertions.headers,

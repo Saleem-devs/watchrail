@@ -1,7 +1,7 @@
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import type { WatchrailDatabase } from './client.js';
 import {
-  HTTP_ENGINE_VERSION,
+  isSupportedHttpEngineVersion,
   deriveProbeAgentHealth,
   type ProbeAgentHealth,
 } from '@watchrail/domain';
@@ -82,7 +82,7 @@ export class ProbeIdentityRepository {
         (agent) =>
           agent.locationId === location.id &&
           agent.status === 'ACTIVE' &&
-          agent.engineVersion === HTTP_ENGINE_VERSION,
+          isSupportedHttpEngineVersion(agent.engineVersion),
       );
       const healths = active.map((agent) =>
         deriveProbeAgentHealth({
@@ -366,7 +366,7 @@ export class ProbeIdentityRepository {
         heartbeatIntervalMs: agent.heartbeatIntervalMs,
         now,
       }),
-      engineCompatible: agent.engineVersion === HTTP_ENGINE_VERSION,
+      engineCompatible: isSupportedHttpEngineVersion(agent.engineVersion),
     }));
   }
 

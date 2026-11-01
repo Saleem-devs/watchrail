@@ -5,7 +5,12 @@ export const PROBE_ATTEMPT_STATUSES = ['LEASED', 'SUBMITTED', 'EXPIRED', 'REJECT
 
 export const LOCAL_PROBE_LOCATION = 'local';
 export const HTTP_EXECUTION_POLICY_VERSION = 'http-v1';
-export const HTTP_ENGINE_VERSION = 'watchrail-http-v1';
+export const LEGACY_HTTP_ENGINE_VERSION = 'watchrail-http-v1';
+export const HTTP_ENGINE_VERSION = 'watchrail-http-v2';
+export const SUPPORTED_HTTP_ENGINE_VERSIONS = [
+  LEGACY_HTTP_ENGINE_VERSION,
+  HTTP_ENGINE_VERSION,
+] as const;
 export const PROBE_LEASE_DURATION_MS = 30_000;
 export const PROBE_MAX_EXECUTION_MS = 120_000;
 export const PROBE_MAX_ATTEMPTS = 3;
@@ -35,6 +40,37 @@ export type ProbeLocationStatus = (typeof PROBE_LOCATION_STATUSES)[number];
 export type ProbeAgentStatus = (typeof PROBE_AGENT_STATUSES)[number];
 export type ProbeCredentialStatus = (typeof PROBE_CREDENTIAL_STATUSES)[number];
 export type ProbeAttemptStatus = (typeof PROBE_ATTEMPT_STATUSES)[number];
+
+export function probeEngineSupports(
+  agentEngineVersion: string,
+  requiredEngineVersion: string,
+): boolean {
+  return (
+    agentEngineVersion === requiredEngineVersion ||
+    (agentEngineVersion === HTTP_ENGINE_VERSION &&
+      requiredEngineVersion === LEGACY_HTTP_ENGINE_VERSION)
+  );
+}
+
+export function requiredEngineVersionsForAgent(agentEngineVersion: string): readonly string[] {
+  if (agentEngineVersion === HTTP_ENGINE_VERSION) {
+    return [HTTP_ENGINE_VERSION, LEGACY_HTTP_ENGINE_VERSION];
+  }
+  return [agentEngineVersion];
+}
+
+export function agentEngineVersionsForRequirement(
+  requiredEngineVersion: string,
+): readonly string[] {
+  if (requiredEngineVersion === LEGACY_HTTP_ENGINE_VERSION) {
+    return [LEGACY_HTTP_ENGINE_VERSION, HTTP_ENGINE_VERSION];
+  }
+  return [requiredEngineVersion];
+}
+
+export function isSupportedHttpEngineVersion(value: string | null): boolean {
+  return value !== null && SUPPORTED_HTTP_ENGINE_VERSIONS.some((version) => version === value);
+}
 
 export function assertProbeEngineVersion(value: unknown): asserts value is string {
   if (typeof value !== 'string' || !/^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$/u.test(value)) {

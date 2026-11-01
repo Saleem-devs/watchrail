@@ -3,6 +3,12 @@ import {
   parseResponseAssertions,
   type ResponseAssertions,
 } from './assertion.js';
+import {
+  DISABLED_TLS_CERTIFICATE_POLICY,
+  parseTlsCertificatePolicy,
+  TlsCertificatePolicyError,
+  type TlsCertificatePolicy,
+} from './tls.js';
 
 export const HTTP_METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] as const;
 export const HTTP_MONITOR_METHODS = [
@@ -40,6 +46,7 @@ export const MONITOR_DEFAULTS = {
   intervalSeconds: 60,
   followRedirects: true,
   statusPolicy: { type: 'ANY_2XX' } as const,
+  tlsPolicy: DISABLED_TLS_CERTIFICATE_POLICY,
   locations: [...MONITOR_LOCATIONS],
 } as const satisfies {
   method: HttpMethod;
@@ -48,6 +55,7 @@ export const MONITOR_DEFAULTS = {
   intervalSeconds: number;
   followRedirects: boolean;
   statusPolicy: HttpStatusPolicy;
+  tlsPolicy: TlsCertificatePolicy;
   locations: readonly string[];
 };
 
@@ -55,6 +63,7 @@ export interface CreateMonitorCommand {
   name: unknown;
   url: unknown;
   statusPolicy?: unknown;
+  tlsPolicy?: unknown;
   method?: unknown;
   timeoutMs?: unknown;
   followRedirects?: unknown;
@@ -75,6 +84,7 @@ export interface NewMonitor {
   intervalSeconds: number;
   followRedirects: boolean;
   statusPolicy: HttpStatusPolicy;
+  tlsPolicy: TlsCertificatePolicy;
   requestHeaders: RequestHeaderUpdate[];
   requestBody: HttpRequestBody;
   assertions: ResponseAssertions;
@@ -85,6 +95,7 @@ export interface MonitorFieldErrors {
   name?: string[];
   url?: string[];
   statusPolicy?: string[];
+  tlsPolicy?: string[];
   requestHeaders?: string[];
   requestBody?: string[];
   assertions?: string[];
@@ -182,6 +193,7 @@ export interface HttpMonitorSettings {
   timeoutMs: number;
   followRedirects: boolean;
   requestBody: HttpRequestBody;
+  tlsPolicy?: TlsCertificatePolicy;
 }
 
 export class MonitorInputError extends Error {
@@ -203,6 +215,7 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
   const name = normalizeName(command.name, fields);
   const url = normalizeUrl(command.url, fields);
   const statusPolicy = normalizeStatusPolicy(command.statusPolicy, fields);
+  const tlsPolicy = normalizeTlsPolicy(command.tlsPolicy, url, fields, true);
   const method =
     command.method === undefined
       ? MONITOR_DEFAULTS.method
@@ -241,6 +254,7 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
     intervalSeconds,
     followRedirects,
     statusPolicy,
+    tlsPolicy,
     requestHeaders,
     requestBody,
     assertions,
@@ -356,14 +370,24 @@ export function parseHttpMonitorSettings(value: unknown): HttpMonitorSettings {
 
   const settings = value as Record<string, unknown>;
   const legacyKeys = ['followRedirects', 'method', 'timeoutMs', 'url'];
-  const expectedKeys = ['followRedirects', 'method', 'requestBody', 'timeoutMs', 'url'];
+  const requestBodyKeys = ['followRedirects', 'method', 'requestBody', 'timeoutMs', 'url'];
+  const expectedKeys = [
+    'followRedirects',
+    'method',
+    'requestBody',
+    'timeoutMs',
+    'tlsPolicy',
+    'url',
+  ];
   const keys = Object.keys(settings).sort();
   if (!(
     (keys.length === legacyKeys.length && keys.every((key, index) => key === legacyKeys[index])) ||
+    (keys.length === requestBodyKeys.length &&
+      keys.every((key, index) => key === requestBodyKeys[index])) ||
     (keys.length === expectedKeys.length && keys.every((key, index) => key === expectedKeys[index]))
   )) {
     fields.httpSettings = [
-      'Provide exactly url, method, timeoutMs, followRedirects, and requestBody.',
+      'Provide exactly url, method, timeoutMs, followRedirects, requestBody, and tlsPolicy.',
     ];
   }
 
@@ -372,9 +396,43 @@ export function parseHttpMonitorSettings(value: unknown): HttpMonitorSettings {
   const timeoutMs = normalizeTimeout(settings.timeoutMs, fields);
   const followRedirects = normalizeFollowRedirects(settings.followRedirects, fields);
   const requestBody = normalizeRequestBody(settings.requestBody, method, fields);
+  const tlsPolicy =
+    settings.tlsPolicy === undefined
+      ? undefined
+      : normalizeTlsPolicy(settings.tlsPolicy, url, fields, false);
 
   if (Object.keys(fields).length > 0) throw new MonitorInputError(fields);
-  return { url, method, timeoutMs, followRedirects, requestBody };
+  return {
+    url,
+    method,
+    timeoutMs,
+    followRedirects,
+    requestBody,
+    ...(tlsPolicy === undefined ? {} : { tlsPolicy }),
+  };
+}
+
+function normalizeTlsPolicy(
+  value: unknown,
+  url: string,
+  fields: MonitorFieldErrors,
+  optional: boolean,
+): TlsCertificatePolicy {
+  if (optional && value === undefined) return { ...MONITOR_DEFAULTS.tlsPolicy };
+  try {
+    const policy = parseTlsCertificatePolicy(value);
+    if (policy.type !== 'DISABLED' && !url.startsWith('https://')) {
+      fields.tlsPolicy = ['Certificate expiry monitoring requires an HTTPS URL.'];
+      return { ...MONITOR_DEFAULTS.tlsPolicy };
+    }
+    return policy;
+  } catch (error) {
+    if (error instanceof TlsCertificatePolicyError) {
+      fields.tlsPolicy = [error.message];
+      return { ...MONITOR_DEFAULTS.tlsPolicy };
+    }
+    throw error;
+  }
 }
 
 function normalizeRequestBody(

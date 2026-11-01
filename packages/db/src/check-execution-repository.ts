@@ -4,6 +4,7 @@ import {
   INCIDENT_FAILURE_THRESHOLD,
   parseHttpRedirectHops,
   parseStoredAssertionEvaluation,
+  parseTlsCertificateEvidenceList,
   type AssertionEvaluationV1,
   type HttpMethod,
   type HttpRedirectHop,
@@ -11,6 +12,8 @@ import {
   type HttpRequestBody,
   type ResponseAssertionConfigurationV1,
   type StoredRequestHeader,
+  type TlsCertificateEvidenceV1,
+  type TlsCertificatePolicy,
 } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
 import { applyAvailabilityObservation } from './availability-repository.js';
@@ -43,6 +46,7 @@ export interface ClaimedCheckExecution {
   requestHeaders: readonly StoredRequestHeader[];
   requestBody: HttpRequestBody;
   assertions: ResponseAssertionConfigurationV1;
+  tlsPolicy?: TlsCertificatePolicy;
 }
 
 export type CheckExecutionClaimResult =
@@ -60,6 +64,7 @@ export interface AuthoritativeCheckResult {
   attemptDurationMs: number;
   redirects: readonly HttpRedirectHop[];
   assertionEvaluation: AssertionEvaluationV1;
+  tlsCertificates?: readonly TlsCertificateEvidenceV1[];
   checkedAt: Date;
 }
 
@@ -90,6 +95,7 @@ export class CheckExecutionRepository {
           requestHeaders: monitorConfigurationVersions.requestHeaders,
           requestBody: monitorConfigurationVersions.requestBody,
           assertions: monitorConfigurationVersions.assertions,
+          tlsPolicy: monitorConfigurationVersions.tlsPolicy,
         })
         .from(checkExecutionAssignments)
         .innerJoin(
@@ -151,6 +157,7 @@ export class CheckExecutionRepository {
           requestHeaders: candidate.requestHeaders,
           requestBody: candidate.requestBody,
           assertions: candidate.assertions,
+          tlsPolicy: candidate.tlsPolicy,
         },
       };
     });
@@ -163,6 +170,7 @@ export class CheckExecutionRepository {
   ): Promise<boolean> {
     const redirects = parseHttpRedirectHops(result.redirects);
     const assertionEvaluation = parseStoredAssertionEvaluation(result.assertionEvaluation);
+    const tlsCertificates = parseTlsCertificateEvidenceList(result.tlsCertificates ?? []);
 
     return this.db.transaction(async (tx) => {
       const [completed] = await tx
@@ -191,7 +199,7 @@ export class CheckExecutionRepository {
         assignmentId,
         organizationId: completed.organizationId,
         roundId: completed.roundId,
-        result: { ...result, redirects, assertionEvaluation },
+        result: { ...result, redirects, assertionEvaluation, tlsCertificates },
       });
 
       return true;
@@ -217,6 +225,7 @@ export async function finalizeCheckExecution(
   }
   const redirects = parseHttpRedirectHops(input.result.redirects);
   const assertionEvaluation = parseStoredAssertionEvaluation(input.result.assertionEvaluation);
+  const tlsCertificates = parseTlsCertificateEvidenceList(input.result.tlsCertificates ?? []);
 
   await tx.insert(checkExecutionResults).values({
     organizationId: input.organizationId,
@@ -230,6 +239,7 @@ export async function finalizeCheckExecution(
     attemptDurationMs: input.result.attemptDurationMs,
     redirects,
     assertionEvaluation,
+    tlsCertificates,
     checkedAt: input.result.checkedAt,
   });
 

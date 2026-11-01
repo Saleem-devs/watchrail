@@ -9,6 +9,7 @@ import type {
 } from './types';
 import { formatMilliseconds, formatRatio, humanize } from './formatting';
 import { AssertionDiagnostics, diagnosticFailureLabel } from './assertion-diagnostics';
+import { TlsCertificateEvidencePanel } from './tls-certificate-evidence';
 
 type DiagnosticOutcome =
   | 'PASS'
@@ -83,7 +84,12 @@ function DiagnosticOutcomeSummary({
   assertionEvaluation: AssertionEvaluation;
 }) {
   const httpOutcome: DiagnosticOutcome =
-    stage !== 'HTTP' || statusCode === null ? 'NO_RESPONSE' : outcome;
+    (reason === 'CERTIFICATE_EXPIRING' || reason === 'CERTIFICATE_EVIDENCE_UNAVAILABLE') &&
+    statusCode !== null
+      ? 'PASS'
+      : stage !== 'HTTP' || statusCode === null
+        ? 'NO_RESPONSE'
+        : outcome;
   const health = singleLocationHealth(outcome, reason, assertionEvaluation.outcome);
   return (
     <dl className="grid gap-px border-t border-rail-border bg-rail-border sm:grid-cols-3">
@@ -192,6 +198,7 @@ export function ManualDiagnostic({
           {diagnosticFailureLabel({
             outcome: result.outcome,
             stage: result.stage,
+            reason: result.reason,
             statusCode: result.statusCode,
             assertionEvaluation,
           })}
@@ -201,6 +208,10 @@ export function ManualDiagnostic({
         </p>
       </div>
       <AssertionDiagnostics evaluation={assertionEvaluation} />
+      <TlsCertificateEvidencePanel
+        certificates={result.tlsCertificates}
+        observedAt={result.checkedAt}
+      />
       {result.redirects.length > 0 ? <RedirectPath redirects={result.redirects} /> : null}
       <EvidenceRetentionNotice />
     </section>
@@ -324,6 +335,10 @@ function MultiLocationDiagnostic({
                         evaluation={execution.diagnosticSummary.assertionEvaluation}
                       />
                     ) : null}
+                    <TlsCertificateEvidencePanel
+                      certificates={execution.diagnosticSummary.tlsCertificates}
+                      observedAt={execution.diagnosticSummary.checkedAt}
+                    />
                   </div>
                 ) : null,
               )}
@@ -479,11 +494,16 @@ function HistoricalSingleLocationEvidence({
         {diagnosticFailureLabel({
           outcome: result.outcome,
           stage: result.stage,
+          reason: result.reason,
           statusCode: result.statusCode,
           assertionEvaluation,
         })}
       </p>
       <AssertionDiagnostics evaluation={assertionEvaluation} />
+      <TlsCertificateEvidencePanel
+        certificates={result.tlsCertificates}
+        observedAt={result.checkedAt}
+      />
       {result.redirects.length > 0 ? <RedirectPath redirects={result.redirects} /> : null}
       <EvidenceRetentionNotice />
     </div>

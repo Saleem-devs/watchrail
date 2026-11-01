@@ -133,6 +133,7 @@ export class MonitorConfigurationTestService {
           requestHeaders,
           assertions,
         ),
+        input.settings.tlsPolicy,
       );
     } catch (error) {
       this.throwExpectedError(error);

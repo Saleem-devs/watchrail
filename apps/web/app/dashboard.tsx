@@ -46,6 +46,7 @@ import {
   requiresStateChangingMethodConfirmation,
   requestBodyFromForm,
   requestHeadersFromForm,
+  tlsPolicyFromForm,
   urlFromMonitorForm,
 } from '../features/monitors/monitor-form-serialization';
 import { HTTP_METHODS } from '../features/monitors/http-method-options';
@@ -338,6 +339,7 @@ export function Dashboard({
             name: formData.get('name'),
             url: urlFromMonitorForm(formData),
             statusPolicy,
+            tlsPolicy: tlsPolicyFromForm(formData),
             method: formData.get('method'),
             timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
             followRedirects: formData.get('followRedirects') === 'on',
@@ -387,6 +389,7 @@ export function Dashboard({
             timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
             followRedirects: formData.get('followRedirects') === 'on',
             requestBody: requestBodyFromForm(formData),
+            tlsPolicy: tlsPolicyFromForm(formData),
           },
           requestHeaders: requestHeadersFromForm(formData),
           assertions: responseAssertionsFromForm(formData),
