@@ -171,7 +171,13 @@ export function ManualDiagnostic({
 
   const { result } = round;
   if (result.kind === 'MULTI_LOCATION') {
-    return <MultiLocationDiagnostic result={result} label="Latest manual diagnostic" />;
+    return (
+      <MultiLocationDiagnostic
+        result={result}
+        label="Latest manual diagnostic"
+        protocol={protocol}
+      />
+    );
   }
   const assertionEvaluation = result.assertionEvaluation ?? {
     contractVersion: 1,
@@ -200,9 +206,7 @@ export function ManualDiagnostic({
           value={
             protocol === 'HTTP'
               ? (result.statusCode?.toString() ?? 'No response')
-              : result.reason === 'CONNECTED'
-                ? 'Established'
-                : 'Failed'
+              : tcpConnectionState(result.outcome, result.reason)
           }
         />
         <Metric
@@ -311,6 +315,30 @@ function tcpDiagnosticLabel(reason: string): string {
   }
 }
 
+function tcpConnectionState(
+  outcome: 'PASS' | 'FAIL' | 'UNKNOWN',
+  reason: string,
+): 'Established' | 'Failed' | 'Indeterminate' {
+  if (outcome === 'UNKNOWN') return 'Indeterminate';
+  return outcome === 'PASS' && reason === 'CONNECTED' ? 'Established' : 'Failed';
+}
+
+function regionalTcpConnectionState(reason: string): 'Established' | 'Failed' | 'Indeterminate' {
+  if (reason === 'CONNECTED') return 'Established';
+  if (
+    [
+      'CONNECTION_REFUSED',
+      'HOST_UNREACHABLE',
+      'CONNECTION_TIMEOUT',
+      'NAME_NOT_FOUND',
+      'PROHIBITED_DESTINATION',
+    ].includes(reason)
+  ) {
+    return 'Failed';
+  }
+  return 'Indeterminate';
+}
+
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0 bg-rail-header px-4 py-3">
@@ -325,9 +353,11 @@ function Metric({ label, value }: { label: string; value: string }) {
 function MultiLocationDiagnostic({
   result,
   label,
+  protocol,
 }: {
   result: Extract<NonNullable<ManualRound['result']>, { kind: 'MULTI_LOCATION' }>;
   label: string;
+  protocol: Monitor['type'];
 }) {
   return (
     <section
@@ -371,26 +401,45 @@ function MultiLocationDiagnostic({
                     key={execution.id}
                     className="mt-2 overflow-hidden rounded-rail-control border border-rail-border"
                   >
-                    <p className="m-0 px-3 py-2 text-xs text-rail-muted">
-                      {execution.role.toLowerCase()} · HTTP{' '}
-                      {execution.diagnosticSummary.statusCode ?? 'response unavailable'} ·{' '}
-                      {formatMilliseconds(execution.diagnosticSummary.responseTimeMs)}
-                      <span className="mt-1 block">
-                        Response validation:{' '}
-                        {execution.diagnosticSummary.assertionEvaluation
-                          ? outcomeLabel[execution.diagnosticSummary.assertionEvaluation.outcome]
-                          : 'Not reported'}
-                      </span>
-                    </p>
-                    {execution.diagnosticSummary.assertionEvaluation ? (
+                    {protocol === 'TCP' ? (
+                      <dl className="m-0 grid grid-cols-2 gap-px bg-rail-border">
+                        <Metric
+                          label={
+                            execution.role === 'PRIMARY'
+                              ? 'Primary connection'
+                              : 'Confirmation connection'
+                          }
+                          value={regionalTcpConnectionState(execution.diagnosticSummary.reason)}
+                        />
+                        <Metric
+                          label="Connect latency"
+                          value={formatMilliseconds(execution.diagnosticSummary.responseTimeMs)}
+                        />
+                      </dl>
+                    ) : (
+                      <p className="m-0 px-3 py-2 text-xs text-rail-muted">
+                        {execution.role.toLowerCase()} · HTTP{' '}
+                        {execution.diagnosticSummary.statusCode ?? 'response unavailable'} ·{' '}
+                        {formatMilliseconds(execution.diagnosticSummary.responseTimeMs)}
+                        <span className="mt-1 block">
+                          Response validation:{' '}
+                          {execution.diagnosticSummary.assertionEvaluation
+                            ? outcomeLabel[execution.diagnosticSummary.assertionEvaluation.outcome]
+                            : 'Not reported'}
+                        </span>
+                      </p>
+                    )}
+                    {protocol === 'HTTP' && execution.diagnosticSummary.assertionEvaluation ? (
                       <AssertionDiagnostics
                         evaluation={execution.diagnosticSummary.assertionEvaluation}
                       />
                     ) : null}
-                    <TlsCertificateEvidencePanel
-                      certificates={execution.diagnosticSummary.tlsCertificates}
-                      observedAt={execution.diagnosticSummary.checkedAt}
-                    />
+                    {protocol === 'HTTP' ? (
+                      <TlsCertificateEvidencePanel
+                        certificates={execution.diagnosticSummary.tlsCertificates}
+                        observedAt={execution.diagnosticSummary.checkedAt}
+                      />
+                    ) : null}
                   </div>
                 ) : null,
               )}
@@ -398,7 +447,7 @@ function MultiLocationDiagnostic({
           ))}
         </ul>
       ) : null}
-      <EvidenceRetentionNotice />
+      {protocol === 'HTTP' ? <EvidenceRetentionNotice /> : null}
     </section>
   );
 }
@@ -499,6 +548,7 @@ export function CheckHistory({
                 <MultiLocationDiagnostic
                   result={detail.result}
                   label="Historical regional evidence"
+                  protocol={protocol}
                 />
               ) : null}
               {isExpanded && detail?.result && detail.result.kind !== 'MULTI_LOCATION' ? (
@@ -539,9 +589,7 @@ function HistoricalSingleLocationEvidence({
           value={
             protocol === 'HTTP'
               ? (result.statusCode?.toString() ?? 'No response')
-              : result.reason === 'CONNECTED'
-                ? 'Established'
-                : 'Failed'
+              : tcpConnectionState(result.outcome, result.reason)
           }
         />
         <Metric
