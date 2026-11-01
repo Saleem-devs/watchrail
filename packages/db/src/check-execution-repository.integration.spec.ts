@@ -117,6 +117,43 @@ describe('CheckExecutionRepository', () => {
     expect(claim.execution.statusPolicy).toBeUndefined();
   });
 
+  it('persists and reloads a successful TCP connection result', async () => {
+    const round = await createTcpRound();
+    const claim = await repository.claim(round.id, 45_000);
+    if (claim.state !== 'CLAIMED') throw new Error('Expected a TCP execution claim.');
+
+    const checkedAt = new Date('2026-11-01T09:15:00.000Z');
+    await expect(
+      repository.complete(claim.execution.assignmentId, claim.execution.claimToken, {
+        outcome: 'PASS',
+        stage: 'CONNECT',
+        reason: 'CONNECTED',
+        statusCode: null,
+        responseTimeMs: 18,
+        attemptDurationMs: 24,
+        redirects: [],
+        assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
+        tlsCertificates: [],
+        checkedAt,
+      }),
+    ).resolves.toBe(true);
+
+    const stored = await new CheckHistoryRepository(connection.db).findForMonitor(
+      organizationId,
+      round.monitorId,
+      round.id,
+    );
+    expect(stored?.result).toMatchObject({
+      outcome: 'PASS',
+      stage: 'CONNECT',
+      reason: 'CONNECTED',
+      statusCode: null,
+      responseTimeMs: 18,
+      attemptDurationMs: 24,
+      checkedAt,
+    });
+  });
+
   it('allows only one concurrent claimant', async () => {
     const round = await createRound();
 

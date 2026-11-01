@@ -2,11 +2,26 @@ import { connect } from 'node:net';
 import type { TcpConnectInput, TcpConnector, TcpConnectResult } from './tcp-types.js';
 
 export class NodeTcpConnector implements TcpConnector {
+  constructor(
+    private readonly dependencies: {
+      monotonicNow?: () => number;
+      connectAddress?: typeof connectAddress;
+    } = {},
+  ) {}
+
   async connect(input: TcpConnectInput): Promise<TcpConnectResult> {
+    const now = this.dependencies.monotonicNow ?? (() => performance.now());
+    const attempt = this.dependencies.connectAddress ?? connectAddress;
+    const startedAt = now();
     let unreachable = false;
     for (const address of input.addresses) {
-      const result = await connectAddress(input, address.address, address.family);
-      if (result.type === 'CONNECTED') return result;
+      const result = await attempt(input, address.address, address.family);
+      if (result.type === 'CONNECTED') {
+        return {
+          type: 'CONNECTED',
+          connectionTimeMs: Math.max(0, Math.round(now() - startedAt)),
+        };
+      }
       if (result.type === 'HOST_UNREACHABLE') unreachable = true;
     }
     return { type: unreachable ? 'HOST_UNREACHABLE' : 'CONNECTION_REFUSED' };

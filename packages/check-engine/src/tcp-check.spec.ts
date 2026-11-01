@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { executeTcpCheck } from './tcp-check.js';
+import { NodeTcpConnector } from './node-tcp-connector.js';
 import type { DnsResolver, TcpConnector, TcpConnectResult } from './index.js';
 
 const checkedAt = new Date('2026-11-01T12:00:00.000Z');
@@ -124,5 +125,37 @@ describe('executeTcpCheck', () => {
       reason: 'CONNECTION_TIMEOUT',
     });
     vi.useRealTimers();
+  });
+});
+
+describe('NodeTcpConnector', () => {
+  it('measures the full connection phase across address attempts', async () => {
+    let elapsedMs = 0;
+    const connectAddress = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        elapsedMs = 80;
+        return Promise.resolve({ type: 'CONNECTION_REFUSED' as const });
+      })
+      .mockImplementationOnce(() => {
+        elapsedMs = 105;
+        return Promise.resolve({ type: 'CONNECTED' as const, connectionTimeMs: 25 });
+      });
+    const connector = new NodeTcpConnector({
+      monotonicNow: () => elapsedMs,
+      connectAddress,
+    });
+
+    await expect(
+      connector.connect({
+        host: 'db.example.com',
+        port: 5432,
+        addresses: [
+          { address: '93.184.216.34', family: 4 },
+          { address: '2606:2800:220:1:248:1893:25c8:1946', family: 6 },
+        ],
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toEqual({ type: 'CONNECTED', connectionTimeMs: 105 });
   });
 });

@@ -1004,7 +1004,11 @@ export const checkExecutionResults = pgTable(
 
     check(
       'check_execution_results_response_evidence_consistent',
-      sql`(${table.statusCode} is null) = (${table.responseTimeMs} is null)`,
+      sql`(
+        ((${table.statusCode} is null) = (${table.responseTimeMs} is null))
+        or
+        (${table.statusCode} is null and ${table.responseTimeMs} is not null and ${table.stage} = 'CONNECT' and ${table.reason} = 'CONNECTED')
+      )`,
     ),
 
     check(
