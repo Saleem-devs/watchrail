@@ -8,7 +8,9 @@ import {
   API_WORKFLOW_LIMITS,
   type ApiWorkflowConfigurationInput,
   type ApiWorkflowExtraction,
+  type ApiWorkflowRequestBodyUpdate,
   type ApiWorkflowStepInput,
+  type StoredApiWorkflowRequestBodyV1,
   type StoredApiWorkflowConfigurationV1,
 } from './api-workflow.js';
 import { parseStoredAssertionConfiguration } from './assertion-persistence.js';
@@ -268,7 +270,7 @@ export function parseApiWorkflowConfiguration(value: unknown): ApiWorkflowConfig
     const timeoutMs = normalizeTimeout(candidate.timeoutMs, stepFields);
     const followRedirects = normalizeFollowRedirects(candidate.followRedirects, stepFields);
     const statusPolicy = normalizeStatusPolicy(candidate.statusPolicy, stepFields);
-    const requestBody = normalizeRequestBody(candidate.requestBody, method, stepFields);
+    const requestBody = normalizeApiWorkflowRequestBody(candidate.requestBody, method, stepFields);
     const tlsPolicy = normalizeTlsPolicy(candidate.tlsPolicy, url, stepFields, false);
     let requestHeaders: RequestHeaderUpdate[] = [];
     try {
@@ -327,6 +329,7 @@ export function parseStoredApiWorkflowConfiguration(
       return {
         ...candidate,
         requestHeaders: parseStoredRequestHeaders(candidate.requestHeaders),
+        requestBody: parseStoredApiWorkflowRequestBody(candidate.requestBody),
         assertions: parseStoredAssertionConfiguration(candidate.assertions),
       };
     });
@@ -334,6 +337,10 @@ export function parseStoredApiWorkflowConfiguration(
       contractVersion: 1,
       steps: storedSteps.map((step) => ({
         ...step,
+        requestBody:
+          step.requestBody.type === 'NONE'
+            ? step.requestBody
+            : { type: step.requestBody.type, sensitive: true, retain: true as const },
         requestHeaders: step.requestHeaders.map((header) =>
           header.sensitive ? { name: header.name, sensitive: true, retain: true as const } : header,
         ),
@@ -343,6 +350,7 @@ export function parseStoredApiWorkflowConfiguration(
       contractVersion: 1,
       steps: normalized.steps.map((step, index) => ({
         ...step,
+        requestBody: storedSteps[index]!.requestBody,
         requestHeaders: storedSteps[index]!.requestHeaders,
         assertions: storedSteps[index]!.assertions,
       })),
@@ -351,6 +359,45 @@ export function parseStoredApiWorkflowConfiguration(
     if (error instanceof StoredApiWorkflowConfigurationInvariantError) throw error;
     throw new StoredApiWorkflowConfigurationInvariantError();
   }
+}
+
+function normalizeApiWorkflowRequestBody(
+  value: unknown,
+  method: HttpMonitorMethod,
+  fields: MonitorFieldErrors,
+): ApiWorkflowRequestBodyUpdate {
+  if (
+    hasExactKeys(value, ['retain', 'sensitive', 'type']) &&
+    value.retain === true &&
+    value.sensitive === true &&
+    (value.type === 'JSON' || value.type === 'FORM_URLENCODED' || value.type === 'RAW')
+  ) {
+    if (method === 'GET' || method === 'HEAD') {
+      fields.requestBody = [`${method} monitors cannot send a request body.`];
+      return { type: 'NONE' };
+    }
+    return { type: value.type, sensitive: true, retain: true };
+  }
+  return normalizeRequestBody(value, method, fields);
+}
+
+function parseStoredApiWorkflowRequestBody(value: unknown): StoredApiWorkflowRequestBodyV1 {
+  if (hasExactKeys(value, ['type']) && value.type === 'NONE') {
+    return { type: 'NONE' };
+  }
+  if (
+    hasExactKeys(value, ['encryptedValue', 'sensitive', 'type']) &&
+    (value.type === 'JSON' || value.type === 'FORM_URLENCODED' || value.type === 'RAW') &&
+    value.sensitive === true &&
+    isEncryptedHeaderValueV1(value.encryptedValue)
+  ) {
+    return {
+      type: value.type,
+      sensitive: true,
+      encryptedValue: value.encryptedValue,
+    };
+  }
+  throw new StoredApiWorkflowConfigurationInvariantError();
 }
 
 function normalizeWorkflowStepId(
@@ -1138,6 +1185,7 @@ function normalizeUrl(value: unknown, fields: MonitorFieldErrors): string {
 }
 import {
   assertNoRetainedHeaders,
+  isEncryptedHeaderValueV1,
   normalizeRequestHeaderUpdates,
   parseStoredRequestHeaders,
   RequestHeaderInputError,

@@ -1,5 +1,9 @@
 import type { ResponseAssertionConfigurationV1 } from './assertion-persistence.js';
-import type { RequestHeaderUpdate, StoredRequestHeader } from './request-header.js';
+import type {
+  EncryptedHeaderValueV1,
+  RequestHeaderUpdate,
+  StoredRequestHeader,
+} from './request-header.js';
 import type { TlsCertificatePolicy } from './tls.js';
 import type { HttpMonitorMethod, HttpRequestBody, HttpStatusPolicy } from './monitor.js';
 
@@ -19,7 +23,20 @@ export interface ApiWorkflowExtraction {
   sensitive: boolean;
 }
 
-interface ApiWorkflowStepBase {
+type ApiWorkflowBodyType = Exclude<HttpRequestBody['type'], 'NONE'>;
+
+export type ApiWorkflowRequestBodyUpdate =
+  HttpRequestBody | { type: ApiWorkflowBodyType; sensitive: true; retain: true };
+
+export type StoredApiWorkflowRequestBodyV1 =
+  | { type: 'NONE' }
+  | {
+      type: ApiWorkflowBodyType;
+      sensitive: true;
+      encryptedValue: EncryptedHeaderValueV1;
+    };
+
+interface ApiWorkflowStepBase<TRequestBody> {
   id: string;
   name: string;
   url: string;
@@ -28,11 +45,11 @@ interface ApiWorkflowStepBase {
   followRedirects: boolean;
   statusPolicy: HttpStatusPolicy;
   tlsPolicy: TlsCertificatePolicy;
-  requestBody: HttpRequestBody;
+  requestBody: TRequestBody;
   extractions: ApiWorkflowExtraction[];
 }
 
-export interface ApiWorkflowStepInput extends ApiWorkflowStepBase {
+export interface ApiWorkflowStepInput extends ApiWorkflowStepBase<ApiWorkflowRequestBodyUpdate> {
   requestHeaders: RequestHeaderUpdate[];
   assertions: unknown;
 }
@@ -42,7 +59,7 @@ export interface ApiWorkflowConfigurationInput {
   steps: ApiWorkflowStepInput[];
 }
 
-export interface StoredApiWorkflowStepV1 extends ApiWorkflowStepBase {
+export interface StoredApiWorkflowStepV1 extends ApiWorkflowStepBase<StoredApiWorkflowRequestBodyV1> {
   requestHeaders: StoredRequestHeader[];
   assertions: ResponseAssertionConfigurationV1;
 }

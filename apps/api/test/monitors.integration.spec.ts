@@ -40,7 +40,12 @@ function apiWorkflowConfiguration(retainSecrets = false) {
             ? { name: 'authorization', sensitive: true, retain: true }
             : { name: 'authorization', sensitive: true, value: 'Bearer workflow-secret' },
         ],
-        requestBody: { type: 'JSON', value: '{"username":"saleem"}' },
+        requestBody: retainSecrets
+          ? { type: 'JSON', sensitive: true, retain: true }
+          : {
+              type: 'JSON',
+              value: '{"username":"operator","password":"workflow-password"}',
+            },
         assertions: {
           headers: [],
           textBody: [
@@ -352,6 +357,11 @@ describe('monitor API', () => {
                   hasValue: true,
                 },
               ],
+              requestBody: {
+                type: 'JSON',
+                sensitive: true,
+                hasValue: true,
+              },
               assertions: {
                 assertions: {
                   textBody: [{ target: { sensitive: true, hasValue: true } }],
@@ -365,6 +375,7 @@ describe('monitor API', () => {
     });
     expect(JSON.stringify(created.body)).not.toContain('workflow-secret');
     expect(JSON.stringify(created.body)).not.toContain('assertion-secret');
+    expect(JSON.stringify(created.body)).not.toContain('workflow-password');
 
     const monitorId = created.body.data.id as string;
     const before = await database.$client.query<{ api_workflow: unknown }>(
@@ -374,6 +385,11 @@ describe('monitor API', () => {
     );
     expect(JSON.stringify(before.rows)).not.toContain('workflow-secret');
     expect(JSON.stringify(before.rows)).not.toContain('assertion-secret');
+    expect(JSON.stringify(before.rows)).not.toContain('workflow-password');
+    const projectionBeforeUpdate = await database.$client.query<{
+      api_workflow: unknown;
+    }>('select api_workflow from monitors where id=$1', [monitorId]);
+    expect(JSON.stringify(projectionBeforeUpdate.rows)).not.toContain('workflow-password');
 
     const updated = await request(app.getHttpServer())
       .patch(`/api/monitors/${monitorId}/api-workflow`)
@@ -384,6 +400,7 @@ describe('monitor API', () => {
     const after = await database.$client.query<{
       api_workflow: {
         steps: Array<{
+          requestBody: { encryptedValue: unknown };
           requestHeaders: Array<{ encryptedValue: unknown }>;
           assertions: {
             assertions: { textBody: Array<{ target: { encryptedValue: unknown } }> };
@@ -401,6 +418,9 @@ describe('monitor API', () => {
     expect(second.steps[0]!.requestHeaders[0]!.encryptedValue).toEqual(
       first.steps[0]!.requestHeaders[0]!.encryptedValue,
     );
+    expect(second.steps[0]!.requestBody.encryptedValue).toEqual(
+      first.steps[0]!.requestBody.encryptedValue,
+    );
     expect(second.steps[0]!.assertions.assertions.textBody[0]!.target.encryptedValue).toEqual(
       first.steps[0]!.assertions.assertions.textBody[0]!.target.encryptedValue,
     );
@@ -414,6 +434,46 @@ describe('monitor API', () => {
       .patch('/api/monitors/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/api-workflow')
       .send(apiWorkflowConfiguration())
       .expect(404);
+
+    const invalidUpdate = apiWorkflowConfiguration(true);
+    Object.assign(invalidUpdate.steps[1]!, {
+      requestHeaders: [{ name: 'x-missing-secret', sensitive: true, retain: true }],
+    });
+    const projectionBeforeRejectedUpdate = await database.$client.query<{
+      api_workflow: unknown;
+      updated_at: Date;
+    }>('select api_workflow, updated_at from monitors where id=$1', [monitorId]);
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/api-workflow`)
+      .send(invalidUpdate)
+      .expect(400)
+      .expect(({ body }) => expect(body).toMatchObject({ code: 'VALIDATION_FAILED' }));
+
+    const afterRejectedUpdate = await database.$client.query<{
+      api_workflow: unknown;
+    }>(
+      `select api_workflow from monitor_configuration_versions
+       where monitor_id=$1 order by version_number`,
+      [monitorId],
+    );
+    expect(afterRejectedUpdate.rows).toEqual(after.rows);
+    const projectionAfterRejectedUpdate = await database.$client.query<{
+      api_workflow: unknown;
+      updated_at: Date;
+    }>('select api_workflow, updated_at from monitors where id=$1', [monitorId]);
+    expect(projectionAfterRejectedUpdate.rows).toEqual(projectionBeforeRejectedUpdate.rows);
+  });
+
+  it('rejects workflow secret-retention tokens during creation as validation errors', async () => {
+    await request(app.getHttpServer())
+      .post(`/api/monitors?projectId=${projectId}`)
+      .send({
+        type: 'API_WORKFLOW',
+        name: 'Invalid retained workflow',
+        workflow: apiWorkflowConfiguration(true),
+      })
+      .expect(400)
+      .expect(({ body }) => expect(body).toMatchObject({ code: 'VALIDATION_FAILED' }));
   });
 
   it('replaces the immutable execution location with an owned active remote location', async () => {

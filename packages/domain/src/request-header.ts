@@ -170,7 +170,7 @@ function parseStoredRequestHeader(value: unknown): StoredRequestHeader {
   return { name: value.name, sensitive: true, encryptedValue: value.encryptedValue };
 }
 
-function isEncryptedHeaderValueV1(value: unknown): value is EncryptedHeaderValueV1 {
+export function isEncryptedHeaderValueV1(value: unknown): value is EncryptedHeaderValueV1 {
   return (
     isRecord(value) &&
     hasExactKeys(value, ['version', 'algorithm', 'keyId', 'iv', 'ciphertext', 'authTag']) &&

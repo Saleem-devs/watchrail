@@ -219,6 +219,21 @@ describe('createMonitor', () => {
         ...workflow,
         steps: workflow.steps.map((step) => ({
           ...step,
+          requestBody:
+            step.requestBody.type === 'NONE'
+              ? step.requestBody
+              : {
+                  type: step.requestBody.type,
+                  sensitive: true,
+                  encryptedValue: {
+                    version: 1,
+                    algorithm: 'AES-256-GCM',
+                    keyId: 'active',
+                    iv: 'AAAAAAAAAAAAAAAA',
+                    ciphertext: 'YQ',
+                    authTag: 'AAAAAAAAAAAAAAAAAAAAAA',
+                  },
+                },
           requestHeaders: [{ name: 'x-environment', sensitive: false, value: 'test' }],
           assertions: { contractVersion: 1, assertions: step.assertions },
         })),

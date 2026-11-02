@@ -3,9 +3,14 @@ import {
   EMPTY_ASSERTION_CONFIGURATION,
   parseStoredApiWorkflowConfiguration,
   type ApiWorkflowConfigurationInput,
+  type ApiWorkflowRequestBodyUpdate,
+  type HttpRequestBody,
+  type StoredApiWorkflowRequestBodyV1,
   type StoredApiWorkflowConfigurationV1,
 } from '@watchrail/domain';
 import {
+  decryptHeaderValue,
+  encryptHeaderValue,
   resolveRequestHeaders,
   storeRequestHeaders,
   type HeaderEncryptionKeyring,
@@ -15,6 +20,8 @@ import {
   storeResponseAssertions,
   type AssertionEncryptionKeyring,
 } from '@watchrail/assertion-security';
+
+const WORKFLOW_REQUEST_BODY_ENCRYPTION_NAME = '@workflow-request-body';
 
 export interface ApiWorkflowEncryptionContext {
   organizationId: string;
@@ -40,6 +47,7 @@ export function storeApiWorkflowConfiguration(
   keyrings: ApiWorkflowKeyrings,
   options: { allowRetain: boolean },
 ): StoredApiWorkflowConfigurationV1 {
+  if (!options.allowRetain) assertNoCreationRetention(input);
   const existing =
     existingValue === null || existingValue === undefined
       ? null
@@ -52,6 +60,13 @@ export function storeApiWorkflowConfiguration(
       const scope = workflowStepScope(step.id);
       return {
         ...step,
+        requestBody: storeWorkflowRequestBody(
+          step.requestBody,
+          previous?.requestBody ?? { type: 'NONE' },
+          { ...context, scope },
+          keyrings.headers,
+          options,
+        ),
         requestHeaders: storeRequestHeaders(
           step.requestHeaders,
           previous?.requestHeaders ?? [],
@@ -110,7 +125,11 @@ export function resolveApiWorkflowConfiguration(
           { ...context, scope },
           keyrings.headers,
         ),
-        requestBody: step.requestBody,
+        requestBody: resolveWorkflowRequestBody(
+          step.requestBody,
+          { ...context, scope },
+          keyrings.headers,
+        ),
         headerAssertions: assertions.headers,
         textBodyAssertions: assertions.textBody,
         jsonBodyAssertions: assertions.jsonBody,
@@ -118,6 +137,75 @@ export function resolveApiWorkflowConfiguration(
       };
     }),
   };
+}
+
+function assertNoCreationRetention(input: ApiWorkflowConfigurationInput): void {
+  for (const step of input.steps) {
+    if (step.requestHeaders.some((header) => 'retain' in header)) {
+      throw new ApiWorkflowConfigurationError(
+        'Cannot retain workflow header secrets during monitor creation.',
+      );
+    }
+    if ('retain' in step.requestBody) {
+      throw new ApiWorkflowConfigurationError(
+        'Cannot retain a workflow request body during monitor creation.',
+      );
+    }
+  }
+}
+
+function storeWorkflowRequestBody(
+  update: ApiWorkflowRequestBodyUpdate,
+  existing: StoredApiWorkflowRequestBodyV1,
+  context: ApiWorkflowEncryptionContext & { scope: string },
+  keyring: HeaderEncryptionKeyring,
+  options: { allowRetain: boolean },
+): StoredApiWorkflowRequestBodyV1 {
+  if (update.type === 'NONE') return update;
+  if ('retain' in update) {
+    if (!options.allowRetain) {
+      throw new ApiWorkflowConfigurationError(
+        'Cannot retain a workflow request body during monitor creation.',
+      );
+    }
+    if (existing.type !== update.type || !('encryptedValue' in existing)) {
+      throw new ApiWorkflowConfigurationError(
+        `Cannot retain the missing ${update.type.toLowerCase()} workflow request body.`,
+      );
+    }
+    return existing;
+  }
+  return {
+    type: update.type,
+    sensitive: true,
+    encryptedValue: encryptHeaderValue(
+      JSON.stringify(update),
+      { ...context, normalizedHeaderName: WORKFLOW_REQUEST_BODY_ENCRYPTION_NAME },
+      keyring,
+    ),
+  };
+}
+
+function resolveWorkflowRequestBody(
+  stored: StoredApiWorkflowRequestBodyV1,
+  context: ApiWorkflowEncryptionContext & { scope: string },
+  keyring: HeaderEncryptionKeyring,
+): HttpRequestBody {
+  if (stored.type === 'NONE') return stored;
+  const plaintext = decryptHeaderValue(
+    stored.encryptedValue,
+    { ...context, normalizedHeaderName: WORKFLOW_REQUEST_BODY_ENCRYPTION_NAME },
+    keyring,
+  );
+  try {
+    const resolved = JSON.parse(plaintext) as HttpRequestBody;
+    if (resolved.type !== stored.type) throw new Error('Request-body type mismatch.');
+    return resolved;
+  } catch (error) {
+    throw new ApiWorkflowConfigurationError('Stored workflow request body is invalid.', {
+      cause: error,
+    });
+  }
 }
 
 function workflowStepScope(stepId: string): string {

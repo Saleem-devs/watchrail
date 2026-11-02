@@ -280,6 +280,14 @@ function redactApiWorkflow(value: unknown): unknown {
     contractVersion: 1,
     steps: workflow.steps.map((step) => ({
       ...step,
+      requestBody:
+        step.requestBody.type === 'NONE'
+          ? step.requestBody
+          : {
+              type: step.requestBody.type,
+              sensitive: true,
+              hasValue: true,
+            },
       requestHeaders: redactRequestHeaders(step.requestHeaders),
       assertions: redactAssertions(step.assertions),
     })),
