@@ -1,7 +1,7 @@
 export { executeHttpCheck } from './http-check.js';
 export { executeTcpCheck } from './tcp-check.js';
 export { executeDnsCheck } from './dns-check.js';
-export { executeApiWorkflow } from './api-workflow-check.js';
+export { executeApiWorkflow, validateApiWorkflow } from './api-workflow-check.js';
 export { NodeDnsQueryResolver } from './node-dns-query-resolver.js';
 export { NodeTcpConnector } from './node-tcp-connector.js';
 export { evaluateHeaderAssertions, notEvaluateHeaderAssertions } from './header-assertions.js';

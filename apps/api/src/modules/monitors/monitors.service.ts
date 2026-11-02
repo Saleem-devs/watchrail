@@ -22,6 +22,7 @@ import {
   MonitorUpdateNotFoundError,
   MonitorProtocolMismatchError,
   MonitorLocationUnavailableError,
+  WorkflowExecutionUnavailableError,
   type CheckRoundRecord,
   type CheckHistoryDetail,
   type CheckHistoryPage,
@@ -56,6 +57,7 @@ import {
   parseMonitorLifecycleSettings,
   parseMonitorLocationSettings,
   parseMonitorScheduleSettings,
+  parseApiWorkflowConfiguration,
   RequestHeaderInputError,
   TcpMonitorInputError,
   DnsMonitorInputError,
@@ -66,6 +68,10 @@ import { AssertionRetentionError, storeResponseAssertions } from '@watchrail/ass
 import { APP_CONFIG, type AppConfig } from '../../config/config.js';
 import type { RequestContext } from '../../auth/request-context.js';
 import type { MonitorListQuery } from './dto/monitor-list-query.js';
+import {
+  ApiWorkflowConfigurationError,
+  storeApiWorkflowConfiguration,
+} from './api-workflow-configuration.js';
 
 @Injectable()
 export class MonitorsService {
@@ -88,6 +94,27 @@ export class MonitorsService {
       await this.assertProject(context, projectId);
       const monitor = createMonitor(command);
       const monitorId = randomUUID();
+      if (monitor.type === 'API_WORKFLOW') {
+        const workflow = storeApiWorkflowConfiguration(
+          monitor.workflow,
+          null,
+          { organizationId: context.organizationId, monitorId },
+          {
+            headers: this.config.headerEncryptionKeyring,
+            assertions: this.config.assertionEncryptionKeyring,
+          },
+          { allowRetain: false },
+        );
+        return await this.monitors.create(
+          context.organizationId,
+          monitorId,
+          monitor,
+          [],
+          EMPTY_ASSERTION_CONFIGURATION,
+          projectId,
+          workflow,
+        );
+      }
       if (monitor.type !== 'HTTP') {
         return await this.monitors.create(
           context.organizationId,
@@ -121,12 +148,76 @@ export class MonitorsService {
         projectId,
       );
     } catch (error) {
-      if (error instanceof MonitorInputError || error instanceof AssertionInputError) {
+      if (
+        error instanceof MonitorInputError ||
+        error instanceof AssertionInputError ||
+        error instanceof AssertionRetentionError ||
+        error instanceof RequestHeaderInputError ||
+        error instanceof ApiWorkflowConfigurationError
+      ) {
         throw new BadRequestException({
           code: 'VALIDATION_FAILED',
           message: error.message,
-          fields: error instanceof MonitorInputError ? error.fields : { assertions: error.issues },
+          fields:
+            error instanceof MonitorInputError
+              ? error.fields
+              : error instanceof AssertionInputError
+                ? { assertions: error.issues }
+                : error instanceof RequestHeaderInputError
+                  ? { workflow: error.issues }
+                  : { workflow: [error.message] },
         });
+      }
+      throw error;
+    }
+  }
+
+  async updateApiWorkflow(
+    context: RequestContext,
+    monitorId: string,
+    value: unknown,
+  ): Promise<MonitorRecord> {
+    try {
+      const input = parseApiWorkflowConfiguration(value);
+      return await this.monitors.updateApiWorkflow(context.organizationId, monitorId, (current) =>
+        storeApiWorkflowConfiguration(
+          input,
+          current,
+          { organizationId: context.organizationId, monitorId },
+          {
+            headers: this.config.headerEncryptionKeyring,
+            assertions: this.config.assertionEncryptionKeyring,
+          },
+          { allowRetain: true },
+        ),
+      );
+    } catch (error) {
+      if (
+        error instanceof MonitorInputError ||
+        error instanceof AssertionInputError ||
+        error instanceof AssertionRetentionError ||
+        error instanceof RequestHeaderInputError ||
+        error instanceof ApiWorkflowConfigurationError ||
+        (error instanceof Error && error.message.startsWith('Cannot retain missing sensitive'))
+      ) {
+        throw new BadRequestException({
+          code: 'VALIDATION_FAILED',
+          message: 'API workflow configuration is invalid.',
+          fields: {
+            workflow:
+              error instanceof MonitorInputError
+                ? (error.fields.workflow ?? [error.message])
+                : error instanceof AssertionInputError || error instanceof RequestHeaderInputError
+                  ? error.issues
+                  : [error.message],
+          },
+        });
+      }
+      if (error instanceof MonitorUpdateNotFoundError) {
+        throw new NotFoundException({ code: 'MONITOR_NOT_FOUND', message: error.message });
+      }
+      if (error instanceof MonitorProtocolMismatchError) {
+        throw new ConflictException({ code: 'MONITOR_PROTOCOL_MISMATCH', message: error.message });
       }
       throw error;
     }
@@ -615,6 +706,12 @@ export class MonitorsService {
       }
       if (error instanceof ArchivedMonitorLifecycleError) {
         throw new ConflictException({ code: 'MONITOR_ARCHIVED', message: error.message });
+      }
+      if (error instanceof WorkflowExecutionUnavailableError) {
+        throw new ConflictException({
+          code: 'WORKFLOW_EXECUTION_UNAVAILABLE',
+          message: error.message,
+        });
       }
       throw error;
     }

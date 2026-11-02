@@ -165,6 +165,10 @@ export async function executeApiWorkflow(
   };
 }
 
+export function validateApiWorkflow(input: ApiWorkflowInput): void {
+  assertWorkflow(input);
+}
+
 function resolveStep(
   step: ApiWorkflowStep,
   variables: ReadonlyMap<string, string>,

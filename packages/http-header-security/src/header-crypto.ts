@@ -11,6 +11,7 @@ export interface HeaderEncryptionContext {
   organizationId: string;
   monitorId: string;
   normalizedHeaderName: string;
+  scope?: string;
 }
 
 export interface HeaderEncryptionKeyring {
@@ -168,6 +169,7 @@ function aad(context: HeaderEncryptionContext): Buffer {
       'watchrail:http-header:v1',
       context.organizationId,
       context.monitorId,
+      ...(context.scope === undefined ? [] : [context.scope]),
       context.normalizedHeaderName,
     ].join('\n'),
     'utf8',

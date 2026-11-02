@@ -211,5 +211,21 @@ describe('assertion encryption', () => {
     expect(() => resolveResponseAssertions(tampered, 'GET', context, keyring)).toThrow(
       StoredAssertionResolutionError,
     );
+
+    const scoped = storeResponseAssertions(
+      {
+        headers: [],
+        textBody: [{ operator: 'equals', target: { sensitive: true, value: 'secret' } }],
+        jsonBody: [],
+      },
+      EMPTY_ASSERTION_CONFIGURATION,
+      'GET',
+      { ...context, scope: 'workflow:first' },
+      keyring,
+      { allowRetain: false },
+    );
+    expect(() =>
+      resolveResponseAssertions(scoped, 'GET', { ...context, scope: 'workflow:second' }, keyring),
+    ).toThrow(StoredAssertionResolutionError);
   });
 });
