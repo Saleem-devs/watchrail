@@ -47,6 +47,7 @@ import {
   type TlsCertificateEvidenceV1,
   type TlsCertificatePolicy,
   type DnsRecordType,
+  type StoredApiWorkflowConfigurationV1,
 } from '@watchrail/domain';
 
 export const httpMethodEnum = pgEnum('http_method', HTTP_METHODS);
@@ -380,6 +381,7 @@ export const monitors = pgTable(
     dnsName: text('dns_name'),
     dnsRecordType: varchar('dns_record_type', { length: 8 }).$type<DnsRecordType>(),
     dnsExpectedValues: jsonb('dns_expected_values').$type<string[]>().notNull().default([]),
+    apiWorkflow: jsonb('api_workflow').$type<StoredApiWorkflowConfigurationV1>(),
 
     // Current projection.
     //
@@ -433,11 +435,13 @@ export const monitors = pgTable(
     check(
       'monitors_protocol_configuration',
       sql`(
-        (${table.type}::text = 'HTTP' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null)
+        (${table.type}::text = 'HTTP' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.apiWorkflow} is null)
         or
-        (${table.type}::text = 'TCP' and length(btrim(${table.tcpHost})) > 0 and ${table.tcpPort} between 1 and 65535 and ${table.dnsName} is null and ${table.dnsRecordType} is null)
+        (${table.type}::text = 'TCP' and length(btrim(${table.tcpHost})) > 0 and ${table.tcpPort} between 1 and 65535 and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.apiWorkflow} is null)
         or
-        (${table.type}::text = 'DNS' and ${table.tcpHost} is null and ${table.tcpPort} is null and length(btrim(${table.dnsName})) > 0 and ${table.dnsRecordType} in ('A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS'))
+        (${table.type}::text = 'DNS' and ${table.tcpHost} is null and ${table.tcpPort} is null and length(btrim(${table.dnsName})) > 0 and ${table.dnsRecordType} in ('A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS') and ${table.apiWorkflow} is null)
+        or
+        (${table.type}::text = 'API_WORKFLOW' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and jsonb_typeof(${table.apiWorkflow}) = 'object')
       )`,
     ),
 
@@ -575,6 +579,7 @@ export const monitorConfigurationVersions = pgTable(
     dnsName: text('dns_name'),
     dnsRecordType: varchar('dns_record_type', { length: 8 }).$type<DnsRecordType>(),
     dnsExpectedValues: jsonb('dns_expected_values').$type<string[]>().notNull().default([]),
+    apiWorkflow: jsonb('api_workflow').$type<StoredApiWorkflowConfigurationV1>(),
 
     url: text('url').notNull(),
     method: httpMethodEnum('method').notNull(),
@@ -632,11 +637,13 @@ export const monitorConfigurationVersions = pgTable(
     check(
       'monitor_configuration_versions_protocol_configuration',
       sql`(
-        (${table.type}::text = 'HTTP' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null)
+        (${table.type}::text = 'HTTP' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.apiWorkflow} is null)
         or
-        (${table.type}::text = 'TCP' and length(btrim(${table.tcpHost})) > 0 and ${table.tcpPort} between 1 and 65535 and ${table.dnsName} is null and ${table.dnsRecordType} is null)
+        (${table.type}::text = 'TCP' and length(btrim(${table.tcpHost})) > 0 and ${table.tcpPort} between 1 and 65535 and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.apiWorkflow} is null)
         or
-        (${table.type}::text = 'DNS' and ${table.tcpHost} is null and ${table.tcpPort} is null and length(btrim(${table.dnsName})) > 0 and ${table.dnsRecordType} in ('A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS'))
+        (${table.type}::text = 'DNS' and ${table.tcpHost} is null and ${table.tcpPort} is null and length(btrim(${table.dnsName})) > 0 and ${table.dnsRecordType} in ('A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS') and ${table.apiWorkflow} is null)
+        or
+        (${table.type}::text = 'API_WORKFLOW' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and jsonb_typeof(${table.apiWorkflow}) = 'object')
       )`,
     ),
 

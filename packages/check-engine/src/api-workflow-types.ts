@@ -1,21 +1,8 @@
 import type { HttpCheckInput, HttpCheckResult, HttpExecutor } from './types.js';
 import type { CheckClock } from './types.js';
-
-export const API_WORKFLOW_LIMITS = {
-  minimumSteps: 2,
-  maximumSteps: 10,
-  maximumExtractionsPerStep: 16,
-  maximumInitialVariables: 32,
-  maximumVariables: 64,
-  maximumVariableNameLength: 64,
-  maximumVariableValueBytes: 16 * 1024,
-} as const;
-
-export interface ApiWorkflowExtraction {
-  variable: string;
-  selector: string;
-  sensitive: boolean;
-}
+import type { ApiWorkflowExtraction } from '@watchrail/domain';
+export { API_WORKFLOW_LIMITS } from '@watchrail/domain';
+export type { ApiWorkflowExtraction } from '@watchrail/domain';
 
 export interface ApiWorkflowStep extends Omit<HttpCheckInput, 'captureResponseEvidence'> {
   id: string;

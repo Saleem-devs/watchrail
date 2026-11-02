@@ -1,5 +1,6 @@
 export * from './assertion-persistence.js';
 export * from './assertion.js';
+export * from './api-workflow.js';
 export * from './availability.js';
 export * from './check-round.js';
 export * from './dns.js';

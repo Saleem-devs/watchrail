@@ -14,6 +14,7 @@ import type {
 import {
   parseStoredRequestHeaders,
   parseStoredAssertionConfiguration,
+  parseStoredApiWorkflowConfiguration,
   type HttpRedirectHop,
   type HttpStatusPolicy,
   type AssertionEvaluationV1,
@@ -26,7 +27,7 @@ export interface MonitorResponse {
   id: string;
   projectId: string;
   name: string;
-  type: 'HTTP' | 'TCP' | 'DNS';
+  type: 'HTTP' | 'TCP' | 'DNS' | 'API_WORKFLOW';
   configuration:
     | { type: 'HTTP'; url: string }
     | { type: 'TCP'; host: string; port: number }
@@ -35,7 +36,8 @@ export interface MonitorResponse {
         name: string;
         recordType: 'A' | 'AAAA' | 'CNAME' | 'MX' | 'TXT' | 'NS';
         expectedValues: string[];
-      };
+      }
+    | { type: 'API_WORKFLOW'; workflow: unknown };
   url: string;
   method: string;
   lifecycleState: string;
@@ -132,20 +134,25 @@ export function toResponse(
     name: monitor.name,
     type: monitor.type,
     configuration:
-      monitor.type === 'TCP'
+      monitor.type === 'API_WORKFLOW'
         ? {
-            type: 'TCP',
-            host: requireTcpField(monitor.tcpHost, 'host'),
-            port: requireTcpField(monitor.tcpPort, 'port'),
+            type: 'API_WORKFLOW',
+            workflow: redactApiWorkflow(monitor.apiWorkflow),
           }
-        : monitor.type === 'DNS'
+        : monitor.type === 'TCP'
           ? {
-              type: 'DNS',
-              name: requireDnsField(monitor.dnsName, 'name'),
-              recordType: requireDnsField(monitor.dnsRecordType, 'record type'),
-              expectedValues: monitor.dnsExpectedValues,
+              type: 'TCP',
+              host: requireTcpField(monitor.tcpHost, 'host'),
+              port: requireTcpField(monitor.tcpPort, 'port'),
             }
-          : { type: 'HTTP', url: monitor.url },
+          : monitor.type === 'DNS'
+            ? {
+                type: 'DNS',
+                name: requireDnsField(monitor.dnsName, 'name'),
+                recordType: requireDnsField(monitor.dnsRecordType, 'record type'),
+                expectedValues: monitor.dnsExpectedValues,
+              }
+            : { type: 'HTTP', url: monitor.url },
     url: monitor.url,
     method: monitor.method,
     lifecycleState: monitor.lifecycleState,
@@ -264,6 +271,26 @@ function redactAssertions(value: unknown): unknown {
           : assertion,
       ),
     },
+  };
+}
+
+function redactApiWorkflow(value: unknown): unknown {
+  const workflow = parseStoredApiWorkflowConfiguration(value);
+  return {
+    contractVersion: 1,
+    steps: workflow.steps.map((step) => ({
+      ...step,
+      requestBody:
+        step.requestBody.type === 'NONE'
+          ? step.requestBody
+          : {
+              type: step.requestBody.type,
+              sensitive: true,
+              hasValue: true,
+            },
+      requestHeaders: redactRequestHeaders(step.requestHeaders),
+      assertions: redactAssertions(step.assertions),
+    })),
   };
 }
 

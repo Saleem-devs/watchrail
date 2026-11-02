@@ -186,6 +186,9 @@ export class ProbeCoordinatorRepository {
       ) {
         return null;
       }
+      if (row.type === 'API_WORKFLOW') {
+        throw new Error('API workflow probe execution is not enabled yet.');
+      }
       return {
         assignmentId: row.assignmentId,
         attemptId: row.attemptId,

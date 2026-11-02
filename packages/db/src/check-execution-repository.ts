@@ -152,6 +152,9 @@ export class CheckExecutionRepository {
       if (!candidate) return { state: 'MISSING' };
       if (candidate.roundStatus === 'COMPLETED') return { state: 'COMPLETED' };
       if (candidate.status === 'COMPLETED') return { state: 'COMPLETED' };
+      if (candidate.type === 'API_WORKFLOW') {
+        throw new Error('API workflow execution is not enabled yet.');
+      }
 
       if (candidate.status === 'RUNNING' && !candidate.claimAvailable) {
         return { state: 'BUSY' };

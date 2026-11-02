@@ -288,6 +288,13 @@
       "when": 1793533710167,
       "tag": "0040_tense_maggott",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1793652876336,
+      "tag": "0041_rich_gorgon",
+      "breakpoints": true
     }
   ]
 }

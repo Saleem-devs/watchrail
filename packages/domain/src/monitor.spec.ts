@@ -5,6 +5,7 @@ import {
   MonitorInputError,
   parseHttpMonitorSettings,
   parseHttpConfigurationTest,
+  parseStoredApiWorkflowConfiguration,
   parseMonitorLifecycleSettings,
   parseMonitorLocationSettings,
   parseMonitorScheduleSettings,
@@ -169,7 +170,115 @@ describe('createMonitor', () => {
       MonitorInputError,
     );
   });
+
+  it('creates a paused API workflow monitor with normalized step configuration', () => {
+    const monitor = createMonitor({
+      type: 'API_WORKFLOW',
+      name: 'Checkout journey',
+      workflow: workflowConfiguration(),
+    });
+
+    expect(monitor).toMatchObject({
+      type: 'API_WORKFLOW',
+      lifecycleState: 'PAUSED',
+      timeoutMs: 7_000,
+      workflow: { contractVersion: 1 },
+    });
+    if (monitor.type !== 'API_WORKFLOW') throw new Error('Expected an API workflow monitor.');
+    expect(monitor.workflow.steps.map((step) => step.id)).toEqual(['authenticate', 'fetch-user']);
+    expect(monitor.workflow.steps[1]?.url).toBe('https://api.example.com/users/{{token}}');
+  });
+
+  it('rejects unsafe workflow origins, duplicate extractions, and enabled creation', () => {
+    const unsafe = workflowConfiguration();
+    unsafe.steps[1]!.url = 'https:{{token}}.example.com/health';
+    expect(() => createMonitor({ type: 'API_WORKFLOW', name: 'Unsafe', workflow: unsafe })).toThrow(
+      MonitorInputError,
+    );
+
+    const duplicate = workflowConfiguration();
+    duplicate.steps[1]!.extractions = [{ variable: 'token', selector: '$.token', sensitive: true }];
+    expect(() =>
+      createMonitor({ type: 'API_WORKFLOW', name: 'Duplicate', workflow: duplicate }),
+    ).toThrow(MonitorInputError);
+
+    expect(() =>
+      createMonitor({
+        type: 'API_WORKFLOW',
+        name: 'Enabled',
+        lifecycleState: 'ENABLED',
+        workflow: workflowConfiguration(),
+      }),
+    ).toThrow(MonitorInputError);
+  });
+
+  it('parses the strict stored API workflow contract', () => {
+    const workflow = workflowConfiguration();
+    expect(
+      parseStoredApiWorkflowConfiguration({
+        ...workflow,
+        steps: workflow.steps.map((step) => ({
+          ...step,
+          requestBody:
+            step.requestBody.type === 'NONE'
+              ? step.requestBody
+              : {
+                  type: step.requestBody.type,
+                  sensitive: true,
+                  encryptedValue: {
+                    version: 1,
+                    algorithm: 'AES-256-GCM',
+                    keyId: 'active',
+                    iv: 'AAAAAAAAAAAAAAAA',
+                    ciphertext: 'YQ',
+                    authTag: 'AAAAAAAAAAAAAAAAAAAAAA',
+                  },
+                },
+          requestHeaders: [{ name: 'x-environment', sensitive: false, value: 'test' }],
+          assertions: { contractVersion: 1, assertions: step.assertions },
+        })),
+      }),
+    ).toMatchObject({ contractVersion: 1, steps: [{ id: 'authenticate' }, { id: 'fetch-user' }] });
+  });
 });
+
+function workflowConfiguration() {
+  return {
+    contractVersion: 1 as const,
+    steps: [
+      {
+        id: 'authenticate',
+        name: 'Authenticate',
+        url: 'https://api.example.com/session',
+        method: 'POST' as const,
+        timeoutMs: 7_000,
+        followRedirects: true,
+        statusPolicy: { type: 'ANY_2XX' as const },
+        tlsPolicy: { type: 'DISABLED' as const },
+        requestHeaders: [
+          { name: 'authorization', sensitive: true as const, value: 'Bearer credential' },
+        ],
+        requestBody: { type: 'JSON' as const, value: '{"username":"saleem"}' },
+        assertions: { headers: [], textBody: [], jsonBody: [] },
+        extractions: [{ variable: 'token', selector: '$.token', sensitive: true }],
+      },
+      {
+        id: 'fetch-user',
+        name: 'Fetch user',
+        url: 'https://api.example.com/users/{{token}}',
+        method: 'GET' as const,
+        timeoutMs: 5_000,
+        followRedirects: true,
+        statusPolicy: { type: 'ANY_2XX' as const },
+        tlsPolicy: { type: 'DISABLED' as const },
+        requestHeaders: [],
+        requestBody: { type: 'NONE' as const },
+        assertions: { headers: [], textBody: [], jsonBody: [] },
+        extractions: [],
+      },
+    ],
+  };
+}
 
 function createHttpMonitor(command: Parameters<typeof createMonitor>[0]) {
   const monitor = createMonitor(command);

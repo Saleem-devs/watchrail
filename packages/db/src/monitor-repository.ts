@@ -17,6 +17,7 @@ import {
   type StoredRequestHeader,
   type TcpMonitorSettings,
   type DnsMonitorSettings,
+  type StoredApiWorkflowConfigurationV1,
 } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
 import {
@@ -43,6 +44,7 @@ export class MonitorRepository {
     suppliedRequestHeaders: StoredRequestHeader[] = [],
     suppliedAssertions: ResponseAssertionConfigurationV1 = EMPTY_ASSERTION_CONFIGURATION,
     suppliedProjectId?: string,
+    suppliedApiWorkflow?: StoredApiWorkflowConfigurationV1,
   ): Promise<MonitorRecord> {
     const monitorId = typeof monitorOrId === 'string' ? monitorOrId : randomUUID();
     const monitor = typeof monitorOrId === 'string' ? suppliedMonitor : monitorOrId;
@@ -51,6 +53,10 @@ export class MonitorRepository {
     const assertions =
       typeof monitorOrId === 'string' ? suppliedAssertions : EMPTY_ASSERTION_CONFIGURATION;
     const projectId = suppliedProjectId ?? (await ensureDefaultProject(this.db, organizationId)).id;
+    const apiWorkflow = monitor.type === 'API_WORKFLOW' ? suppliedApiWorkflow : null;
+    if (monitor.type === 'API_WORKFLOW' && !apiWorkflow) {
+      throw new Error('Stored API workflow configuration is required.');
+    }
 
     return this.db.transaction(async (tx) => {
       const [created] = await tx
@@ -66,12 +72,16 @@ export class MonitorRepository {
           dnsName: monitor.type === 'DNS' ? monitor.dnsName : null,
           dnsRecordType: monitor.type === 'DNS' ? monitor.dnsRecordType : null,
           dnsExpectedValues: monitor.type === 'DNS' ? monitor.dnsExpectedValues : [],
+          apiWorkflow,
           url: monitor.type === 'HTTP' ? monitor.url : '',
           method: monitor.type === 'HTTP' ? monitor.method : 'GET',
           lifecycleState: monitor.lifecycleState,
           timeoutMs: monitor.timeoutMs,
           intervalSeconds: monitor.intervalSeconds,
-          nextCheckAt: sql`clock_timestamp() + (${monitor.intervalSeconds} * interval '1 second')`,
+          nextCheckAt:
+            monitor.lifecycleState === 'ENABLED'
+              ? sql`clock_timestamp() + (${monitor.intervalSeconds} * interval '1 second')`
+              : null,
           followRedirects: monitor.type === 'HTTP' ? monitor.followRedirects : false,
           statusPolicy:
             monitor.type === 'HTTP' ? monitor.statusPolicy : { type: 'ANY_2XX' as const },
@@ -97,6 +107,7 @@ export class MonitorRepository {
         dnsName: created.dnsName,
         dnsRecordType: created.dnsRecordType,
         dnsExpectedValues: created.dnsExpectedValues,
+        apiWorkflow: created.apiWorkflow,
 
         url: created.url,
         method: created.method,
@@ -255,6 +266,7 @@ export class MonitorRepository {
         dnsName: configuration.dnsName,
         dnsRecordType: configuration.dnsRecordType,
         dnsExpectedValues: configuration.dnsExpectedValues,
+        apiWorkflow: configuration.apiWorkflow,
         url: configuration.url,
         method: configuration.method,
         timeoutMs: configuration.timeoutMs,
@@ -321,6 +333,7 @@ export class MonitorRepository {
         dnsName: configuration.dnsName,
         dnsRecordType: configuration.dnsRecordType,
         dnsExpectedValues: configuration.dnsExpectedValues,
+        apiWorkflow: configuration.apiWorkflow,
         url: configuration.url,
         method: configuration.method,
         timeoutMs: configuration.timeoutMs,
@@ -404,6 +417,7 @@ export class MonitorRepository {
         dnsName: configuration.dnsName,
         dnsRecordType: configuration.dnsRecordType,
         dnsExpectedValues: configuration.dnsExpectedValues,
+        apiWorkflow: configuration.apiWorkflow,
         ...settings,
         tlsPolicy,
         intervalSeconds: configuration.intervalSeconds,
@@ -470,6 +484,7 @@ export class MonitorRepository {
         dnsName: configuration.dnsName,
         dnsRecordType: configuration.dnsRecordType,
         dnsExpectedValues: configuration.dnsExpectedValues,
+        apiWorkflow: configuration.apiWorkflow,
         ...settings,
         tlsPolicy,
         intervalSeconds: configuration.intervalSeconds,
@@ -530,6 +545,7 @@ export class MonitorRepository {
         type: 'TCP',
         tcpHost: settings.host,
         tcpPort: settings.port,
+        apiWorkflow: configuration.apiWorkflow,
         url: configuration.url,
         method: configuration.method,
         timeoutMs: settings.timeoutMs,
@@ -597,6 +613,7 @@ export class MonitorRepository {
         dnsName: settings.name,
         dnsRecordType: settings.recordType,
         dnsExpectedValues: settings.expectedValues,
+        apiWorkflow: configuration.apiWorkflow,
         url: configuration.url,
         method: configuration.method,
         timeoutMs: settings.timeoutMs,
@@ -668,6 +685,7 @@ export class MonitorRepository {
         dnsName: configuration.dnsName,
         dnsRecordType: configuration.dnsRecordType,
         dnsExpectedValues: configuration.dnsExpectedValues,
+        apiWorkflow: configuration.apiWorkflow,
         url: configuration.url,
         method: configuration.method,
         timeoutMs: configuration.timeoutMs,
@@ -677,6 +695,72 @@ export class MonitorRepository {
         requestHeaders: configuration.requestHeaders,
         requestBody: configuration.requestBody,
         assertions,
+        tlsPolicy: configuration.tlsPolicy,
+        locations: configuration.locations,
+      });
+      return updated;
+    });
+  }
+
+  async updateApiWorkflow(
+    organizationId: string,
+    monitorId: string,
+    update: (current: StoredApiWorkflowConfigurationV1) => StoredApiWorkflowConfigurationV1,
+  ): Promise<MonitorRecord> {
+    return this.db.transaction(async (tx) => {
+      const [monitor] = await tx
+        .select()
+        .from(monitors)
+        .where(and(eq(monitors.id, monitorId), eq(monitors.organizationId, organizationId)))
+        .limit(1)
+        .for('update');
+      if (!monitor) throw new MonitorUpdateNotFoundError();
+      if (monitor.type !== 'API_WORKFLOW') {
+        throw new MonitorProtocolMismatchError('API_WORKFLOW');
+      }
+      const [configuration] = await tx
+        .select()
+        .from(monitorConfigurationVersions)
+        .where(
+          and(
+            eq(monitorConfigurationVersions.monitorId, monitorId),
+            eq(monitorConfigurationVersions.organizationId, organizationId),
+          ),
+        )
+        .orderBy(desc(monitorConfigurationVersions.versionNumber))
+        .limit(1);
+      if (!configuration) throw new Error('Monitor has no configuration version.');
+      if (!configuration.apiWorkflow) throw new Error('Monitor has no API workflow configuration.');
+
+      const apiWorkflow = update(configuration.apiWorkflow);
+      const timeoutMs = Math.max(...apiWorkflow.steps.map((step) => step.timeoutMs));
+      const [updated] = await tx
+        .update(monitors)
+        .set({ apiWorkflow, timeoutMs, updatedAt: sql`clock_timestamp()` })
+        .where(and(eq(monitors.id, monitorId), eq(monitors.organizationId, organizationId)))
+        .returning();
+      if (!updated) throw new Error('The monitor update returned no record.');
+
+      await tx.insert(monitorConfigurationVersions).values({
+        organizationId,
+        monitorId,
+        versionNumber: configuration.versionNumber + 1,
+        type: 'API_WORKFLOW',
+        tcpHost: null,
+        tcpPort: null,
+        dnsName: null,
+        dnsRecordType: null,
+        dnsExpectedValues: [],
+        apiWorkflow,
+        url: configuration.url,
+        method: configuration.method,
+        timeoutMs,
+        intervalSeconds: configuration.intervalSeconds,
+        followRedirects: configuration.followRedirects,
+        statusPolicy: configuration.statusPolicy,
+        requestHeaders: configuration.requestHeaders,
+        requestBody: configuration.requestBody,
+        assertions: configuration.assertions,
         tlsPolicy: configuration.tlsPolicy,
         locations: configuration.locations,
       });
@@ -737,6 +821,7 @@ export class MonitorRepository {
         dnsName: configuration.dnsName,
         dnsRecordType: configuration.dnsRecordType,
         dnsExpectedValues: configuration.dnsExpectedValues,
+        apiWorkflow: configuration.apiWorkflow,
         url: configuration.url,
         method: configuration.method,
         timeoutMs: configuration.timeoutMs,
@@ -823,6 +908,7 @@ export class MonitorRepository {
         dnsName: configuration.dnsName,
         dnsRecordType: configuration.dnsRecordType,
         dnsExpectedValues: configuration.dnsExpectedValues,
+        apiWorkflow: configuration.apiWorkflow,
         url: configuration.url,
         method: configuration.method,
         timeoutMs: configuration.timeoutMs,
@@ -856,6 +942,9 @@ export class MonitorRepository {
       if (!monitor) throw new MonitorUpdateNotFoundError();
       if (monitor.lifecycleState === 'ARCHIVED' && lifecycleState !== 'ARCHIVED') {
         throw new ArchivedMonitorLifecycleError();
+      }
+      if (monitor.type === 'API_WORKFLOW' && lifecycleState === 'ENABLED') {
+        throw new WorkflowExecutionUnavailableError();
       }
       if (monitor.lifecycleState === lifecycleState) return monitor;
 
@@ -921,8 +1010,15 @@ export class MonitorLocationUnavailableError extends Error {
 }
 
 export class MonitorProtocolMismatchError extends Error {
-  constructor(protocol: 'HTTP' | 'TCP' | 'DNS') {
+  constructor(protocol: 'HTTP' | 'TCP' | 'DNS' | 'API_WORKFLOW') {
     super(`This operation requires a ${protocol} monitor.`);
     this.name = 'MonitorProtocolMismatchError';
+  }
+}
+
+export class WorkflowExecutionUnavailableError extends Error {
+  constructor() {
+    super('API workflow execution is not enabled yet.');
+    this.name = 'WorkflowExecutionUnavailableError';
   }
 }

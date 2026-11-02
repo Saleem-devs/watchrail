@@ -1,8 +1,19 @@
 import {
   AssertionInputError,
+  isValidJsonSelector,
   parseResponseAssertions,
   type ResponseAssertions,
 } from './assertion.js';
+import {
+  API_WORKFLOW_LIMITS,
+  type ApiWorkflowConfigurationInput,
+  type ApiWorkflowExtraction,
+  type ApiWorkflowRequestBodyUpdate,
+  type ApiWorkflowStepInput,
+  type StoredApiWorkflowRequestBodyV1,
+  type StoredApiWorkflowConfigurationV1,
+} from './api-workflow.js';
+import { parseStoredAssertionConfiguration } from './assertion-persistence.js';
 import {
   DISABLED_TLS_CERTIFICATE_POLICY,
   parseTlsCertificatePolicy,
@@ -28,7 +39,7 @@ export const HTTP_MONITOR_METHODS = [
   'OPTIONS',
 ] as const;
 export const MONITOR_LIFECYCLE_STATES = ['ENABLED', 'PAUSED', 'ARCHIVED'] as const;
-export const MONITOR_TYPES = ['HTTP', 'TCP', 'DNS'] as const;
+export const MONITOR_TYPES = ['HTTP', 'TCP', 'DNS', 'API_WORKFLOW'] as const;
 export const MONITOR_LOCATIONS = ['local'] as const;
 export const MONITOR_INTERVAL_LIMITS = {
   minimumSeconds: 60,
@@ -87,6 +98,7 @@ export interface CreateMonitorCommand {
   requestHeaders?: unknown;
   requestBody?: unknown;
   assertions?: unknown;
+  workflow?: unknown;
   intervalSeconds?: unknown;
 }
 
@@ -123,7 +135,12 @@ export interface NewDnsMonitor extends NewMonitorBase {
   dnsExpectedValues: string[];
 }
 
-export type NewMonitor = NewHttpMonitor | NewTcpMonitor | NewDnsMonitor;
+export interface NewApiWorkflowMonitor extends NewMonitorBase {
+  type: 'API_WORKFLOW';
+  workflow: ApiWorkflowConfigurationInput;
+}
+
+export type NewMonitor = NewHttpMonitor | NewTcpMonitor | NewDnsMonitor | NewApiWorkflowMonitor;
 
 export interface MonitorFieldErrors {
   name?: string[];
@@ -140,6 +157,7 @@ export interface MonitorFieldErrors {
   requestHeaders?: string[];
   requestBody?: string[];
   assertions?: string[];
+  workflow?: string[];
   method?: string[];
   timeoutMs?: string[];
   followRedirects?: string[];
@@ -195,6 +213,297 @@ export function parseMonitorConfigurationUpdate(value: unknown): MonitorConfigur
     settings: parseHttpMonitorSettings(value.httpSettings),
     requestHeaders: value.requestHeaders,
     assertions: value.assertions,
+  };
+}
+
+const WORKFLOW_STEP_KEYS = [
+  'assertions',
+  'extractions',
+  'followRedirects',
+  'id',
+  'method',
+  'name',
+  'requestBody',
+  'requestHeaders',
+  'statusPolicy',
+  'timeoutMs',
+  'tlsPolicy',
+  'url',
+] as const;
+const WORKFLOW_STEP_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
+const WORKFLOW_VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/u;
+const WORKFLOW_VARIABLE_REFERENCE = /\{\{([A-Za-z_][A-Za-z0-9_]{0,63})\}\}/gu;
+const WORKFLOW_URL_MARKER = 'watchrail-variable-marker';
+
+export function parseApiWorkflowConfiguration(value: unknown): ApiWorkflowConfigurationInput {
+  if (!hasExactKeys(value, ['contractVersion', 'steps']) || value.contractVersion !== 1) {
+    throw new MonitorInputError({
+      workflow: ['Provide a supported API workflow configuration.'],
+    });
+  }
+  if (
+    !Array.isArray(value.steps) ||
+    value.steps.length < API_WORKFLOW_LIMITS.minimumSteps ||
+    value.steps.length > API_WORKFLOW_LIMITS.maximumSteps
+  ) {
+    throw new MonitorInputError({
+      workflow: [
+        `Provide ${API_WORKFLOW_LIMITS.minimumSteps} to ${API_WORKFLOW_LIMITS.maximumSteps} workflow steps.`,
+      ],
+    });
+  }
+
+  const issues: string[] = [];
+  const stepIds = new Set<string>();
+  const variables = new Set<string>();
+  const steps = value.steps.map((candidate, index) => {
+    const label = `Step ${index + 1}`;
+    if (!hasExactKeys(candidate, WORKFLOW_STEP_KEYS)) {
+      issues.push(`${label} must provide the complete HTTP step configuration.`);
+      return emptyApiWorkflowStep(index);
+    }
+    const stepFields: MonitorFieldErrors = {};
+    const id = normalizeWorkflowStepId(candidate.id, stepIds, label, issues);
+    const name = normalizeWorkflowStepName(candidate.name, label, issues);
+    const url = normalizeWorkflowStepUrl(candidate.url, label, issues);
+    const method = normalizeHttpMonitorMethod(candidate.method, stepFields);
+    const timeoutMs = normalizeTimeout(candidate.timeoutMs, stepFields);
+    const followRedirects = normalizeFollowRedirects(candidate.followRedirects, stepFields);
+    const statusPolicy = normalizeStatusPolicy(candidate.statusPolicy, stepFields);
+    const requestBody = normalizeApiWorkflowRequestBody(candidate.requestBody, method, stepFields);
+    const tlsPolicy = normalizeTlsPolicy(candidate.tlsPolicy, url, stepFields, false);
+    let requestHeaders: RequestHeaderUpdate[] = [];
+    try {
+      requestHeaders = normalizeRequestHeaderUpdates(candidate.requestHeaders);
+    } catch (error) {
+      if (!(error instanceof RequestHeaderInputError)) throw error;
+      stepFields.requestHeaders = error.issues;
+    }
+    const extractions = normalizeWorkflowExtractions(
+      candidate.extractions,
+      variables,
+      label,
+      issues,
+    );
+    for (const [field, messages] of Object.entries(stepFields)) {
+      for (const message of messages ?? []) issues.push(`${label} ${field}: ${message}`);
+    }
+    return {
+      id,
+      name,
+      url,
+      method,
+      timeoutMs,
+      followRedirects,
+      statusPolicy,
+      tlsPolicy,
+      requestHeaders,
+      requestBody,
+      assertions: candidate.assertions,
+      extractions,
+    } satisfies ApiWorkflowStepInput;
+  });
+  if (issues.length > 0) throw new MonitorInputError({ workflow: issues });
+  return { contractVersion: 1, steps };
+}
+
+export class StoredApiWorkflowConfigurationInvariantError extends Error {
+  constructor() {
+    super('Stored API workflow configuration violates the persistence contract.');
+    this.name = 'StoredApiWorkflowConfigurationInvariantError';
+  }
+}
+
+export function parseStoredApiWorkflowConfiguration(
+  value: unknown,
+): StoredApiWorkflowConfigurationV1 {
+  if (!hasExactKeys(value, ['contractVersion', 'steps']) || value.contractVersion !== 1) {
+    throw new StoredApiWorkflowConfigurationInvariantError();
+  }
+  if (!Array.isArray(value.steps)) throw new StoredApiWorkflowConfigurationInvariantError();
+  try {
+    const storedSteps = value.steps.map((candidate) => {
+      if (!hasExactKeys(candidate, WORKFLOW_STEP_KEYS)) {
+        throw new StoredApiWorkflowConfigurationInvariantError();
+      }
+      return {
+        ...candidate,
+        requestHeaders: parseStoredRequestHeaders(candidate.requestHeaders),
+        requestBody: parseStoredApiWorkflowRequestBody(candidate.requestBody),
+        assertions: parseStoredAssertionConfiguration(candidate.assertions),
+      };
+    });
+    const normalized = parseApiWorkflowConfiguration({
+      contractVersion: 1,
+      steps: storedSteps.map((step) => ({
+        ...step,
+        requestBody:
+          step.requestBody.type === 'NONE'
+            ? step.requestBody
+            : { type: step.requestBody.type, sensitive: true, retain: true as const },
+        requestHeaders: step.requestHeaders.map((header) =>
+          header.sensitive ? { name: header.name, sensitive: true, retain: true as const } : header,
+        ),
+      })),
+    });
+    return {
+      contractVersion: 1,
+      steps: normalized.steps.map((step, index) => ({
+        ...step,
+        requestBody: storedSteps[index]!.requestBody,
+        requestHeaders: storedSteps[index]!.requestHeaders,
+        assertions: storedSteps[index]!.assertions,
+      })),
+    };
+  } catch (error) {
+    if (error instanceof StoredApiWorkflowConfigurationInvariantError) throw error;
+    throw new StoredApiWorkflowConfigurationInvariantError();
+  }
+}
+
+function normalizeApiWorkflowRequestBody(
+  value: unknown,
+  method: HttpMonitorMethod,
+  fields: MonitorFieldErrors,
+): ApiWorkflowRequestBodyUpdate {
+  if (
+    hasExactKeys(value, ['retain', 'sensitive', 'type']) &&
+    value.retain === true &&
+    value.sensitive === true &&
+    (value.type === 'JSON' || value.type === 'FORM_URLENCODED' || value.type === 'RAW')
+  ) {
+    if (method === 'GET' || method === 'HEAD') {
+      fields.requestBody = [`${method} monitors cannot send a request body.`];
+      return { type: 'NONE' };
+    }
+    return { type: value.type, sensitive: true, retain: true };
+  }
+  return normalizeRequestBody(value, method, fields);
+}
+
+function parseStoredApiWorkflowRequestBody(value: unknown): StoredApiWorkflowRequestBodyV1 {
+  if (hasExactKeys(value, ['type']) && value.type === 'NONE') {
+    return { type: 'NONE' };
+  }
+  if (
+    hasExactKeys(value, ['encryptedValue', 'sensitive', 'type']) &&
+    (value.type === 'JSON' || value.type === 'FORM_URLENCODED' || value.type === 'RAW') &&
+    value.sensitive === true &&
+    isEncryptedHeaderValueV1(value.encryptedValue)
+  ) {
+    return {
+      type: value.type,
+      sensitive: true,
+      encryptedValue: value.encryptedValue,
+    };
+  }
+  throw new StoredApiWorkflowConfigurationInvariantError();
+}
+
+function normalizeWorkflowStepId(
+  value: unknown,
+  seen: Set<string>,
+  label: string,
+  issues: string[],
+): string {
+  if (typeof value !== 'string' || !WORKFLOW_STEP_ID.test(value)) {
+    issues.push(
+      `${label} needs a unique ID using up to 64 letters, numbers, underscores, or dashes.`,
+    );
+    return `invalid-${seen.size + 1}`;
+  }
+  if (seen.has(value)) issues.push(`${label} reuses workflow step ID ${value}.`);
+  seen.add(value);
+  return value;
+}
+
+function normalizeWorkflowStepName(value: unknown, label: string, issues: string[]): string {
+  if (typeof value !== 'string' || value.trim() === '' || value.trim().length > 120) {
+    issues.push(`${label} needs a name containing 1 to 120 characters.`);
+    return '';
+  }
+  return value.trim();
+}
+
+function normalizeWorkflowStepUrl(value: unknown, label: string, issues: string[]): string {
+  if (typeof value !== 'string' || value.trim() === '' || value.length > 2_048) {
+    issues.push(`${label} needs an HTTP or HTTPS URL of 2,048 characters or fewer.`);
+    return '';
+  }
+  const url = value.trim();
+  try {
+    const parsed = new URL(url.replace(WORKFLOW_VARIABLE_REFERENCE, WORKFLOW_URL_MARKER));
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error();
+    if (!parsed.hostname || parsed.username || parsed.password) throw new Error();
+    if (
+      parsed.protocol.includes(WORKFLOW_URL_MARKER) ||
+      parsed.username.includes(WORKFLOW_URL_MARKER) ||
+      parsed.password.includes(WORKFLOW_URL_MARKER) ||
+      parsed.hostname.includes(WORKFLOW_URL_MARKER) ||
+      parsed.port.includes(WORKFLOW_URL_MARKER)
+    ) {
+      issues.push(`${label} cannot interpolate variables into the URL origin.`);
+    }
+  } catch {
+    issues.push(`${label} needs a valid absolute HTTP or HTTPS URL.`);
+  }
+  return url;
+}
+
+function normalizeWorkflowExtractions(
+  value: unknown,
+  variables: Set<string>,
+  label: string,
+  issues: string[],
+): ApiWorkflowExtraction[] {
+  if (!Array.isArray(value) || value.length > API_WORKFLOW_LIMITS.maximumExtractionsPerStep) {
+    issues.push(
+      `${label} may define up to ${API_WORKFLOW_LIMITS.maximumExtractionsPerStep} extractions.`,
+    );
+    return [];
+  }
+  return value.map((candidate, index) => {
+    const extraction = `${label} extraction ${index + 1}`;
+    if (!hasExactKeys(candidate, ['selector', 'sensitive', 'variable'])) {
+      issues.push(`${extraction} is incomplete.`);
+      return { variable: `invalid_${index}`, selector: '$', sensitive: true };
+    }
+    const variable = typeof candidate.variable === 'string' ? candidate.variable : '';
+    const selector = typeof candidate.selector === 'string' ? candidate.selector : '';
+    if (!WORKFLOW_VARIABLE_NAME.test(variable)) {
+      issues.push(`${extraction} has an invalid variable name.`);
+    } else if (variables.has(variable)) {
+      issues.push(`${extraction} redefines variable ${variable}.`);
+    } else {
+      variables.add(variable);
+      if (variables.size > API_WORKFLOW_LIMITS.maximumVariables) {
+        issues.push(
+          `The workflow defines more than ${API_WORKFLOW_LIMITS.maximumVariables} variables.`,
+        );
+      }
+    }
+    if (!isValidJsonSelector(selector)) issues.push(`${extraction} has an invalid JSON selector.`);
+    if (typeof candidate.sensitive !== 'boolean') {
+      issues.push(`${extraction} must declare whether its value is sensitive.`);
+    }
+    return { variable, selector, sensitive: candidate.sensitive === true };
+  });
+}
+
+function emptyApiWorkflowStep(index: number): ApiWorkflowStepInput {
+  return {
+    id: `invalid-${index + 1}`,
+    name: '',
+    url: '',
+    method: 'GET',
+    timeoutMs: MONITOR_DEFAULTS.timeoutMs,
+    followRedirects: true,
+    statusPolicy: { type: 'ANY_2XX' },
+    tlsPolicy: { type: 'DISABLED' },
+    requestHeaders: [],
+    requestBody: { type: 'NONE' },
+    assertions: { headers: [], textBody: [], jsonBody: [] },
+    extractions: [],
   };
 }
 
@@ -257,6 +566,7 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
   const type = normalizeMonitorType(command.type, fields);
   if (type === 'TCP') return createTcpMonitor(command, name, fields);
   if (type === 'DNS') return createDnsMonitor(command, name, fields);
+  if (type === 'API_WORKFLOW') return createApiWorkflowMonitor(command, name, fields);
   const url = normalizeUrl(command.url, fields);
   const statusPolicy = normalizeStatusPolicy(command.statusPolicy, fields);
   const tlsPolicy = normalizeTlsPolicy(command.tlsPolicy, url, fields, true);
@@ -294,9 +604,10 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
       command.dnsName,
       command.dnsRecordType,
       command.dnsExpectedValues,
+      command.workflow,
     ].some((value) => value !== undefined)
   ) {
-    fields.type = ['HTTP monitors cannot include TCP or DNS configuration.'];
+    fields.type = ['HTTP monitors cannot include TCP, DNS, or workflow configuration.'];
   }
 
   if (Object.keys(fields).length > 0) throw new MonitorInputError(fields);
@@ -315,6 +626,62 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
     requestHeaders,
     requestBody,
     assertions,
+    locations,
+  };
+}
+
+function createApiWorkflowMonitor(
+  command: CreateMonitorCommand,
+  name: string,
+  fields: MonitorFieldErrors,
+): NewApiWorkflowMonitor {
+  let workflow: ApiWorkflowConfigurationInput = { contractVersion: 1, steps: [] };
+  try {
+    workflow = parseApiWorkflowConfiguration(command.workflow);
+  } catch (error) {
+    if (!(error instanceof MonitorInputError)) throw error;
+    Object.assign(fields, error.fields);
+  }
+  const intervalSeconds = normalizeIntervalSeconds(command.intervalSeconds, fields, true);
+  let locations: string[] = [...MONITOR_DEFAULTS.locations];
+  if (command.locations !== undefined) {
+    try {
+      locations = parseMonitorLocationSettings({ locations: command.locations }).locations;
+    } catch (error) {
+      if (error instanceof MonitorInputError) Object.assign(fields, error.fields);
+      else throw error;
+    }
+  }
+  if (command.lifecycleState !== undefined && command.lifecycleState !== 'PAUSED') {
+    fields.lifecycleState = ['API workflows remain paused until workflow execution is enabled.'];
+  }
+  const incompatibleFields = [
+    command.url,
+    command.host,
+    command.port,
+    command.dnsName,
+    command.dnsRecordType,
+    command.dnsExpectedValues,
+    command.statusPolicy,
+    command.tlsPolicy,
+    command.method,
+    command.timeoutMs,
+    command.followRedirects,
+    command.requestHeaders,
+    command.requestBody,
+    command.assertions,
+  ];
+  if (incompatibleFields.some((value) => value !== undefined)) {
+    fields.type = ['API workflow monitors cannot include single-protocol configuration.'];
+  }
+  if (Object.keys(fields).length > 0) throw new MonitorInputError(fields);
+  return {
+    type: 'API_WORKFLOW',
+    name,
+    workflow,
+    lifecycleState: 'PAUSED',
+    timeoutMs: Math.max(...workflow.steps.map((step) => step.timeoutMs)),
+    intervalSeconds,
     locations,
   };
 }
@@ -368,9 +735,10 @@ function createDnsMonitor(
     command.requestHeaders,
     command.requestBody,
     command.assertions,
+    command.workflow,
   ];
   if (incompatibleFields.some((value) => value !== undefined)) {
-    fields.type = ['DNS monitors cannot include HTTP or TCP configuration.'];
+    fields.type = ['DNS monitors cannot include HTTP, TCP, or workflow configuration.'];
   }
   if (Object.keys(fields).length > 0) throw new MonitorInputError(fields);
   return {
@@ -429,9 +797,10 @@ function createTcpMonitor(
     command.requestHeaders,
     command.requestBody,
     command.assertions,
+    command.workflow,
   ];
   if (httpOnlyFields.some((value) => value !== undefined)) {
-    fields.type = ['TCP monitors cannot include HTTP or DNS configuration.'];
+    fields.type = ['TCP monitors cannot include HTTP, DNS, or workflow configuration.'];
   }
   if (Object.keys(fields).length > 0) throw new MonitorInputError(fields);
   return {
@@ -449,7 +818,7 @@ function createTcpMonitor(
 function normalizeMonitorType(value: unknown, fields: MonitorFieldErrors): MonitorType {
   if (value === undefined) return 'HTTP';
   if (typeof value !== 'string' || !MONITOR_TYPES.includes(value as MonitorType)) {
-    fields.type = ['Choose HTTP, TCP, or DNS.'];
+    fields.type = ['Choose HTTP, TCP, DNS, or API workflow.'];
     return 'HTTP';
   }
   return value as MonitorType;
@@ -816,7 +1185,9 @@ function normalizeUrl(value: unknown, fields: MonitorFieldErrors): string {
 }
 import {
   assertNoRetainedHeaders,
+  isEncryptedHeaderValueV1,
   normalizeRequestHeaderUpdates,
+  parseStoredRequestHeaders,
   RequestHeaderInputError,
   type RequestHeaderUpdate,
 } from './request-header.js';

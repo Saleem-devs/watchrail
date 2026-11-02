@@ -39,6 +39,11 @@ describe('HTTP header encryption', () => {
     expect(() =>
       decryptHeaderValue(encrypted, { ...context, monitorId: 'different' }, keyring),
     ).toThrow(StoredRequestHeaderResolutionError);
+
+    const scoped = encryptHeaderValue('secret', { ...context, scope: 'workflow:first' }, keyring);
+    expect(() =>
+      decryptHeaderValue(scoped, { ...context, scope: 'workflow:second' }, keyring),
+    ).toThrow(StoredRequestHeaderResolutionError);
   });
 
   it('translates unavailable envelope keys into a safe resolution error', () => {

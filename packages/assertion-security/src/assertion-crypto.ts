@@ -22,6 +22,7 @@ export interface AssertionEncryptionKeyring {
 export interface AssertionEncryptionContext {
   organizationId: string;
   monitorId: string;
+  scope?: string;
 }
 
 export class StoredAssertionResolutionError extends Error {
@@ -395,6 +396,7 @@ function aad(context: FullContext): Buffer {
       'watchrail:response-assertion:v1',
       context.organizationId,
       context.monitorId,
+      ...(context.scope === undefined ? [] : [context.scope]),
       context.source,
       String(context.index),
       context.subject ?? '',

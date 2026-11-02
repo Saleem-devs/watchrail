@@ -22,6 +22,62 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { AppModule } from '../src/app.module.js';
 import { NodeHttpExecutor, type HttpExecutor } from '@watchrail/check-engine';
 
+function apiWorkflowConfiguration(retainSecrets = false) {
+  return {
+    contractVersion: 1,
+    steps: [
+      {
+        id: 'authenticate',
+        name: 'Authenticate',
+        url: 'https://api.example.com/session',
+        method: 'POST',
+        timeoutMs: 7_000,
+        followRedirects: true,
+        statusPolicy: { type: 'ANY_2XX' },
+        tlsPolicy: { type: 'DISABLED' },
+        requestHeaders: [
+          retainSecrets
+            ? { name: 'authorization', sensitive: true, retain: true }
+            : { name: 'authorization', sensitive: true, value: 'Bearer workflow-secret' },
+        ],
+        requestBody: retainSecrets
+          ? { type: 'JSON', sensitive: true, retain: true }
+          : {
+              type: 'JSON',
+              value: '{"username":"operator","password":"workflow-password"}',
+            },
+        assertions: {
+          headers: [],
+          textBody: [
+            {
+              operator: 'contains',
+              target: retainSecrets
+                ? { sensitive: true, retain: true }
+                : { sensitive: true, value: 'assertion-secret' },
+            },
+          ],
+          jsonBody: [],
+        },
+        extractions: [{ variable: 'token', selector: '$.token', sensitive: true }],
+      },
+      {
+        id: 'fetch-user',
+        name: 'Fetch user',
+        url: 'https://api.example.com/users/{{token}}',
+        method: 'GET',
+        timeoutMs: 5_000,
+        followRedirects: true,
+        statusPolicy: { type: 'ANY_2XX' },
+        tlsPolicy: { type: 'DISABLED' },
+        requestHeaders: [],
+        requestBody: { type: 'NONE' },
+        assertions: { headers: [], textBody: [], jsonBody: [] },
+        extractions: [],
+      },
+    ],
+  };
+}
+
 describe('monitor API', () => {
   let app: INestApplication;
   let container: StartedPostgreSqlContainer;
@@ -270,6 +326,154 @@ describe('monitor API', () => {
         timeout_ms: 5_000,
       },
     ]);
+  });
+
+  it('creates and atomically updates a paused workflow with encrypted secret retention', async () => {
+    const created = await request(app.getHttpServer())
+      .post(`/api/monitors?projectId=${projectId}`)
+      .send({
+        type: 'API_WORKFLOW',
+        name: 'Checkout journey',
+        workflow: apiWorkflowConfiguration(),
+      })
+      .expect(201);
+
+    expect(created.body.data).toMatchObject({
+      type: 'API_WORKFLOW',
+      lifecycleState: 'PAUSED',
+      nextCheckAt: null,
+      configuration: {
+        type: 'API_WORKFLOW',
+        workflow: {
+          contractVersion: 1,
+          steps: [
+            {
+              id: 'authenticate',
+              requestHeaders: [
+                {
+                  name: 'authorization',
+                  sensitive: true,
+                  value: null,
+                  hasValue: true,
+                },
+              ],
+              requestBody: {
+                type: 'JSON',
+                sensitive: true,
+                hasValue: true,
+              },
+              assertions: {
+                assertions: {
+                  textBody: [{ target: { sensitive: true, hasValue: true } }],
+                },
+              },
+            },
+            { id: 'fetch-user' },
+          ],
+        },
+      },
+    });
+    expect(JSON.stringify(created.body)).not.toContain('workflow-secret');
+    expect(JSON.stringify(created.body)).not.toContain('assertion-secret');
+    expect(JSON.stringify(created.body)).not.toContain('workflow-password');
+
+    const monitorId = created.body.data.id as string;
+    const before = await database.$client.query<{ api_workflow: unknown }>(
+      `select api_workflow from monitor_configuration_versions
+       where monitor_id=$1 order by version_number`,
+      [monitorId],
+    );
+    expect(JSON.stringify(before.rows)).not.toContain('workflow-secret');
+    expect(JSON.stringify(before.rows)).not.toContain('assertion-secret');
+    expect(JSON.stringify(before.rows)).not.toContain('workflow-password');
+    const projectionBeforeUpdate = await database.$client.query<{
+      api_workflow: unknown;
+    }>('select api_workflow from monitors where id=$1', [monitorId]);
+    expect(JSON.stringify(projectionBeforeUpdate.rows)).not.toContain('workflow-password');
+
+    const updated = await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/api-workflow`)
+      .send(apiWorkflowConfiguration(true))
+      .expect(200);
+    expect(updated.body.data.configuration.workflow.steps).toHaveLength(2);
+
+    const after = await database.$client.query<{
+      api_workflow: {
+        steps: Array<{
+          requestBody: { encryptedValue: unknown };
+          requestHeaders: Array<{ encryptedValue: unknown }>;
+          assertions: {
+            assertions: { textBody: Array<{ target: { encryptedValue: unknown } }> };
+          };
+        }>;
+      };
+    }>(
+      `select api_workflow from monitor_configuration_versions
+       where monitor_id=$1 order by version_number`,
+      [monitorId],
+    );
+    expect(after.rows).toHaveLength(2);
+    const first = after.rows[0]!.api_workflow;
+    const second = after.rows[1]!.api_workflow;
+    expect(second.steps[0]!.requestHeaders[0]!.encryptedValue).toEqual(
+      first.steps[0]!.requestHeaders[0]!.encryptedValue,
+    );
+    expect(second.steps[0]!.requestBody.encryptedValue).toEqual(
+      first.steps[0]!.requestBody.encryptedValue,
+    );
+    expect(second.steps[0]!.assertions.assertions.textBody[0]!.target.encryptedValue).toEqual(
+      first.steps[0]!.assertions.assertions.textBody[0]!.target.encryptedValue,
+    );
+
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/lifecycle`)
+      .send({ lifecycleState: 'ENABLED' })
+      .expect(409)
+      .expect(({ body }) => expect(body).toMatchObject({ code: 'WORKFLOW_EXECUTION_UNAVAILABLE' }));
+    await request(app.getHttpServer())
+      .patch('/api/monitors/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/api-workflow')
+      .send(apiWorkflowConfiguration())
+      .expect(404);
+
+    const invalidUpdate = apiWorkflowConfiguration(true);
+    Object.assign(invalidUpdate.steps[1]!, {
+      requestHeaders: [{ name: 'x-missing-secret', sensitive: true, retain: true }],
+    });
+    const projectionBeforeRejectedUpdate = await database.$client.query<{
+      api_workflow: unknown;
+      updated_at: Date;
+    }>('select api_workflow, updated_at from monitors where id=$1', [monitorId]);
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/api-workflow`)
+      .send(invalidUpdate)
+      .expect(400)
+      .expect(({ body }) => expect(body).toMatchObject({ code: 'VALIDATION_FAILED' }));
+
+    const afterRejectedUpdate = await database.$client.query<{
+      api_workflow: unknown;
+    }>(
+      `select api_workflow from monitor_configuration_versions
+       where monitor_id=$1 order by version_number`,
+      [monitorId],
+    );
+    expect(afterRejectedUpdate.rows).toEqual(after.rows);
+    const projectionAfterRejectedUpdate = await database.$client.query<{
+      api_workflow: unknown;
+      updated_at: Date;
+    }>('select api_workflow, updated_at from monitors where id=$1', [monitorId]);
+    expect(projectionAfterRejectedUpdate.rows).toEqual(projectionBeforeRejectedUpdate.rows);
+  });
+
+  it('rejects workflow secret-retention tokens during creation as validation errors', async () => {
+    await request(app.getHttpServer())
+      .post(`/api/monitors?projectId=${projectId}`)
+      .send({
+        type: 'API_WORKFLOW',
+        name: 'Invalid retained workflow',
+        workflow: apiWorkflowConfiguration(true),
+      })
+      .expect(400)
+      .expect(({ body }) => expect(body).toMatchObject({ code: 'VALIDATION_FAILED' }));
   });
 
   it('replaces the immutable execution location with an owned active remote location', async () => {

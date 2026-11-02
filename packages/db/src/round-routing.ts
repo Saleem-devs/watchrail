@@ -160,6 +160,9 @@ async function requiredEngineVersionForRound(
   if (!configuration) throw new MonitorLocationInvariantError();
   if (configuration.type === 'TCP') return TCP_ENGINE_VERSION;
   if (configuration.type === 'DNS') return DNS_ENGINE_VERSION;
+  if (configuration.type === 'API_WORKFLOW') {
+    throw new Error('API workflow execution is not enabled yet.');
+  }
   return parseTlsCertificatePolicy(configuration.tlsPolicy).type === 'DISABLED'
     ? LEGACY_HTTP_ENGINE_VERSION
     : HTTP_ENGINE_VERSION;
