@@ -1,37 +1,27 @@
-import { validateApiWorkflow, type ApiWorkflowInput } from '@watchrail/check-engine';
+import { validateApiWorkflow } from '@watchrail/check-engine';
+import {
+  resolveApiWorkflowConfiguration,
+  API_WORKFLOW_REQUEST_BODY_ENCRYPTION_NAME,
+  type ApiWorkflowEncryptionContext,
+  type ApiWorkflowKeyrings,
+} from '@watchrail/api-workflow-security';
 import {
   EMPTY_ASSERTION_CONFIGURATION,
   parseStoredApiWorkflowConfiguration,
   type ApiWorkflowConfigurationInput,
   type ApiWorkflowRequestBodyUpdate,
-  type HttpRequestBody,
   type StoredApiWorkflowRequestBodyV1,
   type StoredApiWorkflowConfigurationV1,
 } from '@watchrail/domain';
 import {
-  decryptHeaderValue,
   encryptHeaderValue,
-  resolveRequestHeaders,
   storeRequestHeaders,
   type HeaderEncryptionKeyring,
 } from '@watchrail/http-header-security';
-import {
-  resolveResponseAssertions,
-  storeResponseAssertions,
-  type AssertionEncryptionKeyring,
-} from '@watchrail/assertion-security';
+import { storeResponseAssertions } from '@watchrail/assertion-security';
 
-const WORKFLOW_REQUEST_BODY_ENCRYPTION_NAME = '@workflow-request-body';
-
-export interface ApiWorkflowEncryptionContext {
-  organizationId: string;
-  monitorId: string;
-}
-
-interface ApiWorkflowKeyrings {
-  headers: HeaderEncryptionKeyring;
-  assertions: AssertionEncryptionKeyring;
-}
+export { resolveApiWorkflowConfiguration } from '@watchrail/api-workflow-security';
+export type { ApiWorkflowEncryptionContext } from '@watchrail/api-workflow-security';
 
 export class ApiWorkflowConfigurationError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -96,49 +86,6 @@ export function storeApiWorkflowConfiguration(
   return parsed;
 }
 
-export function resolveApiWorkflowConfiguration(
-  value: unknown,
-  context: ApiWorkflowEncryptionContext,
-  keyrings: ApiWorkflowKeyrings,
-): ApiWorkflowInput {
-  const stored = parseStoredApiWorkflowConfiguration(value);
-  return {
-    steps: stored.steps.map((step) => {
-      const scope = workflowStepScope(step.id);
-      const assertions = resolveResponseAssertions(
-        step.assertions,
-        step.method,
-        { ...context, scope },
-        keyrings.assertions,
-      );
-      return {
-        id: step.id,
-        name: step.name,
-        url: step.url,
-        method: step.method,
-        timeoutMs: step.timeoutMs,
-        followRedirects: step.followRedirects,
-        statusPolicy: step.statusPolicy,
-        tlsPolicy: step.tlsPolicy,
-        requestHeaders: resolveRequestHeaders(
-          step.requestHeaders,
-          { ...context, scope },
-          keyrings.headers,
-        ),
-        requestBody: resolveWorkflowRequestBody(
-          step.requestBody,
-          { ...context, scope },
-          keyrings.headers,
-        ),
-        headerAssertions: assertions.headers,
-        textBodyAssertions: assertions.textBody,
-        jsonBodyAssertions: assertions.jsonBody,
-        extractions: step.extractions,
-      };
-    }),
-  };
-}
-
 function assertNoCreationRetention(input: ApiWorkflowConfigurationInput): void {
   for (const step of input.steps) {
     if (step.requestHeaders.some((header) => 'retain' in header)) {
@@ -180,32 +127,10 @@ function storeWorkflowRequestBody(
     sensitive: true,
     encryptedValue: encryptHeaderValue(
       JSON.stringify(update),
-      { ...context, normalizedHeaderName: WORKFLOW_REQUEST_BODY_ENCRYPTION_NAME },
+      { ...context, normalizedHeaderName: API_WORKFLOW_REQUEST_BODY_ENCRYPTION_NAME },
       keyring,
     ),
   };
-}
-
-function resolveWorkflowRequestBody(
-  stored: StoredApiWorkflowRequestBodyV1,
-  context: ApiWorkflowEncryptionContext & { scope: string },
-  keyring: HeaderEncryptionKeyring,
-): HttpRequestBody {
-  if (stored.type === 'NONE') return stored;
-  const plaintext = decryptHeaderValue(
-    stored.encryptedValue,
-    { ...context, normalizedHeaderName: WORKFLOW_REQUEST_BODY_ENCRYPTION_NAME },
-    keyring,
-  );
-  try {
-    const resolved = JSON.parse(plaintext) as HttpRequestBody;
-    if (resolved.type !== stored.type) throw new Error('Request-body type mismatch.');
-    return resolved;
-  } catch (error) {
-    throw new ApiWorkflowConfigurationError('Stored workflow request body is invalid.', {
-      cause: error,
-    });
-  }
 }
 
 function workflowStepScope(stepId: string): string {

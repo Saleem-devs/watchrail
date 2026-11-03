@@ -1016,6 +1016,12 @@ export function Dashboard({
                 </>
               ) : view === 'create' ? (
                 <>
+                  <Link
+                    href={`${projectBase}/monitors`}
+                    className={actionClassName({ variant: 'quiet' })}
+                  >
+                    Cancel
+                  </Link>
                   {createMonitorType === 'HTTP' ? (
                     <Button
                       variant="secondary"
@@ -1025,12 +1031,6 @@ export function Dashboard({
                       {isTestingConfiguration ? 'Testing…' : 'Test configuration'}
                     </Button>
                   ) : null}
-                  <Link
-                    href={`${projectBase}/monitors`}
-                    className={actionClassName({ variant: 'quiet' })}
-                  >
-                    Cancel
-                  </Link>
                   <Button
                     form="monitor-form"
                     type="submit"
@@ -1052,6 +1052,9 @@ export function Dashboard({
             actions={
               detailMonitor ? (
                 <>
+                  <Link href={detailPath} className={actionClassName({ variant: 'quiet' })}>
+                    Cancel
+                  </Link>
                   {detailMonitor.type === 'HTTP' ? (
                     <Button
                       variant="secondary"
@@ -1061,9 +1064,6 @@ export function Dashboard({
                       {isTestingConfiguration ? 'Testing…' : 'Test configuration'}
                     </Button>
                   ) : null}
-                  <Link href={detailPath} className={actionClassName({ variant: 'quiet' })}>
-                    Cancel
-                  </Link>
                   <Button
                     form="monitor-form"
                     type="submit"

@@ -12,6 +12,7 @@ import {
   type RegionalEvaluationV1,
   type TlsCertificateEvidenceV1,
 } from '@watchrail/domain';
+import { parseApiWorkflowResult, type ApiWorkflowResult } from '@watchrail/check-engine';
 import type { WatchrailDatabase } from './client.js';
 import {
   checkExecutionAssignments,
@@ -87,6 +88,7 @@ export interface CheckHistoryDetail extends Omit<CheckHistoryListItem, 'result'>
         assertionEvaluation: AssertionEvaluationV1;
         tlsCertificates: TlsCertificateEvidenceV1[];
         dnsAnswers: string[];
+        workflowResult: ApiWorkflowResult | null;
         checkedAt: Date;
       }
     | {
@@ -195,6 +197,7 @@ interface HistoryRow {
   assertionEvaluation: AssertionEvaluationV1 | null;
   tlsCertificates: TlsCertificateEvidenceV1[] | null;
   dnsAnswers: string[] | null;
+  workflowResult: CheckExecutionResultRecord['workflowResult'];
   checkedAt: Date | null;
 }
 
@@ -737,6 +740,8 @@ export class CheckHistoryRepository {
             assertionEvaluation: required(assertionEvaluation),
             tlsCertificates: parseTlsCertificateEvidenceList(row.tlsCertificates ?? []),
             dnsAnswers: parseDnsAnswers(row.dnsAnswers ?? []),
+            workflowResult:
+              row.workflowResult === null ? null : parseApiWorkflowResult(row.workflowResult),
             checkedAt: required(row.checkedAt),
           }
         : null,
@@ -780,6 +785,7 @@ const historySelection = {
   assertionEvaluation: checkExecutionResults.assertionEvaluation,
   tlsCertificates: checkExecutionResults.tlsCertificates,
   dnsAnswers: checkExecutionResults.dnsAnswers,
+  workflowResult: checkExecutionResults.workflowResult,
   checkedAt: checkExecutionResults.checkedAt,
 };
 
@@ -976,6 +982,7 @@ function parseRegionalDiagnosticSummary(value: unknown): RegionalDiagnosticSumma
     'stage',
     'statusCode',
     ...(Object.hasOwn(value, 'tlsCertificates') ? ['tlsCertificates'] : []),
+    ...(Object.hasOwn(value, 'workflowResult') ? ['workflowResult'] : []),
   ];
   if (Object.hasOwn(value, 'assertionEvaluation')) {
     parseStoredAssertionEvaluation(value.assertionEvaluation);
@@ -984,7 +991,11 @@ function parseRegionalDiagnosticSummary(value: unknown): RegionalDiagnosticSumma
     parseTlsCertificateEvidenceList(value.tlsCertificates);
   }
   if (Object.hasOwn(value, 'dnsAnswers')) parseDnsAnswers(value.dnsAnswers);
-  const validStage = ['DNS', 'CONNECT', 'TLS', 'HTTP', 'PROBE'].includes(String(value.stage));
+  const hasWorkflowResult = Object.hasOwn(value, 'workflowResult');
+  if (hasWorkflowResult) parseApiWorkflowResult(value.workflowResult);
+  const validStage = ['DNS', 'CONNECT', 'TLS', 'HTTP', 'PROBE', 'WORKFLOW'].includes(
+    String(value.stage),
+  );
   const validTime = (candidate: unknown) =>
     candidate === null ||
     (typeof candidate === 'number' && Number.isFinite(candidate) && candidate >= 0);
@@ -992,6 +1003,7 @@ function parseRegionalDiagnosticSummary(value: unknown): RegionalDiagnosticSumma
     keys.length !== expected.length ||
     keys.some((key, index) => key !== expected[index]) ||
     !validStage ||
+    (value.stage === 'WORKFLOW') !== hasWorkflowResult ||
     typeof value.reason !== 'string' ||
     value.reason.length < 1 ||
     value.reason.length > 120 ||

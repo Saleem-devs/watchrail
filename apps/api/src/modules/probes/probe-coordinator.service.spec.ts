@@ -96,4 +96,74 @@ describe('ProbeCoordinatorService submission audit', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(submit).not.toHaveBeenCalled();
   });
+
+  it('accepts bounded workflow diagnostics and rejects injected response evidence', async () => {
+    submit.mockResolvedValue({ state: 'ACCEPTED', duplicate: false });
+    const checkedAt = new Date().toISOString();
+    const workflowResult = {
+      outcome: 'PASS',
+      stage: 'WORKFLOW',
+      reason: 'WORKFLOW_COMPLETED',
+      failedStepId: null,
+      checkedAt,
+      attemptDurationMs: 20,
+      steps: ['first', 'second'].map((id, position) => ({
+        id,
+        name: id,
+        position,
+        status: 'EXECUTED',
+        result: {
+          outcome: 'PASS',
+          stage: 'HTTP',
+          reason: 'COMPLETED',
+          statusCode: 200,
+          responseTimeMs: 8,
+          attemptDurationMs: 10,
+          checkedAt,
+          assertionEvaluation: { contractVersion: 1, outcome: 'PASS', diagnostics: [] },
+          redirectCount: 0,
+          tlsCertificateCount: 0,
+        },
+        extractions: [],
+      })),
+    };
+    const body = {
+      reference: {
+        contractVersion: 1,
+        assignmentId,
+        attemptId,
+        attemptNumber: 1,
+        engineVersion: 'watchrail-api-workflow-v1',
+      },
+      result: workflowResult,
+    };
+
+    await expect(service.submit(machine, attemptId, claimToken, body)).resolves.toEqual({
+      state: 'ACCEPTED',
+      duplicate: false,
+    });
+    expect(submit).toHaveBeenCalledWith(
+      machine,
+      expect.objectContaining({ engineVersion: 'watchrail-api-workflow-v1' }),
+      claimToken,
+      expect.objectContaining({
+        stage: 'WORKFLOW',
+        workflowResult: expect.objectContaining({ reason: 'WORKFLOW_COMPLETED' }),
+      }),
+    );
+
+    const firstStep = workflowResult.steps[0]!;
+    await expect(
+      service.submit(machine, attemptId, claimToken, {
+        ...body,
+        result: {
+          ...workflowResult,
+          steps: [
+            { ...firstStep, result: { ...firstStep.result, responseEvidence: 'secret' } },
+            workflowResult.steps[1],
+          ],
+        },
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
 });

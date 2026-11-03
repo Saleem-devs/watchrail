@@ -19,6 +19,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@watchrail/check-engine": "workspace:*",
     "@watchrail/contracts": "workspace:*",
     "@watchrail/domain": "workspace:*",
     "@watchrail/webhook-security": "workspace:*",

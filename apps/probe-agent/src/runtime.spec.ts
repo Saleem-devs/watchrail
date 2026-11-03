@@ -5,6 +5,7 @@ import {
   LEGACY_HTTP_ENGINE_VERSION,
   TCP_ENGINE_VERSION,
   DNS_ENGINE_VERSION,
+  API_WORKFLOW_ENGINE_VERSION,
 } from '@watchrail/domain';
 import { describe, expect, it, vi } from 'vitest';
 import { ProbeCoordinatorClient, ProbeCoordinatorError } from './coordinator-client.js';
@@ -84,10 +85,11 @@ describe('ProbeAgentRuntime', () => {
 
     await runtime.run();
 
-    expect(claim).toHaveBeenNthCalledWith(1, DNS_ENGINE_VERSION, expect.any(AbortSignal));
-    expect(claim).toHaveBeenNthCalledWith(2, TCP_ENGINE_VERSION, expect.any(AbortSignal));
-    expect(claim).toHaveBeenNthCalledWith(3, HTTP_ENGINE_VERSION, expect.any(AbortSignal));
-    expect(claim).toHaveBeenNthCalledWith(4, LEGACY_HTTP_ENGINE_VERSION, expect.any(AbortSignal));
+    expect(claim).toHaveBeenNthCalledWith(1, API_WORKFLOW_ENGINE_VERSION, expect.any(AbortSignal));
+    expect(claim).toHaveBeenNthCalledWith(2, DNS_ENGINE_VERSION, expect.any(AbortSignal));
+    expect(claim).toHaveBeenNthCalledWith(3, TCP_ENGINE_VERSION, expect.any(AbortSignal));
+    expect(claim).toHaveBeenNthCalledWith(4, HTTP_ENGINE_VERSION, expect.any(AbortSignal));
+    expect(claim).toHaveBeenNthCalledWith(5, LEGACY_HTTP_ENGINE_VERSION, expect.any(AbortSignal));
     expect(submit).toHaveBeenCalledOnce();
   });
 
@@ -163,6 +165,53 @@ describe('ProbeAgentRuntime', () => {
       dnsLease,
       DNS_ENGINE_VERSION,
       expect.objectContaining({ reason: 'RECORDS_MATCHED', answers: ['203.0.113.10'] }),
+    );
+  });
+
+  it('executes workflow assignments only with the dedicated workflow engine', async () => {
+    const workflowConfiguration: ProbeExecutionConfigurationV1 = {
+      contractVersion: 1,
+      type: 'API_WORKFLOW',
+      assignmentId: lease.assignmentId,
+      attemptId: lease.attemptId,
+      configurationVersionId: lease.configurationVersionId,
+      configurationVersionNumber: lease.configurationVersionNumber,
+      executionPolicyVersion: 'api-workflow-v1',
+      requiredEngineVersion: API_WORKFLOW_ENGINE_VERSION,
+      workflow: {
+        steps: ['first', 'second'].map((id) => ({
+          id,
+          name: id,
+          url: `https://example.com/${id}`,
+          method: 'GET',
+          timeoutMs: 5_000,
+          followRedirects: true,
+          statusPolicy: { type: 'ANY_2XX' },
+          tlsPolicy: { type: 'DISABLED' },
+          requestHeaders: [],
+          requestBody: { type: 'NONE' },
+          headerAssertions: [],
+          textBodyAssertions: [],
+          jsonBodyAssertions: [],
+          extractions: [],
+        })),
+      },
+    };
+    const workflowLease = {
+      ...lease,
+      executionPolicyVersion: 'api-workflow-v1',
+      requiredEngineVersion: API_WORKFLOW_ENGINE_VERSION,
+    };
+    const fixture = runtimeFixture(workflowLease, 1, false, workflowConfiguration);
+    vi.spyOn(fixture.client, 'submitSerialized').mockImplementation(fixture.submit);
+
+    await fixture.runtime.run();
+
+    expect(fixture.execute).toHaveBeenCalledTimes(2);
+    expect(fixture.serialize).toHaveBeenCalledWith(
+      workflowLease,
+      API_WORKFLOW_ENGINE_VERSION,
+      expect.objectContaining({ outcome: 'PASS', reason: 'WORKFLOW_COMPLETED' }),
     );
   });
 
@@ -260,7 +309,11 @@ function runtimeFixture(
   const state: { runtime?: ProbeAgentRuntime } = {};
   const claim = vi.fn();
   if (legacyFallback) {
-    claim.mockResolvedValueOnce(null).mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+    claim
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null);
   }
   claim.mockResolvedValueOnce(runtimeLease).mockImplementation(() => {
     state.runtime?.stop();

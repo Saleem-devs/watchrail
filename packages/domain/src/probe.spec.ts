@@ -4,12 +4,25 @@ import {
   deriveProbeAgentHealth,
   parseProbeLocationIdentity,
   probeAssignmentLocation,
+  probeEngineSupports,
+  API_WORKFLOW_ENGINE_VERSION,
+  DNS_ENGINE_VERSION,
+  HTTP_ENGINE_VERSION,
 } from './probe.js';
 
 const organizationId = '11111111-1111-4111-8111-111111111111';
 const locationId = '22222222-2222-4222-8222-222222222222';
 
 describe('probe domain', () => {
+  it('routes workflows only to workflow-capable probe agents', () => {
+    expect(probeEngineSupports(API_WORKFLOW_ENGINE_VERSION, API_WORKFLOW_ENGINE_VERSION)).toBe(
+      true,
+    );
+    expect(probeEngineSupports(API_WORKFLOW_ENGINE_VERSION, DNS_ENGINE_VERSION)).toBe(true);
+    expect(probeEngineSupports(API_WORKFLOW_ENGINE_VERSION, HTTP_ENGINE_VERSION)).toBe(true);
+    expect(probeEngineSupports(DNS_ENGINE_VERSION, API_WORKFLOW_ENGINE_VERSION)).toBe(false);
+  });
+
   it('parses an exact tenant-scoped location identity', () => {
     expect(parseProbeLocationIdentity({ contractVersion: 1, organizationId, locationId })).toEqual({
       contractVersion: 1,

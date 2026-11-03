@@ -1,3 +1,5 @@
+import { validateApiWorkflow, type ApiWorkflowInput } from '@watchrail/check-engine';
+
 export const PROBE_COORDINATOR_CONTRACT_VERSION = 1;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -94,10 +96,23 @@ export interface DnsProbeExecutionConfigurationV1 {
   timeoutMs: number;
 }
 
+export interface ApiWorkflowProbeExecutionConfigurationV1 {
+  contractVersion: 1;
+  type: 'API_WORKFLOW';
+  assignmentId: string;
+  attemptId: string;
+  configurationVersionId: string;
+  configurationVersionNumber: number;
+  executionPolicyVersion: string;
+  requiredEngineVersion: string;
+  workflow: ApiWorkflowInput;
+}
+
 export type ProbeExecutionConfigurationV1 =
   | HttpProbeExecutionConfigurationV1
   | TcpProbeExecutionConfigurationV1
-  | DnsProbeExecutionConfigurationV1;
+  | DnsProbeExecutionConfigurationV1
+  | ApiWorkflowProbeExecutionConfigurationV1;
 
 export class InvalidProbeCoordinatorContractError extends Error {
   constructor() {
@@ -188,6 +203,36 @@ export function parseProbeHeartbeat(value: unknown): ProbeHeartbeatV1 {
 }
 
 export function parseProbeExecutionConfiguration(value: unknown): ProbeExecutionConfigurationV1 {
+  const workflowKeys = [
+    'assignmentId',
+    'attemptId',
+    'configurationVersionId',
+    'configurationVersionNumber',
+    'contractVersion',
+    'executionPolicyVersion',
+    'requiredEngineVersion',
+    'type',
+    'workflow',
+  ];
+  if (hasExactKeys(value, workflowKeys) && value.type === 'API_WORKFLOW') {
+    if (
+      value.contractVersion !== PROBE_COORDINATOR_CONTRACT_VERSION ||
+      !isUuid(value.assignmentId) ||
+      !isUuid(value.attemptId) ||
+      !isUuid(value.configurationVersionId) ||
+      !isPositiveInteger(value.configurationVersionNumber) ||
+      !isVersion(value.executionPolicyVersion) ||
+      !isVersion(value.requiredEngineVersion)
+    ) {
+      throw new InvalidProbeCoordinatorContractError();
+    }
+    try {
+      validateApiWorkflow(value.workflow as ApiWorkflowInput);
+    } catch {
+      throw new InvalidProbeCoordinatorContractError();
+    }
+    return value as unknown as ApiWorkflowProbeExecutionConfigurationV1;
+  }
   const dnsKeys = [
     'assignmentId',
     'attemptId',

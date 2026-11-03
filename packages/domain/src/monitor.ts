@@ -303,6 +303,14 @@ export function parseApiWorkflowConfiguration(value: unknown): ApiWorkflowConfig
       extractions,
     } satisfies ApiWorkflowStepInput;
   });
+  if (
+    steps.reduce((total, step) => total + step.timeoutMs, 0) >
+    API_WORKFLOW_LIMITS.maximumExecutionMs
+  ) {
+    issues.push(
+      `Workflow step timeouts may total at most ${API_WORKFLOW_LIMITS.maximumExecutionMs / 1_000} seconds.`,
+    );
+  }
   if (issues.length > 0) throw new MonitorInputError({ workflow: issues });
   return { contractVersion: 1, steps };
 }
@@ -652,9 +660,7 @@ function createApiWorkflowMonitor(
       else throw error;
     }
   }
-  if (command.lifecycleState !== undefined && command.lifecycleState !== 'PAUSED') {
-    fields.lifecycleState = ['API workflows remain paused until workflow execution is enabled.'];
-  }
+  const lifecycleState = normalizeInitialLifecycleState(command.lifecycleState, fields);
   const incompatibleFields = [
     command.url,
     command.host,
@@ -679,7 +685,7 @@ function createApiWorkflowMonitor(
     type: 'API_WORKFLOW',
     name,
     workflow,
-    lifecycleState: 'PAUSED',
+    lifecycleState,
     timeoutMs: Math.max(...workflow.steps.map((step) => step.timeoutMs)),
     intervalSeconds,
     locations,

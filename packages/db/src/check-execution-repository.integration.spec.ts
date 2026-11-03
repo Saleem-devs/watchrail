@@ -83,6 +83,44 @@ describe('CheckExecutionRepository', () => {
     return new ManualRoundRepository(connection.db).create(organizationId, monitor.id);
   }
 
+  async function createWorkflowRound(stepTimeouts: readonly number[] = [5_000, 5_000]) {
+    const workflow = {
+      contractVersion: 1 as const,
+      steps: stepTimeouts.map((timeoutMs, index) => ({
+        id: `step-${index}`,
+        name: `Request ${index}`,
+        url: `https://example.com/step-${index}`,
+        method: 'GET' as const,
+        timeoutMs,
+        followRedirects: true,
+        statusPolicy: { type: 'ANY_2XX' as const },
+        tlsPolicy: { type: 'DISABLED' as const },
+        requestHeaders: [],
+        requestBody: { type: 'NONE' as const },
+        assertions: {
+          contractVersion: 1 as const,
+          assertions: { headers: [], textBody: [], jsonBody: [] },
+        },
+        extractions: [],
+      })),
+    };
+    const monitor = createMonitor({
+      type: 'API_WORKFLOW',
+      name: 'Checkout journey',
+      workflow,
+    });
+    const created = await new MonitorRepository(connection.db).create(
+      organizationId,
+      'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      monitor,
+      [],
+      undefined,
+      undefined,
+      workflow,
+    );
+    return new ManualRoundRepository(connection.db).create(organizationId, created.id);
+  }
+
   it('claims the local assignment with its immutable configuration', async () => {
     const round = await createRound();
 
@@ -111,6 +149,133 @@ describe('CheckExecutionRepository', () => {
     });
     expect(assignment?.claimToken).toEqual(expect.any(String));
     expect(assignment?.claimExpiresAt).toBeInstanceOf(Date);
+  });
+
+  it('persists and reloads a successful API workflow result', async () => {
+    const round = await createWorkflowRound();
+    const claim = await repository.claim(round.id, 45_000);
+    if (claim.state !== 'CLAIMED' || claim.execution.type !== 'API_WORKFLOW') {
+      throw new Error('Expected an API workflow execution claim.');
+    }
+    const [assignment] = await connection.db
+      .select()
+      .from(checkExecutionAssignments)
+      .where(eq(checkExecutionAssignments.id, claim.execution.assignmentId));
+    expect(assignment).toMatchObject({
+      executionPolicyVersion: 'api-workflow-v1',
+      requiredEngineVersion: 'watchrail-api-workflow-v1',
+    });
+    const checkedAt = new Date('2026-11-02T20:00:00.000Z');
+    const workflowResult = {
+      outcome: 'PASS' as const,
+      stage: 'WORKFLOW' as const,
+      reason: 'WORKFLOW_COMPLETED' as const,
+      failedStepId: null,
+      checkedAt,
+      attemptDurationMs: 24,
+      steps: claim.execution.workflow.steps.map((step, position) => ({
+        id: step.id,
+        name: step.name,
+        position,
+        status: 'EXECUTED' as const,
+        result: {
+          outcome: 'PASS' as const,
+          stage: 'HTTP' as const,
+          reason: 'COMPLETED' as const,
+          statusCode: 200,
+          responseTimeMs: 10,
+          attemptDurationMs: 12,
+          checkedAt,
+          assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
+          redirectCount: 0,
+          tlsCertificateCount: 0,
+        },
+        extractions: [],
+      })),
+    };
+
+    await expect(
+      repository.complete(claim.execution.assignmentId, claim.execution.claimToken, {
+        outcome: 'PASS',
+        stage: 'WORKFLOW',
+        reason: 'WORKFLOW_COMPLETED',
+        statusCode: null,
+        responseTimeMs: null,
+        attemptDurationMs: 24,
+        redirects: [],
+        assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
+        workflowResult,
+        checkedAt,
+      }),
+    ).resolves.toBe(true);
+
+    const stored = await new CheckHistoryRepository(connection.db).findForMonitor(
+      organizationId,
+      round.monitorId,
+      round.id,
+    );
+    expect(stored?.result).toMatchObject({
+      kind: 'SINGLE_LOCATION',
+      outcome: 'PASS',
+      stage: 'WORKFLOW',
+      reason: 'WORKFLOW_COMPLETED',
+      workflowResult: {
+        outcome: 'PASS',
+        steps: [
+          { id: 'step-0', status: 'EXECUTED' },
+          { id: 'step-1', status: 'EXECUTED' },
+        ],
+      },
+    });
+  });
+
+  it('keeps the local lease authoritative through the maximum workflow deadline', async () => {
+    const round = await createWorkflowRound([30_000, 30_000, 30_000]);
+    const claim = await repository.claim(round.id, 45_000);
+    if (claim.state !== 'CLAIMED') throw new Error('Expected an API workflow execution claim.');
+
+    const [assignment] = await connection.db
+      .select({
+        claimExpiresAt: checkExecutionAssignments.claimExpiresAt,
+        lastStartedAt: checkExecutionAssignments.lastStartedAt,
+      })
+      .from(checkExecutionAssignments)
+      .where(eq(checkExecutionAssignments.id, claim.execution.assignmentId));
+
+    expect(assignment?.claimExpiresAt?.getTime()).toBe(
+      (assignment?.lastStartedAt?.getTime() ?? 0) + 95_000,
+    );
+  });
+
+  it('rejects workflow stages without matching workflow evidence', async () => {
+    const round = await createRound();
+    const claim = await repository.claim(round.id, 45_000);
+    if (claim.state !== 'CLAIMED') throw new Error('Expected an HTTP execution claim.');
+
+    await expect(
+      repository.complete(claim.execution.assignmentId, claim.execution.claimToken, {
+        outcome: 'PASS',
+        stage: 'HTTP',
+        reason: 'COMPLETED',
+        statusCode: 200,
+        responseTimeMs: 10,
+        attemptDurationMs: 12,
+        redirects: [],
+        assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
+        checkedAt: new Date('2026-11-02T20:00:00.000Z'),
+      }),
+    ).resolves.toBe(true);
+
+    await expect(
+      connection.db
+        .update(checkExecutionResults)
+        .set({ stage: 'WORKFLOW' })
+        .where(eq(checkExecutionResults.roundId, round.id)),
+    ).rejects.toMatchObject({
+      cause: {
+        constraint: 'check_execution_results_workflow_result_consistent',
+      },
+    });
   });
 
   it('claims TCP assignments with only their protocol-specific configuration', async () => {

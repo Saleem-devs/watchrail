@@ -943,9 +943,6 @@ export class MonitorRepository {
       if (monitor.lifecycleState === 'ARCHIVED' && lifecycleState !== 'ARCHIVED') {
         throw new ArchivedMonitorLifecycleError();
       }
-      if (monitor.type === 'API_WORKFLOW' && lifecycleState === 'ENABLED') {
-        throw new WorkflowExecutionUnavailableError();
-      }
       if (monitor.lifecycleState === lifecycleState) return monitor;
 
       await transitionAvailabilityLifecycle(tx, organizationId, monitorId, lifecycleState);
@@ -1013,12 +1010,5 @@ export class MonitorProtocolMismatchError extends Error {
   constructor(protocol: 'HTTP' | 'TCP' | 'DNS' | 'API_WORKFLOW') {
     super(`This operation requires a ${protocol} monitor.`);
     this.name = 'MonitorProtocolMismatchError';
-  }
-}
-
-export class WorkflowExecutionUnavailableError extends Error {
-  constructor() {
-    super('API workflow execution is not enabled yet.');
-    this.name = 'WorkflowExecutionUnavailableError';
   }
 }

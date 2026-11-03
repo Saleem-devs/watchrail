@@ -399,7 +399,7 @@ function Navigation({
           {group.items.map((item) => {
             const active =
               item.page === page || (item.page === 'monitors' && page === 'monitor-detail');
-            const sharedClassName = `group relative flex min-h-9 items-center gap-3 rounded-rail-control px-3 text-[13px] whitespace-nowrap transition-colors ${active ? 'bg-rail-selected font-medium text-rail-text' : 'font-normal text-rail-subtle'} ${item.disabled ? 'cursor-not-allowed opacity-55' : 'hover:bg-rail-hover hover:text-rail-text'}`;
+            const sharedClassName = `group relative flex min-h-9 items-center gap-3 rounded-rail-control px-3 text-[13px] whitespace-nowrap transition-colors ${active ? 'bg-rail-selected font-medium text-rail-text' : 'font-normal text-rail-subtle'} ${item.disabled ? 'cursor-not-allowed' : 'hover:bg-rail-hover hover:text-rail-text'}`;
             const content = (
               <>
                 <span
@@ -412,13 +412,6 @@ function Navigation({
                 >
                   {item.label}
                 </span>
-                {item.disabled ? (
-                  <span
-                    className={`ml-auto overflow-hidden text-[9px] tracking-wide text-rail-muted uppercase transition-[max-width,opacity] duration-150 ${collapsed ? 'max-w-0 opacity-0' : 'max-w-10 opacity-100'}`}
-                  >
-                    Soon
-                  </span>
-                ) : null}
               </>
             );
 

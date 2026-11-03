@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { executeApiWorkflow } from './api-workflow-check.js';
+import { parseApiWorkflowResult, serializeApiWorkflowResult } from './api-workflow-result.js';
 import type { ApiWorkflowStep } from './api-workflow-types.js';
 import type { HttpExecutionResult, HttpExecutor } from './types.js';
 
@@ -127,6 +128,100 @@ describe('executeApiWorkflow', () => {
       reason: 'PREVIOUS_STEP_FAILED',
     });
     expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it('treats a failed response assertion as a failed workflow step', async () => {
+    const execute = vi.fn<HttpExecutor['execute']>().mockResolvedValue(response());
+    const result = await executeApiWorkflow(
+      {
+        steps: [
+          step({
+            id: 'assert-header',
+            name: 'Assert header',
+            headerAssertions: [{ name: 'x-service-ready', operator: 'exists' }],
+          }),
+          step({ id: 'later', name: 'Later' }),
+        ],
+      },
+      { executor: { execute }, clock: createClock() },
+    );
+
+    expect(result).toMatchObject({
+      outcome: 'FAIL',
+      reason: 'STEP_FAILED',
+      failedStepId: 'assert-header',
+      steps: [
+        {
+          status: 'EXECUTED',
+          result: {
+            outcome: 'PASS',
+            reason: 'COMPLETED',
+            assertionEvaluation: { outcome: 'FAIL' },
+          },
+        },
+        { status: 'SKIPPED', reason: 'PREVIOUS_STEP_FAILED' },
+      ],
+    });
+    expect(execute).toHaveBeenCalledOnce();
+
+    const serialized = serializeApiWorkflowResult(result);
+    expect(parseApiWorkflowResult(serialized)).toEqual(result);
+    expect(() =>
+      parseApiWorkflowResult({
+        ...serialized,
+        outcome: 'PASS',
+        reason: 'WORKFLOW_COMPLETED',
+        failedStepId: null,
+      }),
+    ).toThrow('API workflow result is invalid');
+  });
+
+  it('treats unevaluated response assertions as an indeterminate workflow step', async () => {
+    const execute = vi.fn<HttpExecutor['execute']>().mockResolvedValue({
+      type: 'RESPONSE',
+      statusCode: 200,
+      responseTimeMs: 12,
+      headers: [{ name: 'content-type', values: ['application/json'] }],
+      body: { state: 'UNAVAILABLE', reason: 'BODY_TOO_LARGE' },
+      redirects: [],
+    });
+    const result = await executeApiWorkflow(
+      {
+        steps: [
+          step({
+            id: 'assert-body',
+            name: 'Assert body',
+            textBodyAssertions: [
+              {
+                operator: 'contains',
+                target: { value: 'ready', sensitive: false },
+              },
+            ],
+          }),
+          step({ id: 'later', name: 'Later' }),
+        ],
+      },
+      { executor: { execute }, clock: createClock() },
+    );
+
+    expect(result).toMatchObject({
+      outcome: 'UNKNOWN',
+      reason: 'STEP_INDETERMINATE',
+      failedStepId: 'assert-body',
+      steps: [
+        {
+          status: 'EXECUTED',
+          result: {
+            outcome: 'PASS',
+            reason: 'COMPLETED',
+            assertionEvaluation: { outcome: 'NOT_EVALUATED' },
+          },
+        },
+        { status: 'SKIPPED', reason: 'PREVIOUS_STEP_INDETERMINATE' },
+      ],
+    });
+    expect(execute).toHaveBeenCalledOnce();
+    expect(parseApiWorkflowResult(serializeApiWorkflowResult(result))).toEqual(result);
   });
 
   it('fails safely when extraction evidence is missing or non-scalar', async () => {
@@ -462,5 +557,128 @@ describe('executeApiWorkflow', () => {
     if (extraction?.status !== 'EXECUTED') throw new Error('Expected executed step.');
     expect(extraction.extractions[0]).toMatchObject({ reason: 'VALUE_TOO_LARGE' });
     expect(JSON.stringify(result)).not.toContain(oversized);
+  });
+
+  it('bounds the total workflow execution deadline', async () => {
+    await expect(
+      executeApiWorkflow(
+        {
+          steps: Array.from({ length: 5 }, (_, index) =>
+            step({ id: `step-${index}`, name: `Step ${index}`, timeoutMs: 30_000 }),
+          ),
+        },
+        { executor: { execute: vi.fn<HttpExecutor['execute']>() } },
+      ),
+    ).rejects.toThrow('total execution limit');
+  });
+
+  it('does not start later steps once the workflow deadline is exhausted', async () => {
+    const clock = createClock();
+    const execute = vi.fn<HttpExecutor['execute']>().mockImplementationOnce(() => {
+      clock.advance(90_000);
+      return Promise.resolve(response());
+    });
+    const result = await executeApiWorkflow(
+      {
+        steps: [
+          step({ id: 'first', name: 'First', timeoutMs: 30_000 }),
+          step({ id: 'second', name: 'Second', timeoutMs: 30_000 }),
+          step({ id: 'third', name: 'Third', timeoutMs: 30_000 }),
+        ],
+      },
+      { executor: { execute }, clock },
+    );
+
+    expect(result).toMatchObject({
+      outcome: 'UNKNOWN',
+      reason: 'INTERNAL_ERROR',
+      failedStepId: 'second',
+      steps: [
+        { id: 'first', status: 'EXECUTED' },
+        { id: 'second', status: 'SKIPPED', reason: 'EXECUTION_ERROR' },
+        { id: 'third', status: 'SKIPPED', reason: 'PREVIOUS_STEP_INDETERMINATE' },
+      ],
+    });
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it('composes caller cancellation with the active workflow step', async () => {
+    const caller = new AbortController();
+    let markStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const execute = vi.fn<HttpExecutor['execute']>().mockImplementation(
+      ({ signal }) =>
+        new Promise<HttpExecutionResult>((_resolve, reject) => {
+          markStarted?.();
+          signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+        }),
+    );
+    const execution = executeApiWorkflow(
+      {
+        steps: [step({ id: 'first', name: 'First' }), step({ id: 'second', name: 'Second' })],
+      },
+      { executor: { execute }, signal: caller.signal },
+    );
+
+    await started;
+    caller.abort();
+    const result = await execution;
+
+    expect(result).toMatchObject({
+      outcome: 'UNKNOWN',
+      reason: 'STEP_INDETERMINATE',
+      failedStepId: 'first',
+      steps: [
+        {
+          id: 'first',
+          status: 'EXECUTED',
+          result: { outcome: 'UNKNOWN', reason: 'INTERNAL_ERROR' },
+        },
+        { id: 'second', status: 'SKIPPED', reason: 'PREVIOUS_STEP_INDETERMINATE' },
+      ],
+    });
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it('round-trips the bounded workflow result contract and rejects added evidence', async () => {
+    const result = await executeApiWorkflow(
+      {
+        steps: [step({ id: 'one', name: 'One' }), step({ id: 'two', name: 'Two' })],
+      },
+      { executor: { execute: vi.fn<HttpExecutor['execute']>().mockResolvedValue(response()) } },
+    );
+    const serialized = serializeApiWorkflowResult(result);
+
+    expect(parseApiWorkflowResult(serialized)).toEqual(result);
+    expect(() =>
+      parseApiWorkflowResult({
+        ...serialized,
+        steps: serialized.steps.map((item, index) =>
+          index === 0 && item.status === 'EXECUTED'
+            ? { ...item, result: { ...item.result, responseEvidence: { body: 'secret' } } }
+            : item,
+        ),
+      }),
+    ).toThrow('API workflow result is invalid');
+    const first = serialized.steps[0]!;
+    if (first.status !== 'EXECUTED') throw new Error('Expected an executed step.');
+    expect(() =>
+      parseApiWorkflowResult({
+        ...serialized,
+        steps: [
+          {
+            ...first,
+            result: {
+              ...first.result,
+              outcome: 'FAIL',
+              reason: 'UNEXPECTED_STATUS',
+            },
+          },
+          serialized.steps[1],
+        ],
+      }),
+    ).toThrow('API workflow result is invalid');
   });
 });

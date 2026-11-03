@@ -1,12 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
   executeDnsCheck,
+  executeApiWorkflow,
   executeHttpCheck,
   executeTcpCheck,
   NodeDnsQueryResolver,
   NodeTcpConnector,
 } from '@watchrail/check-engine';
+import { resolveApiWorkflowConfiguration } from '@watchrail/api-workflow-security';
 import type {
+  ApiWorkflowResult,
   DnsQueryResolver,
   HttpCheckResult,
   HttpExecutor,
@@ -126,6 +129,55 @@ export class CheckRoundJobHandler implements CheckJobHandler {
           assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
           checkedAt: tcpResult.checkedAt,
         },
+      );
+      if (!completed) throw new CheckExecutionClaimLostError();
+      return;
+    }
+
+    if (claim.execution.type === 'API_WORKFLOW') {
+      let workflowResult: ApiWorkflowResult | null = null;
+      try {
+        const workflow = resolveApiWorkflowConfiguration(
+          claim.execution.workflow,
+          {
+            organizationId: claim.execution.organizationId,
+            monitorId: claim.execution.monitorId,
+          },
+          {
+            headers: this.headerEncryptionKeyring,
+            assertions: this.assertionEncryptionKeyring,
+          },
+        );
+        workflowResult = await executeApiWorkflow(workflow, { executor: this.executor });
+      } catch (error) {
+        this.logger.error(
+          `Stored API workflow configuration is invalid for assignment ${claim.execution.assignmentId}.`,
+          error instanceof Error ? error.stack : undefined,
+        );
+      }
+      const authoritativeResult =
+        workflowResult === null
+          ? internalExecutionFailureResult()
+          : {
+              outcome: workflowResult.outcome,
+              stage: workflowResult.stage,
+              reason: workflowResult.reason,
+              statusCode: null,
+              responseTimeMs: null,
+              attemptDurationMs: workflowResult.attemptDurationMs,
+              redirects: [],
+              assertionEvaluation: {
+                contractVersion: 1 as const,
+                outcome: 'PASS' as const,
+                diagnostics: [],
+              },
+              workflowResult,
+              checkedAt: workflowResult.checkedAt,
+            };
+      const completed = await this.executions.complete(
+        claim.execution.assignmentId,
+        claim.execution.claimToken,
+        authoritativeResult,
       );
       if (!completed) throw new CheckExecutionClaimLostError();
       return;

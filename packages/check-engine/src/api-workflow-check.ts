@@ -29,14 +29,42 @@ export async function executeApiWorkflow(
   dependencies: ApiWorkflowDependencies,
 ): Promise<ApiWorkflowResult> {
   assertWorkflow(input);
+  const controller = new AbortController();
+  const cancelFromCaller = () => controller.abort(dependencies.signal?.reason);
+  if (dependencies.signal?.aborted) {
+    cancelFromCaller();
+  } else {
+    dependencies.signal?.addEventListener('abort', cancelFromCaller, { once: true });
+  }
+  const executionLimitMs = workflowExecutionLimitMs(input);
+  const deadline = setTimeout(() => controller.abort(), executionLimitMs);
+  try {
+    return await executeApiWorkflowWithinDeadline(input, {
+      ...dependencies,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(deadline);
+    dependencies.signal?.removeEventListener('abort', cancelFromCaller);
+  }
+}
+
+async function executeApiWorkflowWithinDeadline(
+  input: ApiWorkflowInput,
+  dependencies: ApiWorkflowDependencies & { signal: AbortSignal },
+): Promise<ApiWorkflowResult> {
   const clock = dependencies.clock ?? defaultClock;
   const checkedAt = clock.now();
   const startedAt = clock.monotonicNow();
   const variables = new Map(Object.entries(input.initialVariables ?? {}));
   const steps: ApiWorkflowStepResult[] = [];
+  const executionLimitMs = workflowExecutionLimitMs(input);
 
   for (let position = 0; position < input.steps.length; position += 1) {
     const step = input.steps[position]!;
+    if (dependencies.signal.aborted) {
+      return interruptedWorkflow(input.steps, step, position, checkedAt, clock, startedAt, steps);
+    }
     let request: HttpCheckInput;
     try {
       request = resolveStep(step, variables);
@@ -59,6 +87,14 @@ export async function executeApiWorkflow(
         steps,
       );
     }
+    const remainingMs = executionLimitMs - elapsed(clock, startedAt);
+    if (remainingMs <= 0 || dependencies.signal.aborted) {
+      return interruptedWorkflow(input.steps, step, position, checkedAt, clock, startedAt, steps);
+    }
+    request = {
+      ...request,
+      timeoutMs: Math.max(1, Math.min(request.timeoutMs, remainingMs)),
+    };
 
     let result: HttpCheckResult;
     try {
@@ -67,7 +103,7 @@ export async function executeApiWorkflow(
         {
           executor: dependencies.executor,
           clock,
-          ...(dependencies.signal === undefined ? {} : { signal: dependencies.signal }),
+          signal: dependencies.signal,
         },
       );
     } catch {
@@ -84,7 +120,8 @@ export async function executeApiWorkflow(
     }
 
     const safeResult = withoutResponseEvidence(result);
-    if (result.outcome !== 'PASS') {
+    const stepOutcome = effectiveStepOutcome(result);
+    if (stepOutcome !== 'PASS') {
       steps.push({
         id: step.id,
         name: step.name,
@@ -96,10 +133,10 @@ export async function executeApiWorkflow(
       appendSkippedSteps(
         input.steps,
         position + 1,
-        result.outcome === 'FAIL' ? 'PREVIOUS_STEP_FAILED' : 'PREVIOUS_STEP_INDETERMINATE',
+        stepOutcome === 'FAIL' ? 'PREVIOUS_STEP_FAILED' : 'PREVIOUS_STEP_INDETERMINATE',
         steps,
       );
-      return result.outcome === 'FAIL'
+      return stepOutcome === 'FAIL'
         ? terminalResult(
             'FAIL',
             'STEP_FAILED',
@@ -163,6 +200,41 @@ export async function executeApiWorkflow(
     attemptDurationMs: elapsed(clock, startedAt),
     steps,
   };
+}
+
+function effectiveStepOutcome(result: HttpCheckResult): 'PASS' | 'FAIL' | 'UNKNOWN' {
+  if (result.outcome !== 'PASS') return result.outcome;
+  if (result.assertionEvaluation.outcome === 'FAIL') return 'FAIL';
+  if (result.assertionEvaluation.outcome === 'NOT_EVALUATED') return 'UNKNOWN';
+  return 'PASS';
+}
+
+function workflowExecutionLimitMs(input: ApiWorkflowInput): number {
+  return Math.min(
+    input.steps.reduce((total, step) => total + step.timeoutMs, 0),
+    API_WORKFLOW_LIMITS.maximumExecutionMs,
+  );
+}
+
+function interruptedWorkflow(
+  configured: readonly ApiWorkflowStep[],
+  step: ApiWorkflowStep,
+  position: number,
+  checkedAt: Date,
+  clock: CheckClock,
+  startedAt: number,
+  steps: ApiWorkflowStepResult[],
+): ApiWorkflowResult {
+  steps.push(skippedStep(step, position, 'EXECUTION_ERROR'));
+  appendSkippedSteps(configured, position + 1, 'PREVIOUS_STEP_INDETERMINATE', steps);
+  return terminalResult(
+    'UNKNOWN',
+    'INTERNAL_ERROR',
+    step.id,
+    checkedAt,
+    elapsed(clock, startedAt),
+    steps,
+  );
 }
 
 export function validateApiWorkflow(input: ApiWorkflowInput): void {
@@ -381,6 +453,10 @@ function assertWorkflow(input: ApiWorkflowInput): void {
     );
   }
   const stepIds = new Set<string>();
+  const maximumExecutionMs = input.steps.reduce((total, step) => total + step.timeoutMs, 0);
+  if (maximumExecutionMs > API_WORKFLOW_LIMITS.maximumExecutionMs) {
+    throw new RangeError('API workflow step timeouts exceed the total execution limit.');
+  }
   const initialVariables = Object.entries(input.initialVariables ?? {});
   if (initialVariables.length > API_WORKFLOW_LIMITS.maximumInitialVariables) {
     throw new RangeError('API workflow has too many initial variables.');

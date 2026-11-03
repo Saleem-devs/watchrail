@@ -2,6 +2,7 @@ import {
   executeHttpCheck,
   executeDnsCheck,
   executeTcpCheck,
+  executeApiWorkflow,
   NodeDnsQueryResolver,
   NodeHttpExecutor,
   NodeTcpConnector,
@@ -15,6 +16,7 @@ import {
   LEGACY_HTTP_ENGINE_VERSION,
   TCP_ENGINE_VERSION,
   DNS_ENGINE_VERSION,
+  API_WORKFLOW_ENGINE_VERSION,
   PROBE_MAX_EXECUTION_MS,
   parseResponseAssertions,
   probeEngineSupports,
@@ -24,6 +26,7 @@ import type {
   ProbeLeaseReferenceV1,
   TcpProbeExecutionConfigurationV1,
   DnsProbeExecutionConfigurationV1,
+  ApiWorkflowProbeExecutionConfigurationV1,
 } from '@watchrail/contracts';
 import { ProbeCoordinatorError } from './coordinator-client.js';
 import type { ProbeCoordinatorClient } from './coordinator-client.js';
@@ -99,30 +102,35 @@ export class ProbeAgentRuntime {
         configuration.configurationVersionNumber !== lease.configurationVersionNumber ||
         configuration.executionPolicyVersion !== lease.executionPolicyVersion ||
         configuration.requiredEngineVersion !== lease.requiredEngineVersion ||
-        !probeEngineSupports(DNS_ENGINE_VERSION, configuration.requiredEngineVersion)
+        !probeEngineSupports(API_WORKFLOW_ENGINE_VERSION, configuration.requiredEngineVersion)
       ) {
         throw new ProbeCoordinatorError('INVALID');
       }
-      const result = isDnsConfiguration(configuration)
-        ? await executeDnsCheck(
-            {
-              name: configuration.name,
-              recordType: configuration.recordType,
-              expectedValues: configuration.expectedValues,
-              timeoutMs: configuration.timeoutMs,
-            },
-            { resolver: this.dnsResolver, signal: abort.signal },
-          )
-        : isTcpConfiguration(configuration)
-          ? await executeTcpCheck(
+      const result = isWorkflowConfiguration(configuration)
+        ? await executeApiWorkflow(configuration.workflow, {
+            executor: this.executor,
+            signal: abort.signal,
+          })
+        : isDnsConfiguration(configuration)
+          ? await executeDnsCheck(
               {
-                host: configuration.host,
-                port: configuration.port,
+                name: configuration.name,
+                recordType: configuration.recordType,
+                expectedValues: configuration.expectedValues,
                 timeoutMs: configuration.timeoutMs,
               },
-              { connector: this.tcpConnector, signal: abort.signal },
+              { resolver: this.dnsResolver, signal: abort.signal },
             )
-          : await executeHttpConfiguration(configuration, this.executor, abort.signal);
+          : isTcpConfiguration(configuration)
+            ? await executeTcpCheck(
+                {
+                  host: configuration.host,
+                  port: configuration.port,
+                  timeoutMs: configuration.timeoutMs,
+                },
+                { connector: this.tcpConnector, signal: abort.signal },
+              )
+            : await executeHttpConfiguration(configuration, this.executor, abort.signal);
       const submissionResult =
         lease.requiredEngineVersion === LEGACY_HTTP_ENGINE_VERSION && 'statusCode' in result
           ? withoutTlsEvidence(result)
@@ -202,7 +210,7 @@ export class ProbeAgentRuntime {
     while (!this.stopping) {
       try {
         await this.client.heartbeat(
-          DNS_ENGINE_VERSION,
+          API_WORKFLOW_ENGINE_VERSION,
           this.config.heartbeatIntervalMs,
           this.lifecycleAbort.signal,
         );
@@ -219,6 +227,11 @@ export class ProbeAgentRuntime {
   }
 
   private async claimCompatibleLease(): Promise<ProbeLeaseReferenceV1 | null> {
+    const workflowLease = await this.client.claim(
+      API_WORKFLOW_ENGINE_VERSION,
+      this.lifecycleAbort.signal,
+    );
+    if (workflowLease) return workflowLease;
     const dnsLease = await this.client.claim(DNS_ENGINE_VERSION, this.lifecycleAbort.signal);
     if (dnsLease) return dnsLease;
 
@@ -237,6 +250,12 @@ export class ProbeAgentRuntime {
   }
 }
 
+function isWorkflowConfiguration(
+  configuration: ProbeExecutionConfigurationV1,
+): configuration is ApiWorkflowProbeExecutionConfigurationV1 {
+  return 'type' in configuration && configuration.type === 'API_WORKFLOW';
+}
+
 function isDnsConfiguration(
   configuration: ProbeExecutionConfigurationV1,
 ): configuration is DnsProbeExecutionConfigurationV1 {
@@ -252,7 +271,7 @@ function isTcpConfiguration(
 async function executeHttpConfiguration(
   configuration: Exclude<
     Awaited<ReturnType<ProbeCoordinatorClient['configuration']>>,
-    { type: 'TCP' } | { type: 'DNS' }
+    { type: 'TCP' } | { type: 'DNS' } | { type: 'API_WORKFLOW' }
   >,
   executor: HttpExecutor,
   signal: AbortSignal,
