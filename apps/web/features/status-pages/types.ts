@@ -20,11 +20,12 @@ export interface StatusPageMonitor {
   id: string;
   name: string;
   url: string;
-  type: 'HTTP' | 'TCP' | 'DNS';
+  type: 'HTTP' | 'TCP' | 'DNS' | 'API_WORKFLOW';
   configuration:
     | { type: 'HTTP'; url: string }
     | { type: 'TCP'; host: string; port: number }
-    | { type: 'DNS'; name: string; recordType: string; expectedValues: string[] };
+    | { type: 'DNS'; name: string; recordType: string; expectedValues: string[] }
+    | { type: 'API_WORKFLOW'; workflow: { steps: Array<{ name: string; url: string }> } };
   lifecycleState: 'ENABLED' | 'PAUSED';
   currentCheck: {
     availability: 'AVAILABLE' | 'UNAVAILABLE' | 'UNKNOWN';

@@ -2,6 +2,7 @@ import { Button } from '../../components/ui/button';
 import { classifyScheduledObservation } from '@watchrail/domain';
 import type {
   AssertionEvaluation,
+  ApiWorkflowResult,
   HistoryPage,
   IncidentHistoryPage,
   IncidentState,
@@ -190,6 +191,14 @@ export function ManualDiagnostic({
       />
     );
   }
+  if (protocol === 'API_WORKFLOW' && result.workflowResult) {
+    return (
+      <WorkflowDiagnostic
+        result={result.workflowResult}
+        label="Latest manual workflow diagnostic"
+      />
+    );
+  }
   const assertionEvaluation = result.assertionEvaluation ?? {
     contractVersion: 1,
     outcome: result.assertionOutcome ?? 'NOT_EVALUATED',
@@ -318,6 +327,145 @@ function EvidenceRetentionNotice() {
       inspect bounded, redacted response evidence.
     </p>
   );
+}
+
+export function WorkflowDiagnostic({
+  result,
+  label,
+  nested = false,
+}: {
+  result: ApiWorkflowResult;
+  label: string;
+  nested?: boolean;
+}) {
+  const workflowOutcome: DiagnosticOutcome =
+    result.outcome === 'PASS'
+      ? 'HEALTHY'
+      : result.outcome === 'FAIL'
+        ? 'UNHEALTHY'
+        : 'INDETERMINATE';
+  return (
+    <section
+      className={
+        nested
+          ? 'overflow-hidden'
+          : 'manual-diagnostic mt-4 overflow-hidden rounded-rail-panel border border-rail-border bg-rail-sidebar/45'
+      }
+      aria-label={label}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rail-border px-4 py-3">
+        <div>
+          <h4 className="m-0 text-sm font-semibold text-rail-text">{label}</h4>
+          <p className="mt-1 mb-0 text-xs text-rail-muted">
+            {humanize(result.reason)} · {formatMilliseconds(result.attemptDurationMs)} total
+          </p>
+        </div>
+        <OutcomeBadge outcome={workflowOutcome} />
+      </div>
+      <ol className="m-0 grid list-none p-0" aria-label="Workflow step evidence">
+        {result.steps.map((step, index) => {
+          const outcome = workflowStepOutcome(step);
+          return (
+            <li
+              key={step.id}
+              className="relative grid gap-3 border-b border-rail-border px-4 py-4 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_auto]"
+            >
+              {index < result.steps.length - 1 ? (
+                <span
+                  aria-hidden="true"
+                  className="absolute top-9 bottom-[-1rem] left-[1.38rem] w-px bg-rail-border-strong"
+                />
+              ) : null}
+              <div className="relative flex min-w-0 gap-3">
+                <span
+                  aria-hidden="true"
+                  className={`mt-0.5 grid size-5 shrink-0 place-items-center rounded-full border text-[10px] font-semibold tabular-nums ${workflowStepDotTone(outcome)}`}
+                >
+                  {index + 1}
+                </span>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <strong className="truncate text-sm text-rail-text">{step.name}</strong>
+                    <code className="text-[11px] text-rail-muted">{step.id}</code>
+                  </div>
+                  {step.status === 'SKIPPED' ? (
+                    <p className="mt-1 mb-0 text-xs leading-5 text-rail-muted">
+                      Not executed · {humanize(step.reason)}
+                    </p>
+                  ) : (
+                    <>
+                      <p className="mt-1 mb-0 text-xs leading-5 text-rail-muted">
+                        {step.result.statusCode === null
+                          ? 'No HTTP response'
+                          : `HTTP ${step.result.statusCode}`}{' '}
+                        · {formatMilliseconds(step.result.responseTimeMs)} ·{' '}
+                        {humanize(step.result.reason)}
+                      </p>
+                      {step.extractions.length ? (
+                        <ul
+                          className="mt-2 mb-0 flex list-none flex-wrap gap-1.5 p-0"
+                          aria-label={`Extractions from ${step.name}`}
+                        >
+                          {step.extractions.map((extraction) => (
+                            <li
+                              key={`${step.id}-${extraction.variable}`}
+                              className="inline-flex min-h-6 items-center gap-1.5 rounded-rail-control border border-rail-border bg-rail-surface px-2 text-[11px] text-rail-subtle"
+                              title={humanize(extraction.reason)}
+                            >
+                              <code>{extraction.variable}</code>
+                              <span aria-hidden="true">·</span>
+                              <span>{humanize(extraction.outcome)}</span>
+                              {extraction.sensitive ? (
+                                <span className="sr-only">Sensitive value</span>
+                              ) : null}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </>
+                  )}
+                </div>
+              </div>
+              <div className="self-start">
+                <OutcomeBadge outcome={outcome} />
+              </div>
+              {step.status === 'EXECUTED' && step.result.assertionEvaluation.diagnostics.length ? (
+                <div className="sm:col-span-2 sm:ml-8">
+                  <AssertionDiagnostics evaluation={step.result.assertionEvaluation} />
+                </div>
+              ) : null}
+            </li>
+          );
+        })}
+      </ol>
+      <p className="m-0 border-t border-rail-border px-4 py-3 text-xs leading-5 text-rail-muted">
+        Response bodies, headers, extracted values, redirect origins, and certificate identities are
+        not retained in workflow history.
+      </p>
+    </section>
+  );
+}
+
+function workflowStepOutcome(step: ApiWorkflowResult['steps'][number]): DiagnosticOutcome {
+  if (step.status === 'SKIPPED') return 'NOT_EVALUATED';
+  if (step.result.outcome === 'FAIL' || step.result.assertionEvaluation.outcome === 'FAIL') {
+    return 'FAIL';
+  }
+  if (
+    step.result.outcome === 'UNKNOWN' ||
+    step.result.assertionEvaluation.outcome === 'NOT_EVALUATED' ||
+    step.extractions.some((extraction) => extraction.outcome === 'NOT_EVALUATED')
+  ) {
+    return 'INDETERMINATE';
+  }
+  if (step.extractions.some((extraction) => extraction.outcome === 'FAILED')) return 'FAIL';
+  return 'PASS';
+}
+
+function workflowStepDotTone(outcome: DiagnosticOutcome): string {
+  if (outcome === 'PASS') return 'border-rail-success/50 bg-rail-success/10 text-rail-success';
+  if (outcome === 'FAIL') return 'border-rail-danger/50 bg-rail-danger/10 text-rail-danger';
+  return 'border-rail-warning/50 bg-rail-warning/10 text-rail-warning';
 }
 
 function tcpDiagnosticLabel(reason: string): string {
@@ -480,7 +628,17 @@ function MultiLocationDiagnostic({
                     key={execution.id}
                     className="mt-2 overflow-hidden rounded-rail-control border border-rail-border"
                   >
-                    {protocol === 'TCP' ? (
+                    {protocol === 'API_WORKFLOW' && execution.diagnosticSummary.workflowResult ? (
+                      <WorkflowDiagnostic
+                        result={execution.diagnosticSummary.workflowResult}
+                        label={
+                          execution.role === 'PRIMARY'
+                            ? 'Primary workflow execution'
+                            : 'Confirmation workflow execution'
+                        }
+                        nested
+                      />
+                    ) : protocol === 'TCP' ? (
                       <dl className="m-0 grid grid-cols-2 gap-px bg-rail-border">
                         <Metric
                           label={
@@ -674,6 +832,11 @@ function HistoricalSingleLocationEvidence({
   result: Extract<NonNullable<ManualRound['result']>, { kind?: 'SINGLE_LOCATION' }>;
   protocol: Monitor['type'];
 }) {
+  if (protocol === 'API_WORKFLOW' && result.workflowResult) {
+    return (
+      <WorkflowDiagnostic result={result.workflowResult} label="Historical workflow evidence" />
+    );
+  }
   const assertionEvaluation = result.assertionEvaluation ?? {
     contractVersion: 1 as const,
     outcome: result.assertionOutcome ?? ('NOT_EVALUATED' as const),

@@ -36,6 +36,10 @@ function monitorColumns(origin: string, projectId?: string): Array<DataTableColu
             <span className="mt-0.5 block max-w-xs truncate text-xs text-rail-muted">
               {monitor.configuration.recordType} {monitor.configuration.name}
             </span>
+          ) : monitor.configuration?.type === 'API_WORKFLOW' ? (
+            <span className="mt-0.5 block max-w-xs truncate text-xs text-rail-muted">
+              {monitor.configuration.workflow.steps.length} ordered HTTP steps
+            </span>
           ) : (
             <a
               href={monitor.url}
