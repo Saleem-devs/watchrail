@@ -84,7 +84,7 @@ function assertResultSemantics(
       steps.some(
         (step) =>
           step.status !== 'EXECUTED' ||
-          step.result.outcome !== 'PASS' ||
+          effectiveStepOutcome(step.result) !== 'PASS' ||
           step.extractions.some((diagnostic) => diagnostic.outcome !== 'CAPTURED'),
       )
     ) {
@@ -101,7 +101,7 @@ function assertResultSemantics(
     earlier.some(
       (step) =>
         step.status !== 'EXECUTED' ||
-        step.result.outcome !== 'PASS' ||
+        effectiveStepOutcome(step.result) !== 'PASS' ||
         step.extractions.some((diagnostic) => diagnostic.outcome !== 'CAPTURED'),
     ) ||
     later.some((step) => step.status !== 'SKIPPED')
@@ -109,18 +109,22 @@ function assertResultSemantics(
     throwInvalidResult();
   }
   if (reason === 'STEP_FAILED') {
-    if (failed.status !== 'EXECUTED' || failed.result.outcome !== 'FAIL') throwInvalidResult();
+    if (failed.status !== 'EXECUTED' || effectiveStepOutcome(failed.result) !== 'FAIL') {
+      throwInvalidResult();
+    }
     return;
   }
   if (reason === 'STEP_INDETERMINATE') {
-    if (failed.status !== 'EXECUTED' || failed.result.outcome !== 'UNKNOWN') throwInvalidResult();
+    if (failed.status !== 'EXECUTED' || effectiveStepOutcome(failed.result) !== 'UNKNOWN') {
+      throwInvalidResult();
+    }
     return;
   }
   if (reason === 'EXTRACTION_FAILED' || reason === 'EXTRACTION_INDETERMINATE') {
     const expected = reason === 'EXTRACTION_FAILED' ? 'FAILED' : 'NOT_EVALUATED';
     if (
       failed.status !== 'EXECUTED' ||
-      failed.result.outcome !== 'PASS' ||
+      effectiveStepOutcome(failed.result) !== 'PASS' ||
       !failed.extractions.some((diagnostic) => diagnostic.outcome === expected)
     ) {
       throwInvalidResult();
@@ -138,6 +142,15 @@ function assertResultSemantics(
     return;
   }
   throwInvalidResult();
+}
+
+function effectiveStepOutcome(
+  result: ApiWorkflowExecutedStepResult['result'],
+): 'PASS' | 'FAIL' | 'UNKNOWN' {
+  if (result.outcome !== 'PASS') return result.outcome;
+  if (result.assertionEvaluation.outcome === 'FAIL') return 'FAIL';
+  if (result.assertionEvaluation.outcome === 'NOT_EVALUATED') return 'UNKNOWN';
+  return 'PASS';
 }
 
 function parseStep(value: unknown, position: number): ApiWorkflowResult['steps'][number] {

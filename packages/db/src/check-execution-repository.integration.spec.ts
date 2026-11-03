@@ -83,15 +83,15 @@ describe('CheckExecutionRepository', () => {
     return new ManualRoundRepository(connection.db).create(organizationId, monitor.id);
   }
 
-  async function createWorkflowRound() {
+  async function createWorkflowRound(stepTimeouts: readonly number[] = [5_000, 5_000]) {
     const workflow = {
       contractVersion: 1 as const,
-      steps: ['first', 'second'].map((id) => ({
-        id,
-        name: `${id} request`,
-        url: `https://example.com/${id}`,
+      steps: stepTimeouts.map((timeoutMs, index) => ({
+        id: `step-${index}`,
+        name: `Request ${index}`,
+        url: `https://example.com/step-${index}`,
         method: 'GET' as const,
-        timeoutMs: 5_000,
+        timeoutMs,
         followRedirects: true,
         statusPolicy: { type: 'ANY_2XX' as const },
         tlsPolicy: { type: 'DISABLED' as const },
@@ -222,11 +222,29 @@ describe('CheckExecutionRepository', () => {
       workflowResult: {
         outcome: 'PASS',
         steps: [
-          { id: 'first', status: 'EXECUTED' },
-          { id: 'second', status: 'EXECUTED' },
+          { id: 'step-0', status: 'EXECUTED' },
+          { id: 'step-1', status: 'EXECUTED' },
         ],
       },
     });
+  });
+
+  it('keeps the local lease authoritative through the maximum workflow deadline', async () => {
+    const round = await createWorkflowRound([30_000, 30_000, 30_000]);
+    const claim = await repository.claim(round.id, 45_000);
+    if (claim.state !== 'CLAIMED') throw new Error('Expected an API workflow execution claim.');
+
+    const [assignment] = await connection.db
+      .select({
+        claimExpiresAt: checkExecutionAssignments.claimExpiresAt,
+        lastStartedAt: checkExecutionAssignments.lastStartedAt,
+      })
+      .from(checkExecutionAssignments)
+      .where(eq(checkExecutionAssignments.id, claim.execution.assignmentId));
+
+    expect(assignment?.claimExpiresAt?.getTime()).toBe(
+      (assignment?.lastStartedAt?.getTime() ?? 0) + 95_000,
+    );
   });
 
   it('rejects workflow stages without matching workflow evidence', async () => {
