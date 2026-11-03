@@ -15,6 +15,7 @@ export const API_WORKFLOW_LIMITS = {
   maximumVariables: 64,
   maximumVariableNameLength: 64,
   maximumVariableValueBytes: 16 * 1024,
+  maximumExecutionMs: 90_000,
 } as const;
 
 export interface ApiWorkflowExtraction {

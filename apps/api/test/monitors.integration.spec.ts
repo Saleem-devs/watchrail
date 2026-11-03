@@ -328,7 +328,7 @@ describe('monitor API', () => {
     ]);
   });
 
-  it('creates and atomically updates a paused workflow with encrypted secret retention', async () => {
+  it('creates and atomically updates an executable workflow with encrypted secret retention', async () => {
     const created = await request(app.getHttpServer())
       .post(`/api/monitors?projectId=${projectId}`)
       .send({
@@ -340,8 +340,7 @@ describe('monitor API', () => {
 
     expect(created.body.data).toMatchObject({
       type: 'API_WORKFLOW',
-      lifecycleState: 'PAUSED',
-      nextCheckAt: null,
+      lifecycleState: 'ENABLED',
       configuration: {
         type: 'API_WORKFLOW',
         workflow: {
@@ -427,9 +426,11 @@ describe('monitor API', () => {
 
     await request(app.getHttpServer())
       .patch(`/api/monitors/${monitorId}/lifecycle`)
-      .send({ lifecycleState: 'ENABLED' })
-      .expect(409)
-      .expect(({ body }) => expect(body).toMatchObject({ code: 'WORKFLOW_EXECUTION_UNAVAILABLE' }));
+      .send({ lifecycleState: 'PAUSED' })
+      .expect(200)
+      .expect(({ body }) =>
+        expect(body.data).toMatchObject({ lifecycleState: 'PAUSED', nextCheckAt: null }),
+      );
     await request(app.getHttpServer())
       .patch('/api/monitors/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/api-workflow')
       .send(apiWorkflowConfiguration())

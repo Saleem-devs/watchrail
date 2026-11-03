@@ -20,6 +20,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import type { ExecuteCheckRoundJobV1, WebhookNotificationV1 } from '@watchrail/contracts';
 import type { EncryptedWebhookSigningSecretV1 } from '@watchrail/webhook-security';
+import type { SerializedApiWorkflowResult } from '@watchrail/check-engine';
 import {
   CHECK_ROUND_STATUSES,
   AVAILABILITY_WINDOW_STATES,
@@ -72,6 +73,7 @@ export const checkResultStageEnum = pgEnum('check_result_stage', [
   'TLS',
   'HTTP',
   'PROBE',
+  'WORKFLOW',
 ]);
 
 export const checkResultReasonEnum = pgEnum('check_result_reason', [
@@ -101,6 +103,12 @@ export const checkResultReasonEnum = pgEnum('check_result_reason', [
   'INVALID_REDIRECT_LOCATION',
   'INSECURE_REDIRECT',
   'INTERNAL_ERROR',
+  'WORKFLOW_COMPLETED',
+  'STEP_FAILED',
+  'EXTRACTION_FAILED',
+  'STEP_INDETERMINATE',
+  'EXTRACTION_INDETERMINATE',
+  'VARIABLE_UNAVAILABLE',
 ]);
 
 export const incidentStatusEnum = pgEnum('incident_status', ['OPEN', 'RESOLVED']);
@@ -1005,6 +1013,7 @@ export const checkExecutionResults = pgTable(
       .notNull()
       .default([]),
     dnsAnswers: jsonb('dns_answers').$type<string[]>().notNull().default([]),
+    workflowResult: jsonb('workflow_result').$type<SerializedApiWorkflowResult>(),
     checkedAt: timestamp('checked_at', { withTimezone: true }).notNull(),
 
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -1070,6 +1079,14 @@ export const checkExecutionResults = pgTable(
     check(
       'check_execution_results_dns_answers_array',
       sql`jsonb_typeof(${table.dnsAnswers}) = 'array' and jsonb_array_length(${table.dnsAnswers}) <= 32`,
+    ),
+    check(
+      'check_execution_results_workflow_result_object',
+      sql`${table.workflowResult} is null or jsonb_typeof(${table.workflowResult}) = 'object'`,
+    ),
+    check(
+      'check_execution_results_workflow_result_consistent',
+      sql`(${table.stage}::text = 'WORKFLOW') = (${table.workflowResult} is not null)`,
     ),
   ],
 );
@@ -1141,7 +1158,7 @@ export const checkRegionalExecutions = pgTable(
 );
 
 export interface RegionalDiagnosticSummary {
-  stage: 'DNS' | 'CONNECT' | 'TLS' | 'HTTP' | 'PROBE';
+  stage: 'DNS' | 'CONNECT' | 'TLS' | 'HTTP' | 'PROBE' | 'WORKFLOW';
   reason: string;
   statusCode: number | null;
   responseTimeMs: number | null;
@@ -1150,6 +1167,7 @@ export interface RegionalDiagnosticSummary {
   assertionEvaluation?: AssertionEvaluationV1;
   tlsCertificates?: TlsCertificateEvidenceV1[];
   dnsAnswers?: string[];
+  workflowResult?: SerializedApiWorkflowResult;
 }
 
 export const checkRegionalEvaluations = pgTable(

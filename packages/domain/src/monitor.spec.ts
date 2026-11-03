@@ -171,7 +171,7 @@ describe('createMonitor', () => {
     );
   });
 
-  it('creates a paused API workflow monitor with normalized step configuration', () => {
+  it('creates an enabled API workflow monitor with normalized step configuration', () => {
     const monitor = createMonitor({
       type: 'API_WORKFLOW',
       name: 'Checkout journey',
@@ -180,7 +180,7 @@ describe('createMonitor', () => {
 
     expect(monitor).toMatchObject({
       type: 'API_WORKFLOW',
-      lifecycleState: 'PAUSED',
+      lifecycleState: 'ENABLED',
       timeoutMs: 7_000,
       workflow: { contractVersion: 1 },
     });
@@ -189,7 +189,7 @@ describe('createMonitor', () => {
     expect(monitor.workflow.steps[1]?.url).toBe('https://api.example.com/users/{{token}}');
   });
 
-  it('rejects unsafe workflow origins, duplicate extractions, and enabled creation', () => {
+  it('rejects unsafe workflow origins and duplicate extractions', () => {
     const unsafe = workflowConfiguration();
     unsafe.steps[1]!.url = 'https:{{token}}.example.com/health';
     expect(() => createMonitor({ type: 'API_WORKFLOW', name: 'Unsafe', workflow: unsafe })).toThrow(
@@ -201,15 +201,25 @@ describe('createMonitor', () => {
     expect(() =>
       createMonitor({ type: 'API_WORKFLOW', name: 'Duplicate', workflow: duplicate }),
     ).toThrow(MonitorInputError);
+  });
 
-    expect(() =>
-      createMonitor({
-        type: 'API_WORKFLOW',
-        name: 'Enabled',
-        lifecycleState: 'ENABLED',
-        workflow: workflowConfiguration(),
-      }),
-    ).toThrow(MonitorInputError);
+  it('rejects workflows whose combined step timeouts exceed the execution deadline', () => {
+    const workflow = workflowConfiguration();
+    workflow.steps.push(
+      ...['three', 'four'].map((id) => ({
+        ...workflow.steps[1]!,
+        id,
+        name: id,
+        timeoutMs: 30_000,
+        extractions: [],
+      })),
+    );
+    workflow.steps[0]!.timeoutMs = 30_000;
+    workflow.steps[1]!.timeoutMs = 30_000;
+
+    expect(() => createMonitor({ type: 'API_WORKFLOW', name: 'Too slow', workflow })).toThrow(
+      MonitorInputError,
+    );
   });
 
   it('parses the strict stored API workflow contract', () => {

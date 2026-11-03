@@ -19,7 +19,10 @@ export function classifyScheduledObservation(
   if (
     input.reason === 'INTERNAL_ERROR' ||
     input.reason === 'PROHIBITED_DESTINATION' ||
-    input.reason === 'CERTIFICATE_EVIDENCE_UNAVAILABLE'
+    input.reason === 'CERTIFICATE_EVIDENCE_UNAVAILABLE' ||
+    input.reason === 'STEP_INDETERMINATE' ||
+    input.reason === 'EXTRACTION_INDETERMINATE' ||
+    input.reason === 'VARIABLE_UNAVAILABLE'
   ) {
     return 'INDETERMINATE';
   }

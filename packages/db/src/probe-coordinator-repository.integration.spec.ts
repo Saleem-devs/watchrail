@@ -5,6 +5,8 @@ import {
   EMPTY_ASSERTION_EVALUATION,
   HTTP_ENGINE_VERSION,
   LEGACY_HTTP_ENGINE_VERSION,
+  API_WORKFLOW_ENGINE_VERSION,
+  DNS_ENGINE_VERSION,
 } from '@watchrail/domain';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createDatabaseConnection, type DatabaseConnection } from './client.js';
@@ -76,6 +78,34 @@ describe('probe coordinator repository', () => {
       [fixture.assignmentId],
     );
     expect(attempt.rows[0]!.lease_expires_at.toISOString()).toBe(beforeRenewal);
+  });
+
+  it('routes API workflows only to workflow-capable agents', async () => {
+    const remote = await createMachine('workflow');
+    const workflow = workflowConfiguration();
+    const monitor = await monitors.create(
+      organizationId,
+      'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      createMonitor({ type: 'API_WORKFLOW', name: 'Checkout journey', workflow }),
+      [],
+      undefined,
+      undefined,
+      workflow,
+    );
+    await monitors.updateLocations(organizationId, monitor.id, [remote.locationId]);
+    await rounds.create(organizationId, monitor.id);
+
+    await expect(coordinator.claim(remote.machine, DNS_ENGINE_VERSION)).resolves.toEqual({
+      state: 'NO_WORK',
+    });
+    const claimed = await coordinator.claim(remote.machine, API_WORKFLOW_ENGINE_VERSION);
+    expect(claimed).toMatchObject({
+      state: 'CLAIMED',
+      lease: {
+        executionPolicyVersion: 'api-workflow-v1',
+        requiredEngineVersion: API_WORKFLOW_ENGINE_VERSION,
+      },
+    });
   });
 
   it('returns immutable configuration only for the authoritative agent and claim token', async () => {
@@ -805,6 +835,29 @@ describe('probe coordinator repository', () => {
         credentialId: credential.rows[0]!.id,
         credentialVersion: 1,
       } satisfies ProbeMachineIdentity,
+    };
+  }
+
+  function workflowConfiguration() {
+    return {
+      contractVersion: 1 as const,
+      steps: ['first', 'second'].map((id) => ({
+        id,
+        name: id,
+        url: `https://example.com/${id}`,
+        method: 'GET' as const,
+        timeoutMs: 5_000,
+        followRedirects: true,
+        statusPolicy: { type: 'ANY_2XX' as const },
+        tlsPolicy: { type: 'DISABLED' as const },
+        requestHeaders: [],
+        requestBody: { type: 'NONE' as const },
+        assertions: {
+          contractVersion: 1 as const,
+          assertions: { headers: [], textBody: [], jsonBody: [] },
+        },
+        extractions: [],
+      })),
     };
   }
 

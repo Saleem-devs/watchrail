@@ -13,6 +13,8 @@ import {
   parseProbeResultSubmissionReference,
   type ProbeResultSubmissionReferenceV1,
 } from '@watchrail/contracts';
+import { parseApiWorkflowResult } from '@watchrail/check-engine';
+import { resolveApiWorkflowConfiguration } from '@watchrail/api-workflow-security';
 import {
   LEGACY_HTTP_ENGINE_VERSION,
   parseHttpRedirectHops,
@@ -84,6 +86,26 @@ export class ProbeCoordinatorService {
         host: stored.tcpHost,
         port: stored.tcpPort,
         timeoutMs: stored.timeoutMs,
+      });
+    }
+    if (stored.type === 'API_WORKFLOW') {
+      return parseProbeExecutionConfiguration({
+        contractVersion: 1,
+        type: 'API_WORKFLOW',
+        assignmentId: stored.assignmentId,
+        attemptId: stored.attemptId,
+        configurationVersionId: stored.configurationVersionId,
+        configurationVersionNumber: stored.configurationVersionNumber,
+        executionPolicyVersion: stored.executionPolicyVersion,
+        requiredEngineVersion: stored.requiredEngineVersion,
+        workflow: resolveApiWorkflowConfiguration(
+          stored.apiWorkflow,
+          { organizationId: stored.organizationId, monitorId: stored.monitorId },
+          {
+            headers: this.config.headerEncryptionKeyring,
+            assertions: this.config.assertionEncryptionKeyring,
+          },
+        ),
       });
     }
     if (!isHttpMonitorMethod(stored.method)) {
@@ -234,6 +256,21 @@ function parseClaimToken(value: string | undefined): string {
 }
 
 function parseResult(value: unknown): AuthoritativeCheckResult {
+  if (isRecord(value) && value.stage === 'WORKFLOW') {
+    const workflowResult = parseOrBadRequest(() => parseApiWorkflowResult(value));
+    return {
+      outcome: workflowResult.outcome,
+      stage: workflowResult.stage,
+      reason: workflowResult.reason,
+      statusCode: null,
+      responseTimeMs: null,
+      attemptDurationMs: workflowResult.attemptDurationMs,
+      redirects: [],
+      assertionEvaluation: { contractVersion: 1, outcome: 'PASS', diagnostics: [] },
+      workflowResult,
+      checkedAt: workflowResult.checkedAt,
+    };
+  }
   const dnsResultKeys = [
     'answers',
     'attemptDurationMs',

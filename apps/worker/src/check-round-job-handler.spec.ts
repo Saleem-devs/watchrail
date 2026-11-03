@@ -78,6 +78,84 @@ function createDependencies() {
 }
 
 describe('CheckRoundJobHandler', () => {
+  it('executes a claimed API workflow and persists its authoritative step trace', async () => {
+    const { executions, executor, claim, complete, execute } = createDependencies();
+    claim.mockResolvedValue({
+      state: 'CLAIMED',
+      execution: {
+        type: 'API_WORKFLOW',
+        assignmentId: claimedExecution.assignmentId,
+        claimToken: claimedExecution.claimToken,
+        attemptNumber: 1,
+        timeoutMs: 10_000,
+        organizationId: claimedExecution.organizationId,
+        monitorId: claimedExecution.monitorId,
+        workflow: {
+          contractVersion: 1,
+          steps: [
+            {
+              id: 'first',
+              name: 'First request',
+              url: 'https://example.com/first',
+              method: 'GET',
+              timeoutMs: 5_000,
+              followRedirects: true,
+              statusPolicy: { type: 'ANY_2XX' },
+              tlsPolicy: { type: 'DISABLED' },
+              requestHeaders: [],
+              requestBody: { type: 'NONE' },
+              assertions: EMPTY_ASSERTION_CONFIGURATION,
+              extractions: [],
+            },
+            {
+              id: 'second',
+              name: 'Second request',
+              url: 'https://example.com/second',
+              method: 'GET',
+              timeoutMs: 5_000,
+              followRedirects: true,
+              statusPolicy: { type: 'ANY_2XX' },
+              tlsPolicy: { type: 'DISABLED' },
+              requestHeaders: [],
+              requestBody: { type: 'NONE' },
+              assertions: EMPTY_ASSERTION_CONFIGURATION,
+              extractions: [],
+            },
+          ],
+        },
+      },
+    });
+    execute.mockResolvedValue({
+      type: 'RESPONSE',
+      headers: [],
+      body: { state: 'NOT_REQUESTED' },
+      statusCode: 200,
+      responseTimeMs: 12,
+      redirects: [],
+    });
+    complete.mockResolvedValue(true);
+
+    await createHandler(executions, executor).handle(payload);
+
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(complete).toHaveBeenCalledWith(
+      claimedExecution.assignmentId,
+      claimedExecution.claimToken,
+      expect.objectContaining({
+        outcome: 'PASS',
+        stage: 'WORKFLOW',
+        reason: 'WORKFLOW_COMPLETED',
+        workflowResult: expect.objectContaining({
+          outcome: 'PASS',
+          steps: [
+            expect.objectContaining({ id: 'first', status: 'EXECUTED' }),
+            expect.objectContaining({ id: 'second', status: 'EXECUTED' }),
+          ],
+        }),
+      }),
+    );
+  });
+
   it('executes a claimed HTTP check and persists its normalized result', async () => {
     const { executions, executor, claim, complete, execute } = createDependencies();
     claim.mockResolvedValue({

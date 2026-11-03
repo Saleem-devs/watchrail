@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
+import { serializeApiWorkflowResult } from '@watchrail/check-engine';
 import { and, asc, eq, getTableColumns, inArray, lte, or, sql } from 'drizzle-orm';
 import type { ProbeLeaseReferenceV1, ProbeResultSubmissionReferenceV1 } from '@watchrail/contracts';
 import {
@@ -60,12 +61,13 @@ export interface ProbeExecutionConfigurationRecord {
   requiredEngineVersion: string;
   organizationId: string;
   monitorId: string;
-  type: 'HTTP' | 'TCP' | 'DNS';
+  type: 'HTTP' | 'TCP' | 'DNS' | 'API_WORKFLOW';
   tcpHost: string | null;
   tcpPort: number | null;
   dnsName: string | null;
   dnsRecordType: 'A' | 'AAAA' | 'CNAME' | 'MX' | 'TXT' | 'NS' | null;
   dnsExpectedValues: string[];
+  apiWorkflow: unknown;
   url: string;
   method: string;
   timeoutMs: number;
@@ -136,6 +138,7 @@ export class ProbeCoordinatorRepository {
           dnsName: monitorConfigurationVersions.dnsName,
           dnsRecordType: monitorConfigurationVersions.dnsRecordType,
           dnsExpectedValues: monitorConfigurationVersions.dnsExpectedValues,
+          apiWorkflow: monitorConfigurationVersions.apiWorkflow,
           url: monitorConfigurationVersions.url,
           method: monitorConfigurationVersions.method,
           timeoutMs: monitorConfigurationVersions.timeoutMs,
@@ -186,9 +189,6 @@ export class ProbeCoordinatorRepository {
       ) {
         return null;
       }
-      if (row.type === 'API_WORKFLOW') {
-        throw new Error('API workflow probe execution is not enabled yet.');
-      }
       return {
         assignmentId: row.assignmentId,
         attemptId: row.attemptId,
@@ -204,6 +204,7 @@ export class ProbeCoordinatorRepository {
         dnsName: row.dnsName,
         dnsRecordType: row.dnsRecordType,
         dnsExpectedValues: row.dnsExpectedValues,
+        apiWorkflow: row.apiWorkflow,
         url: row.url,
         method: row.method,
         timeoutMs: row.timeoutMs,
@@ -803,6 +804,9 @@ function diagnosticSummaryFromResult(result: AuthoritativeCheckResult) {
       ? {}
       : { tlsCertificates: [...result.tlsCertificates] }),
     ...(result.dnsAnswers === undefined ? {} : { dnsAnswers: [...result.dnsAnswers] }),
+    ...(result.workflowResult === undefined
+      ? {}
+      : { workflowResult: serializeApiWorkflowResult(result.workflowResult) }),
   } as const;
 }
 
@@ -812,6 +816,9 @@ function resultDigest(result: AuthoritativeCheckResult): string {
       canonicalJson({
         ...result,
         checkedAt: result.checkedAt.toISOString(),
+        ...(result.workflowResult === undefined
+          ? {}
+          : { workflowResult: serializeApiWorkflowResult(result.workflowResult) }),
       }),
     )
     .digest('hex');
@@ -1050,6 +1057,12 @@ function sameResult(
     isDeepStrictEqual(stored.redirects, result.redirects) &&
     isDeepStrictEqual(stored.assertionEvaluation, result.assertionEvaluation) &&
     isDeepStrictEqual(stored.tlsCertificates, result.tlsCertificates ?? []) &&
-    isDeepStrictEqual(stored.dnsAnswers, result.dnsAnswers ?? [])
+    isDeepStrictEqual(stored.dnsAnswers, result.dnsAnswers ?? []) &&
+    isDeepStrictEqual(
+      stored.workflowResult,
+      result.workflowResult === undefined
+        ? null
+        : serializeApiWorkflowResult(result.workflowResult),
+    )
   );
 }

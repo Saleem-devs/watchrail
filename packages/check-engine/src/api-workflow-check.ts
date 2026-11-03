@@ -381,6 +381,10 @@ function assertWorkflow(input: ApiWorkflowInput): void {
     );
   }
   const stepIds = new Set<string>();
+  const maximumExecutionMs = input.steps.reduce((total, step) => total + step.timeoutMs, 0);
+  if (maximumExecutionMs > API_WORKFLOW_LIMITS.maximumExecutionMs) {
+    throw new RangeError('API workflow step timeouts exceed the total execution limit.');
+  }
   const initialVariables = Object.entries(input.initialVariables ?? {});
   if (initialVariables.length > API_WORKFLOW_LIMITS.maximumInitialVariables) {
     throw new RangeError('API workflow has too many initial variables.');

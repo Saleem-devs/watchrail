@@ -1,5 +1,10 @@
 import { and, eq, sql } from 'drizzle-orm';
 import {
+  parseApiWorkflowResult,
+  serializeApiWorkflowResult,
+  type ApiWorkflowResult,
+} from '@watchrail/check-engine';
+import {
   classifyIncidentObservation,
   INCIDENT_FAILURE_THRESHOLD,
   parseHttpRedirectHops,
@@ -15,6 +20,8 @@ import {
   type TlsCertificateEvidenceV1,
   type TlsCertificatePolicy,
   type DnsRecordType,
+  type StoredApiWorkflowConfigurationV1,
+  API_WORKFLOW_LIMITS,
 } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
 import { applyAvailabilityObservation } from './availability-repository.js';
@@ -75,8 +82,16 @@ export interface ClaimedDnsCheckExecution extends ClaimedCheckExecutionBase {
   expectedValues: string[];
 }
 
+export interface ClaimedApiWorkflowExecution extends ClaimedCheckExecutionBase {
+  type: 'API_WORKFLOW';
+  workflow: StoredApiWorkflowConfigurationV1;
+}
+
 export type ClaimedCheckExecution =
-  ClaimedHttpCheckExecution | ClaimedTcpCheckExecution | ClaimedDnsCheckExecution;
+  | ClaimedHttpCheckExecution
+  | ClaimedTcpCheckExecution
+  | ClaimedDnsCheckExecution
+  | ClaimedApiWorkflowExecution;
 
 export type CheckExecutionClaimResult =
   | { state: 'CLAIMED'; execution: ClaimedCheckExecution }
@@ -95,6 +110,7 @@ export interface AuthoritativeCheckResult {
   assertionEvaluation: AssertionEvaluationV1;
   tlsCertificates?: readonly TlsCertificateEvidenceV1[];
   dnsAnswers?: readonly string[];
+  workflowResult?: ApiWorkflowResult;
   checkedAt: Date;
 }
 
@@ -121,6 +137,7 @@ export class CheckExecutionRepository {
           dnsName: monitorConfigurationVersions.dnsName,
           dnsRecordType: monitorConfigurationVersions.dnsRecordType,
           dnsExpectedValues: monitorConfigurationVersions.dnsExpectedValues,
+          apiWorkflow: monitorConfigurationVersions.apiWorkflow,
           url: monitorConfigurationVersions.url,
           method: monitorConfigurationVersions.method,
           timeoutMs: monitorConfigurationVersions.timeoutMs,
@@ -152,20 +169,26 @@ export class CheckExecutionRepository {
       if (!candidate) return { state: 'MISSING' };
       if (candidate.roundStatus === 'COMPLETED') return { state: 'COMPLETED' };
       if (candidate.status === 'COMPLETED') return { state: 'COMPLETED' };
-      if (candidate.type === 'API_WORKFLOW') {
-        throw new Error('API workflow execution is not enabled yet.');
-      }
-
       if (candidate.status === 'RUNNING' && !candidate.claimAvailable) {
         return { state: 'BUSY' };
       }
+      const effectiveLeaseDurationMs =
+        candidate.type === 'API_WORKFLOW' && candidate.apiWorkflow
+          ? Math.max(
+              leaseDurationMs,
+              Math.min(
+                candidate.apiWorkflow.steps.reduce((total, step) => total + step.timeoutMs, 0),
+                API_WORKFLOW_LIMITS.maximumExecutionMs,
+              ) + 5_000,
+            )
+          : leaseDurationMs;
 
       const [claimed] = await tx
         .update(checkExecutionAssignments)
         .set({
           status: 'RUNNING',
           claimToken: sql`gen_random_uuid()`,
-          claimExpiresAt: sql`now() + (${leaseDurationMs} * interval '1 millisecond')`,
+          claimExpiresAt: sql`now() + (${effectiveLeaseDurationMs} * interval '1 millisecond')`,
           attemptCount: candidate.attemptCount + 1,
           lastStartedAt: sql`now()`,
           completedAt: null,
@@ -187,23 +210,29 @@ export class CheckExecutionRepository {
             ? createClaimedTcpExecution(candidate, claimed.claimToken, claimed.attemptNumber)
             : candidate.type === 'DNS'
               ? createClaimedDnsExecution(candidate, claimed.claimToken, claimed.attemptNumber)
-              : {
-                  type: 'HTTP',
-                  assignmentId: candidate.assignmentId,
-                  claimToken: claimed.claimToken,
-                  attemptNumber: claimed.attemptNumber,
-                  url: candidate.url,
-                  method: candidate.method,
-                  timeoutMs: candidate.timeoutMs,
-                  followRedirects: candidate.followRedirects,
-                  statusPolicy: candidate.statusPolicy,
-                  organizationId: candidate.organizationId,
-                  monitorId: candidate.monitorId,
-                  requestHeaders: candidate.requestHeaders,
-                  requestBody: candidate.requestBody,
-                  assertions: candidate.assertions,
-                  tlsPolicy: candidate.tlsPolicy,
-                },
+              : candidate.type === 'API_WORKFLOW'
+                ? createClaimedApiWorkflowExecution(
+                    candidate,
+                    claimed.claimToken,
+                    claimed.attemptNumber,
+                  )
+                : {
+                    type: 'HTTP',
+                    assignmentId: candidate.assignmentId,
+                    claimToken: claimed.claimToken,
+                    attemptNumber: claimed.attemptNumber,
+                    url: candidate.url,
+                    method: candidate.method,
+                    timeoutMs: candidate.timeoutMs,
+                    followRedirects: candidate.followRedirects,
+                    statusPolicy: candidate.statusPolicy,
+                    organizationId: candidate.organizationId,
+                    monitorId: candidate.monitorId,
+                    requestHeaders: candidate.requestHeaders,
+                    requestBody: candidate.requestBody,
+                    assertions: candidate.assertions,
+                    tlsPolicy: candidate.tlsPolicy,
+                  },
       };
     });
   }
@@ -216,6 +245,10 @@ export class CheckExecutionRepository {
     const redirects = parseHttpRedirectHops(result.redirects);
     const assertionEvaluation = parseStoredAssertionEvaluation(result.assertionEvaluation);
     const tlsCertificates = parseTlsCertificateEvidenceList(result.tlsCertificates ?? []);
+    const workflowResult =
+      result.workflowResult === undefined
+        ? undefined
+        : parseApiWorkflowResult(serializeApiWorkflowResult(result.workflowResult));
 
     return this.db.transaction(async (tx) => {
       const [completed] = await tx
@@ -244,12 +277,44 @@ export class CheckExecutionRepository {
         assignmentId,
         organizationId: completed.organizationId,
         roundId: completed.roundId,
-        result: { ...result, redirects, assertionEvaluation, tlsCertificates },
+        result: {
+          ...result,
+          redirects,
+          assertionEvaluation,
+          tlsCertificates,
+          ...(workflowResult === undefined ? {} : { workflowResult }),
+        },
       });
 
       return true;
     });
   }
+}
+
+function createClaimedApiWorkflowExecution(
+  candidate: {
+    assignmentId: string;
+    apiWorkflow: StoredApiWorkflowConfigurationV1 | null;
+    timeoutMs: number;
+    organizationId: string;
+    monitorId: string;
+  },
+  claimToken: string,
+  attemptNumber: number,
+): ClaimedApiWorkflowExecution {
+  if (candidate.apiWorkflow === null) {
+    throw new Error('API workflow execution configuration is incomplete.');
+  }
+  return {
+    type: 'API_WORKFLOW',
+    assignmentId: candidate.assignmentId,
+    claimToken,
+    attemptNumber,
+    workflow: candidate.apiWorkflow,
+    timeoutMs: candidate.timeoutMs,
+    organizationId: candidate.organizationId,
+    monitorId: candidate.monitorId,
+  };
 }
 
 function createClaimedDnsExecution(
@@ -344,6 +409,10 @@ export async function finalizeCheckExecution(
     assertionEvaluation,
     tlsCertificates,
     dnsAnswers: [...(input.result.dnsAnswers ?? [])],
+    workflowResult:
+      input.result.workflowResult === undefined
+        ? null
+        : serializeApiWorkflowResult(input.result.workflowResult),
     checkedAt: input.result.checkedAt,
   });
 

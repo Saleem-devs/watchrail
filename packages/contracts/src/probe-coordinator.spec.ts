@@ -151,4 +151,40 @@ describe('probe coordinator contracts', () => {
       parseProbeExecutionConfiguration({ ...configuration, host: 'api.example.com' }),
     ).toThrow(InvalidProbeCoordinatorContractError);
   });
+
+  it('parses a dedicated API workflow execution configuration', () => {
+    const configuration = {
+      contractVersion: 1,
+      type: 'API_WORKFLOW',
+      assignmentId,
+      attemptId,
+      configurationVersionId,
+      configurationVersionNumber: 10,
+      executionPolicyVersion: 'api-workflow-v1',
+      requiredEngineVersion: 'watchrail-api-workflow-v1',
+      workflow: {
+        steps: ['first', 'second'].map((id) => ({
+          id,
+          name: id,
+          url: `https://api.example.com/${id}`,
+          method: 'GET' as const,
+          timeoutMs: 5_000,
+          followRedirects: true,
+          statusPolicy: { type: 'ANY_2XX' as const },
+          tlsPolicy: { type: 'DISABLED' as const },
+          requestHeaders: [],
+          requestBody: { type: 'NONE' as const },
+          headerAssertions: [],
+          textBodyAssertions: [],
+          jsonBodyAssertions: [],
+          extractions: [],
+        })),
+      },
+    } as const;
+
+    expect(parseProbeExecutionConfiguration(configuration)).toEqual(configuration);
+    expect(() =>
+      parseProbeExecutionConfiguration({ ...configuration, workflow: { steps: [] } }),
+    ).toThrow(InvalidProbeCoordinatorContractError);
+  });
 });

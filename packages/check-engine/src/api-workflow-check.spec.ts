@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { executeApiWorkflow } from './api-workflow-check.js';
+import { parseApiWorkflowResult, serializeApiWorkflowResult } from './api-workflow-result.js';
 import type { ApiWorkflowStep } from './api-workflow-types.js';
 import type { HttpExecutionResult, HttpExecutor } from './types.js';
 
@@ -462,5 +463,61 @@ describe('executeApiWorkflow', () => {
     if (extraction?.status !== 'EXECUTED') throw new Error('Expected executed step.');
     expect(extraction.extractions[0]).toMatchObject({ reason: 'VALUE_TOO_LARGE' });
     expect(JSON.stringify(result)).not.toContain(oversized);
+  });
+
+  it('bounds the total workflow execution deadline', async () => {
+    await expect(
+      executeApiWorkflow(
+        {
+          steps: [
+            step({ id: 'one', name: 'One', timeoutMs: 30_000 }),
+            step({ id: 'two', name: 'Two', timeoutMs: 30_000 }),
+            step({ id: 'three', name: 'Three', timeoutMs: 30_000 }),
+            step({ id: 'four', name: 'Four', timeoutMs: 1_000 }),
+          ],
+        },
+        { executor: { execute: vi.fn<HttpExecutor['execute']>() } },
+      ),
+    ).rejects.toThrow('total execution limit');
+  });
+
+  it('round-trips the bounded workflow result contract and rejects added evidence', async () => {
+    const result = await executeApiWorkflow(
+      {
+        steps: [step({ id: 'one', name: 'One' }), step({ id: 'two', name: 'Two' })],
+      },
+      { executor: { execute: vi.fn<HttpExecutor['execute']>().mockResolvedValue(response()) } },
+    );
+    const serialized = serializeApiWorkflowResult(result);
+
+    expect(parseApiWorkflowResult(serialized)).toEqual(result);
+    expect(() =>
+      parseApiWorkflowResult({
+        ...serialized,
+        steps: serialized.steps.map((item, index) =>
+          index === 0 && item.status === 'EXECUTED'
+            ? { ...item, result: { ...item.result, responseEvidence: { body: 'secret' } } }
+            : item,
+        ),
+      }),
+    ).toThrow('API workflow result is invalid');
+    const first = serialized.steps[0]!;
+    if (first.status !== 'EXECUTED') throw new Error('Expected an executed step.');
+    expect(() =>
+      parseApiWorkflowResult({
+        ...serialized,
+        steps: [
+          {
+            ...first,
+            result: {
+              ...first.result,
+              outcome: 'FAIL',
+              reason: 'UNEXPECTED_STATUS',
+            },
+          },
+          serialized.steps[1],
+        ],
+      }),
+    ).toThrow('API workflow result is invalid');
   });
 });

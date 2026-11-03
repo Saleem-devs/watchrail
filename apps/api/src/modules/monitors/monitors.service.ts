@@ -22,7 +22,6 @@ import {
   MonitorUpdateNotFoundError,
   MonitorProtocolMismatchError,
   MonitorLocationUnavailableError,
-  WorkflowExecutionUnavailableError,
   type CheckRoundRecord,
   type CheckHistoryDetail,
   type CheckHistoryPage,
@@ -706,12 +705,6 @@ export class MonitorsService {
       }
       if (error instanceof ArchivedMonitorLifecycleError) {
         throw new ConflictException({ code: 'MONITOR_ARCHIVED', message: error.message });
-      }
-      if (error instanceof WorkflowExecutionUnavailableError) {
-        throw new ConflictException({
-          code: 'WORKFLOW_EXECUTION_UNAVAILABLE',
-          message: error.message,
-        });
       }
       throw error;
     }

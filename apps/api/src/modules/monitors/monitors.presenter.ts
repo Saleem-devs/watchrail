@@ -22,6 +22,10 @@ import {
   type TlsCertificateEvidenceV1,
   type TlsCertificatePolicy,
 } from '@watchrail/domain';
+import {
+  serializeApiWorkflowResult,
+  type SerializedApiWorkflowResult,
+} from '@watchrail/check-engine';
 
 export interface MonitorResponse {
   id: string;
@@ -94,6 +98,7 @@ export interface CheckRoundResponse {
         assertionEvaluation: AssertionEvaluationV1;
         tlsCertificates?: TlsCertificateEvidenceV1[];
         dnsAnswers?: string[];
+        workflowResult?: SerializedApiWorkflowResult;
         checkedAt: string;
       }
     | {
@@ -375,6 +380,9 @@ function toSingleLocationDetailResponse(
     assertionEvaluation: result.assertionEvaluation,
     ...(result.tlsCertificates.length === 0 ? {} : { tlsCertificates: result.tlsCertificates }),
     ...(result.dnsAnswers.length === 0 ? {} : { dnsAnswers: result.dnsAnswers }),
+    ...(result.workflowResult === null
+      ? {}
+      : { workflowResult: serializeApiWorkflowResult(result.workflowResult) }),
     checkedAt: result.checkedAt.toISOString(),
   };
 }
