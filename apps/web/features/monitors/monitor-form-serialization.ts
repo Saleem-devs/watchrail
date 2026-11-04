@@ -1,5 +1,6 @@
 import { statusPolicyFromForm } from './formatting';
 import { responseAssertionsFromForm } from './response-assertions';
+import type { ApiWorkflowConfiguration } from './types';
 
 export function requiresStateChangingMethodConfirmation(method: string): boolean {
   return ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
@@ -40,6 +41,14 @@ export function httpConfigurationTestFromForm(formData: FormData) {
     requestHeaders: requestHeadersFromForm(formData),
     assertions: responseAssertionsFromForm(formData),
   };
+}
+
+export function apiWorkflowFromForm(formData: FormData): ApiWorkflowConfiguration {
+  const value = formData.get('apiWorkflow');
+  if (typeof value !== 'string' || value.length === 0) {
+    return { contractVersion: 1, steps: [] };
+  }
+  return JSON.parse(value) as ApiWorkflowConfiguration;
 }
 
 export function tlsPolicyFromForm(formData: FormData) {

@@ -1,5 +1,8 @@
 import type { RequestBodyValue } from './request-body-field';
-import type { RedactedResponseAssertionConfiguration } from './response-assertions';
+import type {
+  RedactedResponseAssertionConfiguration,
+  SerializedResponseAssertions,
+} from './response-assertions';
 
 export type TlsCertificatePolicy =
   { type: 'DISABLED' } | { type: 'MINIMUM_VALIDITY'; days: 1 | 2 | 3 | 7 | 14 | 30 | 60 };
@@ -21,7 +24,7 @@ export interface TlsCertificateEvidence {
 export interface Monitor {
   id: string;
   projectId?: string;
-  type: 'HTTP' | 'TCP' | 'DNS';
+  type: 'HTTP' | 'TCP' | 'DNS' | 'API_WORKFLOW';
   name: string;
   url: string;
   configuration:
@@ -32,7 +35,8 @@ export interface Monitor {
         name: string;
         recordType: 'A' | 'AAAA' | 'CNAME' | 'MX' | 'TXT' | 'NS';
         expectedValues: string[];
-      };
+      }
+    | { type: 'API_WORKFLOW'; workflow: ApiWorkflowConfiguration };
   method: string;
   lifecycleState: 'ENABLED' | 'PAUSED';
   timeoutMs: number;
@@ -124,6 +128,52 @@ export interface FieldErrors {
   requestBody?: string[];
   assertions?: string[];
   tlsPolicy?: string[];
+  workflow?: string[];
+}
+
+export type ApiWorkflowRequestBody =
+  | { type: 'NONE' }
+  | { type: 'JSON'; value: string }
+  | { type: 'FORM_URLENCODED'; fields: Array<{ name: string; value: string }> }
+  | { type: 'RAW'; contentType: string; value: string }
+  | {
+      type: 'JSON' | 'FORM_URLENCODED' | 'RAW';
+      sensitive: true;
+      hasValue: true;
+    }
+  | {
+      type: 'JSON' | 'FORM_URLENCODED' | 'RAW';
+      sensitive: true;
+      retain: true;
+    };
+
+export interface ApiWorkflowStepConfiguration {
+  id: string;
+  name: string;
+  url: string;
+  method: string;
+  timeoutMs: number;
+  followRedirects: boolean;
+  statusPolicy: { type: 'ANY_2XX' } | { type: 'EXACT'; statusCodes: number[] };
+  tlsPolicy: TlsCertificatePolicy;
+  requestHeaders: Array<
+    | {
+        name: string;
+        sensitive: boolean;
+        value: string | null;
+        hasValue: true;
+      }
+    | { name: string; sensitive: boolean; value: string }
+    | { name: string; sensitive: true; retain: true }
+  >;
+  requestBody: ApiWorkflowRequestBody;
+  assertions: RedactedResponseAssertionConfiguration | SerializedResponseAssertions;
+  extractions: Array<{ variable: string; selector: string; sensitive: boolean }>;
+}
+
+export interface ApiWorkflowConfiguration {
+  contractVersion: 1;
+  steps: ApiWorkflowStepConfiguration[];
 }
 
 export interface AssertionDiagnostic {
@@ -206,7 +256,7 @@ export interface ManualRound {
     | {
         kind?: 'SINGLE_LOCATION';
         outcome: 'PASS' | 'FAIL' | 'UNKNOWN';
-        stage: 'DNS' | 'CONNECT' | 'TLS' | 'HTTP' | 'PROBE';
+        stage: 'DNS' | 'CONNECT' | 'TLS' | 'HTTP' | 'PROBE' | 'WORKFLOW';
         reason: string;
         statusCode: number | null;
         responseTimeMs: number | null;
@@ -216,6 +266,7 @@ export interface ManualRound {
         assertionEvaluation?: AssertionEvaluation;
         tlsCertificates?: TlsCertificateEvidence[];
         dnsAnswers?: string[];
+        workflowResult?: ApiWorkflowResult;
         checkedAt: string;
       }
     | {
@@ -249,11 +300,72 @@ export interface ManualRound {
               assertionEvaluation?: AssertionEvaluation;
               tlsCertificates?: TlsCertificateEvidence[];
               dnsAnswers?: string[];
+              workflowResult?: ApiWorkflowResult;
             } | null;
           }>;
         }>;
       }
     | null;
+}
+
+export interface ApiWorkflowResult {
+  outcome: 'PASS' | 'FAIL' | 'UNKNOWN';
+  stage: 'WORKFLOW';
+  reason:
+    | 'WORKFLOW_COMPLETED'
+    | 'STEP_FAILED'
+    | 'EXTRACTION_FAILED'
+    | 'STEP_INDETERMINATE'
+    | 'EXTRACTION_INDETERMINATE'
+    | 'VARIABLE_UNAVAILABLE'
+    | 'INTERNAL_ERROR';
+  failedStepId: string | null;
+  checkedAt: string;
+  attemptDurationMs: number;
+  steps: Array<
+    | {
+        id: string;
+        name: string;
+        position: number;
+        status: 'SKIPPED';
+        reason:
+          | 'VARIABLE_UNAVAILABLE'
+          | 'EXECUTION_ERROR'
+          | 'PREVIOUS_STEP_FAILED'
+          | 'PREVIOUS_STEP_INDETERMINATE';
+      }
+    | {
+        id: string;
+        name: string;
+        position: number;
+        status: 'EXECUTED';
+        result: {
+          outcome: 'PASS' | 'FAIL' | 'UNKNOWN';
+          stage: 'DNS' | 'CONNECT' | 'TLS' | 'HTTP' | 'PROBE';
+          reason: string;
+          statusCode: number | null;
+          responseTimeMs: number | null;
+          attemptDurationMs: number;
+          redirectCount: number;
+          tlsCertificateCount: number;
+          assertionEvaluation: AssertionEvaluation;
+          checkedAt: string;
+        };
+        extractions: Array<{
+          variable: string;
+          selector: string;
+          sensitive: boolean;
+          outcome: 'CAPTURED' | 'FAILED' | 'NOT_EVALUATED';
+          reason:
+            | 'CAPTURED'
+            | 'BODY_UNAVAILABLE'
+            | 'INVALID_JSON'
+            | 'VALUE_MISSING'
+            | 'NON_SCALAR_VALUE'
+            | 'VALUE_TOO_LARGE';
+        }>;
+      }
+  >;
 }
 
 export interface HistoryPage {

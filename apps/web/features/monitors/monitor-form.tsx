@@ -14,6 +14,7 @@ import type { ConfigurationTestResult } from './types';
 import { ConfigurationTestPanel } from './configuration-test-result';
 import { TlsCertificatePolicyField } from './tls-certificate-policy-field';
 import { DnsExpectedValuesField } from './dns-expected-values-field';
+import { ApiWorkflowBuilder } from './api-workflow-builder';
 
 export interface MonitorFormValues {
   type: Monitor['type'];
@@ -108,8 +109,8 @@ export function MonitorForm({
               {mode === 'create' ? (
                 <fieldset className="m-0 grid gap-2 border-0 p-0">
                   <legend className="p-0 text-xs font-medium text-rail-subtle">Protocol</legend>
-                  <div className="grid gap-2 sm:max-w-2xl sm:grid-cols-3">
-                    {(['HTTP', 'TCP', 'DNS'] as const).map((type) => (
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                    {(['HTTP', 'TCP', 'DNS', 'API_WORKFLOW'] as const).map((type) => (
                       <button
                         key={type}
                         type="button"
@@ -135,7 +136,9 @@ export function MonitorForm({
                           ? 'HTTP endpoint'
                           : type === 'TCP'
                             ? 'TCP port'
-                            : 'DNS record'}
+                            : type === 'DNS'
+                              ? 'DNS record'
+                              : 'API workflow'}
                       </button>
                     ))}
                   </div>
@@ -260,7 +263,7 @@ export function MonitorForm({
                     ) : null}
                   </label>
                 </div>
-              ) : (
+              ) : monitorType === 'DNS' ? (
                 <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_10rem]">
                   <label
                     className="grid gap-1.5 text-xs font-medium text-rail-subtle"
@@ -326,11 +329,18 @@ export function MonitorForm({
                     ) : null}
                   </label>
                 </div>
-              )}
+              ) : null}
             </div>
           </section>
 
-          {monitorType === 'HTTP' ? (
+          {monitorType === 'API_WORKFLOW' ? (
+            <ApiWorkflowBuilder
+              {...(initialValues?.configuration.type === 'API_WORKFLOW'
+                ? { initialConfiguration: initialValues.configuration.workflow }
+                : {})}
+              {...(errors.workflow?.[0] ? { error: errors.workflow[0] } : {})}
+            />
+          ) : monitorType === 'HTTP' ? (
             <>
               <QueryParametersField initialUrl={initialValues?.url} />
 
@@ -445,7 +455,7 @@ export function MonitorForm({
                 <p className="mt-3 mb-0 text-xs text-rail-danger">{errors.tcpSettings[0]}</p>
               ) : null}
             </section>
-          ) : (
+          ) : monitorType === 'DNS' ? (
             <>
               <section className="px-5 py-5 sm:px-6">
                 <h2 className="m-0 text-sm font-semibold text-rail-text">DNS lookup</h2>
@@ -466,7 +476,7 @@ export function MonitorForm({
                 {...(errors.dnsExpectedValues?.[0] ? { error: errors.dnsExpectedValues[0] } : {})}
               />
             </>
-          )}
+          ) : null}
         </div>
 
         <aside
@@ -504,28 +514,34 @@ export function MonitorForm({
                 ) : null}
               </label>
             ) : null}
-            <label className="grid gap-1.5 text-xs font-medium text-rail-subtle">
-              Timeout
-              <div className="relative">
-                <Input
-                  name="timeoutSeconds"
-                  type="number"
-                  min="1"
-                  max="30"
-                  step="1"
-                  defaultValue={(initialValues?.timeoutMs ?? 10_000) / 1_000}
-                  required
-                  aria-invalid={Boolean(errors.timeoutMs)}
-                  className="pr-16"
-                />
-                <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-rail-muted">
-                  seconds
-                </span>
-              </div>
-              {errors.timeoutMs ? (
-                <span className="font-normal text-rail-danger">{errors.timeoutMs[0]}</span>
-              ) : null}
-            </label>
+            {monitorType !== 'API_WORKFLOW' ? (
+              <label className="grid gap-1.5 text-xs font-medium text-rail-subtle">
+                Timeout
+                <div className="relative">
+                  <Input
+                    name="timeoutSeconds"
+                    type="number"
+                    min="1"
+                    max="30"
+                    step="1"
+                    defaultValue={(initialValues?.timeoutMs ?? 10_000) / 1_000}
+                    required
+                    aria-invalid={Boolean(errors.timeoutMs)}
+                    className="pr-16"
+                  />
+                  <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-rail-muted">
+                    seconds
+                  </span>
+                </div>
+                {errors.timeoutMs ? (
+                  <span className="font-normal text-rail-danger">{errors.timeoutMs[0]}</span>
+                ) : null}
+              </label>
+            ) : (
+              <p className="m-0 text-xs leading-5 text-rail-muted">
+                Workflow timeouts are configured per step and share a 90-second execution budget.
+              </p>
+            )}
             <label className="grid gap-1.5 text-xs font-medium text-rail-subtle">
               Location
               <Select

@@ -43,6 +43,7 @@ import { MonitorForm } from '../features/monitors/monitor-form';
 import { responseAssertionsFromForm } from '../features/monitors/response-assertions';
 import {
   httpConfigurationTestFromForm,
+  apiWorkflowFromForm,
   dnsSettingsFromForm,
   requiresStateChangingMethodConfirmation,
   requestBodyFromForm,
@@ -76,6 +77,9 @@ function monitorTargetLabel(monitor: Monitor | undefined): string {
   }
   if (monitor.configuration.type === 'DNS') {
     return `${monitor.configuration.recordType} ${monitor.configuration.name}`;
+  }
+  if (monitor.configuration.type === 'API_WORKFLOW') {
+    return `${monitor.configuration.workflow.steps.length} ordered HTTP steps`;
   }
   return monitor.url;
 }
@@ -343,7 +347,9 @@ export function Dashboard({
     const formData = new FormData(form);
     const requestedType = formData.get('monitorType');
     const monitorType: Monitor['type'] =
-      requestedType === 'TCP' || requestedType === 'DNS' ? requestedType : 'HTTP';
+      requestedType === 'TCP' || requestedType === 'DNS' || requestedType === 'API_WORKFLOW'
+        ? requestedType
+        : 'HTTP';
 
     try {
       const response = await fetch(
@@ -352,40 +358,48 @@ export function Dashboard({
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify(
-            monitorType === 'TCP'
+            monitorType === 'API_WORKFLOW'
               ? {
-                  type: 'TCP',
+                  type: 'API_WORKFLOW',
                   name: formData.get('name'),
-                  ...tcpSettingsFromForm(formData),
+                  workflow: apiWorkflowFromForm(formData),
                   locations: [formData.get('location')],
                   lifecycleState: formData.get('lifecycleState'),
                 }
-              : monitorType === 'DNS'
+              : monitorType === 'TCP'
                 ? {
-                    type: 'DNS',
+                    type: 'TCP',
                     name: formData.get('name'),
-                    dnsName: dnsSettingsFromForm(formData).name,
-                    dnsRecordType: dnsSettingsFromForm(formData).recordType,
-                    dnsExpectedValues: dnsSettingsFromForm(formData).expectedValues,
-                    timeoutMs: dnsSettingsFromForm(formData).timeoutMs,
+                    ...tcpSettingsFromForm(formData),
                     locations: [formData.get('location')],
                     lifecycleState: formData.get('lifecycleState'),
                   }
-                : {
-                    type: 'HTTP',
-                    name: formData.get('name'),
-                    url: urlFromMonitorForm(formData),
-                    statusPolicy: statusPolicyFromForm(formData),
-                    tlsPolicy: tlsPolicyFromForm(formData),
-                    method: formData.get('method'),
-                    timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
-                    followRedirects: formData.get('followRedirects') === 'on',
-                    locations: [formData.get('location')],
-                    lifecycleState: formData.get('lifecycleState'),
-                    requestHeaders: requestHeadersFromForm(formData),
-                    requestBody: requestBodyFromForm(formData),
-                    assertions: responseAssertionsFromForm(formData),
-                  },
+                : monitorType === 'DNS'
+                  ? {
+                      type: 'DNS',
+                      name: formData.get('name'),
+                      dnsName: dnsSettingsFromForm(formData).name,
+                      dnsRecordType: dnsSettingsFromForm(formData).recordType,
+                      dnsExpectedValues: dnsSettingsFromForm(formData).expectedValues,
+                      timeoutMs: dnsSettingsFromForm(formData).timeoutMs,
+                      locations: [formData.get('location')],
+                      lifecycleState: formData.get('lifecycleState'),
+                    }
+                  : {
+                      type: 'HTTP',
+                      name: formData.get('name'),
+                      url: urlFromMonitorForm(formData),
+                      statusPolicy: statusPolicyFromForm(formData),
+                      tlsPolicy: tlsPolicyFromForm(formData),
+                      method: formData.get('method'),
+                      timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
+                      followRedirects: formData.get('followRedirects') === 'on',
+                      locations: [formData.get('location')],
+                      lifecycleState: formData.get('lifecycleState'),
+                      requestHeaders: requestHeadersFromForm(formData),
+                      requestBody: requestBodyFromForm(formData),
+                      assertions: responseAssertionsFromForm(formData),
+                    },
           ),
         },
       );
@@ -418,26 +432,28 @@ export function Dashboard({
 
     const formData = new FormData(event.currentTarget);
     const monitorType = detailMonitor?.type ?? 'HTTP';
-    const requests: Array<{ path: string; body: Record<string, unknown> }> = [
-      monitorType === 'TCP'
-        ? { path: 'tcp-settings', body: tcpSettingsFromForm(formData) }
-        : monitorType === 'DNS'
-          ? { path: 'dns-settings', body: dnsSettingsFromForm(formData) }
-          : {
-              path: 'configuration',
-              body: {
-                httpSettings: {
-                  url: urlFromMonitorForm(formData),
-                  method: formData.get('method'),
-                  timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
-                  followRedirects: formData.get('followRedirects') === 'on',
-                  requestBody: requestBodyFromForm(formData),
-                  tlsPolicy: tlsPolicyFromForm(formData),
+    const requests: Array<{ path: string; body: unknown }> = [
+      monitorType === 'API_WORKFLOW'
+        ? { path: 'api-workflow', body: apiWorkflowFromForm(formData) }
+        : monitorType === 'TCP'
+          ? { path: 'tcp-settings', body: tcpSettingsFromForm(formData) }
+          : monitorType === 'DNS'
+            ? { path: 'dns-settings', body: dnsSettingsFromForm(formData) }
+            : {
+                path: 'configuration',
+                body: {
+                  httpSettings: {
+                    url: urlFromMonitorForm(formData),
+                    method: formData.get('method'),
+                    timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
+                    followRedirects: formData.get('followRedirects') === 'on',
+                    requestBody: requestBodyFromForm(formData),
+                    tlsPolicy: tlsPolicyFromForm(formData),
+                  },
+                  requestHeaders: requestHeadersFromForm(formData),
+                  assertions: responseAssertionsFromForm(formData),
                 },
-                requestHeaders: requestHeadersFromForm(formData),
-                assertions: responseAssertionsFromForm(formData),
               },
-            },
       { path: 'name', body: { name: formData.get('name') } },
       ...(monitorType === 'HTTP'
         ? [{ path: 'status-policy', body: { statusPolicy: statusPolicyFromForm(formData) } }]
@@ -1211,8 +1227,8 @@ export function Dashboard({
                   </div>
                   <h3 className="m-0 text-base font-semibold text-rail-text">No monitors yet</h3>
                   <p className="mt-1 mb-0 max-w-sm text-sm leading-6 text-rail-subtle">
-                    Add an HTTP endpoint or TCP service to begin collecting availability and
-                    diagnostic evidence.
+                    Add a monitor or API workflow to begin collecting availability and diagnostic
+                    evidence.
                   </p>
                 </div>
               ) : visibleMonitors.length === 0 ? (
@@ -1304,6 +1320,10 @@ export function Dashboard({
                             ) : monitor.configuration?.type === 'DNS' ? (
                               <span className="block max-w-full truncate text-sm text-rail-subtle">
                                 {monitor.configuration.recordType} {monitor.configuration.name}
+                              </span>
+                            ) : monitor.configuration?.type === 'API_WORKFLOW' ? (
+                              <span className="block max-w-full truncate text-sm text-rail-subtle">
+                                {monitor.configuration.workflow.steps.length} ordered HTTP steps
                               </span>
                             ) : (
                               <a
@@ -1766,6 +1786,22 @@ function MonitorDetailView({
                         ? monitor.configuration.expectedValues.join(', ')
                         : 'Any answer'
                     }
+                  />
+                </>
+              ) : monitor.configuration?.type === 'API_WORKFLOW' ? (
+                <>
+                  <DetailRow
+                    label="Steps"
+                    value={String(monitor.configuration.workflow.steps.length)}
+                  />
+                  <DetailRow
+                    label="Execution budget"
+                    value={`${
+                      monitor.configuration.workflow.steps.reduce(
+                        (total, step) => total + step.timeoutMs,
+                        0,
+                      ) / 1_000
+                    }s / 90s`}
                   />
                 </>
               ) : (
