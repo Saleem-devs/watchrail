@@ -120,11 +120,11 @@ export function IncidentTable({
         {
           id: 'view-monitor',
           label: 'View monitor',
-          href: (incident) => monitorDetailHref(incident.monitorId, origin),
+          href: (incident) => monitorDetailHref(incident.monitorId, origin, projectId),
         },
       ]}
       getRowKey={(incident) => incident.id}
-      getRowHref={(incident) => monitorDetailHref(incident.monitorId, origin)}
+      getRowHref={(incident) => monitorDetailHref(incident.monitorId, origin, projectId)}
       getRowLabel={(incident) => `${incident.monitorName} incident`}
       ariaLabel="Workspace incidents"
       minWidthClassName="min-w-[760px]"

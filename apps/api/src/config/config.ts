@@ -10,6 +10,10 @@ import {
   loadWebhookSigningSecretKeyring,
   type WebhookSigningSecretKeyring,
 } from '@watchrail/webhook-security';
+import {
+  loadWorkspaceSecretKeyring,
+  type WorkspaceSecretKeyring,
+} from '@watchrail/secret-vault-security';
 import { loadMailConfig, type MailConfig } from '../infrastructure/mail/mail.js';
 import { loadAuthEmailKeyring, type AuthEmailKeyring } from '@watchrail/db';
 
@@ -38,6 +42,7 @@ export interface AppConfig {
   headerEncryptionKeyring: HeaderEncryptionKeyring;
   assertionEncryptionKeyring: AssertionEncryptionKeyring;
   webhookSigningSecretKeyring: WebhookSigningSecretKeyring;
+  workspaceSecretKeyring: WorkspaceSecretKeyring;
   publicStatusPageInternalToken: string;
   probePendingAssignmentTimeoutMs: number;
   multiLocationExecutionEnabled: boolean;
@@ -100,6 +105,18 @@ export function loadAppConfig(environment: NodeJS.ProcessEnv = process.env): App
     headerEncryptionKeyring: loadHeaderEncryptionKeyring(environment),
     assertionEncryptionKeyring: loadAssertionEncryptionKeyring(environment),
     webhookSigningSecretKeyring: loadWebhookSigningSecretKeyring(environment),
+    workspaceSecretKeyring: loadWorkspaceSecretKeyring(
+      nodeEnv === 'production'
+        ? environment
+        : {
+            ...environment,
+            WORKSPACE_SECRET_ACTIVE_KEY_ID:
+              environment.WORKSPACE_SECRET_ACTIVE_KEY_ID ?? 'development',
+            WORKSPACE_SECRET_ENCRYPTION_KEYS:
+              environment.WORKSPACE_SECRET_ENCRYPTION_KEYS ??
+              JSON.stringify({ development: Buffer.alloc(32, 9).toString('base64') }),
+          },
+    ),
     publicStatusPageInternalToken,
     probePendingAssignmentTimeoutMs: parseIntegerRange(
       environment.PROBE_PENDING_ASSIGNMENT_TIMEOUT_MS,

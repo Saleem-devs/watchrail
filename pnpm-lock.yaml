@@ -229,6 +229,9 @@ importers:
       '@watchrail/http-header-security':
         specifier: workspace:*
         version: link:../../packages/http-header-security
+      '@watchrail/secret-vault-security':
+        specifier: workspace:*
+        version: link:../../packages/secret-vault-security
       '@watchrail/webhook-security':
         specifier: workspace:*
         version: link:../../packages/webhook-security
@@ -543,6 +546,9 @@ importers:
       '@watchrail/domain':
         specifier: workspace:*
         version: link:../domain
+      '@watchrail/secret-vault-security':
+        specifier: workspace:*
+        version: link:../secret-vault-security
       '@watchrail/webhook-security':
         specifier: workspace:*
         version: link:../webhook-security
@@ -621,6 +627,18 @@ importers:
       testcontainers:
         specifier: 12.1.0
         version: 12.1.0(supports-color@7.2.0)
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: 5.0.1
+        version: 5.0.1(@types/node@24.13.6)(jsdom@30.1.0(@noble/hashes@1.8.0))(vite@8.3.0(@types/node@24.13.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.1))
+
+  packages/secret-vault-security:
+    devDependencies:
+      '@types/node':
+        specifier: 24.13.6
+        version: 24.13.6
       typescript:
         specifier: 6.0.3
         version: 6.0.3

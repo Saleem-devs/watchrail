@@ -22,6 +22,7 @@
     "@watchrail/check-engine": "workspace:*",
     "@watchrail/contracts": "workspace:*",
     "@watchrail/domain": "workspace:*",
+    "@watchrail/secret-vault-security": "workspace:*",
     "@watchrail/webhook-security": "workspace:*",
     "drizzle-orm": "0.45.2",
     "pg": "8.23.0"

@@ -24,6 +24,7 @@
     "@watchrail/db": "workspace:*",
     "@watchrail/domain": "workspace:*",
     "@watchrail/http-header-security": "workspace:*",
+    "@watchrail/secret-vault-security": "workspace:*",
     "@watchrail/webhook-security": "workspace:*",
     "better-auth": "^1.7.10",
     "dotenv": "18.0.1",
