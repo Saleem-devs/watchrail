@@ -191,11 +191,17 @@ export function ManualDiagnostic({
       />
     );
   }
-  if (protocol === 'API_WORKFLOW' && result.workflowResult) {
-    return (
+  if (protocol === 'API_WORKFLOW') {
+    return result.workflowResult ? (
       <WorkflowDiagnostic
         result={result.workflowResult}
         label="Latest manual workflow diagnostic"
+      />
+    ) : (
+      <WorkflowEvidenceUnavailable
+        label="Latest manual workflow diagnostic"
+        reason={result.reason}
+        attemptDurationMs={result.attemptDurationMs}
       />
     );
   }
@@ -326,6 +332,48 @@ function EvidenceRetentionNotice() {
       Response headers and body were not retained for this check. Run a configuration test to
       inspect bounded, redacted response evidence.
     </p>
+  );
+}
+
+export function WorkflowEvidenceUnavailable({
+  label,
+  reason,
+  attemptDurationMs,
+  nested = false,
+}: {
+  label: string;
+  reason: string;
+  attemptDurationMs: number;
+  nested?: boolean;
+}) {
+  return (
+    <section
+      className={
+        nested
+          ? 'overflow-hidden'
+          : 'manual-diagnostic mt-4 overflow-hidden rounded-rail-panel border border-rail-border bg-rail-sidebar/45'
+      }
+      aria-label={label}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rail-border px-4 py-3">
+        <div>
+          <h4 className="m-0 text-sm font-semibold text-rail-text">{label}</h4>
+          <p className="mt-1 mb-0 text-xs text-rail-muted">
+            {humanize(reason)} · {formatMilliseconds(attemptDurationMs)} total
+          </p>
+        </div>
+        <OutcomeBadge outcome="INDETERMINATE" />
+      </div>
+      <div className="px-4 py-4">
+        <strong className="block text-sm font-semibold text-rail-text">
+          Workflow step evidence unavailable
+        </strong>
+        <p className="mt-1 mb-0 text-xs leading-5 text-rail-muted">
+          Watchrail could not evaluate this workflow, and no step was reported as executed. Review
+          the workflow configuration before running another check.
+        </p>
+      </div>
+    </section>
   );
 }
 
@@ -628,16 +676,29 @@ function MultiLocationDiagnostic({
                     key={execution.id}
                     className="mt-2 overflow-hidden rounded-rail-control border border-rail-border"
                   >
-                    {protocol === 'API_WORKFLOW' && execution.diagnosticSummary.workflowResult ? (
-                      <WorkflowDiagnostic
-                        result={execution.diagnosticSummary.workflowResult}
-                        label={
-                          execution.role === 'PRIMARY'
-                            ? 'Primary workflow execution'
-                            : 'Confirmation workflow execution'
-                        }
-                        nested
-                      />
+                    {protocol === 'API_WORKFLOW' ? (
+                      execution.diagnosticSummary.workflowResult ? (
+                        <WorkflowDiagnostic
+                          result={execution.diagnosticSummary.workflowResult}
+                          label={
+                            execution.role === 'PRIMARY'
+                              ? 'Primary workflow execution'
+                              : 'Confirmation workflow execution'
+                          }
+                          nested
+                        />
+                      ) : (
+                        <WorkflowEvidenceUnavailable
+                          label={
+                            execution.role === 'PRIMARY'
+                              ? 'Primary workflow execution'
+                              : 'Confirmation workflow execution'
+                          }
+                          reason={execution.diagnosticSummary.reason}
+                          attemptDurationMs={execution.diagnosticSummary.attemptDurationMs}
+                          nested
+                        />
+                      )
                     ) : protocol === 'TCP' ? (
                       <dl className="m-0 grid grid-cols-2 gap-px bg-rail-border">
                         <Metric
@@ -832,9 +893,15 @@ function HistoricalSingleLocationEvidence({
   result: Extract<NonNullable<ManualRound['result']>, { kind?: 'SINGLE_LOCATION' }>;
   protocol: Monitor['type'];
 }) {
-  if (protocol === 'API_WORKFLOW' && result.workflowResult) {
-    return (
+  if (protocol === 'API_WORKFLOW') {
+    return result.workflowResult ? (
       <WorkflowDiagnostic result={result.workflowResult} label="Historical workflow evidence" />
+    ) : (
+      <WorkflowEvidenceUnavailable
+        label="Historical workflow evidence"
+        reason={result.reason}
+        attemptDurationMs={result.attemptDurationMs}
+      />
     );
   }
   const assertionEvaluation = result.assertionEvaluation ?? {

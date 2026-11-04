@@ -492,7 +492,14 @@ function StepEditor({
               <Select
                 value={canSendBody ? field.value : 'NONE'}
                 disabled={!canSendBody}
-                onChange={field.onChange}
+                onChange={(event) => {
+                  const nextType = event.target.value as WorkflowStepFormValue['bodyType'];
+                  const typeChanged = nextType !== field.value;
+                  field.onChange(nextType);
+                  if (typeChanged && step.bodyRetain) {
+                    setValue(`steps.${index}.bodyRetain`, false, { shouldDirty: true });
+                  }
+                }}
                 controlSize="compact"
                 className="w-44"
                 aria-label={`Step ${index + 1} request body type`}

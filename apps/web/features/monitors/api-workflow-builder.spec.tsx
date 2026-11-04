@@ -1,9 +1,9 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { ApiWorkflowBuilder } from './api-workflow-builder';
-import { WorkflowDiagnostic } from './monitor-evidence';
-import type { ApiWorkflowConfiguration, ApiWorkflowResult } from './types';
+import { CheckHistory, ManualDiagnostic, WorkflowDiagnostic } from './monitor-evidence';
+import type { ApiWorkflowConfiguration, ApiWorkflowResult, ManualRound } from './types';
 
 describe('API workflow builder', () => {
   it('constructs an ordered workflow and preserves encrypted edit values', async () => {
@@ -53,6 +53,33 @@ describe('API workflow builder', () => {
       screen.getByText(/Reduce step timeouts so the workflow stays within the 90-second/i),
     ).toBeInTheDocument();
   });
+
+  it('requires a replacement body when a retained body changes type', async () => {
+    const user = userEvent.setup();
+    render(<ApiWorkflowBuilder initialConfiguration={workflowConfiguration()} />);
+
+    const hidden = document.querySelector<HTMLInputElement>('input[name="apiWorkflow"]');
+    expect(JSON.parse(hidden!.value).steps[0].requestBody).toEqual({
+      type: 'JSON',
+      sensitive: true,
+      retain: true,
+    });
+
+    const bodyType = screen.getByRole('combobox', { name: 'Step 1 request body type' });
+    bodyType.focus();
+    await user.keyboard('{Enter}');
+    await user.click(screen.getByRole('option', { name: 'Raw' }));
+
+    expect(screen.queryByText('Stored json body')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Step 1 body content type')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(JSON.parse(hidden!.value).steps[0].requestBody).toEqual({
+        type: 'RAW',
+        contentType: 'text/plain',
+        value: '',
+      }),
+    );
+  });
 });
 
 describe('workflow diagnostics', () => {
@@ -69,7 +96,125 @@ describe('workflow diagnostics', () => {
       screen.getByText(/extracted values.*are not retained in workflow history/i),
     ).toBeInTheDocument();
   });
+
+  it('presents missing single-location workflow evidence as indeterminate', () => {
+    render(
+      <ManualDiagnostic
+        round={workflowRoundWithoutEvidence()}
+        error={undefined}
+        protocol="API_WORKFLOW"
+      />,
+    );
+
+    expect(screen.getByText('Workflow step evidence unavailable')).toBeInTheDocument();
+    expect(screen.getByText('Indeterminate')).toBeInTheDocument();
+    expect(screen.queryByText('DNS lookup')).not.toBeInTheDocument();
+    expect(screen.queryByText(/HTTP response unavailable/i)).not.toBeInTheDocument();
+  });
+
+  it('uses workflow-specific missing-evidence diagnostics in history', () => {
+    const round = workflowRoundWithoutEvidence();
+    render(
+      <CheckHistory
+        page={{ items: [round], nextCursor: null }}
+        loading={false}
+        onLoadMore={() => undefined}
+        details={{ [round.id]: round }}
+        expandedRoundIds={new Set([round.id])}
+        loadingRoundIds={new Set()}
+        onToggleRound={() => undefined}
+        protocol="API_WORKFLOW"
+      />,
+    );
+
+    expect(screen.getByText('Historical workflow evidence')).toBeInTheDocument();
+    expect(screen.getByText('Workflow step evidence unavailable')).toBeInTheDocument();
+    expect(screen.queryByText('DNS lookup')).not.toBeInTheDocument();
+  });
+
+  it('uses workflow-specific missing-evidence diagnostics for regional executions', () => {
+    render(
+      <ManualDiagnostic
+        round={regionalWorkflowRoundWithoutEvidence()}
+        error={undefined}
+        protocol="API_WORKFLOW"
+      />,
+    );
+
+    expect(screen.getByText('Primary workflow execution')).toBeInTheDocument();
+    expect(screen.getByText('Workflow step evidence unavailable')).toBeInTheDocument();
+    expect(screen.queryByText(/HTTP response unavailable/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Response validation/i)).not.toBeInTheDocument();
+  });
 });
+
+function workflowRoundWithoutEvidence(): ManualRound {
+  return {
+    id: 'workflow-round-no-evidence',
+    monitorId: 'workflow-monitor',
+    trigger: 'SCHEDULED',
+    status: 'COMPLETED',
+    assignmentStatus: 'COMPLETED',
+    createdAt: '2026-11-04T09:00:00.000Z',
+    result: {
+      outcome: 'UNKNOWN',
+      stage: 'WORKFLOW',
+      reason: 'INTERNAL_ERROR',
+      statusCode: null,
+      responseTimeMs: null,
+      attemptDurationMs: 12,
+      redirects: [],
+      checkedAt: '2026-11-04T09:00:00.000Z',
+    },
+  };
+}
+
+function regionalWorkflowRoundWithoutEvidence(): ManualRound {
+  return {
+    id: 'regional-workflow-round-no-evidence',
+    monitorId: 'workflow-monitor',
+    trigger: 'SCHEDULED',
+    status: 'COMPLETED',
+    assignmentStatus: 'COMPLETED',
+    createdAt: '2026-11-04T09:00:00.000Z',
+    result: {
+      kind: 'MULTI_LOCATION',
+      outcome: 'UNKNOWN',
+      counts: {
+        selected: 1,
+        pass: 0,
+        confirmedFail: 0,
+        unknown: 1,
+        conclusive: 0,
+      },
+      coverage: { numerator: 1, denominator: 1 },
+      reachability: null,
+      finalizedAt: '2026-11-04T09:00:00.000Z',
+      regions: [
+        {
+          location: 'lagos',
+          phase: 'FINALIZED',
+          outcome: 'UNKNOWN',
+          terminalReason: 'INTERNAL_ERROR',
+          executions: [
+            {
+              id: 'execution-1',
+              role: 'PRIMARY',
+              diagnosticSummary: {
+                stage: 'WORKFLOW',
+                reason: 'INTERNAL_ERROR',
+                statusCode: null,
+                responseTimeMs: null,
+                attemptDurationMs: 15,
+                checkedAt: '2026-11-04T09:00:00.000Z',
+              },
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
 
 function workflowConfiguration(): ApiWorkflowConfiguration {
   return {

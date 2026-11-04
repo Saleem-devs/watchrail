@@ -2,6 +2,11 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type {
+  ApiWorkflowConfiguration,
+  ApiWorkflowRequestBody,
+  Monitor,
+} from '../features/monitors/types';
 import { Dashboard } from './dashboard';
 
 const push = vi.fn();
@@ -227,6 +232,92 @@ describe('Dashboard', () => {
     expect(await screen.findByRole('status')).toHaveTextContent(
       'Public API DNS is ready for its first check.',
     );
+  });
+
+  it('creates an API workflow with serialized steps', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: workflowMonitor('Customer journey', redactedWorkflowConfiguration()),
+          }),
+          { status: 201 },
+        ),
+      );
+
+    render(<Dashboard view="create" />);
+    await screen.findByRole('heading', { name: 'Create monitor' });
+    await userEvent.click(screen.getByRole('button', { name: 'API workflow' }));
+    await userEvent.type(screen.getByLabelText('Monitor name'), 'Customer journey');
+    await userEvent.type(
+      screen.getByRole('textbox', { name: 'HTTP(S) URL' }),
+      'https://api.watchrail.app/session',
+    );
+    await userEvent.click(screen.getByRole('button', { name: /Fetch resource/i }));
+    const secondStepUrl = screen.getByRole('textbox', { name: 'HTTP(S) URL' });
+    await userEvent.click(secondStepUrl);
+    await userEvent.paste('https://api.watchrail.app/users/{{token}}');
+    await userEvent.click(screen.getByRole('button', { name: 'Save monitor' }));
+
+    const request = fetchMock.mock.calls.at(-1)?.[1];
+    if (typeof request?.body !== 'string') throw new Error('Expected a JSON request body.');
+    expect(JSON.parse(request.body)).toMatchObject({
+      type: 'API_WORKFLOW',
+      name: 'Customer journey',
+      locations: ['local'],
+      lifecycleState: 'ENABLED',
+      workflow: {
+        contractVersion: 1,
+        steps: [
+          {
+            id: 'step_1',
+            name: 'Authenticate',
+            method: 'POST',
+            url: 'https://api.watchrail.app/session',
+            requestBody: { type: 'JSON', value: '{\n  \n}' },
+          },
+          {
+            id: 'step_2',
+            name: 'Fetch resource',
+            method: 'GET',
+            url: 'https://api.watchrail.app/users/{{token}}',
+            requestBody: { type: 'NONE' },
+          },
+        ],
+      },
+    });
+  });
+
+  it('updates an API workflow through its dedicated configuration endpoint', async () => {
+    const monitor = workflowMonitor('Customer journey', redactedWorkflowConfiguration());
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [monitor] }), { status: 200 }))
+      .mockResolvedValue(
+        new Response(JSON.stringify({ data: monitor }), {
+          status: 200,
+        }),
+      );
+
+    render(<Dashboard view="edit" monitorId={monitor.id} />);
+    await screen.findByRole('heading', { name: 'Edit Customer journey' });
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/monitors/${monitor.id}/api-workflow`,
+        expect.objectContaining({ method: 'PATCH' }),
+      ),
+    );
+    const workflowRequest = fetchMock.mock.calls.find(
+      ([url]) => url === `/api/monitors/${monitor.id}/api-workflow`,
+    )?.[1];
+    if (typeof workflowRequest?.body !== 'string') {
+      throw new Error('Expected a workflow update request body.');
+    }
+    expect(JSON.parse(workflowRequest.body)).toEqual(retainedWorkflowConfiguration());
   });
 
   it('presents a paused monitor neutrally despite a successful historical check', async () => {
@@ -1146,6 +1237,77 @@ describe('Dashboard', () => {
     expect(screen.queryByRole('heading', { name: 'Monitors' })).not.toBeInTheDocument();
   });
 });
+
+function workflowMonitor(name: string, workflow: ApiWorkflowConfiguration): Monitor {
+  return {
+    id: 'workflow-monitor-1',
+    type: 'API_WORKFLOW',
+    name,
+    url: '',
+    configuration: { type: 'API_WORKFLOW', workflow },
+    method: 'GET',
+    lifecycleState: 'PAUSED',
+    timeoutMs: 90_000,
+    followRedirects: false,
+    statusPolicy: { type: 'ANY_2XX' },
+    locations: ['local'],
+    createdAt: '2026-11-04T09:00:00.000Z',
+    currentCheck: null,
+    incidentState: { failureStreak: null, currentIncident: null },
+    uptime: { uptimePercent: null, coveragePercent: null },
+  };
+}
+
+function workflowConfiguration(
+  requestBody: ApiWorkflowRequestBody = { type: 'JSON', value: '{\n  \n}' },
+): ApiWorkflowConfiguration {
+  return {
+    contractVersion: 1,
+    steps: [workflowStep(requestBody), workflowStep({ type: 'NONE' }, true)],
+  };
+}
+
+function workflowStep(
+  requestBody: ApiWorkflowRequestBody,
+  second = false,
+): ApiWorkflowConfiguration['steps'][number] {
+  return {
+    id: second ? 'step_2' : 'step_1',
+    name: second ? 'Fetch resource' : 'Authenticate',
+    url: second ? 'https://api.watchrail.app/users/{{token}}' : 'https://api.watchrail.app/session',
+    method: second ? 'GET' : 'POST',
+    timeoutMs: 10_000,
+    followRedirects: true,
+    statusPolicy: { type: 'ANY_2XX' },
+    tlsPolicy: { type: 'DISABLED' },
+    requestHeaders: [],
+    requestBody,
+    assertions: { headers: [], textBody: [], jsonBody: [] },
+    extractions: [],
+  };
+}
+
+function redactedWorkflowConfiguration(): ApiWorkflowConfiguration {
+  const configuration = workflowConfiguration({
+    type: 'JSON',
+    sensitive: true,
+    hasValue: true,
+  });
+  return {
+    ...configuration,
+    steps: configuration.steps.map((step) => ({
+      ...step,
+      assertions: {
+        contractVersion: 1,
+        assertions: { headers: [], textBody: [], jsonBody: [] },
+      },
+    })),
+  };
+}
+
+function retainedWorkflowConfiguration(): ApiWorkflowConfiguration {
+  return workflowConfiguration({ type: 'JSON', sensitive: true, retain: true });
+}
 
 function configurationTestResponse(): Response {
   return new Response(
