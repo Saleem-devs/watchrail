@@ -15,7 +15,8 @@ type Page =
   | 'monitor-detail'
   | 'incidents'
   | 'status-pages'
-  | 'organization';
+  | 'organization'
+  | 'secrets';
 type IconName =
   | 'overview'
   | 'monitors'
@@ -28,6 +29,7 @@ type IconName =
   | 'organization'
   | 'members'
   | 'credentials'
+  | 'secrets'
   | 'menu'
   | 'sidebar-control';
 
@@ -72,6 +74,7 @@ const projectNavigationGroups: { label: string; items: NavigationItem[] }[] = [
         href: '/settings/organization#api-credentials',
         icon: 'credentials',
       },
+      { label: 'Secrets', href: '/settings/secrets', page: 'secrets', icon: 'secrets' },
     ],
   },
 ];
@@ -98,6 +101,7 @@ function navigationGroups(
             page: 'organization',
             icon: 'organization',
           },
+          { label: 'Secrets', href: '/settings/secrets', page: 'secrets', icon: 'secrets' },
         ],
       },
     ];
@@ -192,6 +196,12 @@ function ShellIcon({ name, className = 'size-[18px]' }: { name: IconName; classN
       <>
         <circle cx="8" cy="12" r="4" />
         <path d="M12 12h9M17 12v3M20 12v2" />
+      </>
+    ),
+    secrets: (
+      <>
+        <rect x="4" y="5" width="16" height="14" rx="2" />
+        <path d="M8 5V3.5h8V5M9 11.5h6M9 15h4" />
       </>
     ),
     menu: (

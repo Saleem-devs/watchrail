@@ -26,6 +26,15 @@ describe('Watchrail organization permissions', () => {
     expect(hasPermission('editor', PERMISSIONS.MONITOR_EXECUTE)).toBe(true);
     expect(hasPermission('editor', PERMISSIONS.MEMBER_UPDATE_ROLE)).toBe(false);
     expect(hasPermission('editor', PERMISSIONS.ORGANIZATION_UPDATE)).toBe(false);
+    expect(hasPermission('editor', PERMISSIONS.SECRET_READ)).toBe(true);
+    expect(hasPermission('editor', PERMISSIONS.SECRET_MANAGE)).toBe(false);
+  });
+
+  it('keeps workspace secret names away from viewers and management with administrators', () => {
+    expect(hasPermission('viewer', PERMISSIONS.SECRET_READ)).toBe(false);
+    expect(hasPermission('admin', PERMISSIONS.SECRET_READ)).toBe(true);
+    expect(hasPermission('admin', PERMISSIONS.SECRET_MANAGE)).toBe(true);
+    expect(hasPermission('owner', PERMISSIONS.SECRET_MANAGE)).toBe(true);
   });
 
   it('reserves destructive organization operations for owners', () => {

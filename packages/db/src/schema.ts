@@ -20,6 +20,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import type { ExecuteCheckRoundJobV1, WebhookNotificationV1 } from '@watchrail/contracts';
 import type { EncryptedWebhookSigningSecretV1 } from '@watchrail/webhook-security';
+import type { EncryptedWorkspaceSecretV1 } from '@watchrail/secret-vault-security';
 import type { SerializedApiWorkflowResult } from '@watchrail/check-engine';
 import {
   CHECK_ROUND_STATUSES,
@@ -115,6 +116,12 @@ export const incidentStatusEnum = pgEnum('incident_status', ['OPEN', 'RESOLVED']
 export const notificationEventTypeEnum = pgEnum('notification_event_type', [
   'INCIDENT_OPENED',
   'INCIDENT_RESOLVED',
+]);
+export const workspaceSecretAuditActionEnum = pgEnum('workspace_secret_audit_action', [
+  'CREATED',
+  'DESCRIPTION_UPDATED',
+  'ROTATED',
+  'ARCHIVED',
 ]);
 export const availabilityStateEnum = pgEnum(
   'availability_window_state',
@@ -1365,6 +1372,144 @@ export const incidents = pgTable(
     check(
       'incidents_severity_valid',
       sql`${table.severity} is null or ${table.severity} in ('DEGRADED', 'DOWN')`,
+    ),
+  ],
+);
+
+export const workspaceSecrets = pgTable(
+  'workspace_secrets',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull(),
+    key: varchar('key', { length: 64 }).notNull(),
+    description: varchar('description', { length: 240 }),
+    currentVersionNumber: integer('current_version_number').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
+    archivedByActorId: uuid('archived_by_actor_id'),
+  },
+  (table) => [
+    unique('workspace_secrets_identity_unique').on(table.organizationId, table.id),
+    unique('workspace_secrets_key_unique').on(table.organizationId, table.key),
+    check('workspace_secrets_key_format', sql`${table.key} ~ '^[A-Z][A-Z0-9_]{0,63}$'`),
+    check('workspace_secrets_version_positive', sql`${table.currentVersionNumber} > 0`),
+    check(
+      'workspace_secrets_archive_consistent',
+      sql`(${table.archivedAt} is null) = (${table.archivedByActorId} is null)`,
+    ),
+    index('workspace_secrets_organization_idx').on(
+      table.organizationId,
+      table.archivedAt,
+      table.createdAt,
+      table.id,
+    ),
+  ],
+);
+
+export const workspaceSecretVersions = pgTable(
+  'workspace_secret_versions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull(),
+    secretId: uuid('secret_id').notNull(),
+    versionNumber: integer('version_number').notNull(),
+    encryptedValue: jsonb('encrypted_value').$type<EncryptedWorkspaceSecretV1>().notNull(),
+    createdByActorId: uuid('created_by_actor_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'workspace_secret_versions_secret_fk',
+      columns: [table.organizationId, table.secretId],
+      foreignColumns: [workspaceSecrets.organizationId, workspaceSecrets.id],
+    }).onDelete('restrict'),
+    unique('workspace_secret_versions_identity_unique').on(
+      table.organizationId,
+      table.secretId,
+      table.id,
+    ),
+    unique('workspace_secret_versions_number_unique').on(
+      table.organizationId,
+      table.secretId,
+      table.versionNumber,
+    ),
+    check('workspace_secret_versions_version_positive', sql`${table.versionNumber} > 0`),
+    check(
+      'workspace_secret_versions_encrypted_value_object',
+      sql`jsonb_typeof(${table.encryptedValue}) = 'object'`,
+    ),
+  ],
+);
+
+export const workspaceSecretBindings = pgTable(
+  'workspace_secret_bindings',
+  {
+    organizationId: uuid('organization_id').notNull(),
+    secretId: uuid('secret_id').notNull(),
+    resourceType: varchar('resource_type', { length: 32 }).notNull(),
+    resourceId: uuid('resource_id').notNull(),
+    resourcePath: varchar('resource_path', { length: 240 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'workspace_secret_bindings_secret_fk',
+      columns: [table.organizationId, table.secretId],
+      foreignColumns: [workspaceSecrets.organizationId, workspaceSecrets.id],
+    }).onDelete('restrict'),
+    primaryKey({
+      name: 'workspace_secret_bindings_pk',
+      columns: [
+        table.organizationId,
+        table.secretId,
+        table.resourceType,
+        table.resourceId,
+        table.resourcePath,
+      ],
+    }),
+    check(
+      'workspace_secret_bindings_resource_type_not_blank',
+      sql`length(btrim(${table.resourceType})) > 0`,
+    ),
+    check(
+      'workspace_secret_bindings_resource_path_not_blank',
+      sql`length(btrim(${table.resourcePath})) > 0`,
+    ),
+    index('workspace_secret_bindings_resource_idx').on(
+      table.organizationId,
+      table.resourceType,
+      table.resourceId,
+    ),
+  ],
+);
+
+export const workspaceSecretAuditEvents = pgTable(
+  'workspace_secret_audit_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull(),
+    secretId: uuid('secret_id').notNull(),
+    actorId: uuid('actor_id').notNull(),
+    action: workspaceSecretAuditActionEnum('action').notNull(),
+    versionNumber: integer('version_number'),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'workspace_secret_audit_events_secret_fk',
+      columns: [table.organizationId, table.secretId],
+      foreignColumns: [workspaceSecrets.organizationId, workspaceSecrets.id],
+    }).onDelete('restrict'),
+    index('workspace_secret_audit_events_history_idx').on(
+      table.organizationId,
+      table.secretId,
+      table.occurredAt.desc(),
+      table.id.desc(),
+    ),
+    check(
+      'workspace_secret_audit_events_version_positive',
+      sql`${table.versionNumber} is null or ${table.versionNumber} > 0`,
     ),
   ],
 );

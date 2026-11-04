@@ -35,6 +35,8 @@ import { OverviewController } from './modules/overview/overview.controller.js';
 import { OverviewModule } from './modules/overview/overview.module.js';
 import { ProjectsController } from './modules/projects/projects.controller.js';
 import { ProjectsModule } from './modules/projects/projects.module.js';
+import { WorkspaceSecretsController } from './modules/workspace-secrets/workspace-secrets.controller.js';
+import { WorkspaceSecretsModule } from './modules/workspace-secrets/workspace-secrets.module.js';
 
 @Module({
   imports: [
@@ -50,6 +52,7 @@ import { ProjectsModule } from './modules/projects/projects.module.js';
     PublicStatusPagesModule,
     StatusPagesModule,
     WebhookEndpointsModule,
+    WorkspaceSecretsModule,
   ],
   providers: [
     DevelopmentIdentityMiddleware,
@@ -93,6 +96,7 @@ export class AppModule implements NestModule {
         OrganizationsController,
         ProjectsController,
         ApiCredentialsController,
+        WorkspaceSecretsController,
       );
 
     consumer.apply(ProbeMachineNoStoreMiddleware).forRoutes(ProbeMachineController);

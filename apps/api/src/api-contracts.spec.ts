@@ -13,6 +13,7 @@ import {
 import { InternalStatusPagesController } from './modules/public-status-pages/internal-status-pages.controller.js';
 import { PublicStatusPagesController } from './modules/public-status-pages/public-status-pages.controller.js';
 import { OverviewController } from './modules/overview/overview.controller.js';
+import { WorkspaceSecretsController } from './modules/workspace-secrets/workspace-secrets.controller.js';
 
 function routes(controller: { prototype: object }) {
   const prototype: object = controller.prototype;
@@ -38,6 +39,24 @@ describe('remaining API route contracts', () => {
   it('protects overview analytics with check-read permission', () => {
     expect(routes(OverviewController)).toEqual([
       { route: 'GET overview/response-times', permission: 'check:read' },
+    ]);
+  });
+
+  it('protects workspace secret metadata and mutations with separate permissions', () => {
+    expect(routes(WorkspaceSecretsController)).toEqual([
+      { route: 'POST workspace-secrets', permission: 'secret:manage' },
+      { route: 'GET workspace-secrets', permission: 'secret:read' },
+      { route: 'GET workspace-secrets/:secretId', permission: 'secret:read' },
+      {
+        route: 'GET workspace-secrets/:secretId/audit-events',
+        permission: 'secret:read',
+      },
+      { route: 'PATCH workspace-secrets/:secretId', permission: 'secret:manage' },
+      {
+        route: 'POST workspace-secrets/:secretId/rotations',
+        permission: 'secret:manage',
+      },
+      { route: 'DELETE workspace-secrets/:secretId', permission: 'secret:manage' },
     ]);
   });
 

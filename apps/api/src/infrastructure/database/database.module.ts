@@ -18,6 +18,7 @@ import {
   AuthInvitationRepository,
   AuthApiKeyRepository,
   AuthEmailOutboxRepository,
+  WorkspaceSecretRepository,
 } from '@watchrail/db';
 import type { WatchrailDatabase } from '@watchrail/db';
 import { ConfigModule } from '../../config/config.module.js';
@@ -53,6 +54,11 @@ import { APP_CONFIG, type AppConfig } from '../../config/config.js';
       provide: AuthInvitationRepository,
       inject: [getDrizzleToken()],
       useFactory: (db: WatchrailDatabase) => new AuthInvitationRepository(db),
+    },
+    {
+      provide: WorkspaceSecretRepository,
+      inject: [getDrizzleToken()],
+      useFactory: (db: WatchrailDatabase) => new WorkspaceSecretRepository(db),
     },
     {
       provide: ProbeCoordinatorRepository,
@@ -134,6 +140,7 @@ import { APP_CONFIG, type AppConfig } from '../../config/config.js';
     StatusPageRepository,
     WebhookEndpointRepository,
     WebhookDeliveryReadRepository,
+    WorkspaceSecretRepository,
   ],
 })
 export class DatabaseModule {}

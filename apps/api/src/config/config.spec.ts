@@ -10,6 +10,10 @@ const encryptionEnvironment = {
   WEBHOOK_SIGNING_SECRET_ENCRYPTION_KEYS: JSON.stringify({
     test: Buffer.alloc(32).toString('base64'),
   }),
+  WORKSPACE_SECRET_ACTIVE_KEY_ID: 'test',
+  WORKSPACE_SECRET_ENCRYPTION_KEYS: JSON.stringify({
+    test: Buffer.alloc(32).toString('base64'),
+  }),
   AUTH_EMAIL_ACTIVE_KEY_ID: 'test',
   AUTH_EMAIL_ENCRYPTION_KEYS: JSON.stringify({ test: Buffer.alloc(32).toString('base64') }),
 };

@@ -47,6 +47,10 @@ export const PERMISSIONS = {
   // Notifications (read-only; delivery is worker-triggered)
   NOTIFICATION_READ: 'notification:read',
 
+  // Reusable workspace secrets
+  SECRET_READ: 'secret:read',
+  SECRET_MANAGE: 'secret:manage',
+
   // Members & invitations
   MEMBER_READ: 'member:read',
   MEMBER_INVITE: 'member:invite',
@@ -98,6 +102,7 @@ const EDITOR_PERMISSIONS: Permission[] = [
   PERMISSIONS.PROJECT_MANAGE,
   PERMISSIONS.STATUS_PAGE_MANAGE,
   PERMISSIONS.WEBHOOK_MANAGE,
+  PERMISSIONS.SECRET_READ,
 ];
 
 const ADMIN_PERMISSIONS: Permission[] = [
@@ -109,6 +114,7 @@ const ADMIN_PERMISSIONS: Permission[] = [
   PERMISSIONS.MEMBER_UPDATE_ROLE,
   PERMISSIONS.ORGANIZATION_UPDATE,
   PERMISSIONS.API_KEY_MANAGE,
+  PERMISSIONS.SECRET_MANAGE,
 ];
 
 const OWNER_PERMISSIONS: Permission[] = [
