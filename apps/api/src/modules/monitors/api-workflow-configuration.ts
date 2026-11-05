@@ -111,6 +111,14 @@ function storeWorkflowRequestBody(
   options: { allowRetain: boolean },
 ): StoredApiWorkflowRequestBodyV1 {
   if (update.type === 'NONE') return update;
+  if ('secretReference' in update) {
+    return {
+      type: update.type,
+      sensitive: true,
+      secretReference: update.secretReference,
+      ...(update.type === 'RAW' ? { contentType: update.contentType! } : {}),
+    };
+  }
   if ('retain' in update) {
     if (!options.allowRetain) {
       throw new ApiWorkflowConfigurationError(

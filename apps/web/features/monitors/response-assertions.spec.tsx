@@ -163,6 +163,83 @@ describe('response assertion configuration', () => {
     ).toMatchObject({ target: { sensitive: true, value: 'replacement' } });
   });
 
+  it('round-trips workspace-secret assertion references without an inline value', () => {
+    const secretId = '11111111-1111-4111-8111-111111111111';
+    const rows = responseAssertionRows({
+      contractVersion: 1,
+      assertions: {
+        headers: [],
+        textBody: [],
+        jsonBody: [
+          {
+            selector: '$.enabled',
+            operator: 'equals',
+            target: {
+              sensitive: true,
+              hasValue: true,
+              valueType: 'boolean',
+              secretReference: { contractVersion: 1, secretId },
+            },
+          },
+        ],
+      },
+    });
+
+    expect(rows[0]).toMatchObject({
+      valueSource: 'VAULT',
+      secretId,
+      targetType: 'boolean',
+      targetValue: '',
+      retainSensitive: false,
+    });
+    expect(serializeResponseAssertions(rows).jsonBody[0]).toEqual({
+      selector: '$.enabled',
+      operator: 'equals',
+      target: {
+        sensitive: true,
+        valueType: 'boolean',
+        secretReference: { contractVersion: 1, secretId },
+      },
+    });
+  });
+
+  it('requires a replacement after changing an assertion from vault to inline', async () => {
+    const user = userEvent.setup();
+    render(
+      <ResponseAssertionsField
+        method="GET"
+        initialConfiguration={{
+          contractVersion: 1,
+          assertions: {
+            headers: [],
+            textBody: [
+              {
+                operator: 'contains',
+                target: {
+                  sensitive: true,
+                  hasValue: true,
+                  secretReference: {
+                    contractVersion: 1,
+                    secretId: '11111111-1111-4111-8111-111111111111',
+                  },
+                },
+              },
+            ],
+            jsonBody: [],
+          },
+        }}
+      />,
+    );
+
+    const source = screen.getByRole('combobox', { name: 'Expected value source' });
+    source.focus();
+    await user.keyboard('{Enter}');
+    await user.click(screen.getByRole('option', { name: 'This monitor' }));
+
+    expect(screen.getByLabelText('Expected value')).toBeRequired();
+    expect(screen.getByText(/replacement value to stop using/i)).toBeInTheDocument();
+  });
+
   it('prevents body assertions for HEAD and enforces the 32-assertion UI limit', () => {
     const full: RedactedResponseAssertionConfiguration = {
       contractVersion: 1,

@@ -133,6 +133,119 @@ describe('workspace secret monitor bindings', () => {
     expect(bindings.map(({ secretId }) => secretId)).toEqual([secret.id]);
   });
 
+  it('reconciles assertion-value bindings atomically when references are added and removed', async () => {
+    const secrets = new WorkspaceSecretRepository(connection.db);
+    const secret = await secrets.create(
+      organizationId,
+      actorId,
+      { key: 'EXPECTED_VALUE' },
+      (context) => encryptWorkspaceSecret('ready', { organizationId, ...context }, vaultKeyring),
+    );
+    const monitor = await createMonitorWithoutReference();
+    const repository = new MonitorRepository(connection.db);
+
+    await repository.updateAssertions(organizationId, monitor.id, () => ({
+      contractVersion: 1,
+      assertions: {
+        headers: [],
+        textBody: [
+          {
+            operator: 'contains',
+            target: {
+              sensitive: true,
+              secretReference: { contractVersion: 1, secretId: secret.id },
+            },
+          },
+        ],
+        jsonBody: [],
+      },
+    }));
+
+    await expect(connection.db.select().from(workspaceSecretBindings)).resolves.toMatchObject([
+      {
+        organizationId,
+        resourceId: monitor.id,
+        secretId: secret.id,
+        resourcePath: 'assertions.textBody.0',
+      },
+    ]);
+
+    await repository.updateAssertions(organizationId, monitor.id, () =>
+      structuredClone(EMPTY_ASSERTION_CONFIGURATION),
+    );
+    await expect(connection.db.select().from(workspaceSecretBindings)).resolves.toEqual([]);
+  });
+
+  it('binds a workflow request body reference without persisting its plaintext value', async () => {
+    const secrets = new WorkspaceSecretRepository(connection.db);
+    const secret = await secrets.create(
+      organizationId,
+      actorId,
+      { key: 'WORKFLOW_BODY' },
+      (context) =>
+        encryptWorkspaceSecret('{"token":"secret"}', { organizationId, ...context }, vaultKeyring),
+    );
+    const workflowInput = {
+      contractVersion: 1 as const,
+      steps: ['first', 'second'].map((id, index) => ({
+        id,
+        name: id,
+        url: `https://example.com/${id}`,
+        method: index === 0 ? ('POST' as const) : ('GET' as const),
+        timeoutMs: 5_000,
+        followRedirects: true,
+        statusPolicy: { type: 'ANY_2XX' as const },
+        tlsPolicy: { type: 'DISABLED' as const },
+        requestHeaders: [],
+        requestBody:
+          index === 0
+            ? {
+                type: 'JSON' as const,
+                sensitive: true as const,
+                secretReference: { contractVersion: 1 as const, secretId: secret.id },
+              }
+            : { type: 'NONE' as const },
+        assertions: { headers: [], textBody: [], jsonBody: [] },
+        extractions: [],
+      })),
+    };
+    const storedWorkflow = {
+      ...workflowInput,
+      steps: workflowInput.steps.map((step) => ({
+        ...step,
+        assertions: structuredClone(EMPTY_ASSERTION_CONFIGURATION),
+      })),
+    };
+    const monitor = createMonitor({
+      type: 'API_WORKFLOW',
+      name: 'Vault workflow',
+      workflow: workflowInput,
+    });
+    const created = await new MonitorRepository(connection.db).create(
+      organizationId,
+      randomUUID(),
+      monitor,
+      [],
+      EMPTY_ASSERTION_CONFIGURATION,
+      undefined,
+      storedWorkflow,
+    );
+
+    await expect(connection.db.select().from(workspaceSecretBindings)).resolves.toMatchObject([
+      {
+        organizationId,
+        resourceId: created.id,
+        secretId: secret.id,
+        resourcePath: 'workflow.steps.first.requestBody',
+      },
+    ]);
+    const persisted = await connection.pool.query<{ api_workflow: unknown }>(
+      'select api_workflow from monitors where id = $1',
+      [created.id],
+    );
+    expect(JSON.stringify(persisted.rows[0]?.api_workflow)).not.toContain('token');
+  });
+
   it('authorizes a destination update against the row-locked secret configuration', async () => {
     const secrets = new WorkspaceSecretRepository(connection.db);
     const secret = await secrets.create(
@@ -203,6 +316,142 @@ describe('workspace secret monitor bindings', () => {
       await secretConnection.pool.end();
       await destinationConnection.pool.end();
     }
+  });
+
+  it('rejects an unauthorized combined HTTP update that retains a Vault assertion', async () => {
+    const secrets = new WorkspaceSecretRepository(connection.db);
+    const secret = await secrets.create(
+      organizationId,
+      actorId,
+      { key: 'EXPECTED_RESPONSE' },
+      (context) =>
+        encryptWorkspaceSecret('expected-value', { organizationId, ...context }, vaultKeyring),
+    );
+    const monitor = await createMonitorWithoutReference();
+    const repository = new MonitorRepository(connection.db);
+
+    await repository.updateAssertions(organizationId, monitor.id, () => ({
+      contractVersion: 1,
+      assertions: {
+        headers: [],
+        textBody: [
+          {
+            operator: 'contains',
+            target: {
+              sensitive: true,
+              secretReference: { contractVersion: 1, secretId: secret.id },
+            },
+          },
+        ],
+        jsonBody: [],
+      },
+    }));
+
+    await expect(
+      repository.updateConfiguration(
+        organizationId,
+        monitor.id,
+        {
+          url: 'https://untrusted.example/collect',
+          method: monitor.method,
+          timeoutMs: monitor.timeoutMs,
+          followRedirects: monitor.followRedirects,
+          requestBody: monitor.requestBody,
+          tlsPolicy: monitor.tlsPolicy,
+        },
+        (current) => [...current],
+        (current) => current,
+        false,
+      ),
+    ).rejects.toBeInstanceOf(WorkspaceSecretUseAuthorizationError);
+
+    const stored = await connection.pool.query<{ url: string }>(
+      'select url from monitors where id = $1',
+      [monitor.id],
+    );
+    expect(stored.rows[0]?.url).toBe('https://example.com/health');
+  });
+
+  it('rejects an unauthorized workflow URL edit that retains a Vault assertion', async () => {
+    const secrets = new WorkspaceSecretRepository(connection.db);
+    const secret = await secrets.create(
+      organizationId,
+      actorId,
+      { key: 'WORKFLOW_EXPECTED_RESPONSE' },
+      (context) =>
+        encryptWorkspaceSecret('expected-value', { organizationId, ...context }, vaultKeyring),
+    );
+    const assertions = {
+      headers: [],
+      textBody: [
+        {
+          operator: 'contains' as const,
+          target: {
+            sensitive: true as const,
+            secretReference: { contractVersion: 1 as const, secretId: secret.id },
+          },
+        },
+      ],
+      jsonBody: [],
+    };
+    const workflowInput = {
+      contractVersion: 1 as const,
+      steps: ['first', 'second'].map((id) => ({
+        id,
+        name: id,
+        url: `https://example.com/${id}`,
+        method: 'GET' as const,
+        timeoutMs: 5_000,
+        followRedirects: true,
+        statusPolicy: { type: 'ANY_2XX' as const },
+        tlsPolicy: { type: 'DISABLED' as const },
+        requestHeaders: [],
+        requestBody: { type: 'NONE' as const },
+        assertions: id === 'first' ? assertions : { headers: [], textBody: [], jsonBody: [] },
+        extractions: [],
+      })),
+    };
+    const storedWorkflow = {
+      ...workflowInput,
+      steps: workflowInput.steps.map((step) => ({
+        ...step,
+        assertions: { contractVersion: 1 as const, assertions: step.assertions },
+      })),
+    };
+    const monitor = createMonitor({
+      type: 'API_WORKFLOW',
+      name: 'Vault assertion workflow',
+      workflow: workflowInput,
+    });
+    const created = await new MonitorRepository(connection.db).create(
+      organizationId,
+      randomUUID(),
+      monitor,
+      [],
+      EMPTY_ASSERTION_CONFIGURATION,
+      undefined,
+      storedWorkflow,
+    );
+
+    await expect(
+      new MonitorRepository(connection.db).updateApiWorkflow(
+        organizationId,
+        created.id,
+        (current) => ({
+          ...current,
+          steps: current.steps.map((step, index) =>
+            index === 0 ? { ...step, url: 'https://untrusted.example/collect' } : step,
+          ),
+        }),
+        false,
+      ),
+    ).rejects.toBeInstanceOf(WorkspaceSecretUseAuthorizationError);
+
+    const stored = await connection.pool.query<{ api_workflow: { steps: Array<{ url: string }> } }>(
+      'select api_workflow from monitors where id = $1',
+      [created.id],
+    );
+    expect(stored.rows[0]?.api_workflow.steps[0]?.url).toBe('https://example.com/first');
   });
 
   async function createMonitorWithReference(secretId: string) {

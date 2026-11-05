@@ -258,7 +258,12 @@ function redactAssertions(value: unknown): unknown {
       'sensitive' in target &&
       target.sensitive === true
     ) {
-      return { sensitive: true, hasValue: true };
+      return {
+        sensitive: true,
+        hasValue: true,
+        ...('secretReference' in target ? { secretReference: target.secretReference } : {}),
+        ...('valueType' in target ? { valueType: target.valueType } : {}),
+      };
     }
     return target;
   };
@@ -296,6 +301,12 @@ function redactApiWorkflow(value: unknown): unknown {
               type: step.requestBody.type,
               sensitive: true,
               hasValue: true,
+              ...('secretReference' in step.requestBody
+                ? { secretReference: step.requestBody.secretReference }
+                : {}),
+              ...(step.requestBody.type === 'RAW' && 'contentType' in step.requestBody
+                ? { contentType: step.requestBody.contentType }
+                : {}),
             },
       requestHeaders: redactRequestHeaders(step.requestHeaders),
       assertions: redactAssertions(step.assertions),

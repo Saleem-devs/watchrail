@@ -144,6 +144,7 @@ export class MonitorsService {
         this.config.assertionEncryptionKeyring,
         { allowRetain: false },
       );
+      this.assertSecretUse(context, containsWorkspaceSecretReference(assertions));
       return await this.monitors.create(
         context.organizationId,
         monitorId,
@@ -177,7 +178,11 @@ export class MonitorsService {
       }
       if (error instanceof WorkspaceSecretBindingError) {
         throw workspaceSecretReferenceValidationError(
-          command.type === 'API_WORKFLOW' ? 'workflow' : 'requestHeaders',
+          command.type === 'API_WORKFLOW'
+            ? 'workflow'
+            : containsWorkspaceSecretReference(command.assertions)
+              ? 'assertions'
+              : 'requestHeaders',
         );
       }
       throw error;
@@ -192,17 +197,21 @@ export class MonitorsService {
     try {
       const input = parseApiWorkflowConfiguration(value);
       this.assertSecretUse(context, workflowUsesWorkspaceSecrets(input));
-      return await this.monitors.updateApiWorkflow(context.organizationId, monitorId, (current) =>
-        storeApiWorkflowConfiguration(
-          input,
-          current,
-          { organizationId: context.organizationId, monitorId },
-          {
-            headers: this.config.headerEncryptionKeyring,
-            assertions: this.config.assertionEncryptionKeyring,
-          },
-          { allowRetain: true },
-        ),
+      return await this.monitors.updateApiWorkflow(
+        context.organizationId,
+        monitorId,
+        (current) =>
+          storeApiWorkflowConfiguration(
+            input,
+            current,
+            { organizationId: context.organizationId, monitorId },
+            {
+              headers: this.config.headerEncryptionKeyring,
+              assertions: this.config.assertionEncryptionKeyring,
+            },
+            { allowRetain: true },
+          ),
+        requestCan(context, PERMISSIONS.SECRET_USE),
       );
     } catch (error) {
       if (
@@ -234,6 +243,9 @@ export class MonitorsService {
       }
       if (error instanceof WorkspaceSecretBindingError) {
         throw workspaceSecretReferenceValidationError('workflow');
+      }
+      if (error instanceof WorkspaceSecretUseAuthorizationError) {
+        throw workspaceSecretUseForbidden();
       }
       throw error;
     }
@@ -333,6 +345,7 @@ export class MonitorsService {
     value: unknown,
   ): Promise<MonitorRecord> {
     try {
+      this.assertSecretUse(context, containsWorkspaceSecretReference(value));
       return await this.monitors.updateAssertions(
         context.organizationId,
         monitorId,
@@ -361,6 +374,9 @@ export class MonitorsService {
       }
       if (error instanceof MonitorProtocolMismatchError) {
         throw new ConflictException({ code: 'MONITOR_PROTOCOL_MISMATCH', message: error.message });
+      }
+      if (error instanceof WorkspaceSecretBindingError) {
+        throw workspaceSecretReferenceValidationError('assertions');
       }
       throw error;
     }
@@ -594,7 +610,11 @@ export class MonitorsService {
     try {
       const update = parseMonitorConfigurationUpdate(value);
       const requestHeaderUpdates = normalizeRequestHeaderUpdates(update.requestHeaders);
-      this.assertSecretUse(context, requestHeadersUseWorkspaceSecrets(requestHeaderUpdates));
+      this.assertSecretUse(
+        context,
+        requestHeadersUseWorkspaceSecrets(requestHeaderUpdates) ||
+          containsWorkspaceSecretReference(update.assertions),
+      );
       return await this.monitors.updateConfiguration(
         context.organizationId,
         monitorId,
@@ -615,6 +635,7 @@ export class MonitorsService {
             this.config.assertionEncryptionKeyring,
             { allowRetain: true },
           ),
+        requestCan(context, PERMISSIONS.SECRET_USE),
       );
     } catch (error) {
       if (error instanceof MonitorInputError) {
@@ -655,6 +676,9 @@ export class MonitorsService {
       }
       if (error instanceof WorkspaceSecretBindingError) {
         throw workspaceSecretReferenceValidationError('requestHeaders');
+      }
+      if (error instanceof WorkspaceSecretUseAuthorizationError) {
+        throw workspaceSecretUseForbidden();
       }
       throw error;
     }
@@ -906,7 +930,7 @@ function workspaceSecretUseForbidden(): ForbiddenException {
 }
 
 function workspaceSecretReferenceValidationError(
-  field: 'requestHeaders' | 'workflow',
+  field: 'requestHeaders' | 'workflow' | 'assertions',
 ): BadRequestException {
   return new BadRequestException({
     code: 'VALIDATION_FAILED',
@@ -928,18 +952,14 @@ function requestHeadersUseWorkspaceSecrets(value: unknown): boolean {
 }
 
 function workflowUsesWorkspaceSecrets(value: unknown): boolean {
-  if (value === null || typeof value !== 'object' || !('steps' in value)) return false;
-  const { steps } = value as { steps?: unknown };
-  return (
-    Array.isArray(steps) &&
-    steps.some(
-      (step) =>
-        step !== null &&
-        typeof step === 'object' &&
-        'requestHeaders' in step &&
-        requestHeadersUseWorkspaceSecrets((step as { requestHeaders: unknown }).requestHeaders),
-    )
-  );
+  return containsWorkspaceSecretReference(value);
+}
+
+function containsWorkspaceSecretReference(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsWorkspaceSecretReference);
+  if (value === null || typeof value !== 'object') return false;
+  if (Object.prototype.hasOwnProperty.call(value, 'secretReference')) return true;
+  return Object.values(value).some(containsWorkspaceSecretReference);
 }
 
 function monitorListState(

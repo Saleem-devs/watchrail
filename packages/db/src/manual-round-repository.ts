@@ -65,6 +65,7 @@ export class ManualRoundRepository {
           id: monitors.id,
           lifecycleState: monitors.lifecycleState,
           requestHeaders: monitors.requestHeaders,
+          assertions: monitors.assertions,
           apiWorkflow: monitors.apiWorkflow,
         })
         .from(monitors)

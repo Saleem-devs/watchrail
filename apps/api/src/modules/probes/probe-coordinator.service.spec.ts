@@ -7,6 +7,7 @@ import type {
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppConfig } from '../../config/config.js';
 import { ProbeCoordinatorService } from './probe-coordinator.service.js';
+import { EMPTY_ASSERTION_CONFIGURATION } from '@watchrail/domain';
 
 describe('ProbeCoordinatorService submission audit', () => {
   const machine: ProbeMachineIdentity = {
@@ -24,10 +25,12 @@ describe('ProbeCoordinatorService submission audit', () => {
   let resolveWorkspaceSecret: ReturnType<typeof vi.fn>;
   let warn: ReturnType<typeof vi.spyOn>;
   let service: ProbeCoordinatorService;
+  let createExecutionValueResolver: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     configuration = vi.fn().mockResolvedValue(null);
     resolveWorkspaceSecret = vi.fn();
+    createExecutionValueResolver = vi.fn(() => resolveWorkspaceSecret);
     submit = vi.fn().mockResolvedValue({
       state: 'REJECTED',
       reason: 'NON_AUTHORITATIVE_LEASE',
@@ -36,9 +39,22 @@ describe('ProbeCoordinatorService submission audit', () => {
     service = new ProbeCoordinatorService(
       { configuration, submit } as unknown as ProbeCoordinatorRepository,
       {
-        createExecutionValueResolver: vi.fn(() => resolveWorkspaceSecret),
+        createExecutionValueResolver,
       } as unknown as WorkspaceSecretRepository,
-      {} as AppConfig,
+      {
+        headerEncryptionKeyring: {
+          activeKeyId: 'v1',
+          keys: new Map([['v1', Buffer.alloc(32, 1)]]),
+        },
+        assertionEncryptionKeyring: {
+          activeKeyId: 'v1',
+          keys: new Map([['v1', Buffer.alloc(32, 2)]]),
+        },
+        workspaceSecretKeyring: {
+          activeKeyId: 'v1',
+          keys: new Map([['v1', Buffer.alloc(32, 3)]]),
+        },
+      } as unknown as AppConfig,
     );
   });
 
@@ -49,6 +65,63 @@ describe('ProbeCoordinatorService submission audit', () => {
 
     expect(configuration).toHaveBeenCalledWith(machine, attemptId, claimToken);
     expect(resolveWorkspaceSecret).not.toHaveBeenCalled();
+  });
+
+  it('uses one version-pinning resolver for every vault value in an HTTP lease', async () => {
+    const secretId = '77777777-7777-4777-8777-777777777777';
+    configuration.mockResolvedValue({
+      type: 'HTTP',
+      assignmentId,
+      attemptId,
+      configurationVersionId: '88888888-8888-4888-8888-888888888888',
+      configurationVersionNumber: 1,
+      executionPolicyVersion: 'http-v2',
+      requiredEngineVersion: 'watchrail-http-v2',
+      organizationId: machine.organizationId,
+      monitorId: '99999999-9999-4999-8999-999999999999',
+      url: 'https://example.com/health',
+      method: 'GET',
+      timeoutMs: 5_000,
+      followRedirects: true,
+      statusPolicy: { type: 'ANY_2XX' },
+      tlsPolicy: { type: 'DISABLED' },
+      requestHeaders: [
+        {
+          name: 'authorization',
+          sensitive: true,
+          secretReference: { contractVersion: 1, secretId },
+        },
+      ],
+      requestBody: { type: 'NONE' },
+      assertions: {
+        ...EMPTY_ASSERTION_CONFIGURATION,
+        assertions: {
+          headers: [],
+          textBody: [
+            {
+              operator: 'contains',
+              target: {
+                sensitive: true,
+                secretReference: { contractVersion: 1, secretId },
+              },
+            },
+          ],
+          jsonBody: [],
+        },
+      },
+    });
+    resolveWorkspaceSecret.mockResolvedValue('shared-secret-version');
+
+    const resolved = await service.configuration(machine, attemptId, claimToken);
+
+    expect(createExecutionValueResolver).toHaveBeenCalledTimes(1);
+    expect(resolveWorkspaceSecret).toHaveBeenCalledTimes(2);
+    expect(resolved).toMatchObject({
+      requestHeaders: [{ name: 'authorization', value: 'shared-secret-version' }],
+      assertions: {
+        textBody: [{ target: { sensitive: true, value: 'shared-secret-version' } }],
+      },
+    });
   });
 
   it('emits an attributable value-free event while preserving the generic API rejection', async () => {

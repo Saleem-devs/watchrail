@@ -25,7 +25,7 @@ import {
 } from '@watchrail/domain';
 import { resolveRequestHeadersWithWorkspaceSecrets } from '@watchrail/http-header-security';
 import { decryptWorkspaceSecret } from '@watchrail/secret-vault-security';
-import { resolveResponseAssertions } from '@watchrail/assertion-security';
+import { resolveResponseAssertionsWithWorkspaceSecrets } from '@watchrail/assertion-security';
 import {
   ProbeCoordinatorRepository,
   WorkspaceSecretRepository,
@@ -127,6 +127,7 @@ export class ProbeCoordinatorService {
     ) {
       throw new Error('A legacy probe assignment cannot execute a TLS certificate policy.');
     }
+    const resolveWorkspaceSecret = this.executionSecretResolver(stored.organizationId);
     const resolved = parseProbeExecutionConfiguration({
       contractVersion: 1,
       assignmentId: stored.assignmentId,
@@ -145,14 +146,15 @@ export class ProbeCoordinatorService {
         stored.requestHeaders,
         context,
         this.config.headerEncryptionKeyring,
-        this.executionSecretResolver(stored.organizationId),
+        resolveWorkspaceSecret,
       ),
       requestBody: stored.requestBody,
-      assertions: resolveResponseAssertions(
+      assertions: await resolveResponseAssertionsWithWorkspaceSecrets(
         stored.assertions,
         stored.method,
         context,
         this.config.assertionEncryptionKeyring,
+        resolveWorkspaceSecret,
       ),
     });
     if (stored.requiredEngineVersion !== LEGACY_HTTP_ENGINE_VERSION) return resolved;

@@ -19,6 +19,7 @@ import {
 import type { ApiWorkflowConfiguration, ApiWorkflowStepConfiguration } from './types';
 import { listWorkspaceSecrets } from '../workspace-secrets/workspace-secret-api';
 import type { WorkspaceSecret } from '../workspace-secrets/workspace-secret-types';
+import { WorkspaceSecretOptions } from '../workspace-secrets/workspace-secret-options';
 
 const MAXIMUM_STEPS = 10;
 const MAXIMUM_EXECUTION_SECONDS = 90;
@@ -65,6 +66,9 @@ interface WorkflowStepFormValue {
   bodyContentType: string;
   bodyFields: WorkflowBodyFieldFormValue[];
   bodyRetain: boolean;
+  bodySource: 'INLINE' | 'VAULT';
+  bodySecretId: string;
+  bodyRequiresInlineReplacement: boolean;
   assertions: ResponseAssertionRow[];
   extractions: WorkflowExtractionFormValue[];
 }
@@ -109,8 +113,13 @@ export function ApiWorkflowBuilder({
   }
 
   useEffect(() => {
-    const referencesVault = initialConfiguration?.steps.some((step) =>
-      step.requestHeaders.some((header) => 'secretReference' in header),
+    const referencesVault = initialConfiguration?.steps.some(
+      (step) =>
+        step.requestHeaders.some((header) => 'secretReference' in header) ||
+        (step.requestBody.type !== 'NONE' && 'secretReference' in step.requestBody) ||
+        responseAssertionRows(step.assertions as RedactedResponseAssertionConfiguration).some(
+          (assertion) => assertion.valueSource === 'VAULT',
+        ),
     );
     if (referencesVault) loadWorkspaceSecrets();
     // Initial workflow configuration is immutable for this builder instance.
@@ -531,17 +540,10 @@ function StepEditor({
                         required
                         aria-label={`Step ${index + 1} header ${headerIndex + 1} workspace secret`}
                       >
-                        <option value="">Select a secret</option>
-                        {workspaceSecrets.map((secret) => (
-                          <option key={secret.id} value={secret.id}>
-                            {secret.key}
-                          </option>
-                        ))}
-                        {workspaceSecretsLoaded && workspaceSecrets.length === 0 ? (
-                          <option value="" disabled>
-                            No active workspace secrets
-                          </option>
-                        ) : null}
+                        <WorkspaceSecretOptions
+                          loaded={workspaceSecretsLoaded}
+                          secrets={workspaceSecrets}
+                        />
                       </Select>
                     )}
                   />
@@ -633,11 +635,79 @@ function StepEditor({
             )}
           />
         </div>
+        {canSendBody && step.bodyType !== 'NONE' ? (
+          <div className="mt-4 grid gap-3 sm:grid-cols-[10rem_minmax(0,1fr)]">
+            <label className="grid gap-1.5 text-xs font-medium text-rail-subtle">
+              Value source
+              <Controller
+                control={control}
+                name={`steps.${index}.bodySource`}
+                render={({ field }) => (
+                  <Select
+                    value={field.value}
+                    onChange={(event) => {
+                      const bodySource = event.target.value as 'INLINE' | 'VAULT';
+                      if (bodySource === 'VAULT') onLoadWorkspaceSecrets();
+                      setValue(`steps.${index}.bodySecretId`, '', { shouldDirty: true });
+                      setValue(`steps.${index}.bodyRetain`, false, { shouldDirty: true });
+                      setValue(
+                        `steps.${index}.bodyRequiresInlineReplacement`,
+                        field.value === 'VAULT' && bodySource === 'INLINE',
+                        { shouldDirty: true },
+                      );
+                      field.onChange(bodySource);
+                    }}
+                    aria-label={`Step ${index + 1} request body source`}
+                  >
+                    <option value="INLINE">This step</option>
+                    <option value="VAULT">Vault</option>
+                  </Select>
+                )}
+              />
+            </label>
+            {step.bodySource === 'VAULT' ? (
+              <label className="grid gap-1.5 text-xs font-medium text-rail-subtle">
+                Workspace secret
+                <Controller
+                  control={control}
+                  name={`steps.${index}.bodySecretId`}
+                  render={({ field }) => (
+                    <Select
+                      value={field.value}
+                      onChange={field.onChange}
+                      required
+                      aria-label={`Step ${index + 1} request body workspace secret`}
+                    >
+                      <WorkspaceSecretOptions
+                        loaded={workspaceSecretsLoaded}
+                        secrets={workspaceSecrets}
+                      />
+                    </Select>
+                  )}
+                />
+              </label>
+            ) : (
+              <p className="m-0 self-end pb-2 text-xs leading-5 text-rail-muted">
+                The body is encrypted with this monitor&apos;s configuration.
+              </p>
+            )}
+          </div>
+        ) : null}
+        {canSendBody && step.bodySource === 'VAULT' && step.bodyType === 'RAW' ? (
+          <Input
+            {...register(`steps.${index}.bodyContentType`)}
+            placeholder="text/plain"
+            required
+            aria-label={`Step ${index + 1} body content type`}
+            className="mt-3"
+          />
+        ) : null}
         {!canSendBody ? (
           <p className="mt-3 mb-0 text-xs text-rail-muted">
             {step.method} requests do not send a body.
           </p>
-        ) : step.bodyRetain && step.bodyType !== 'NONE' ? (
+        ) : step.bodySource === 'VAULT' && step.bodyType !== 'NONE' ? null : step.bodyRetain &&
+          step.bodyType !== 'NONE' ? (
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-rail-control border border-rail-border bg-rail-surface px-4 py-3">
             <div>
               <strong className="block text-xs font-semibold text-rail-text">
@@ -716,6 +786,11 @@ function StepEditor({
             </Button>
           </div>
         ) : null}
+        {step.bodyRequiresInlineReplacement && step.bodySource === 'INLINE' ? (
+          <p className="mt-2 mb-0 text-[11px] leading-4 text-rail-muted">
+            Enter a replacement body to stop using the workspace secret.
+          </p>
+        ) : null}
       </section>
 
       <section className="border-b border-rail-border px-5 py-5 sm:px-6">
@@ -769,6 +844,9 @@ function StepEditor({
                 row={assertion}
                 index={assertionIndex}
                 onChange={(patch) => updateAssertion(assertionIndex, patch)}
+                workspaceSecrets={workspaceSecrets}
+                workspaceSecretsLoaded={workspaceSecretsLoaded}
+                onLoadWorkspaceSecrets={onLoadWorkspaceSecrets}
                 onRemove={() =>
                   setAssertions(assertions.filter((_, itemIndex) => itemIndex !== assertionIndex))
                 }
@@ -947,11 +1025,17 @@ function WorkflowAssertionRow({
   index,
   onChange,
   onRemove,
+  workspaceSecrets,
+  workspaceSecretsLoaded,
+  onLoadWorkspaceSecrets,
 }: {
   row: ResponseAssertionRow;
   index: number;
   onChange: (patch: Partial<ResponseAssertionRow>) => void;
   onRemove: () => void;
+  workspaceSecrets: readonly WorkspaceSecret[];
+  workspaceSecretsLoaded: boolean;
+  onLoadWorkspaceSecrets: () => void;
 }) {
   const operators: Record<AssertionSource, AssertionOperator[]> = {
     HEADER: ['exists', 'does_not_exist', 'equals', 'not_equals', 'contains', 'not_contains'],
@@ -999,6 +1083,25 @@ function WorkflowAssertionRow({
       </Select>
       {operatorNeedsTarget(row.operator) ? (
         <div className="grid gap-2">
+          <Select
+            value={row.valueSource}
+            onChange={(event) => {
+              const valueSource = event.target.value as ResponseAssertionRow['valueSource'];
+              if (valueSource === 'VAULT') onLoadWorkspaceSecrets();
+              onChange({
+                valueSource,
+                secretId: '',
+                targetValue: '',
+                sensitive: valueSource === 'VAULT' || row.sensitive,
+                retainSensitive: false,
+                requiresInlineReplacement: row.valueSource === 'VAULT' && valueSource === 'INLINE',
+              });
+            }}
+            aria-label={`Assertion ${index + 1} expected value source`}
+          >
+            <option value="INLINE">This step</option>
+            <option value="VAULT">Vault</option>
+          </Select>
           {row.source === 'JSON_BODY' ? (
             <Select
               value={row.targetType}
@@ -1017,7 +1120,16 @@ function WorkflowAssertionRow({
               <option value="null">Null</option>
             </Select>
           ) : null}
-          {row.targetType !== 'null' ? (
+          {row.valueSource === 'VAULT' ? (
+            <Select
+              value={row.secretId}
+              onChange={(event) => onChange({ secretId: event.target.value })}
+              required
+              aria-label={`Assertion ${index + 1} workspace secret`}
+            >
+              <WorkspaceSecretOptions loaded={workspaceSecretsLoaded} secrets={workspaceSecrets} />
+            </Select>
+          ) : row.targetType !== 'null' ? (
             row.source === 'JSON_BODY' && row.targetType === 'boolean' ? (
               <Select
                 value={row.targetValue || 'true'}
@@ -1040,10 +1152,16 @@ function WorkflowAssertionRow({
                   row.retainSensitive ? 'Stored securely — leave blank to retain' : 'Expected value'
                 }
                 aria-label={`Assertion ${index + 1} expected value`}
+                required={row.requiresInlineReplacement}
               />
             )
           ) : null}
-          {row.targetType !== 'null' ? (
+          {row.requiresInlineReplacement && row.valueSource === 'INLINE' ? (
+            <span className="text-[11px] leading-4 text-rail-muted">
+              Enter a replacement value to stop using the workspace secret.
+            </span>
+          ) : null}
+          {row.targetType !== 'null' && row.valueSource === 'INLINE' ? (
             <label className="flex min-h-7 cursor-pointer items-center gap-2 text-xs text-rail-muted">
               <Checkbox
                 checked={row.sensitive}
@@ -1131,6 +1249,9 @@ function newStep(number: number, name: string): WorkflowStepFormValue {
     bodyContentType: 'text/plain',
     bodyFields: [{ rowId: 'initial', name: '', value: '' }],
     bodyRetain: false,
+    bodySource: 'INLINE',
+    bodySecretId: '',
+    bodyRequiresInlineReplacement: false,
     assertions: [],
     extractions: [],
   };
@@ -1139,6 +1260,7 @@ function newStep(number: number, name: string): WorkflowStepFormValue {
 function stepToFormValue(step: ApiWorkflowStepConfiguration, index: number): WorkflowStepFormValue {
   const body = step.requestBody;
   const bodyProtected = body.type !== 'NONE' && ('hasValue' in body || 'retain' in body);
+  const bodyUsesVault = body.type !== 'NONE' && 'secretReference' in body;
   return {
     id: step.id,
     name: step.name,
@@ -1162,12 +1284,19 @@ function stepToFormValue(step: ApiWorkflowStepConfiguration, index: number): Wor
     })),
     bodyType: body.type,
     bodyValue: body.type !== 'NONE' && !bodyProtected && 'value' in body ? body.value : '',
-    bodyContentType: body.type === 'RAW' && !bodyProtected ? body.contentType : 'text/plain',
+    bodyContentType:
+      body.type === 'RAW' && 'contentType' in body
+        ? (body.contentType ?? 'text/plain')
+        : 'text/plain',
     bodyFields:
-      body.type === 'FORM_URLENCODED' && !bodyProtected
+      body.type === 'FORM_URLENCODED' && !bodyProtected && 'fields' in body
         ? body.fields.map((field, fieldIndex) => ({ rowId: `${index}-${fieldIndex}`, ...field }))
         : [{ rowId: 'initial', name: '', value: '' }],
-    bodyRetain: bodyProtected,
+    bodyRetain: bodyProtected && !bodyUsesVault,
+    bodySource: bodyUsesVault ? 'VAULT' : 'INLINE',
+    bodySecretId:
+      body.type !== 'NONE' && 'secretReference' in body ? body.secretReference.secretId : '',
+    bodyRequiresInlineReplacement: false,
     assertions: responseAssertionRows(step.assertions as RedactedResponseAssertionConfiguration),
     extractions: step.extractions.map((extraction, extractionIndex) => ({
       rowId: `${index}-${extractionIndex}`,
@@ -1225,6 +1354,14 @@ function serializeRequestBody(
   step: WorkflowStepFormValue,
 ): ApiWorkflowStepConfiguration['requestBody'] {
   if (!BODY_METHODS.has(step.method) || step.bodyType === 'NONE') return { type: 'NONE' };
+  if (step.bodySource === 'VAULT') {
+    return {
+      type: step.bodyType,
+      sensitive: true,
+      secretReference: { contractVersion: 1, secretId: step.bodySecretId },
+      ...(step.bodyType === 'RAW' ? { contentType: step.bodyContentType } : {}),
+    };
+  }
   if (step.bodyRetain) return { type: step.bodyType, sensitive: true, retain: true };
   if (step.bodyType === 'JSON') return { type: 'JSON', value: step.bodyValue };
   if (step.bodyType === 'RAW') {

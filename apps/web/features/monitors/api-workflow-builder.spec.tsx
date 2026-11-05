@@ -112,6 +112,54 @@ describe('API workflow builder', () => {
       { name: 'authorization', sensitive: true, value: '' },
     ]);
   });
+
+  it('serializes vault-backed workflow bodies and assertion targets without inline values', () => {
+    const secretId = '11111111-1111-4111-8111-111111111111';
+    const configuration = workflowConfiguration();
+    configuration.steps[0]!.requestBody = {
+      type: 'JSON',
+      sensitive: true,
+      hasValue: true,
+      secretReference: { contractVersion: 1, secretId },
+    };
+    configuration.steps[0]!.assertions = {
+      contractVersion: 1,
+      assertions: {
+        headers: [],
+        textBody: [
+          {
+            operator: 'contains',
+            target: {
+              sensitive: true,
+              hasValue: true,
+              secretReference: { contractVersion: 1, secretId },
+            },
+          },
+        ],
+        jsonBody: [],
+      },
+    };
+    render(<ApiWorkflowBuilder initialConfiguration={configuration} />);
+
+    const hidden = document.querySelector<HTMLInputElement>('input[name="apiWorkflow"]');
+    expect(JSON.parse(hidden!.value).steps[0]).toMatchObject({
+      requestBody: {
+        type: 'JSON',
+        sensitive: true,
+        secretReference: { contractVersion: 1, secretId },
+      },
+      assertions: {
+        textBody: [
+          {
+            target: {
+              sensitive: true,
+              secretReference: { contractVersion: 1, secretId },
+            },
+          },
+        ],
+      },
+    });
+  });
 });
 
 describe('HTTP request headers', () => {

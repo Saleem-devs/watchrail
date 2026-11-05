@@ -14,6 +14,7 @@ import {
   type StoredApiWorkflowConfigurationV1,
 } from './api-workflow.js';
 import { parseStoredAssertionConfiguration } from './assertion-persistence.js';
+import { parseWorkspaceSecretReference } from './workspace-secret-reference.js';
 import {
   DISABLED_TLS_CERTIFICATE_POLICY,
   parseTlsCertificatePolicy,
@@ -119,7 +120,7 @@ export interface NewHttpMonitor extends NewMonitorBase {
   tlsPolicy: TlsCertificatePolicy;
   requestHeaders: RequestHeaderUpdate[];
   requestBody: HttpRequestBody;
-  assertions: ResponseAssertions;
+  assertions: unknown;
 }
 
 export interface NewTcpMonitor extends NewMonitorBase {
@@ -375,6 +376,45 @@ function normalizeApiWorkflowRequestBody(
   fields: MonitorFieldErrors,
 ): ApiWorkflowRequestBodyUpdate {
   if (
+    isRecord(value) &&
+    value.sensitive === true &&
+    (value.type === 'JSON' || value.type === 'FORM_URLENCODED' || value.type === 'RAW') &&
+    'secretReference' in value
+  ) {
+    if (method === 'GET' || method === 'HEAD') {
+      fields.requestBody = [`${method} monitors cannot send a request body.`];
+      return { type: 'NONE' };
+    }
+    try {
+      const secretReference = parseWorkspaceSecretReference(value.secretReference);
+      if (value.type === 'RAW') {
+        if (!hasExactKeys(value, ['contentType', 'secretReference', 'sensitive', 'type'])) {
+          fields.requestBody = ['Workspace-secret raw bodies contain unsupported fields.'];
+          return { type: 'NONE' };
+        }
+        const contentType = normalizeRawContentType(value.contentType);
+        if (contentType === null) {
+          fields.requestBody = ['Raw workflow bodies require a valid content type.'];
+          return { type: 'NONE' };
+        }
+        return {
+          type: 'RAW',
+          sensitive: true,
+          secretReference,
+          contentType,
+        };
+      }
+      if (!hasExactKeys(value, ['sensitive', 'type', 'secretReference'])) {
+        fields.requestBody = ['Workspace-secret workflow bodies contain unsupported fields.'];
+        return { type: 'NONE' };
+      }
+      return { type: value.type, sensitive: true, secretReference };
+    } catch {
+      fields.requestBody = ['Choose a valid active workspace secret.'];
+      return { type: 'NONE' };
+    }
+  }
+  if (
     hasExactKeys(value, ['retain', 'sensitive', 'type']) &&
     value.retain === true &&
     value.sensitive === true &&
@@ -403,6 +443,29 @@ function parseStoredApiWorkflowRequestBody(value: unknown): StoredApiWorkflowReq
       type: value.type,
       sensitive: true,
       encryptedValue: value.encryptedValue,
+    };
+  }
+  if (
+    isRecord(value) &&
+    value.sensitive === true &&
+    (value.type === 'JSON' || value.type === 'FORM_URLENCODED' || value.type === 'RAW') &&
+    'secretReference' in value
+  ) {
+    const expectedKeys =
+      value.type === 'RAW'
+        ? ['contentType', 'secretReference', 'sensitive', 'type']
+        : ['secretReference', 'sensitive', 'type'];
+    if (!hasExactKeys(value, expectedKeys))
+      throw new StoredApiWorkflowConfigurationInvariantError();
+    const contentType = value.type === 'RAW' ? normalizeRawContentType(value.contentType) : null;
+    if (value.type === 'RAW' && contentType === null) {
+      throw new StoredApiWorkflowConfigurationInvariantError();
+    }
+    return {
+      type: value.type,
+      sensitive: true,
+      secretReference: parseWorkspaceSecretReference(value.secretReference),
+      ...(contentType === null ? {} : { contentType }),
     };
   }
   throw new StoredApiWorkflowConfigurationInvariantError();
@@ -602,7 +665,9 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
   }
   const requestHeaders = normalizeHeaders(command.requestHeaders, fields);
   const requestBody = normalizeRequestBody(command.requestBody, method, fields);
-  const assertions = normalizeAssertions(command.assertions, fields);
+  const assertions = containsWorkspaceSecretReference(command.assertions)
+    ? command.assertions
+    : normalizeAssertions(command.assertions, fields);
   const intervalSeconds = normalizeIntervalSeconds(command.intervalSeconds, fields, true);
 
   if (
@@ -893,6 +958,17 @@ function hasExactKeys(
   return keys.length === required.length && keys.every((key, index) => key === required[index]);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function containsWorkspaceSecretReference(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsWorkspaceSecretReference);
+  if (!isRecord(value)) return false;
+  if (Object.prototype.hasOwnProperty.call(value, 'secretReference')) return true;
+  return Object.values(value).some(containsWorkspaceSecretReference);
+}
+
 function normalizeAssertions(value: unknown, fields: MonitorFieldErrors): ResponseAssertions {
   try {
     return parseResponseAssertions(value, MONITOR_DEFAULTS.method);
@@ -1060,19 +1136,21 @@ function normalizeRequestBody(
     return { type: 'FORM_URLENCODED', fields: fieldsList };
   }
   if (body.type === 'RAW' && hasExactKeys(body, ['contentType', 'type', 'value'])) {
-    if (
-      typeof body.contentType !== 'string' ||
-      body.contentType.trim() === '' ||
-      /[\r\n]/u.test(body.contentType)
-    ) {
+    const contentType = normalizeRawContentType(body.contentType);
+    if (contentType === null) {
       return fail('Enter a valid content type for the raw body.');
     }
     if (typeof body.value !== 'string' || utf8Bytes(body.value) > HTTP_REQUEST_BODY_LIMIT_BYTES) {
       return fail('Keep the raw request body at 64 KB or less.');
     }
-    return { type: 'RAW', contentType: body.contentType.trim(), value: body.value };
+    return { type: 'RAW', contentType, value: body.value };
   }
   return fail('Choose none, JSON, form URL encoded, or raw request body.');
+}
+
+function normalizeRawContentType(value: unknown): string | null {
+  if (typeof value !== 'string' || value.trim() === '' || /[\r\n]/u.test(value)) return null;
+  return value.trim();
 }
 
 function utf8Bytes(value: string): number {

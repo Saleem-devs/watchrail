@@ -222,6 +222,36 @@ describe('createMonitor', () => {
     );
   });
 
+  it.each(['text/plain\r\nx-injected: true', 'application/json\n', '   '])(
+    'rejects an invalid Vault-backed raw workflow content type %j',
+    (contentType) => {
+      const base = workflowConfiguration();
+      const workflow = {
+        ...base,
+        steps: base.steps.map((step, index) =>
+          index === 0
+            ? {
+                ...step,
+                requestBody: {
+                  type: 'RAW' as const,
+                  sensitive: true as const,
+                  secretReference: {
+                    contractVersion: 1 as const,
+                    secretId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+                  },
+                  contentType,
+                },
+              }
+            : step,
+        ),
+      };
+
+      expect(() =>
+        createMonitor({ type: 'API_WORKFLOW', name: 'Invalid raw body', workflow }),
+      ).toThrow(MonitorInputError);
+    },
+  );
+
   it('parses the strict stored API workflow contract', () => {
     const workflow = workflowConfiguration();
     expect(

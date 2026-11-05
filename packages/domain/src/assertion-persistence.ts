@@ -14,6 +14,10 @@ import {
   type JsonScalarTarget,
   type TextBodyAssertionOperator,
 } from './assertion.js';
+import {
+  parseWorkspaceSecretReference,
+  type WorkspaceSecretReferenceV1,
+} from './workspace-secret-reference.js';
 
 export interface EncryptedAssertionValueV1 {
   version: 1;
@@ -26,11 +30,17 @@ export interface EncryptedAssertionValueV1 {
 
 export type StoredStringAssertionTarget =
   | { sensitive: false; value: string }
-  | { sensitive: true; encryptedValue: EncryptedAssertionValueV1 };
+  | { sensitive: true; encryptedValue: EncryptedAssertionValueV1 }
+  | { sensitive: true; secretReference: WorkspaceSecretReferenceV1 };
 
 export type StoredJsonAssertionTarget =
   | { sensitive: false; value: JsonScalarTarget }
-  | { sensitive: true; encryptedValue: EncryptedAssertionValueV1 };
+  | { sensitive: true; encryptedValue: EncryptedAssertionValueV1 }
+  | {
+      sensitive: true;
+      valueType: JsonScalarTarget['type'];
+      secretReference: WorkspaceSecretReferenceV1;
+    };
 
 export type StoredHeaderAssertion =
   | { name: string; operator: 'exists' | 'does_not_exist' }
@@ -249,12 +259,28 @@ function parseStoredStringTarget(value: unknown): StoredStringAssertionTarget {
   ) {
     return { sensitive: true, encryptedValue: value.encryptedValue };
   }
+  if (value.sensitive === true && hasExactKeys(value, ['sensitive', 'secretReference'])) {
+    return {
+      sensitive: true,
+      secretReference: parseStoredWorkspaceSecretReference(value.secretReference),
+    };
+  }
   throw new StoredAssertionContractError();
 }
 
 function parseStoredJsonTarget(value: unknown): StoredJsonAssertionTarget {
   if (!isRecord(value)) throw new StoredAssertionContractError();
   if (value.sensitive === true) {
+    if (hasExactKeys(value, ['sensitive', 'valueType', 'secretReference'])) {
+      if (!['string', 'number', 'boolean', 'null'].includes(String(value.valueType))) {
+        throw new StoredAssertionContractError();
+      }
+      return {
+        sensitive: true,
+        valueType: value.valueType as JsonScalarTarget['type'],
+        secretReference: parseStoredWorkspaceSecretReference(value.secretReference),
+      };
+    }
     if (
       !hasExactKeys(value, ['sensitive', 'encryptedValue']) ||
       !isEncryptedValue(value.encryptedValue)
@@ -461,4 +487,12 @@ function hasExactKeys(value: Record<string, unknown>, expected: readonly string[
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseStoredWorkspaceSecretReference(value: unknown): WorkspaceSecretReferenceV1 {
+  try {
+    return parseWorkspaceSecretReference(value);
+  } catch {
+    throw new StoredAssertionContractError();
+  }
 }

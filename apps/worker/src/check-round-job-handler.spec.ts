@@ -41,8 +41,9 @@ const keyring: HeaderEncryptionKeyring = {
   keys: new Map([['v1', Buffer.alloc(32)]]),
 };
 const assertionKeyring: AssertionEncryptionKeyring = keyring;
+const createExecutionValueResolver = vi.fn(() => () => Promise.resolve('workspace-secret'));
 const workspaceSecrets = {
-  createExecutionValueResolver: () => () => Promise.resolve('workspace-secret'),
+  createExecutionValueResolver,
 } as unknown as WorkspaceSecretRepository;
 const workspaceSecretKeyring = { activeKeyId: 'v1', keys: new Map([['v1', Buffer.alloc(32)]]) };
 
@@ -193,6 +194,58 @@ describe('CheckRoundJobHandler', () => {
         responseTimeMs: 12,
       }),
     );
+  });
+
+  it('resolves vault-backed assertion values only for the authoritative execution', async () => {
+    createExecutionValueResolver.mockClear();
+    const { executions, executor, claim, complete, execute } = createDependencies();
+    claim.mockResolvedValue({
+      state: 'CLAIMED',
+      execution: {
+        ...claimedExecution,
+        assertions: {
+          contractVersion: 1,
+          assertions: {
+            headers: [],
+            textBody: [
+              {
+                operator: 'contains',
+                target: {
+                  sensitive: true,
+                  secretReference: {
+                    contractVersion: 1,
+                    secretId: '66666666-6666-4666-8666-666666666666',
+                  },
+                },
+              },
+            ],
+            jsonBody: [],
+          },
+        },
+      },
+    });
+    execute.mockResolvedValue({
+      type: 'RESPONSE',
+      headers: [],
+      body: { state: 'CAPTURED', text: 'workspace-secret' },
+      statusCode: 200,
+      responseTimeMs: 12,
+      redirects: [],
+    });
+    complete.mockResolvedValue(true);
+
+    await createHandler(executions, executor).handle(payload);
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(complete).toHaveBeenCalledWith(
+      claimedExecution.assignmentId,
+      claimedExecution.claimToken,
+      expect.objectContaining({
+        outcome: 'PASS',
+        assertionEvaluation: expect.objectContaining({ outcome: 'PASS' }),
+      }),
+    );
+    expect(createExecutionValueResolver).toHaveBeenCalledTimes(1);
   });
 
   it('executes TCP claims through the protocol-specific connector', async () => {

@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { EMPTY_ASSERTION_CONFIGURATION } from '@watchrail/domain';
+import { AssertionInputError, EMPTY_ASSERTION_CONFIGURATION } from '@watchrail/domain';
 import {
   AssertionRetentionError,
   loadAssertionEncryptionKeyring,
   resolveResponseAssertions,
+  resolveResponseAssertionsWithWorkspaceSecrets,
   storeResponseAssertions,
   StoredAssertionResolutionError,
   type AssertionEncryptionKeyring,
@@ -227,5 +228,87 @@ describe('assertion encryption', () => {
     expect(() =>
       resolveResponseAssertions(scoped, 'GET', { ...context, scope: 'workflow:second' }, keyring),
     ).toThrow(StoredAssertionResolutionError);
+  });
+
+  it('stores workspace-secret references without copying values and resolves typed targets', async () => {
+    const secretId = '33333333-3333-4333-8333-333333333333';
+    const stored = storeResponseAssertions(
+      {
+        headers: [
+          {
+            name: 'x-release',
+            operator: 'equals',
+            target: {
+              sensitive: true,
+              secretReference: { contractVersion: 1, secretId },
+            },
+          },
+        ],
+        textBody: [],
+        jsonBody: [
+          {
+            selector: '$.enabled',
+            operator: 'equals',
+            target: {
+              sensitive: true,
+              valueType: 'boolean',
+              secretReference: { contractVersion: 1, secretId },
+            },
+          },
+        ],
+      },
+      EMPTY_ASSERTION_CONFIGURATION,
+      'GET',
+      context,
+      keyring,
+      { allowRetain: false },
+    );
+
+    expect(stored.assertions.headers[0]).toMatchObject({
+      target: { sensitive: true, secretReference: { secretId } },
+    });
+    expect(stored.assertions.jsonBody[0]).toMatchObject({
+      target: { sensitive: true, valueType: 'boolean', secretReference: { secretId } },
+    });
+
+    const resolve = (requestedId: string) => {
+      expect(requestedId).toBe(secretId);
+      return Promise.resolve('true');
+    };
+    await expect(
+      resolveResponseAssertionsWithWorkspaceSecrets(stored, 'GET', context, keyring, resolve),
+    ).resolves.toMatchObject({
+      headers: [{ target: { sensitive: true, value: 'true' } }],
+      jsonBody: [{ target: { sensitive: true, value: { type: 'boolean', value: true } } }],
+    });
+  });
+
+  it('rejects malformed workspace-secret assertion targets', () => {
+    expect(() =>
+      storeResponseAssertions(
+        {
+          headers: [],
+          textBody: [
+            {
+              operator: 'equals',
+              target: {
+                sensitive: true,
+                value: 'must-not-be-accepted',
+                secretReference: {
+                  contractVersion: 1,
+                  secretId: '33333333-3333-4333-8333-333333333333',
+                },
+              },
+            },
+          ],
+          jsonBody: [],
+        },
+        EMPTY_ASSERTION_CONFIGURATION,
+        'GET',
+        context,
+        keyring,
+        { allowRetain: false },
+      ),
+    ).toThrow(AssertionInputError);
   });
 });

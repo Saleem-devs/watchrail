@@ -5,6 +5,7 @@ import { Button } from '../../components/ui/button';
 import { Checkbox, Input, Select } from '../../components/ui/form-control';
 import { listWorkspaceSecrets } from '../workspace-secrets/workspace-secret-api';
 import type { WorkspaceSecret } from '../workspace-secrets/workspace-secret-types';
+import { WorkspaceSecretOptions } from '../workspace-secrets/workspace-secret-options';
 
 export interface RequestHeaderFormValue {
   name: string;
@@ -149,17 +150,7 @@ export function RequestHeadersField({
                     required
                     aria-label={`Workspace secret for ${row.name || 'header'}`}
                   >
-                    <option value="">Select a secret</option>
-                    {secrets.map((secret) => (
-                      <option key={secret.id} value={secret.id}>
-                        {secret.key}
-                      </option>
-                    ))}
-                    {secretsLoaded && secrets.length === 0 ? (
-                      <option value="" disabled>
-                        No active workspace secrets
-                      </option>
-                    ) : null}
+                    <WorkspaceSecretOptions loaded={secretsLoaded} secrets={secrets} />
                   </Select>
                 ) : (
                   <span className="grid gap-1.5">
