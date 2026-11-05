@@ -175,7 +175,7 @@ export function WorkspaceSecretForm({
         <p className="mt-1 mb-0 text-xs leading-5 text-rail-muted">
           Names and descriptions remain visible. Secret values are encrypted and never returned.
         </p>
-        <div className="mt-5 grid max-w-4xl gap-5 sm:grid-cols-2">
+        <div className="mt-5 grid gap-5 sm:grid-cols-2">
           <Field
             id="workspace-secret-key"
             label="Key"
