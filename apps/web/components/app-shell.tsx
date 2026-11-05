@@ -14,6 +14,7 @@ type Page =
   | 'new-monitor'
   | 'monitor-detail'
   | 'incidents'
+  | 'notifications'
   | 'status-pages'
   | 'organization'
   | 'secrets';
@@ -55,8 +56,8 @@ const projectNavigationGroups: { label: string; items: NavigationItem[] }[] = [
     label: 'Operations',
     items: [
       { label: 'Probe locations', icon: 'probes', disabled: true },
-      { label: 'Notifications', icon: 'notifications', disabled: true },
-      { label: 'Webhooks', icon: 'webhooks', disabled: true },
+      { label: 'Notifications', icon: 'notifications', page: 'notifications' },
+      { label: 'Webhooks', icon: 'webhooks' },
     ],
   },
   {
@@ -107,7 +108,7 @@ function navigationGroups(
     ];
   }
   const base = `/projects/${projectId}`;
-  return [
+  const groups: { label: string; items: NavigationItem[] }[] = [
     {
       label: 'Project',
       items: [
@@ -124,6 +125,20 @@ function navigationGroups(
     },
     ...projectNavigationGroups.slice(1),
   ];
+  return groups.map((group) =>
+    group.label !== 'Operations'
+      ? group
+      : {
+          ...group,
+          items: group.items.map((item) =>
+            item.icon === 'notifications'
+              ? { ...item, href: `${base}/notifications` }
+              : item.icon === 'webhooks'
+                ? { ...item, href: `${base}/notifications#webhooks` }
+                : item,
+          ),
+        },
+  );
 }
 
 function ShellIcon({ name, className = 'size-[18px]' }: { name: IconName; className?: string }) {

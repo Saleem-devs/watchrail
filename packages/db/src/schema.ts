@@ -1519,6 +1519,7 @@ export const webhookEndpoints = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     organizationId: uuid('organization_id').notNull(),
+    projectId: uuid('project_id'),
     name: varchar('name', { length: 120 }).notNull(),
     enabled: boolean('enabled').notNull().default(true),
     currentVersionNumber: integer('current_version_number').notNull().default(1),
@@ -1527,6 +1528,17 @@ export const webhookEndpoints = pgTable(
   },
   (table) => [
     unique('webhook_endpoints_identity_unique').on(table.organizationId, table.id),
+    foreignKey({
+      name: 'webhook_endpoints_project_fk',
+      columns: [table.projectId, table.organizationId],
+      foreignColumns: [projects.id, projects.organizationId],
+    }).onDelete('cascade'),
+    index('webhook_endpoints_project_idx').on(
+      table.organizationId,
+      table.projectId,
+      table.createdAt,
+      table.id,
+    ),
     check('webhook_endpoints_name_not_blank', sql`length(btrim(${table.name})) > 0`),
     check('webhook_endpoints_version_positive', sql`${table.currentVersionNumber} > 0`),
   ],
@@ -1566,6 +1578,39 @@ export const webhookEndpointVersions = pgTable(
     check(
       'webhook_endpoint_versions_secret_object',
       sql`jsonb_typeof(${table.signingSecretEnvelope}) = 'object'`,
+    ),
+  ],
+);
+
+export const webhookEndpointMonitorRoutes = pgTable(
+  'webhook_endpoint_monitor_routes',
+  {
+    organizationId: uuid('organization_id').notNull(),
+    endpointId: uuid('endpoint_id').notNull(),
+    monitorId: uuid('monitor_id').notNull(),
+    notifyOnIncident: boolean('notify_on_incident').notNull().default(true),
+    notifyOnRecovery: boolean('notify_on_recovery').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      name: 'webhook_endpoint_monitor_routes_pk',
+      columns: [table.organizationId, table.endpointId, table.monitorId],
+    }),
+    foreignKey({
+      name: 'webhook_endpoint_monitor_routes_endpoint_fk',
+      columns: [table.organizationId, table.endpointId],
+      foreignColumns: [webhookEndpoints.organizationId, webhookEndpoints.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'webhook_endpoint_monitor_routes_monitor_fk',
+      columns: [table.monitorId, table.organizationId],
+      foreignColumns: [monitors.id, monitors.organizationId],
+    }).onDelete('cascade'),
+    index('webhook_endpoint_monitor_routes_monitor_idx').on(
+      table.organizationId,
+      table.monitorId,
+      table.endpointId,
     ),
   ],
 );
