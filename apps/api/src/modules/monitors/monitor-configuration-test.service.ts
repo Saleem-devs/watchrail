@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   BadRequestException,
+  ForbiddenException,
   HttpException,
   HttpStatus,
   Inject,
@@ -8,7 +9,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { executeHttpCheck, NodeHttpExecutor, type HttpCheckInput } from '@watchrail/check-engine';
-import { MonitorRepository, ProjectRepository } from '@watchrail/db';
+import {
+  MonitorRepository,
+  ProjectRepository,
+  WorkspaceSecretNotFoundError,
+  WorkspaceSecretRepository,
+} from '@watchrail/db';
 import {
   AssertionInputError,
   EMPTY_ASSERTION_CONFIGURATION,
@@ -22,8 +28,14 @@ import {
   resolveResponseAssertions,
   storeResponseAssertions,
 } from '@watchrail/assertion-security';
-import { resolveRequestHeaders, storeRequestHeaders } from '@watchrail/http-header-security';
-import type { RequestContext } from '../../auth/request-context.js';
+import {
+  RequestHeaderStorageError,
+  resolveRequestHeadersWithWorkspaceSecrets,
+  storeRequestHeaders,
+} from '@watchrail/http-header-security';
+import { decryptWorkspaceSecret } from '@watchrail/secret-vault-security';
+import { requestCan, type RequestContext } from '../../auth/request-context.js';
+import { PERMISSIONS } from '../../auth/permissions.js';
 import { PublicStatusPageRateLimiter } from '../../common/rate-limiting/public-status-page-rate-limiter.js';
 import { APP_CONFIG, type AppConfig } from '../../config/config.js';
 import {
@@ -52,6 +64,7 @@ export class MonitorConfigurationTestService {
   constructor(
     @Inject(MonitorRepository) private readonly monitors: MonitorRepository,
     @Inject(ProjectRepository) private readonly projects: ProjectRepository,
+    @Inject(WorkspaceSecretRepository) private readonly workspaceSecrets: WorkspaceSecretRepository,
     @Inject(NodeHttpExecutor) private readonly executor: NodeHttpExecutor,
     @Inject(MonitorConfigurationTestRateLimiter)
     private readonly limiter: MonitorConfigurationTestRateLimiter,
@@ -93,10 +106,28 @@ export class MonitorConfigurationTestService {
         encryptionContext,
         this.config.headerEncryptionKeyring,
       );
-      const requestHeaders = resolveRequestHeaders(
+      if (
+        headersUseWorkspaceSecrets(storedHeaders) &&
+        !requestCan(context, PERMISSIONS.SECRET_USE)
+      ) {
+        throw new ForbiddenException({
+          code: 'WORKSPACE_SECRET_USE_FORBIDDEN',
+          message: 'Permission to use workspace secrets is required for this operation.',
+        });
+      }
+      const requestHeaders = await resolveRequestHeadersWithWorkspaceSecrets(
         storedHeaders,
         encryptionContext,
         this.config.headerEncryptionKeyring,
+        this.workspaceSecrets.createExecutionValueResolver(
+          context.organizationId,
+          (encryptedValue, { secretId, versionNumber }) =>
+            decryptWorkspaceSecret(
+              encryptedValue,
+              { organizationId: context.organizationId, secretId, versionNumber },
+              this.config.workspaceSecretKeyring,
+            ),
+        ),
       );
       const storedAssertions = storeResponseAssertions(
         input.assertions,
@@ -170,15 +201,31 @@ export class MonitorConfigurationTestService {
         },
       });
     }
-    if (error instanceof Error && error.message.startsWith('Cannot retain missing sensitive')) {
+    if (error instanceof RequestHeaderStorageError) {
       throw new BadRequestException({
         code: 'VALIDATION_FAILED',
         message: 'Request headers are invalid.',
         fields: { requestHeaders: [error.message] },
       });
     }
+    if (error instanceof WorkspaceSecretNotFoundError) {
+      throw new BadRequestException({
+        code: 'VALIDATION_FAILED',
+        message: 'A referenced workspace secret is unavailable.',
+        fields: { requestHeaders: ['Choose an active secret from this workspace.'] },
+      });
+    }
     throw error;
   }
+}
+
+function headersUseWorkspaceSecrets(headers: readonly unknown[]): boolean {
+  return headers.some(
+    (header) =>
+      header !== null &&
+      typeof header === 'object' &&
+      Object.prototype.hasOwnProperty.call(header, 'secretReference'),
+  );
 }
 
 function secretValues(

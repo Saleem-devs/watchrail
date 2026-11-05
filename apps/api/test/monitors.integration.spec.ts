@@ -103,6 +103,10 @@ describe('monitor API', () => {
     process.env.WEBHOOK_SIGNING_SECRET_ENCRYPTION_KEYS = JSON.stringify({
       test: Buffer.alloc(32).toString('base64'),
     });
+    process.env.WORKSPACE_SECRET_ACTIVE_KEY_ID = 'test';
+    process.env.WORKSPACE_SECRET_ENCRYPTION_KEYS = JSON.stringify({
+      test: Buffer.alloc(32, 5).toString('base64'),
+    });
 
     const migrationConnection = createDatabaseConnection(container.getConnectionUri());
     await migrateDatabase(migrationConnection, resolve(process.cwd(), '../../packages/db/drizzle'));
@@ -138,6 +142,7 @@ describe('monitor API', () => {
         check_rounds,
         monitor_configuration_versions,
         monitors,
+        workspace_secrets,
         projects
       cascade
     `);
@@ -1028,6 +1033,97 @@ describe('monitor API', () => {
     );
     expect(versions.rows).toHaveLength(2);
     expect(JSON.stringify(versions.rows)).not.toContain('top-secret');
+  });
+
+  it('binds workspace-secret headers without exposing their value and removes stale bindings', async () => {
+    const secretValue = 'WATCHRAIL_MONITOR_VAULT_SENTINEL';
+    const secret = await request(app.getHttpServer())
+      .post('/api/workspace-secrets')
+      .send({ key: 'monitor_api_token', value: secretValue })
+      .expect(201);
+    const secretId = secret.body.data.id as string;
+
+    const created = await request(app.getHttpServer())
+      .post(`/api/monitors?projectId=${projectId}`)
+      .send({
+        name: 'Vault-backed API',
+        url: 'https://example.com/health',
+        requestHeaders: [
+          {
+            name: 'Authorization',
+            sensitive: true,
+            secretReference: { contractVersion: 1, secretId },
+          },
+        ],
+      })
+      .expect(201);
+
+    expect(created.body.data.requestHeaders).toEqual([
+      {
+        name: 'authorization',
+        sensitive: true,
+        value: null,
+        hasValue: true,
+        secretReference: { contractVersion: 1, secretId },
+      },
+    ]);
+    expect(JSON.stringify(created.body)).not.toContain(secretValue);
+
+    const monitorId = created.body.data.id as string;
+    const bindings = await database.$client.query<{
+      secret_id: string;
+      resource_type: string;
+      resource_id: string;
+      resource_path: string;
+    }>(
+      `select secret_id, resource_type, resource_id, resource_path
+       from workspace_secret_bindings
+       where resource_id = $1`,
+      [monitorId],
+    );
+    expect(bindings.rows).toEqual([
+      {
+        secret_id: secretId,
+        resource_type: 'MONITOR',
+        resource_id: monitorId,
+        resource_path: 'requestHeaders.authorization',
+      },
+    ]);
+
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/request-headers`)
+      .send({
+        requestHeaders: [{ name: 'X-Environment', sensitive: false, value: 'production' }],
+      })
+      .expect(200);
+    const remaining = await database.$client.query(
+      'select 1 from workspace_secret_bindings where resource_id = $1',
+      [monitorId],
+    );
+    expect(remaining.rows).toEqual([]);
+  });
+
+  it('rejects unavailable workspace-secret references on the relevant form field', async () => {
+    const unavailableSecretId = randomUUID();
+    const response = await request(app.getHttpServer())
+      .post(`/api/monitors?projectId=${projectId}`)
+      .send({
+        name: 'Invalid vault reference',
+        url: 'https://example.com/health',
+        requestHeaders: [
+          {
+            name: 'Authorization',
+            sensitive: true,
+            secretReference: { contractVersion: 1, secretId: unavailableSecretId },
+          },
+        ],
+      })
+      .expect(400);
+
+    expect(response.body).toMatchObject({
+      code: 'VALIDATION_FAILED',
+      fields: { requestHeaders: [expect.any(String)] },
+    });
   });
 
   it('rejects unsafe headers and retaining a missing secret', async () => {

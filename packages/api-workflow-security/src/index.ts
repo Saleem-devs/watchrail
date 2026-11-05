@@ -3,7 +3,9 @@ import { parseStoredApiWorkflowConfiguration, type HttpRequestBody } from '@watc
 import {
   decryptHeaderValue,
   resolveRequestHeaders,
+  resolveRequestHeadersWithWorkspaceSecrets,
   type HeaderEncryptionKeyring,
+  type WorkspaceSecretValueResolver,
 } from '@watchrail/http-header-security';
 import {
   resolveResponseAssertions,
@@ -33,6 +35,7 @@ export function resolveApiWorkflowConfiguration(
   value: unknown,
   context: ApiWorkflowEncryptionContext,
   keyrings: ApiWorkflowKeyrings,
+  resolveWorkspaceSecret?: (secretId: string) => string,
 ): ApiWorkflowInput {
   const stored = parseStoredApiWorkflowConfiguration(value);
   return {
@@ -57,6 +60,7 @@ export function resolveApiWorkflowConfiguration(
           step.requestHeaders,
           { ...context, scope },
           keyrings.headers,
+          resolveWorkspaceSecret,
         ),
         requestBody: resolveWorkflowRequestBody(
           step.requestBody,
@@ -69,6 +73,53 @@ export function resolveApiWorkflowConfiguration(
         extractions: step.extractions,
       };
     }),
+  };
+}
+
+export async function resolveApiWorkflowConfigurationWithWorkspaceSecrets(
+  value: unknown,
+  context: ApiWorkflowEncryptionContext,
+  keyrings: ApiWorkflowKeyrings,
+  resolveWorkspaceSecret: WorkspaceSecretValueResolver,
+): Promise<ApiWorkflowInput> {
+  const stored = parseStoredApiWorkflowConfiguration(value);
+  return {
+    steps: await Promise.all(
+      stored.steps.map(async (step) => {
+        const scope = workflowStepScope(step.id);
+        const assertions = resolveResponseAssertions(
+          step.assertions,
+          step.method,
+          { ...context, scope },
+          keyrings.assertions,
+        );
+        return {
+          id: step.id,
+          name: step.name,
+          url: step.url,
+          method: step.method,
+          timeoutMs: step.timeoutMs,
+          followRedirects: step.followRedirects,
+          statusPolicy: step.statusPolicy,
+          tlsPolicy: step.tlsPolicy,
+          requestHeaders: await resolveRequestHeadersWithWorkspaceSecrets(
+            step.requestHeaders,
+            { ...context, scope },
+            keyrings.headers,
+            resolveWorkspaceSecret,
+          ),
+          requestBody: resolveWorkflowRequestBody(
+            step.requestBody,
+            { ...context, scope },
+            keyrings.headers,
+          ),
+          headerAssertions: assertions.headers,
+          textBodyAssertions: assertions.textBody,
+          jsonBodyAssertions: assertions.jsonBody,
+          extractions: step.extractions,
+        };
+      }),
+    ),
   };
 }
 

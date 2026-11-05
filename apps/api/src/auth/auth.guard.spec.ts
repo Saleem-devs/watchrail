@@ -83,4 +83,44 @@ describe('WatchrailAuthGuard authorization policy', () => {
 
     await expect(guard.canActivate(context)).rejects.toBeInstanceOf(UnauthorizedException);
   });
+
+  it('caps API-key secret-use scopes at the authenticated organization role', async () => {
+    class ProtectedController {}
+    const handler = () => undefined;
+    Reflect.defineMetadata('watchrail:permission', PERMISSIONS.SECRET_USE, handler);
+    apiKeys.authenticate.mockResolvedValueOnce({
+      userId: '11111111-1111-4111-8111-111111111111',
+      organizationId: '22222222-2222-4222-8222-222222222222',
+      role: 'editor',
+      permissions: JSON.stringify([PERMISSIONS.SECRET_USE]),
+    });
+    const context = executionContext(handler, ProtectedController, {
+      headers: { authorization: `Bearer wrk_${'a'.repeat(43)}` },
+    });
+
+    await expect(guard.canActivate(context)).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('attaches effective secret-use permission for an authorized API key', async () => {
+    class ProtectedController {}
+    const handler = () => undefined;
+    Reflect.defineMetadata('watchrail:permission', PERMISSIONS.SECRET_USE, handler);
+    apiKeys.authenticate.mockResolvedValueOnce({
+      userId: '11111111-1111-4111-8111-111111111111',
+      organizationId: '22222222-2222-4222-8222-222222222222',
+      role: 'admin',
+      permissions: JSON.stringify([PERMISSIONS.SECRET_USE, PERMISSIONS.MONITOR_UPDATE]),
+    });
+    const request = { headers: { authorization: `Bearer wrk_${'b'.repeat(43)}` } } as {
+      headers: { authorization: string };
+      watchrailContext?: { permissions: readonly string[] };
+    };
+    const context = executionContext(handler, ProtectedController, request);
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(request.watchrailContext?.permissions).toEqual([
+      PERMISSIONS.SECRET_USE,
+      PERMISSIONS.MONITOR_UPDATE,
+    ]);
+  });
 });

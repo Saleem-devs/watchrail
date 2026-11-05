@@ -6,6 +6,7 @@ import { ManualDiagnostic } from './monitor-evidence';
 import { ResponseAssertionsField } from './response-assertions-field';
 import {
   httpConfigurationTestFromForm,
+  requestHeadersFromForm,
   requiresStateChangingMethodConfirmation,
 } from './monitor-form-serialization';
 import { ConfigurationTestPanel } from './configuration-test-result';
@@ -36,6 +37,27 @@ const configuredAssertions: RedactedResponseAssertionConfiguration = {
     ],
   },
 };
+
+it('serializes a workspace-vault header without an inline value', () => {
+  const formData = new FormData();
+  formData.append('requestHeaderName', 'Authorization');
+  formData.append('requestHeaderValue', '');
+  formData.append('requestHeaderId', 'header-1');
+  formData.append('requestHeaderHasStoredValue', 'false');
+  formData.append('requestHeaderSource', 'VAULT');
+  formData.append('requestHeaderSecretId', '11111111-1111-4111-8111-111111111111');
+
+  expect(requestHeadersFromForm(formData)).toEqual([
+    {
+      name: 'Authorization',
+      sensitive: true,
+      secretReference: {
+        contractVersion: 1,
+        secretId: '11111111-1111-4111-8111-111111111111',
+      },
+    },
+  ]);
+});
 
 describe('response assertion configuration', () => {
   it('warns only before methods that can change target state', () => {

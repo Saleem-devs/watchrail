@@ -325,6 +325,27 @@ export class WorkspaceSecretRepository {
     };
   }
 
+  createExecutionValueResolver(
+    organizationId: string,
+    decrypt: (
+      encryptedValue: EncryptedWorkspaceSecretV1,
+      context: WorkspaceSecretVersionContext,
+    ) => string,
+  ): (secretId: string) => Promise<string> {
+    const selectedVersions = new Map<string, Promise<string>>();
+    return (secretId) => {
+      const canonicalSecretId = secretId.toLowerCase();
+      const existing = selectedVersions.get(canonicalSecretId);
+      if (existing) return existing;
+      const selected = this.resolveCurrentEnvelope(organizationId, canonicalSecretId).then(
+        ({ encryptedValue, versionNumber }) =>
+          decrypt(encryptedValue, { secretId: canonicalSecretId, versionNumber }),
+      );
+      selectedVersions.set(canonicalSecretId, selected);
+      return selected;
+    };
+  }
+
   private async lock(tx: Transaction, organizationId: string, secretId: string) {
     const [secret] = await tx
       .select()

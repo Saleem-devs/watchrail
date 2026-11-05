@@ -12,6 +12,10 @@ const requiredEnvironment = {
   WEBHOOK_SIGNING_SECRET_ENCRYPTION_KEYS: JSON.stringify({
     test: Buffer.alloc(32).toString('base64'),
   }),
+  WORKSPACE_SECRET_ACTIVE_KEY_ID: 'test',
+  WORKSPACE_SECRET_ENCRYPTION_KEYS: JSON.stringify({
+    test: Buffer.alloc(32).toString('base64'),
+  }),
 };
 
 describe('loadWorkerConfig', () => {
@@ -37,6 +41,7 @@ describe('loadWorkerConfig', () => {
       headerEncryptionKeyring: { activeKeyId: 'test' },
       assertionEncryptionKeyring: { activeKeyId: 'test' },
       webhookSigningSecretKeyring: { activeKeyId: 'test' },
+      workspaceSecretKeyring: { activeKeyId: 'test' },
       webhookDeliveryTimeoutMs: 10_000,
       webhookDeliveryLeaseDurationMs: 30_000,
       webhookDeliveryMaxAttempts: 8,

@@ -29,6 +29,20 @@ describe('workspace secret encryption', () => {
     expect(() => decryptWorkspaceSecret(first, { ...context, versionNumber: 2 }, keyring)).toThrow(
       StoredWorkspaceSecretResolutionError,
     );
+    expect(() =>
+      decryptWorkspaceSecret(
+        first,
+        { ...context, organizationId: '30000000-0000-4000-8000-000000000003' },
+        keyring,
+      ),
+    ).toThrow(StoredWorkspaceSecretResolutionError);
+    expect(() =>
+      decryptWorkspaceSecret(
+        first,
+        { ...context, secretId: '40000000-0000-4000-8000-000000000004' },
+        keyring,
+      ),
+    ).toThrow(StoredWorkspaceSecretResolutionError);
   });
 
   it('retains old-key decryptability while new writes use the active key', () => {

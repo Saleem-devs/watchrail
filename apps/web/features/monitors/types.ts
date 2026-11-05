@@ -48,6 +48,7 @@ export interface Monitor {
     sensitive: boolean;
     value: string | null;
     hasValue: true;
+    secretReference?: { contractVersion: 1; secretId: string };
   }>;
   requestBody?: RequestBodyValue;
   assertions?: RedactedResponseAssertionConfiguration;
@@ -162,9 +163,15 @@ export interface ApiWorkflowStepConfiguration {
         sensitive: boolean;
         value: string | null;
         hasValue: true;
+        secretReference?: { contractVersion: 1; secretId: string };
       }
     | { name: string; sensitive: boolean; value: string }
     | { name: string; sensitive: true; retain: true }
+    | {
+        name: string;
+        sensitive: true;
+        secretReference: { contractVersion: 1; secretId: string };
+      }
   >;
   requestBody: ApiWorkflowRequestBody;
   assertions: RedactedResponseAssertionConfiguration | SerializedResponseAssertions;

@@ -14,7 +14,7 @@ import {
   type ProbeResultSubmissionReferenceV1,
 } from '@watchrail/contracts';
 import { parseApiWorkflowResult } from '@watchrail/check-engine';
-import { resolveApiWorkflowConfiguration } from '@watchrail/api-workflow-security';
+import { resolveApiWorkflowConfigurationWithWorkspaceSecrets } from '@watchrail/api-workflow-security';
 import {
   LEGACY_HTTP_ENGINE_VERSION,
   parseHttpRedirectHops,
@@ -23,10 +23,12 @@ import {
   parseTlsCertificatePolicy,
   parseTlsCertificateEvidenceList,
 } from '@watchrail/domain';
-import { resolveRequestHeaders } from '@watchrail/http-header-security';
+import { resolveRequestHeadersWithWorkspaceSecrets } from '@watchrail/http-header-security';
+import { decryptWorkspaceSecret } from '@watchrail/secret-vault-security';
 import { resolveResponseAssertions } from '@watchrail/assertion-security';
 import {
   ProbeCoordinatorRepository,
+  WorkspaceSecretRepository,
   type AuthoritativeCheckResult,
   type ProbeMachineIdentity,
 } from '@watchrail/db';
@@ -38,6 +40,7 @@ export class ProbeCoordinatorService {
 
   constructor(
     @Inject(ProbeCoordinatorRepository) private readonly coordinator: ProbeCoordinatorRepository,
+    @Inject(WorkspaceSecretRepository) private readonly workspaceSecrets: WorkspaceSecretRepository,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
@@ -89,6 +92,7 @@ export class ProbeCoordinatorService {
       });
     }
     if (stored.type === 'API_WORKFLOW') {
+      const resolveWorkspaceSecret = this.executionSecretResolver(stored.organizationId);
       return parseProbeExecutionConfiguration({
         contractVersion: 1,
         type: 'API_WORKFLOW',
@@ -98,13 +102,14 @@ export class ProbeCoordinatorService {
         configurationVersionNumber: stored.configurationVersionNumber,
         executionPolicyVersion: stored.executionPolicyVersion,
         requiredEngineVersion: stored.requiredEngineVersion,
-        workflow: resolveApiWorkflowConfiguration(
+        workflow: await resolveApiWorkflowConfigurationWithWorkspaceSecrets(
           stored.apiWorkflow,
           { organizationId: stored.organizationId, monitorId: stored.monitorId },
           {
             headers: this.config.headerEncryptionKeyring,
             assertions: this.config.assertionEncryptionKeyring,
           },
+          resolveWorkspaceSecret,
         ),
       });
     }
@@ -136,10 +141,11 @@ export class ProbeCoordinatorService {
       followRedirects: stored.followRedirects,
       statusPolicy: parseHttpStatusPolicy(stored.statusPolicy),
       tlsPolicy,
-      requestHeaders: resolveRequestHeaders(
+      requestHeaders: await resolveRequestHeadersWithWorkspaceSecrets(
         stored.requestHeaders,
         context,
         this.config.headerEncryptionKeyring,
+        this.executionSecretResolver(stored.organizationId),
       ),
       requestBody: stored.requestBody,
       assertions: resolveResponseAssertions(
@@ -154,6 +160,18 @@ export class ProbeCoordinatorService {
     const legacyConfiguration = { ...resolved };
     delete legacyConfiguration.tlsPolicy;
     return legacyConfiguration;
+  }
+
+  private executionSecretResolver(organizationId: string) {
+    return this.workspaceSecrets.createExecutionValueResolver(
+      organizationId,
+      (encryptedValue, { secretId, versionNumber }) =>
+        decryptWorkspaceSecret(
+          encryptedValue,
+          { organizationId, secretId, versionNumber },
+          this.config.workspaceSecretKeyring,
+        ),
+    );
   }
 
   async claim(machine: ProbeMachineIdentity, body: unknown) {

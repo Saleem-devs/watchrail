@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
+import { ROLE_PERMISSIONS } from '../../auth/permissions.js';
 import { OrganizationsService } from './organizations.service.js';
 
 describe('organization invitation tenant boundary', () => {
   const context = {
     actorId: '11111111-1111-4111-8111-111111111111',
     organizationId: '22222222-2222-4222-8222-222222222222',
+    permissions: ROLE_PERMISSIONS.owner ?? [],
     authenticationType: 'SESSION' as const,
   };
   const invitationId = '33333333-3333-4333-8333-333333333333';

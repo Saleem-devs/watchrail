@@ -24,7 +24,7 @@ import type { Request } from 'express';
 import { AuthApiKeyRepository, AuthMembershipRepository } from '@watchrail/db';
 import type { WatchrailAuth } from './auth.js';
 import { WATCHRAIL_AUTH } from './auth.tokens.js';
-import { hasPermission, type Permission } from './permissions.js';
+import { hasPermission, ROLE_PERMISSIONS, type Permission } from './permissions.js';
 import { DEVELOPMENT_REQUEST_CONTEXT, type RequestWithContext } from './request-context.js';
 import { hashApiKey, parseApiKeyPermissions } from '../modules/api-credentials/api-key-auth.js';
 
@@ -126,6 +126,7 @@ export class WatchrailAuthGuard implements CanActivate {
       request.watchrailContext = {
         actorId: identity.userId,
         organizationId: identity.organizationId,
+        permissions: scopes.filter((permission) => hasPermission(identity.role, permission)),
         authenticationType: 'API_KEY',
       };
       return true;
@@ -173,6 +174,7 @@ export class WatchrailAuthGuard implements CanActivate {
     request.watchrailContext = {
       actorId: session.user.id,
       organizationId: activeOrganizationId,
+      permissions: ROLE_PERMISSIONS[role] ?? [],
       authenticationType: 'SESSION',
     };
 

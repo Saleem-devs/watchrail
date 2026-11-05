@@ -1,10 +1,12 @@
 import { randomBytes } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   decryptHeaderValue,
   encryptHeaderValue,
   loadHeaderEncryptionKeyring,
   resolveRequestHeaders,
+  resolveRequestHeadersWithWorkspaceSecrets,
+  RequestHeaderStorageError,
   StoredRequestHeaderResolutionError,
   storeRequestHeaders,
 } from './index.js';
@@ -119,5 +121,71 @@ describe('HTTP header encryption', () => {
       { name: 'authorization', value: 'Bearer secret' },
       { name: 'x-environment', value: 'production' },
     ]);
+  });
+
+  it('resolves a workspace secret reference only through the execution resolver', async () => {
+    const keyring = loadHeaderEncryptionKeyring({
+      HTTP_HEADER_ACTIVE_KEY_ID: 'v1',
+      HTTP_HEADER_ENCRYPTION_KEYS: JSON.stringify({ v1: key }),
+    });
+    const reference = {
+      contractVersion: 1 as const,
+      secretId: '11111111-1111-4111-8111-111111111111',
+    };
+    const stored = storeRequestHeaders(
+      [{ name: 'authorization', sensitive: true, secretReference: reference }],
+      [],
+      context,
+      keyring,
+    );
+
+    expect(() => resolveRequestHeaders(stored, context, keyring)).toThrow(
+      StoredRequestHeaderResolutionError,
+    );
+    const resolveSecret = vi.fn().mockResolvedValue('Bearer from vault');
+    await expect(
+      resolveRequestHeadersWithWorkspaceSecrets(stored, context, keyring, resolveSecret),
+    ).resolves.toEqual([{ name: 'authorization', value: 'Bearer from vault' }]);
+    expect(resolveSecret).toHaveBeenCalledWith(reference.secretId);
+  });
+
+  it('requires a replacement value when switching a vault reference to inline storage', () => {
+    const keyring = loadHeaderEncryptionKeyring({
+      HTTP_HEADER_ACTIVE_KEY_ID: 'v1',
+      HTTP_HEADER_ENCRYPTION_KEYS: JSON.stringify({ v1: key }),
+    });
+    const stored = storeRequestHeaders(
+      [
+        {
+          name: 'authorization',
+          sensitive: true,
+          secretReference: {
+            contractVersion: 1,
+            secretId: '11111111-1111-4111-8111-111111111111',
+          },
+        },
+      ],
+      [],
+      context,
+      keyring,
+    );
+
+    expect(() =>
+      storeRequestHeaders(
+        [{ name: 'authorization', sensitive: true, retain: true }],
+        stored,
+        context,
+        keyring,
+      ),
+    ).toThrow('after changing its value source');
+
+    expect(() =>
+      storeRequestHeaders(
+        [{ name: 'authorization', sensitive: true, value: '' }],
+        stored,
+        context,
+        keyring,
+      ),
+    ).toThrow(RequestHeaderStorageError);
   });
 });

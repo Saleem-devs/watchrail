@@ -21,6 +21,7 @@ export interface WorkerConfig {
   headerEncryptionKeyring: HeaderEncryptionKeyring;
   assertionEncryptionKeyring: AssertionEncryptionKeyring;
   webhookSigningSecretKeyring: WebhookSigningSecretKeyring;
+  workspaceSecretKeyring: WorkspaceSecretKeyring;
   webhookDeliveryTimeoutMs: number;
   webhookDeliveryLeaseDurationMs: number;
   webhookDeliveryMaxAttempts: number;
@@ -160,6 +161,18 @@ export function loadWorkerConfig(environment: NodeJS.ProcessEnv = process.env): 
     headerEncryptionKeyring: loadHeaderEncryptionKeyring(environment),
     assertionEncryptionKeyring: loadAssertionEncryptionKeyring(environment),
     webhookSigningSecretKeyring: loadWebhookSigningSecretKeyring(environment),
+    workspaceSecretKeyring: loadWorkspaceSecretKeyring(
+      environment.NODE_ENV === 'production'
+        ? environment
+        : {
+            ...environment,
+            WORKSPACE_SECRET_ACTIVE_KEY_ID:
+              environment.WORKSPACE_SECRET_ACTIVE_KEY_ID ?? 'development',
+            WORKSPACE_SECRET_ENCRYPTION_KEYS:
+              environment.WORKSPACE_SECRET_ENCRYPTION_KEYS ??
+              JSON.stringify({ development: Buffer.alloc(32, 9).toString('base64') }),
+          },
+    ),
     webhookDeliveryTimeoutMs,
     webhookDeliveryLeaseDurationMs,
     webhookDeliveryMaxAttempts: parseIntegerRange(
@@ -265,3 +278,7 @@ import {
   type WebhookSigningSecretKeyring,
 } from '@watchrail/webhook-security';
 import { loadAuthEmailKeyring, type AuthEmailKeyring } from '@watchrail/db';
+import {
+  loadWorkspaceSecretKeyring,
+  type WorkspaceSecretKeyring,
+} from '@watchrail/secret-vault-security';

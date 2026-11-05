@@ -1,3 +1,8 @@
+import {
+  parseWorkspaceSecretReference,
+  type WorkspaceSecretReferenceV1,
+} from './workspace-secret-reference.js';
+
 export interface EncryptedHeaderValueV1 {
   version: 1;
   algorithm: 'AES-256-GCM';
@@ -9,12 +14,14 @@ export interface EncryptedHeaderValueV1 {
 
 export type StoredRequestHeader =
   | { name: string; sensitive: false; value: string }
-  | { name: string; sensitive: true; encryptedValue: EncryptedHeaderValueV1 };
+  | { name: string; sensitive: true; encryptedValue: EncryptedHeaderValueV1 }
+  | { name: string; sensitive: true; secretReference: WorkspaceSecretReferenceV1 };
 
 export type RequestHeaderUpdate =
   | { name: string; sensitive: false; value: string }
   | { name: string; sensitive: true; value: string }
-  | { name: string; sensitive: true; retain: true };
+  | { name: string; sensitive: true; retain: true }
+  | { name: string; sensitive: true; secretReference: WorkspaceSecretReferenceV1 };
 
 export type ResolvedRequestHeader = { name: string; value: string };
 
@@ -96,6 +103,24 @@ export function normalizeRequestHeaderUpdates(value: unknown): RequestHeaderUpda
     seen.add(name);
 
     const sensitive = candidate.sensitive === true || FORCED_SENSITIVE_HEADERS.has(name);
+    if ('secretReference' in candidate) {
+      if ('value' in candidate || 'retain' in candidate) {
+        issues.push(`${name} cannot combine a workspace secret with an inline value.`);
+      } else if (!sensitive) {
+        issues.push(`${name} must be sensitive when it uses a workspace secret.`);
+      } else {
+        try {
+          normalized.push({
+            name,
+            sensitive: true,
+            secretReference: parseWorkspaceSecretReference(candidate.secretReference),
+          });
+        } catch {
+          issues.push(`${name} has an invalid workspace secret reference.`);
+        }
+      }
+      continue;
+    }
     if (candidate.retain === true) {
       if (!sensitive) issues.push(`${name} cannot retain a non-sensitive value.`);
       else normalized.push({ name, sensitive: true, retain: true });
@@ -160,8 +185,21 @@ function parseStoredRequestHeader(value: unknown): StoredRequestHeader {
     return { name: value.name, sensitive: false, value: value.value };
   }
 
+  if (value.sensitive !== true) {
+    throw new StoredRequestHeadersInvariantError();
+  }
+  if (hasExactKeys(value, ['name', 'sensitive', 'secretReference'])) {
+    try {
+      return {
+        name: value.name,
+        sensitive: true,
+        secretReference: parseWorkspaceSecretReference(value.secretReference),
+      };
+    } catch {
+      throw new StoredRequestHeadersInvariantError();
+    }
+  }
   if (
-    value.sensitive !== true ||
     !hasExactKeys(value, ['name', 'sensitive', 'encryptedValue']) ||
     !isEncryptedHeaderValueV1(value.encryptedValue)
   ) {

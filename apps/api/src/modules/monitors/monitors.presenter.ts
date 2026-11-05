@@ -56,6 +56,7 @@ export interface MonitorResponse {
     sensitive: boolean;
     value: string | null;
     hasValue: true;
+    secretReference?: { contractVersion: 1; secretId: string };
   }>;
   requestBody: HttpRequestBody;
   assertions: unknown;
@@ -242,6 +243,9 @@ function redactRequestHeaders(value: unknown): MonitorResponse['requestHeaders']
     sensitive: header.sensitive,
     value: header.sensitive ? null : header.value,
     hasValue: true,
+    ...(header.sensitive && 'secretReference' in header
+      ? { secretReference: header.secretReference }
+      : {}),
   }));
 }
 
