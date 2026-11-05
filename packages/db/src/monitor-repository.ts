@@ -35,6 +35,7 @@ import {
   type MonitorRecord,
 } from './schema.js';
 import { ensureDefaultProject } from './project-repository.js';
+import { assertWorkspaceSecretUseAuthorized } from './workspace-secret-use-policy.js';
 
 export class MonitorRepository {
   constructor(private readonly db: WatchrailDatabase) {}
@@ -474,6 +475,7 @@ export class MonitorRepository {
     organizationId: string,
     monitorId: string,
     settings: HttpMonitorSettings,
+    workspaceSecretUseAuthorized = true,
   ): Promise<MonitorRecord> {
     return this.db.transaction(async (tx) => {
       const [monitor] = await tx
@@ -485,6 +487,7 @@ export class MonitorRepository {
 
       if (!monitor) throw new MonitorUpdateNotFoundError();
       if (monitor.type !== 'HTTP') throw new MonitorProtocolMismatchError('HTTP');
+      assertWorkspaceSecretUseAuthorized(monitor, workspaceSecretUseAuthorized);
 
       const [configuration] = await tx
         .select()
@@ -889,6 +892,7 @@ export class MonitorRepository {
     organizationId: string,
     monitorId: string,
     requestedLocations: readonly string[],
+    workspaceSecretUseAuthorized = true,
   ): Promise<MonitorRecord> {
     return this.db.transaction(async (tx) => {
       const [monitor] = await tx
@@ -898,6 +902,7 @@ export class MonitorRepository {
         .limit(1)
         .for('update');
       if (!monitor) throw new MonitorUpdateNotFoundError();
+      assertWorkspaceSecretUseAuthorized(monitor, workspaceSecretUseAuthorized);
 
       const locations = normalizeLocationSnapshot(requestedLocations);
       const remoteLocationIds = locations.filter((location) => location !== 'local');
@@ -976,6 +981,7 @@ export class MonitorRepository {
     organizationId: string,
     monitorId: string,
     lifecycleState: MonitorLifecycleState,
+    workspaceSecretUseAuthorized = true,
   ): Promise<MonitorRecord> {
     return this.db.transaction(async (tx) => {
       const [monitor] = await tx
@@ -987,6 +993,9 @@ export class MonitorRepository {
         // Do not hold a conflicting UPDATE lock while waiting for availability state.
         .for('no key update');
       if (!monitor) throw new MonitorUpdateNotFoundError();
+      if (lifecycleState === 'ENABLED') {
+        assertWorkspaceSecretUseAuthorized(monitor, workspaceSecretUseAuthorized);
+      }
       if (monitor.lifecycleState === 'ARCHIVED' && lifecycleState !== 'ARCHIVED') {
         throw new ArchivedMonitorLifecycleError();
       }

@@ -24,6 +24,7 @@ import {
   MonitorProtocolMismatchError,
   MonitorLocationUnavailableError,
   WorkspaceSecretBindingError,
+  WorkspaceSecretUseAuthorizationError,
   type CheckRoundRecord,
   type CheckHistoryDetail,
   type CheckHistoryPage,
@@ -64,7 +65,7 @@ import {
   DnsMonitorInputError,
 } from '@watchrail/domain';
 import type { CreateMonitorCommand } from '@watchrail/domain';
-import { storeRequestHeaders } from '@watchrail/http-header-security';
+import { RequestHeaderStorageError, storeRequestHeaders } from '@watchrail/http-header-security';
 import { AssertionRetentionError, storeResponseAssertions } from '@watchrail/assertion-security';
 import { APP_CONFIG, type AppConfig } from '../../config/config.js';
 import { requestCan, type RequestContext } from '../../auth/request-context.js';
@@ -210,7 +211,7 @@ export class MonitorsService {
         error instanceof AssertionRetentionError ||
         error instanceof RequestHeaderInputError ||
         error instanceof ApiWorkflowConfigurationError ||
-        (error instanceof Error && error.message.startsWith('Cannot retain missing sensitive'))
+        error instanceof RequestHeaderStorageError
       ) {
         throw new BadRequestException({
           code: 'VALIDATION_FAILED',
@@ -312,7 +313,7 @@ export class MonitorsService {
       if (error instanceof MonitorProtocolMismatchError) {
         throw new ConflictException({ code: 'MONITOR_PROTOCOL_MISMATCH', message: error.message });
       }
-      if (error instanceof Error && error.message.startsWith('Cannot retain missing sensitive')) {
+      if (error instanceof RequestHeaderStorageError) {
         throw new BadRequestException({
           code: 'VALIDATION_FAILED',
           message: 'Request headers are invalid.',
@@ -532,8 +533,12 @@ export class MonitorsService {
   ): Promise<MonitorRecord> {
     try {
       const settings = parseHttpMonitorSettings(value);
-      await this.assertSecretUseForMonitor(context, monitorId);
-      return await this.monitors.updateHttpSettings(context.organizationId, monitorId, settings);
+      return await this.monitors.updateHttpSettings(
+        context.organizationId,
+        monitorId,
+        settings,
+        requestCan(context, PERMISSIONS.SECRET_USE),
+      );
     } catch (error) {
       if (error instanceof MonitorInputError || error instanceof AssertionInputError) {
         throw new BadRequestException({
@@ -547,6 +552,9 @@ export class MonitorsService {
       }
       if (error instanceof MonitorProtocolMismatchError) {
         throw new ConflictException({ code: 'MONITOR_PROTOCOL_MISMATCH', message: error.message });
+      }
+      if (error instanceof WorkspaceSecretUseAuthorizationError) {
+        throw workspaceSecretUseForbidden();
       }
       throw error;
     }
@@ -638,7 +646,7 @@ export class MonitorsService {
       if (error instanceof MonitorProtocolMismatchError) {
         throw new ConflictException({ code: 'MONITOR_PROTOCOL_MISMATCH', message: error.message });
       }
-      if (error instanceof Error && error.message.startsWith('Cannot retain missing sensitive')) {
+      if (error instanceof RequestHeaderStorageError) {
         throw new BadRequestException({
           code: 'VALIDATION_FAILED',
           message: 'Request headers are invalid.',
@@ -716,10 +724,12 @@ export class MonitorsService {
   ): Promise<MonitorRecord> {
     try {
       const { lifecycleState } = parseMonitorLifecycleSettings(value);
-      if (lifecycleState === 'ENABLED') {
-        await this.assertSecretUseForMonitor(context, monitorId);
-      }
-      return await this.monitors.updateLifecycle(context.organizationId, monitorId, lifecycleState);
+      return await this.monitors.updateLifecycle(
+        context.organizationId,
+        monitorId,
+        lifecycleState,
+        requestCan(context, PERMISSIONS.SECRET_USE),
+      );
     } catch (error) {
       if (error instanceof MonitorInputError) {
         throw new BadRequestException({
@@ -733,6 +743,9 @@ export class MonitorsService {
       }
       if (error instanceof ArchivedMonitorLifecycleError) {
         throw new ConflictException({ code: 'MONITOR_ARCHIVED', message: error.message });
+      }
+      if (error instanceof WorkspaceSecretUseAuthorizationError) {
+        throw workspaceSecretUseForbidden();
       }
       throw error;
     }
@@ -750,8 +763,12 @@ export class MonitorsService {
           locations: ['Multi-location execution is not enabled.'],
         });
       }
-      await this.assertSecretUseForMonitor(context, monitorId);
-      return await this.monitors.updateLocations(context.organizationId, monitorId, locations);
+      return await this.monitors.updateLocations(
+        context.organizationId,
+        monitorId,
+        locations,
+        requestCan(context, PERMISSIONS.SECRET_USE),
+      );
     } catch (error) {
       if (error instanceof MonitorInputError) {
         throw new BadRequestException({
@@ -766,14 +783,20 @@ export class MonitorsService {
       if (error instanceof MonitorLocationUnavailableError) {
         throw new ConflictException({ code: 'PROBE_LOCATION_UNAVAILABLE', message: error.message });
       }
+      if (error instanceof WorkspaceSecretUseAuthorizationError) {
+        throw workspaceSecretUseForbidden();
+      }
       throw error;
     }
   }
 
   async runNow(context: RequestContext, monitorId: string): Promise<CheckRoundRecord> {
     try {
-      await this.assertSecretUseForMonitor(context, monitorId);
-      return await this.manualRounds.create(context.organizationId, monitorId);
+      return await this.manualRounds.create(
+        context.organizationId,
+        monitorId,
+        requestCan(context, PERMISSIONS.SECRET_USE),
+      );
     } catch (error) {
       if (error instanceof MonitorNotFoundError) {
         throw new NotFoundException({ code: 'MONITOR_NOT_FOUND', message: error.message });
@@ -781,6 +804,10 @@ export class MonitorsService {
 
       if (error instanceof MonitorNotRunnableError) {
         throw new ConflictException({ code: 'MONITOR_NOT_RUNNABLE', message: error.message });
+      }
+
+      if (error instanceof WorkspaceSecretUseAuthorizationError) {
+        throw workspaceSecretUseForbidden();
       }
 
       throw error;
@@ -869,14 +896,13 @@ export class MonitorsService {
       });
     }
   }
+}
 
-  private async assertSecretUseForMonitor(
-    context: RequestContext,
-    monitorId: string,
-  ): Promise<void> {
-    const monitor = await this.monitors.findForOrganization(context.organizationId, monitorId);
-    this.assertSecretUse(context, monitor !== null && monitorUsesWorkspaceSecrets(monitor));
-  }
+function workspaceSecretUseForbidden(): ForbiddenException {
+  return new ForbiddenException({
+    code: 'WORKSPACE_SECRET_USE_FORBIDDEN',
+    message: 'Permission to use workspace secrets is required for this operation.',
+  });
 }
 
 function workspaceSecretReferenceValidationError(
@@ -887,13 +913,6 @@ function workspaceSecretReferenceValidationError(
     message: 'A referenced workspace secret is unavailable.',
     fields: { [field]: ['Choose an active secret from this workspace.'] },
   });
-}
-
-function monitorUsesWorkspaceSecrets(monitor: MonitorRecord): boolean {
-  return (
-    requestHeadersUseWorkspaceSecrets(monitor.requestHeaders) ||
-    workflowUsesWorkspaceSecrets(monitor.apiWorkflow)
-  );
 }
 
 function requestHeadersUseWorkspaceSecrets(value: unknown): boolean {

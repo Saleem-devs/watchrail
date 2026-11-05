@@ -6,6 +6,7 @@ import {
   loadHeaderEncryptionKeyring,
   resolveRequestHeaders,
   resolveRequestHeadersWithWorkspaceSecrets,
+  RequestHeaderStorageError,
   StoredRequestHeaderResolutionError,
   storeRequestHeaders,
 } from './index.js';
@@ -177,5 +178,14 @@ describe('HTTP header encryption', () => {
         keyring,
       ),
     ).toThrow('after changing its value source');
+
+    expect(() =>
+      storeRequestHeaders(
+        [{ name: 'authorization', sensitive: true, value: '' }],
+        stored,
+        context,
+        keyring,
+      ),
+    ).toThrow(RequestHeaderStorageError);
   });
 });

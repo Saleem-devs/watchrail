@@ -28,6 +28,13 @@ export class StoredRequestHeaderResolutionError extends Error {
   }
 }
 
+export class RequestHeaderStorageError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RequestHeaderStorageError';
+  }
+}
+
 class UnavailableHeaderEncryptionKeyError extends Error {}
 
 export function loadHeaderEncryptionKeyring(
@@ -132,14 +139,23 @@ export function storeRequestHeaders(
     if ('retain' in update) {
       const previous = existingByName.get(update.name);
       if (!previous?.sensitive) {
-        throw new Error(`Cannot retain missing sensitive header ${update.name}.`);
+        throw new RequestHeaderStorageError(
+          `Cannot retain missing sensitive header ${update.name}.`,
+        );
       }
       if ('secretReference' in previous) {
-        throw new Error(
+        throw new RequestHeaderStorageError(
           `Cannot retain missing sensitive header ${update.name} after changing its value source.`,
         );
       }
       return previous;
+    }
+
+    const previous = existingByName.get(update.name);
+    if (update.value.length === 0 && previous?.sensitive && 'secretReference' in previous) {
+      throw new RequestHeaderStorageError(
+        `A replacement value is required for sensitive header ${update.name} after changing its value source.`,
+      );
     }
 
     return {

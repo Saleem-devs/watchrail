@@ -14,6 +14,7 @@ import {
   type CheckRoundRecord,
 } from './schema.js';
 import { createRoundLocationSnapshot, createRoutedAssignment } from './round-routing.js';
+import { assertWorkspaceSecretUseAuthorized } from './workspace-secret-use-policy.js';
 
 export class MonitorNotFoundError extends Error {
   constructor() {
@@ -46,7 +47,11 @@ export class ManualRoundRepository {
     private readonly multiLocationExecutionEnabled = false,
   ) {}
 
-  async create(organizationId: string, monitorId: string): Promise<CheckRoundRecord> {
+  async create(
+    organizationId: string,
+    monitorId: string,
+    workspaceSecretUseAuthorized = true,
+  ): Promise<CheckRoundRecord> {
     return this.db.transaction(async (tx) => {
       /*
        * Lock the monitor row.
@@ -59,6 +64,8 @@ export class ManualRoundRepository {
         .select({
           id: monitors.id,
           lifecycleState: monitors.lifecycleState,
+          requestHeaders: monitors.requestHeaders,
+          apiWorkflow: monitors.apiWorkflow,
         })
         .from(monitors)
         .where(and(eq(monitors.id, monitorId), eq(monitors.organizationId, organizationId)))
@@ -72,6 +79,7 @@ export class ManualRoundRepository {
       if (monitor.lifecycleState !== 'ENABLED') {
         throw new MonitorNotRunnableError(monitor.lifecycleState);
       }
+      assertWorkspaceSecretUseAuthorized(monitor, workspaceSecretUseAuthorized);
 
       /*
        * Configuration versions are append-only.

@@ -30,3 +30,4 @@ export * from './uptime-read-repository.js';
 export * from './webhook-endpoint-repository.js';
 export * from './webhook-delivery-read-repository.js';
 export * from './workspace-secret-repository.js';
+export * from './workspace-secret-use-policy.js';

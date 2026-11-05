@@ -29,6 +29,7 @@ import {
   storeResponseAssertions,
 } from '@watchrail/assertion-security';
 import {
+  RequestHeaderStorageError,
   resolveRequestHeadersWithWorkspaceSecrets,
   storeRequestHeaders,
 } from '@watchrail/http-header-security';
@@ -200,7 +201,7 @@ export class MonitorConfigurationTestService {
         },
       });
     }
-    if (error instanceof Error && error.message.startsWith('Cannot retain missing sensitive')) {
+    if (error instanceof RequestHeaderStorageError) {
       throw new BadRequestException({
         code: 'VALIDATION_FAILED',
         message: 'Request headers are invalid.',
