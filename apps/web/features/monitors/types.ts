@@ -141,11 +141,19 @@ export type ApiWorkflowRequestBody =
       type: 'JSON' | 'FORM_URLENCODED' | 'RAW';
       sensitive: true;
       hasValue: true;
+      secretReference?: { contractVersion: 1; secretId: string };
+      contentType?: string;
     }
   | {
       type: 'JSON' | 'FORM_URLENCODED' | 'RAW';
       sensitive: true;
       retain: true;
+    }
+  | {
+      type: 'JSON' | 'FORM_URLENCODED' | 'RAW';
+      sensitive: true;
+      secretReference: { contractVersion: 1; secretId: string };
+      contentType?: string;
     };
 
 export interface ApiWorkflowStepConfiguration {

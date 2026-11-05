@@ -9,6 +9,9 @@ import {
   normalizeLocationSnapshot,
   parseStoredAssertionConfiguration,
   type ResponseAssertionConfigurationV1,
+  type StoredHeaderAssertion,
+  type StoredJsonBodyAssertion,
+  type StoredTextBodyAssertion,
   type HttpMonitorSettings,
   type HttpMonitorMethod,
   type HttpStatusPolicy,
@@ -129,6 +132,7 @@ export class MonitorRepository {
         organizationId,
         created.id,
         created.requestHeaders,
+        created.assertions,
         created.apiWorkflow,
       );
 
@@ -378,6 +382,7 @@ export class MonitorRepository {
         organizationId,
         monitorId,
         requestHeaders,
+        configuration.assertions,
         configuration.apiWorkflow,
       );
 
@@ -465,6 +470,7 @@ export class MonitorRepository {
         organizationId,
         monitorId,
         requestHeaders,
+        assertions,
         configuration.apiWorkflow,
       );
       return updated;
@@ -741,6 +747,14 @@ export class MonitorRepository {
         tlsPolicy: configuration.tlsPolicy,
         locations: configuration.locations,
       });
+      await reconcileWorkspaceSecretBindings(
+        tx,
+        organizationId,
+        monitorId,
+        configuration.requestHeaders,
+        assertions,
+        configuration.apiWorkflow,
+      );
       return updated;
     });
   }
@@ -812,6 +826,7 @@ export class MonitorRepository {
         organizationId,
         monitorId,
         configuration.requestHeaders,
+        configuration.assertions,
         apiWorkflow,
       );
       return updated;
@@ -1044,9 +1059,10 @@ async function reconcileWorkspaceSecretBindings(
   organizationId: string,
   monitorId: string,
   requestHeaders: readonly StoredRequestHeader[],
+  assertions: ResponseAssertionConfigurationV1,
   apiWorkflow: StoredApiWorkflowConfigurationV1 | null,
 ): Promise<void> {
-  const bindings = collectWorkspaceSecretBindings(requestHeaders, apiWorkflow);
+  const bindings = collectWorkspaceSecretBindings(requestHeaders, assertions, apiWorkflow);
   const secretIds = [...new Set(bindings.map(({ secretId }) => secretId))].sort();
 
   // Archive takes the same row lock. Locking in stable order makes reference creation and
@@ -1087,6 +1103,7 @@ async function reconcileWorkspaceSecretBindings(
 
 function collectWorkspaceSecretBindings(
   requestHeaders: readonly StoredRequestHeader[],
+  assertions: ResponseAssertionConfigurationV1,
   apiWorkflow: StoredApiWorkflowConfigurationV1 | null,
 ): MonitorSecretBinding[] {
   const bindings: MonitorSecretBinding[] = [];
@@ -1098,7 +1115,14 @@ function collectWorkspaceSecretBindings(
       });
     }
   }
+  collectAssertionBindings(bindings, assertions, 'assertions');
   for (const step of apiWorkflow?.steps ?? []) {
+    if (step.requestBody.type !== 'NONE' && 'secretReference' in step.requestBody) {
+      bindings.push({
+        secretId: step.requestBody.secretReference.secretId,
+        resourcePath: `workflow.steps.${step.id}.requestBody`,
+      });
+    }
     for (const header of step.requestHeaders) {
       if (header.sensitive && 'secretReference' in header) {
         bindings.push({
@@ -1107,8 +1131,35 @@ function collectWorkspaceSecretBindings(
         });
       }
     }
+    collectAssertionBindings(bindings, step.assertions, `workflow.steps.${step.id}.assertions`);
   }
   return bindings;
+}
+
+function collectAssertionBindings(
+  bindings: MonitorSecretBinding[],
+  configuration: ResponseAssertionConfigurationV1,
+  path: string,
+): void {
+  const groups: ReadonlyArray<
+    readonly (StoredHeaderAssertion | StoredTextBodyAssertion | StoredJsonBodyAssertion)[]
+  > = [
+    configuration.assertions.headers,
+    configuration.assertions.textBody,
+    configuration.assertions.jsonBody,
+  ];
+  const fields = ['headers', 'textBody', 'jsonBody'] as const;
+  groups.forEach((assertions, groupIndex) => {
+    const field = fields[groupIndex]!;
+    assertions.forEach((assertion, index) => {
+      if ('target' in assertion && 'secretReference' in assertion.target) {
+        bindings.push({
+          secretId: assertion.target.secretReference.secretId,
+          resourcePath: `${path}.${field}.${index}`,
+        });
+      }
+    });
+  });
 }
 
 function assertTlsPolicyUrlCompatibility(policy: { type: string }, url: string): void {

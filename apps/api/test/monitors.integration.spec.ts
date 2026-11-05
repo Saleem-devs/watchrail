@@ -15,7 +15,11 @@ import {
   MultiLocationRoundFinalizationRepository,
   ProjectRepository,
 } from '@watchrail/db';
-import { createMonitor, parseNewProject } from '@watchrail/domain';
+import {
+  createMonitor,
+  parseNewProject,
+  type ApiWorkflowConfigurationInput,
+} from '@watchrail/domain';
 import type { WatchrailDatabase } from '@watchrail/db';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -480,6 +484,76 @@ describe('monitor API', () => {
       })
       .expect(400)
       .expect(({ body }) => expect(body).toMatchObject({ code: 'VALIDATION_FAILED' }));
+  });
+
+  it('stores workflow body and assertion vault references without exposing secret values', async () => {
+    const secretValue = 'WORKFLOW_BODY_AND_ASSERTION_SENTINEL';
+    const secret = await request(app.getHttpServer())
+      .post('/api/workspace-secrets')
+      .send({ key: 'workflow_payload', value: secretValue })
+      .expect(201);
+    const secretId = secret.body.data.id as string;
+    const workflow = apiWorkflowConfiguration() as unknown as ApiWorkflowConfigurationInput;
+    workflow.steps[0] = {
+      ...workflow.steps[0]!,
+      requestBody: {
+        type: 'JSON',
+        sensitive: true,
+        secretReference: { contractVersion: 1, secretId },
+      },
+      assertions: {
+        headers: [],
+        textBody: [
+          {
+            operator: 'contains',
+            target: {
+              sensitive: true,
+              secretReference: { contractVersion: 1, secretId },
+            },
+          },
+        ],
+        jsonBody: [],
+      },
+    };
+
+    const created = await request(app.getHttpServer())
+      .post(`/api/monitors?projectId=${projectId}`)
+      .send({ type: 'API_WORKFLOW', name: 'Vault workflow', workflow })
+      .expect(201);
+
+    expect(created.body.data.configuration.workflow.steps[0]).toMatchObject({
+      requestBody: {
+        type: 'JSON',
+        sensitive: true,
+        hasValue: true,
+        secretReference: { contractVersion: 1, secretId },
+      },
+      assertions: {
+        assertions: {
+          textBody: [
+            {
+              target: {
+                sensitive: true,
+                hasValue: true,
+                secretReference: { contractVersion: 1, secretId },
+              },
+            },
+          ],
+        },
+      },
+    });
+    expect(JSON.stringify(created.body)).not.toContain(secretValue);
+    const bindings = await database.$client.query<{ resource_path: string }>(
+      `select resource_path
+       from workspace_secret_bindings
+       where resource_id = $1
+       order by resource_path`,
+      [created.body.data.id],
+    );
+    expect(bindings.rows).toEqual([
+      { resource_path: 'workflow.steps.authenticate.assertions.textBody.0' },
+      { resource_path: 'workflow.steps.authenticate.requestBody' },
+    ]);
   });
 
   it('replaces the immutable execution location with an owned active remote location', async () => {
@@ -1101,6 +1175,64 @@ describe('monitor API', () => {
       [monitorId],
     );
     expect(remaining.rows).toEqual([]);
+  });
+
+  it('binds workspace-secret assertion values and presents only their reference metadata', async () => {
+    const secretValue = 'WATCHRAIL_ASSERTION_VAULT_SENTINEL';
+    const secret = await request(app.getHttpServer())
+      .post('/api/workspace-secrets')
+      .send({ key: 'expected_state', value: secretValue })
+      .expect(201);
+    const secretId = secret.body.data.id as string;
+
+    const created = await request(app.getHttpServer())
+      .post(`/api/monitors?projectId=${projectId}`)
+      .send({
+        name: 'Vault assertion monitor',
+        url: 'https://example.com/health',
+        assertions: {
+          headers: [],
+          textBody: [
+            {
+              operator: 'contains',
+              target: {
+                sensitive: true,
+                secretReference: { contractVersion: 1, secretId },
+              },
+            },
+          ],
+          jsonBody: [],
+        },
+      })
+      .expect(201);
+
+    expect(created.body.data.assertions).toMatchObject({
+      assertions: {
+        textBody: [
+          {
+            target: {
+              sensitive: true,
+              hasValue: true,
+              secretReference: { contractVersion: 1, secretId },
+            },
+          },
+        ],
+      },
+    });
+    expect(JSON.stringify(created.body)).not.toContain(secretValue);
+
+    const bindings = await database.$client.query<{
+      secret_id: string;
+      resource_path: string;
+    }>(
+      `select secret_id, resource_path
+       from workspace_secret_bindings
+       where resource_id = $1`,
+      [created.body.data.id],
+    );
+    expect(bindings.rows).toEqual([
+      { secret_id: secretId, resource_path: 'assertions.textBody.0' },
+    ]);
   });
 
   it('rejects unavailable workspace-secret references on the relevant form field', async () => {

@@ -27,7 +27,7 @@ import {
   StoredRequestHeadersInvariantError,
 } from '@watchrail/domain';
 import {
-  resolveResponseAssertions,
+  resolveResponseAssertionsWithWorkspaceSecrets,
   StoredAssertionResolutionError,
   type AssertionEncryptionKeyring,
 } from '@watchrail/assertion-security';
@@ -201,6 +201,7 @@ export class CheckRoundJobHandler implements CheckJobHandler {
       let requestHeaders;
       let assertions;
       try {
+        const resolveWorkspaceSecret = this.executionSecretResolver(claim.execution.organizationId);
         requestHeaders = await resolveRequestHeadersWithWorkspaceSecrets(
           claim.execution.requestHeaders,
           {
@@ -208,9 +209,9 @@ export class CheckRoundJobHandler implements CheckJobHandler {
             monitorId: claim.execution.monitorId,
           },
           this.headerEncryptionKeyring,
-          this.executionSecretResolver(claim.execution.organizationId),
+          resolveWorkspaceSecret,
         );
-        assertions = resolveResponseAssertions(
+        assertions = await resolveResponseAssertionsWithWorkspaceSecrets(
           claim.execution.assertions,
           claim.execution.method,
           {
@@ -218,6 +219,7 @@ export class CheckRoundJobHandler implements CheckJobHandler {
             monitorId: claim.execution.monitorId,
           },
           this.assertionEncryptionKeyring,
+          resolveWorkspaceSecret,
         );
       } catch (error) {
         if (

@@ -2,6 +2,7 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import {
   ASSERTION_LIMITS,
   AssertionInputError,
+  parseWorkspaceSecretReference,
   parseResponseAssertions,
   parseStoredAssertionConfiguration,
   type EncryptedAssertionValueV1,
@@ -12,7 +13,11 @@ import {
   type StoredJsonAssertionTarget,
   type StoredResponseAssertionsV1,
   type StoredStringAssertionTarget,
+  type WorkspaceSecretReferenceV1,
+  WorkspaceSecretReferenceInputError,
 } from '@watchrail/domain';
+
+export type WorkspaceSecretValueResolver = (secretId: string) => Promise<string>;
 
 export interface AssertionEncryptionKeyring {
   activeKeyId: string;
@@ -86,11 +91,19 @@ export function storeResponseAssertions(
 ): ResponseAssertionConfigurationV1 {
   const existing = parseStoredAssertionConfiguration(existingValue);
   const retained = findRetainedTargets(input);
+  const references = findReferencedTargets(input);
   if (!options.allowRetain && retained.length > 0) {
     throw new AssertionRetentionError('Cannot retain assertion secrets during monitor creation.');
   }
-  const normalized = parseResponseAssertions(replaceRetainedTargets(input), method);
-  const stored = storeNormalized(normalized, existing.assertions, retained, context, keyring);
+  const normalized = parseResponseAssertions(replaceSpecialTargets(input), method);
+  const stored = storeNormalized(
+    normalized,
+    existing.assertions,
+    retained,
+    references,
+    context,
+    keyring,
+  );
   return parseStoredAssertionConfiguration({ contractVersion: 1, assertions: stored });
 }
 
@@ -99,6 +112,7 @@ export function resolveResponseAssertions(
   method: HttpMonitorMethod,
   context: AssertionEncryptionContext,
   keyring: AssertionEncryptionKeyring,
+  resolveWorkspaceSecret?: (secretId: string) => string,
 ): ResponseAssertions {
   const stored = parseStoredAssertionConfiguration(value).assertions;
   const input = {
@@ -110,6 +124,7 @@ export function resolveResponseAssertions(
               assertion.target,
               contextFor(context, 'HEADER', index, assertion.name, assertion.operator),
               keyring,
+              resolveWorkspaceSecret,
             ),
           }
         : assertion,
@@ -120,6 +135,7 @@ export function resolveResponseAssertions(
         assertion.target,
         contextFor(context, 'TEXT_BODY', index, null, assertion.operator),
         keyring,
+        resolveWorkspaceSecret,
       ),
     })),
     jsonBody: stored.jsonBody.map((assertion, index) =>
@@ -130,9 +146,70 @@ export function resolveResponseAssertions(
               assertion.target,
               contextFor(context, 'JSON_BODY', index, assertion.selector, assertion.operator),
               keyring,
+              resolveWorkspaceSecret,
             ),
           }
         : assertion,
+    ),
+  };
+  try {
+    return parseResponseAssertions(input, method);
+  } catch (error) {
+    if (error instanceof AssertionInputError)
+      throw new StoredAssertionResolutionError({ cause: error });
+    throw error;
+  }
+}
+
+export async function resolveResponseAssertionsWithWorkspaceSecrets(
+  value: unknown,
+  method: HttpMonitorMethod,
+  context: AssertionEncryptionContext,
+  keyring: AssertionEncryptionKeyring,
+  resolveWorkspaceSecret: WorkspaceSecretValueResolver,
+): Promise<ResponseAssertions> {
+  const stored = parseStoredAssertionConfiguration(value).assertions;
+  const input = {
+    headers: await Promise.all(
+      stored.headers.map(async (assertion, index) =>
+        'target' in assertion
+          ? {
+              ...assertion,
+              target: await resolveStringTargetAsync(
+                assertion.target,
+                contextFor(context, 'HEADER', index, assertion.name, assertion.operator),
+                keyring,
+                resolveWorkspaceSecret,
+              ),
+            }
+          : assertion,
+      ),
+    ),
+    textBody: await Promise.all(
+      stored.textBody.map(async (assertion, index) => ({
+        ...assertion,
+        target: await resolveStringTargetAsync(
+          assertion.target,
+          contextFor(context, 'TEXT_BODY', index, null, assertion.operator),
+          keyring,
+          resolveWorkspaceSecret,
+        ),
+      })),
+    ),
+    jsonBody: await Promise.all(
+      stored.jsonBody.map(async (assertion, index) =>
+        'target' in assertion
+          ? {
+              ...assertion,
+              target: await resolveJsonTargetAsync(
+                assertion.target,
+                contextFor(context, 'JSON_BODY', index, assertion.selector, assertion.operator),
+                keyring,
+                resolveWorkspaceSecret,
+              ),
+            }
+          : assertion,
+      ),
     ),
   };
   try {
@@ -148,6 +225,7 @@ function storeNormalized(
   assertions: ResponseAssertions,
   existing: StoredResponseAssertionsV1,
   retained: readonly RetainedTarget[],
+  references: ReadonlyMap<string, ReferencedTarget>,
   context: AssertionEncryptionContext,
   keyring: AssertionEncryptionKeyring,
 ): StoredResponseAssertionsV1 {
@@ -164,32 +242,38 @@ function storeNormalized(
       );
       return {
         ...assertion,
-        target: retainedKeys.has(`HEADER:${index}`)
-          ? retainString(existing.headers[index], assertion, 'HEADER', index)
-          : storeStringTarget(assertion.target, encryptionContext, keyring),
+        target: references.has(`HEADER:${index}`)
+          ? referencedString(references.get(`HEADER:${index}`)!)
+          : retainedKeys.has(`HEADER:${index}`)
+            ? retainString(existing.headers[index], assertion, 'HEADER', index)
+            : storeStringTarget(assertion.target, encryptionContext, keyring),
       };
     }),
     textBody: assertions.textBody.map((assertion, index) => ({
       ...assertion,
       target: retainedKeys.has(`TEXT_BODY:${index}`)
         ? retainString(existing.textBody[index], assertion, 'TEXT_BODY', index)
-        : storeStringTarget(
-            assertion.target,
-            contextFor(context, 'TEXT_BODY', index, null, assertion.operator),
-            keyring,
-          ),
+        : references.has(`TEXT_BODY:${index}`)
+          ? referencedString(references.get(`TEXT_BODY:${index}`)!)
+          : storeStringTarget(
+              assertion.target,
+              contextFor(context, 'TEXT_BODY', index, null, assertion.operator),
+              keyring,
+            ),
     })),
     jsonBody: assertions.jsonBody.map((assertion, index) => {
       if (!('target' in assertion)) return assertion;
       return {
         ...assertion,
-        target: retainedKeys.has(`JSON_BODY:${index}`)
-          ? retainJson(existing.jsonBody[index], assertion, index)
-          : storeJsonTarget(
-              assertion.target,
-              contextFor(context, 'JSON_BODY', index, assertion.selector, assertion.operator),
-              keyring,
-            ),
+        target: references.has(`JSON_BODY:${index}`)
+          ? referencedJson(references.get(`JSON_BODY:${index}`)!)
+          : retainedKeys.has(`JSON_BODY:${index}`)
+            ? retainJson(existing.jsonBody[index], assertion, index)
+            : storeJsonTarget(
+                assertion.target,
+                contextFor(context, 'JSON_BODY', index, assertion.selector, assertion.operator),
+                keyring,
+              ),
       };
     }),
   };
@@ -264,22 +348,65 @@ function resolveStringTarget(
   target: StoredStringAssertionTarget,
   context: FullContext,
   keyring: AssertionEncryptionKeyring,
+  resolveWorkspaceSecret?: (secretId: string) => string,
 ) {
-  return target.sensitive
-    ? { sensitive: true, value: decodeString(decrypt(target.encryptedValue, context, keyring)) }
-    : target;
+  if (!target.sensitive) return target;
+  if ('secretReference' in target) {
+    if (!resolveWorkspaceSecret) throw new StoredAssertionResolutionError();
+    return { sensitive: true, value: resolveWorkspaceSecret(target.secretReference.secretId) };
+  }
+  return { sensitive: true, value: decodeString(decrypt(target.encryptedValue, context, keyring)) };
 }
 
 function resolveJsonTarget(
   target: StoredJsonAssertionTarget,
   context: FullContext,
   keyring: AssertionEncryptionKeyring,
+  resolveWorkspaceSecret?: (secretId: string) => string,
 ) {
   if (!target.sensitive) return target;
+  if ('secretReference' in target) {
+    if (!resolveWorkspaceSecret) throw new StoredAssertionResolutionError();
+    return {
+      sensitive: true,
+      value: decodeWorkspaceJsonScalar(
+        resolveWorkspaceSecret(target.secretReference.secretId),
+        target.valueType,
+      ),
+    };
+  }
   return {
     sensitive: true,
     value: decodeJsonScalar(decrypt(target.encryptedValue, context, keyring)),
   };
+}
+
+async function resolveStringTargetAsync(
+  target: StoredStringAssertionTarget,
+  context: FullContext,
+  keyring: AssertionEncryptionKeyring,
+  resolveWorkspaceSecret: WorkspaceSecretValueResolver,
+) {
+  return 'secretReference' in target
+    ? { sensitive: true, value: await resolveWorkspaceSecret(target.secretReference.secretId) }
+    : resolveStringTarget(target, context, keyring);
+}
+
+async function resolveJsonTargetAsync(
+  target: StoredJsonAssertionTarget,
+  context: FullContext,
+  keyring: AssertionEncryptionKeyring,
+  resolveWorkspaceSecret: WorkspaceSecretValueResolver,
+) {
+  return 'secretReference' in target
+    ? {
+        sensitive: true,
+        value: decodeWorkspaceJsonScalar(
+          await resolveWorkspaceSecret(target.secretReference.secretId),
+          target.valueType,
+        ),
+      }
+    : resolveJsonTarget(target, context, keyring);
 }
 
 interface FullContext extends AssertionEncryptionContext {
@@ -411,6 +538,79 @@ interface RetainedTarget {
   index: number;
 }
 
+interface ReferencedTarget extends RetainedTarget {
+  secretReference: WorkspaceSecretReferenceV1;
+  valueType?: JsonScalarTarget['type'];
+}
+
+function findReferencedTargets(value: unknown): ReadonlyMap<string, ReferencedTarget> {
+  const result = new Map<string, ReferencedTarget>();
+  if (!isRecord(value)) return result;
+  for (const [field, source] of [
+    ['headers', 'HEADER'],
+    ['textBody', 'TEXT_BODY'],
+    ['jsonBody', 'JSON_BODY'],
+  ] as const) {
+    const assertions = value[field];
+    if (!Array.isArray(assertions)) continue;
+    assertions.forEach((assertion, index) => {
+      if (!isRecord(assertion) || !isRecord(assertion.target)) return;
+      const target = assertion.target;
+      if (target.sensitive !== true || !('secretReference' in target)) return;
+      const expectedKeys =
+        source === 'JSON_BODY'
+          ? ['secretReference', 'sensitive', 'valueType']
+          : ['secretReference', 'sensitive'];
+      if (!hasExactKeys(target, expectedKeys)) {
+        throw new AssertionInputError([
+          `${source === 'JSON_BODY' ? 'JSON-body' : source === 'TEXT_BODY' ? 'Text-body' : 'Header'} assertion ${index + 1} has an invalid workspace-secret target.`,
+        ]);
+      }
+      let secretReference: WorkspaceSecretReferenceV1;
+      try {
+        secretReference = parseWorkspaceSecretReference(target.secretReference);
+      } catch (error) {
+        if (error instanceof WorkspaceSecretReferenceInputError) {
+          throw new AssertionInputError([
+            `${source === 'JSON_BODY' ? 'JSON-body' : source === 'TEXT_BODY' ? 'Text-body' : 'Header'} assertion ${index + 1} needs a valid workspace secret.`,
+          ]);
+        }
+        throw error;
+      }
+      if (source === 'JSON_BODY') {
+        if (!['string', 'number', 'boolean', 'null'].includes(String(target.valueType))) {
+          throw new AssertionInputError([
+            `JSON-body assertion ${index + 1} needs a value type for its workspace secret.`,
+          ]);
+        }
+        result.set(`${source}:${index}`, {
+          source,
+          index,
+          secretReference,
+          valueType: target.valueType as JsonScalarTarget['type'],
+        });
+      } else {
+        result.set(`${source}:${index}`, { source, index, secretReference });
+      }
+    });
+  }
+  return result;
+}
+
+function referencedString(reference: ReferencedTarget): StoredStringAssertionTarget {
+  return { sensitive: true, secretReference: reference.secretReference };
+}
+
+function referencedJson(reference: ReferencedTarget): StoredJsonAssertionTarget {
+  if (!reference.valueType)
+    throw new AssertionInputError(['JSON assertion value type is missing.']);
+  return {
+    sensitive: true,
+    valueType: reference.valueType,
+    secretReference: reference.secretReference,
+  };
+}
+
 function findRetainedTargets(value: unknown): RetainedTarget[] {
   if (!isRecord(value)) return [];
   const result: RetainedTarget[] = [];
@@ -434,7 +634,7 @@ function findRetainedTargets(value: unknown): RetainedTarget[] {
   return result;
 }
 
-function replaceRetainedTargets(value: unknown): unknown {
+function replaceSpecialTargets(value: unknown): unknown {
   if (!isRecord(value)) return value;
   return Object.fromEntries(
     Object.entries(value).map(([field, assertions]) => [
@@ -445,18 +645,51 @@ function replaceRetainedTargets(value: unknown): unknown {
               !isRecord(assertion) ||
               !isRecord(assertion.target) ||
               assertion.target.sensitive !== true ||
-              assertion.target.retain !== true
+              (assertion.target.retain !== true && !('secretReference' in assertion.target))
             )
               return assertion;
             const target =
               field === 'jsonBody'
-                ? { sensitive: true, value: { type: 'null' } }
+                ? {
+                    sensitive: true,
+                    value: {
+                      type: 'valueType' in assertion.target ? assertion.target.valueType : 'null',
+                      ...('valueType' in assertion.target && assertion.target.valueType === 'string'
+                        ? { value: '' }
+                        : 'valueType' in assertion.target && assertion.target.valueType === 'number'
+                          ? { value: '0' }
+                          : 'valueType' in assertion.target &&
+                              assertion.target.valueType === 'boolean'
+                            ? { value: false }
+                            : {}),
+                    },
+                  }
                 : { sensitive: true, value: '' };
             return { ...assertion, target };
           })
         : assertions,
     ]),
   );
+}
+
+function decodeWorkspaceJsonScalar(
+  value: string,
+  type: JsonScalarTarget['type'],
+): JsonScalarTarget {
+  switch (type) {
+    case 'string':
+      return { type, value };
+    case 'number':
+      return { type, value };
+    case 'boolean':
+      if (value === 'true') return { type, value: true };
+      if (value === 'false') return { type, value: false };
+      break;
+    case 'null':
+      if (value === 'null') return { type };
+      break;
+  }
+  throw new StoredAssertionResolutionError();
 }
 
 function decodeBase64Key(value: string): Buffer {
@@ -468,4 +701,10 @@ function decodeBase64Key(value: string): Buffer {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  const actual = Object.keys(value).sort();
+  const required = [...expected].sort();
+  return actual.length === required.length && actual.every((key, index) => key === required[index]);
 }

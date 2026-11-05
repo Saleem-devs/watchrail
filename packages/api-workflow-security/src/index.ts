@@ -9,6 +9,7 @@ import {
 } from '@watchrail/http-header-security';
 import {
   resolveResponseAssertions,
+  resolveResponseAssertionsWithWorkspaceSecrets,
   type AssertionEncryptionKeyring,
 } from '@watchrail/assertion-security';
 
@@ -46,6 +47,7 @@ export function resolveApiWorkflowConfiguration(
         step.method,
         { ...context, scope },
         keyrings.assertions,
+        resolveWorkspaceSecret,
       );
       return {
         id: step.id,
@@ -66,6 +68,7 @@ export function resolveApiWorkflowConfiguration(
           step.requestBody,
           { ...context, scope },
           keyrings.headers,
+          resolveWorkspaceSecret,
         ),
         headerAssertions: assertions.headers,
         textBodyAssertions: assertions.textBody,
@@ -87,11 +90,12 @@ export async function resolveApiWorkflowConfigurationWithWorkspaceSecrets(
     steps: await Promise.all(
       stored.steps.map(async (step) => {
         const scope = workflowStepScope(step.id);
-        const assertions = resolveResponseAssertions(
+        const assertions = await resolveResponseAssertionsWithWorkspaceSecrets(
           step.assertions,
           step.method,
           { ...context, scope },
           keyrings.assertions,
+          resolveWorkspaceSecret,
         );
         return {
           id: step.id,
@@ -108,10 +112,11 @@ export async function resolveApiWorkflowConfigurationWithWorkspaceSecrets(
             keyrings.headers,
             resolveWorkspaceSecret,
           ),
-          requestBody: resolveWorkflowRequestBody(
+          requestBody: await resolveWorkflowRequestBodyWithWorkspaceSecrets(
             step.requestBody,
             { ...context, scope },
             keyrings.headers,
+            resolveWorkspaceSecret,
           ),
           headerAssertions: assertions.headers,
           textBodyAssertions: assertions.textBody,
@@ -127,8 +132,14 @@ function resolveWorkflowRequestBody(
   stored: ReturnType<typeof parseStoredApiWorkflowConfiguration>['steps'][number]['requestBody'],
   context: ApiWorkflowEncryptionContext & { scope: string },
   keyring: HeaderEncryptionKeyring,
+  resolveWorkspaceSecret?: (secretId: string) => string,
 ): HttpRequestBody {
   if (stored.type === 'NONE') return stored;
+  if ('secretReference' in stored) {
+    if (!resolveWorkspaceSecret)
+      throw new ApiWorkflowResolutionError('Workspace secret is unavailable.');
+    return workflowBodyFromSecret(stored, resolveWorkspaceSecret(stored.secretReference.secretId));
+  }
   const plaintext = decryptHeaderValue(
     stored.encryptedValue,
     { ...context, normalizedHeaderName: API_WORKFLOW_REQUEST_BODY_ENCRYPTION_NAME },
@@ -143,6 +154,39 @@ function resolveWorkflowRequestBody(
       cause: error,
     });
   }
+}
+
+async function resolveWorkflowRequestBodyWithWorkspaceSecrets(
+  stored: ReturnType<typeof parseStoredApiWorkflowConfiguration>['steps'][number]['requestBody'],
+  context: ApiWorkflowEncryptionContext & { scope: string },
+  keyring: HeaderEncryptionKeyring,
+  resolveWorkspaceSecret: WorkspaceSecretValueResolver,
+): Promise<HttpRequestBody> {
+  if ('secretReference' in stored) {
+    return workflowBodyFromSecret(
+      stored,
+      await resolveWorkspaceSecret(stored.secretReference.secretId),
+    );
+  }
+  return resolveWorkflowRequestBody(stored, context, keyring);
+}
+
+function workflowBodyFromSecret(
+  stored: Exclude<
+    ReturnType<typeof parseStoredApiWorkflowConfiguration>['steps'][number]['requestBody'],
+    { type: 'NONE' } | { encryptedValue: unknown }
+  >,
+  value: string,
+): HttpRequestBody {
+  if (stored.type === 'JSON') return { type: 'JSON', value };
+  if (stored.type === 'RAW') return { type: 'RAW', contentType: stored.contentType!, value };
+  return {
+    type: 'FORM_URLENCODED',
+    fields: [...new URLSearchParams(value)].map(([name, fieldValue]) => ({
+      name,
+      value: fieldValue,
+    })),
+  };
 }
 
 function workflowStepScope(stepId: string): string {

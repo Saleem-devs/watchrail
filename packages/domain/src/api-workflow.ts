@@ -6,6 +6,7 @@ import type {
 } from './request-header.js';
 import type { TlsCertificatePolicy } from './tls.js';
 import type { HttpMonitorMethod, HttpRequestBody, HttpStatusPolicy } from './monitor.js';
+import type { WorkspaceSecretReferenceV1 } from './workspace-secret-reference.js';
 
 export const API_WORKFLOW_LIMITS = {
   minimumSteps: 2,
@@ -27,7 +28,14 @@ export interface ApiWorkflowExtraction {
 type ApiWorkflowBodyType = Exclude<HttpRequestBody['type'], 'NONE'>;
 
 export type ApiWorkflowRequestBodyUpdate =
-  HttpRequestBody | { type: ApiWorkflowBodyType; sensitive: true; retain: true };
+  | HttpRequestBody
+  | { type: ApiWorkflowBodyType; sensitive: true; retain: true }
+  | {
+      type: ApiWorkflowBodyType;
+      sensitive: true;
+      secretReference: WorkspaceSecretReferenceV1;
+      contentType?: string;
+    };
 
 export type StoredApiWorkflowRequestBodyV1 =
   | { type: 'NONE' }
@@ -35,6 +43,12 @@ export type StoredApiWorkflowRequestBodyV1 =
       type: ApiWorkflowBodyType;
       sensitive: true;
       encryptedValue: EncryptedHeaderValueV1;
+    }
+  | {
+      type: ApiWorkflowBodyType;
+      sensitive: true;
+      secretReference: WorkspaceSecretReferenceV1;
+      contentType?: string;
     };
 
 interface ApiWorkflowStepBase<TRequestBody> {

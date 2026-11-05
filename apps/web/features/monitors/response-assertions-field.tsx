@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Button } from '../../components/ui/button';
 import { Checkbox, Input, Select } from '../../components/ui/form-control';
 import {
@@ -13,6 +13,9 @@ import {
   type RedactedResponseAssertionConfiguration,
   type ResponseAssertionRow,
 } from './response-assertions';
+import { listWorkspaceSecrets } from '../workspace-secrets/workspace-secret-api';
+import type { WorkspaceSecret } from '../workspace-secrets/workspace-secret-types';
+import { WorkspaceSecretOptions } from '../workspace-secrets/workspace-secret-options';
 
 const SOURCE_LABELS: Record<AssertionSource, string> = {
   HEADER: 'Response header',
@@ -57,8 +60,25 @@ export function ResponseAssertionsField({
     responseAssertionRows(initialConfiguration),
   );
   const nextId = useRef(rows.length);
+  const [workspaceSecrets, setWorkspaceSecrets] = useState<WorkspaceSecret[]>([]);
+  const [workspaceSecretsLoaded, setWorkspaceSecretsLoaded] = useState(false);
+  const [workspaceSecretsUnavailable, setWorkspaceSecretsUnavailable] = useState(false);
   const atLimit = rows.length >= ASSERTION_MAX_COUNT;
   const headHasBodyAssertions = method === 'HEAD' && rows.some((row) => row.source !== 'HEADER');
+
+  function loadWorkspaceSecrets() {
+    if (workspaceSecretsLoaded || workspaceSecretsUnavailable) return;
+    void listWorkspaceSecrets()
+      .then((items) => setWorkspaceSecrets(items.filter((item) => item.status === 'ACTIVE')))
+      .then(() => setWorkspaceSecretsLoaded(true))
+      .catch(() => setWorkspaceSecretsUnavailable(true));
+  }
+
+  useEffect(() => {
+    if (rows.some((row) => row.valueSource === 'VAULT')) loadWorkspaceSecrets();
+    // Initial assertion configuration is immutable for this field instance.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function add(source: AssertionSource) {
     if (atLimit || (method === 'HEAD' && source !== 'HEADER')) return;
@@ -138,6 +158,9 @@ export function ResponseAssertionsField({
               row={row}
               index={index}
               onUpdate={(patch) => update(row.id, patch)}
+              workspaceSecrets={workspaceSecrets}
+              workspaceSecretsLoaded={workspaceSecretsLoaded}
+              loadWorkspaceSecrets={loadWorkspaceSecrets}
               onRemove={() =>
                 setRows((current) => current.filter(({ id: rowId }) => rowId !== row.id))
               }
@@ -151,6 +174,11 @@ export function ResponseAssertionsField({
       )}
 
       <input type="hidden" name="responseAssertions" value={JSON.stringify(rows)} />
+      {workspaceSecretsUnavailable ? (
+        <p className="mt-3 mb-0 text-xs leading-5 text-rail-danger" role="alert">
+          Workspace secrets could not be loaded. Inline expected values remain available.
+        </p>
+      ) : null}
       {error ? (
         <p className="mt-3 mb-0 text-xs leading-5 text-rail-danger" role="alert">
           {error}
@@ -165,11 +193,17 @@ function AssertionRow({
   index,
   onUpdate,
   onRemove,
+  workspaceSecrets,
+  workspaceSecretsLoaded,
+  loadWorkspaceSecrets,
 }: {
   row: ResponseAssertionRow;
   index: number;
   onUpdate: (patch: Partial<ResponseAssertionRow>) => void;
   onRemove: () => void;
+  workspaceSecrets: readonly WorkspaceSecret[];
+  workspaceSecretsLoaded: boolean;
+  loadWorkspaceSecrets: () => void;
 }) {
   const needsTarget = operatorNeedsTarget(row.operator);
   return (
@@ -247,7 +281,13 @@ function AssertionRow({
           </Select>
         </label>
         {needsTarget ? (
-          <TargetField row={row} onUpdate={onUpdate} />
+          <TargetField
+            row={row}
+            onUpdate={onUpdate}
+            workspaceSecrets={workspaceSecrets}
+            workspaceSecretsLoaded={workspaceSecretsLoaded}
+            loadWorkspaceSecrets={loadWorkspaceSecrets}
+          />
         ) : (
           <div className="grid content-start gap-1.5 text-xs font-medium text-rail-subtle">
             Expected value
@@ -264,77 +304,121 @@ function AssertionRow({
 function TargetField({
   row,
   onUpdate,
+  workspaceSecrets,
+  workspaceSecretsLoaded,
+  loadWorkspaceSecrets,
 }: {
   row: ResponseAssertionRow;
   onUpdate: (patch: Partial<ResponseAssertionRow>) => void;
+  workspaceSecrets: readonly WorkspaceSecret[];
+  workspaceSecretsLoaded: boolean;
+  loadWorkspaceSecrets: () => void;
 }) {
   const isJson = row.source === 'JSON_BODY';
   const valueDisabled = isJson && row.targetType === 'null';
   return (
     <div className="grid content-start gap-1.5 text-xs font-medium text-rail-subtle">
       <span>Expected value</span>
-      <div className={`grid gap-2 ${isJson ? 'sm:grid-cols-[7.5rem_minmax(0,1fr)]' : ''}`}>
-        {isJson ? (
-          <Select
-            aria-label="Expected JSON type"
-            value={row.targetType}
+      <Select
+        aria-label="Expected value source"
+        value={row.valueSource}
+        onChange={(event) => {
+          const valueSource = event.target.value as ResponseAssertionRow['valueSource'];
+          if (valueSource === 'VAULT') loadWorkspaceSecrets();
+          onUpdate({
+            valueSource,
+            secretId: '',
+            targetValue: '',
+            sensitive: valueSource === 'VAULT' || row.sensitive,
+            retainSensitive: false,
+            requiresInlineReplacement: row.valueSource === 'VAULT' && valueSource === 'INLINE',
+          });
+        }}
+      >
+        <option value="INLINE">This monitor</option>
+        <option value="VAULT">Workspace secret</option>
+      </Select>
+      {row.valueSource === 'VAULT' ? (
+        <Select
+          aria-label="Workspace secret for expected value"
+          value={row.secretId}
+          required
+          onChange={(event) => onUpdate({ secretId: event.target.value })}
+        >
+          <WorkspaceSecretOptions loaded={workspaceSecretsLoaded} secrets={workspaceSecrets} />
+        </Select>
+      ) : (
+        <div className={`grid gap-2 ${isJson ? 'sm:grid-cols-[7.5rem_minmax(0,1fr)]' : ''}`}>
+          {isJson ? (
+            <Select
+              aria-label="Expected JSON type"
+              value={row.targetType}
+              onChange={(event) =>
+                onUpdate({
+                  targetType: event.target.value as ResponseAssertionRow['targetType'],
+                  targetValue: event.target.value === 'boolean' ? 'true' : '',
+                  retainSensitive: false,
+                })
+              }
+            >
+              <option value="string">String</option>
+              <option value="number">Number</option>
+              <option value="boolean">Boolean</option>
+              <option value="null">Null</option>
+            </Select>
+          ) : null}
+          {isJson && row.targetType === 'boolean' ? (
+            <Select
+              aria-label="Expected value"
+              value={row.targetValue || 'true'}
+              onChange={(event) =>
+                onUpdate({ targetValue: event.target.value, retainSensitive: false })
+              }
+            >
+              <option value="true">true</option>
+              <option value="false">false</option>
+            </Select>
+          ) : (
+            <Input
+              aria-label="Expected value"
+              type={row.sensitive ? 'password' : row.targetType === 'number' ? 'text' : 'text'}
+              inputMode={row.targetType === 'number' ? 'decimal' : undefined}
+              value={row.targetValue}
+              disabled={valueDisabled}
+              maxLength={4096}
+              placeholder={
+                row.retainSensitive && row.targetValue === ''
+                  ? 'Stored securely — leave blank to retain'
+                  : valueDisabled
+                    ? 'No value'
+                    : 'Expected value'
+              }
+              autoComplete="off"
+              required={row.requiresInlineReplacement}
+              onChange={(event) =>
+                onUpdate({ targetValue: event.target.value, retainSensitive: false })
+              }
+            />
+          )}
+        </div>
+      )}
+      {row.requiresInlineReplacement && row.valueSource === 'INLINE' ? (
+        <span className="text-[11px] leading-4 font-normal text-rail-muted">
+          Enter a replacement value to stop using the workspace secret.
+        </span>
+      ) : null}
+      {row.valueSource === 'INLINE' ? (
+        <label className="mt-1 flex min-h-8 cursor-pointer items-center gap-2 font-normal text-rail-muted">
+          <Checkbox
+            checked={row.sensitive}
+            disabled={row.targetType === 'null'}
             onChange={(event) =>
-              onUpdate({
-                targetType: event.target.value as ResponseAssertionRow['targetType'],
-                targetValue: event.target.value === 'boolean' ? 'true' : '',
-                retainSensitive: false,
-              })
-            }
-          >
-            <option value="string">String</option>
-            <option value="number">Number</option>
-            <option value="boolean">Boolean</option>
-            <option value="null">Null</option>
-          </Select>
-        ) : null}
-        {isJson && row.targetType === 'boolean' ? (
-          <Select
-            aria-label="Expected value"
-            value={row.targetValue || 'true'}
-            onChange={(event) =>
-              onUpdate({ targetValue: event.target.value, retainSensitive: false })
-            }
-          >
-            <option value="true">true</option>
-            <option value="false">false</option>
-          </Select>
-        ) : (
-          <Input
-            aria-label="Expected value"
-            type={row.sensitive ? 'password' : row.targetType === 'number' ? 'text' : 'text'}
-            inputMode={row.targetType === 'number' ? 'decimal' : undefined}
-            value={row.targetValue}
-            disabled={valueDisabled}
-            maxLength={4096}
-            placeholder={
-              row.retainSensitive && row.targetValue === ''
-                ? 'Stored securely — leave blank to retain'
-                : valueDisabled
-                  ? 'No value'
-                  : 'Expected value'
-            }
-            autoComplete="off"
-            onChange={(event) =>
-              onUpdate({ targetValue: event.target.value, retainSensitive: false })
+              onUpdate({ sensitive: event.target.checked, retainSensitive: false })
             }
           />
-        )}
-      </div>
-      <label className="mt-1 flex min-h-8 cursor-pointer items-center gap-2 font-normal text-rail-muted">
-        <Checkbox
-          checked={row.sensitive}
-          disabled={row.targetType === 'null'}
-          onChange={(event) =>
-            onUpdate({ sensitive: event.target.checked, retainSensitive: false })
-          }
-        />
-        Store expected value as secret
-      </label>
+          Store expected value as secret
+        </label>
+      ) : null}
     </div>
   );
 }

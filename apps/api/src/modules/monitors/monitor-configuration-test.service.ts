@@ -25,7 +25,7 @@ import {
 } from '@watchrail/domain';
 import {
   AssertionRetentionError,
-  resolveResponseAssertions,
+  resolveResponseAssertionsWithWorkspaceSecrets,
   storeResponseAssertions,
 } from '@watchrail/assertion-security';
 import {
@@ -115,19 +115,20 @@ export class MonitorConfigurationTestService {
           message: 'Permission to use workspace secrets is required for this operation.',
         });
       }
+      const resolveWorkspaceSecret = this.workspaceSecrets.createExecutionValueResolver(
+        context.organizationId,
+        (encryptedValue, { secretId, versionNumber }) =>
+          decryptWorkspaceSecret(
+            encryptedValue,
+            { organizationId: context.organizationId, secretId, versionNumber },
+            this.config.workspaceSecretKeyring,
+          ),
+      );
       const requestHeaders = await resolveRequestHeadersWithWorkspaceSecrets(
         storedHeaders,
         encryptionContext,
         this.config.headerEncryptionKeyring,
-        this.workspaceSecrets.createExecutionValueResolver(
-          context.organizationId,
-          (encryptedValue, { secretId, versionNumber }) =>
-            decryptWorkspaceSecret(
-              encryptedValue,
-              { organizationId: context.organizationId, secretId, versionNumber },
-              this.config.workspaceSecretKeyring,
-            ),
-        ),
+        resolveWorkspaceSecret,
       );
       const storedAssertions = storeResponseAssertions(
         input.assertions,
@@ -137,11 +138,21 @@ export class MonitorConfigurationTestService {
         this.config.assertionEncryptionKeyring,
         { allowRetain: Boolean(existing) },
       );
-      const assertions = resolveResponseAssertions(
+      if (
+        assertionsUseWorkspaceSecrets(storedAssertions) &&
+        !requestCan(context, PERMISSIONS.SECRET_USE)
+      ) {
+        throw new ForbiddenException({
+          code: 'WORKSPACE_SECRET_USE_FORBIDDEN',
+          message: 'Permission to use workspace secrets is required for this operation.',
+        });
+      }
+      const assertions = await resolveResponseAssertionsWithWorkspaceSecrets(
         storedAssertions,
         input.settings.method,
         encryptionContext,
         this.config.assertionEncryptionKeyring,
+        resolveWorkspaceSecret,
       );
       const checkInput: HttpCheckInput = {
         ...input.settings,
@@ -226,6 +237,13 @@ function headersUseWorkspaceSecrets(headers: readonly unknown[]): boolean {
       typeof header === 'object' &&
       Object.prototype.hasOwnProperty.call(header, 'secretReference'),
   );
+}
+
+function assertionsUseWorkspaceSecrets(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(assertionsUseWorkspaceSecrets);
+  if (value === null || typeof value !== 'object') return false;
+  if (Object.prototype.hasOwnProperty.call(value, 'secretReference')) return true;
+  return Object.values(value).some(assertionsUseWorkspaceSecrets);
 }
 
 function secretValues(

@@ -14,6 +14,7 @@ import {
   type StoredApiWorkflowConfigurationV1,
 } from './api-workflow.js';
 import { parseStoredAssertionConfiguration } from './assertion-persistence.js';
+import { parseWorkspaceSecretReference } from './workspace-secret-reference.js';
 import {
   DISABLED_TLS_CERTIFICATE_POLICY,
   parseTlsCertificatePolicy,
@@ -119,7 +120,7 @@ export interface NewHttpMonitor extends NewMonitorBase {
   tlsPolicy: TlsCertificatePolicy;
   requestHeaders: RequestHeaderUpdate[];
   requestBody: HttpRequestBody;
-  assertions: ResponseAssertions;
+  assertions: unknown;
 }
 
 export interface NewTcpMonitor extends NewMonitorBase {
@@ -375,6 +376,44 @@ function normalizeApiWorkflowRequestBody(
   fields: MonitorFieldErrors,
 ): ApiWorkflowRequestBodyUpdate {
   if (
+    isRecord(value) &&
+    value.sensitive === true &&
+    (value.type === 'JSON' || value.type === 'FORM_URLENCODED' || value.type === 'RAW') &&
+    'secretReference' in value
+  ) {
+    if (method === 'GET' || method === 'HEAD') {
+      fields.requestBody = [`${method} monitors cannot send a request body.`];
+      return { type: 'NONE' };
+    }
+    try {
+      const secretReference = parseWorkspaceSecretReference(value.secretReference);
+      if (value.type === 'RAW') {
+        if (!hasExactKeys(value, ['contentType', 'secretReference', 'sensitive', 'type'])) {
+          fields.requestBody = ['Workspace-secret raw bodies contain unsupported fields.'];
+          return { type: 'NONE' };
+        }
+        if (typeof value.contentType !== 'string' || value.contentType.trim() === '') {
+          fields.requestBody = ['Raw workflow bodies require a content type.'];
+          return { type: 'NONE' };
+        }
+        return {
+          type: 'RAW',
+          sensitive: true,
+          secretReference,
+          contentType: value.contentType.trim(),
+        };
+      }
+      if (!hasExactKeys(value, ['sensitive', 'type', 'secretReference'])) {
+        fields.requestBody = ['Workspace-secret workflow bodies contain unsupported fields.'];
+        return { type: 'NONE' };
+      }
+      return { type: value.type, sensitive: true, secretReference };
+    } catch {
+      fields.requestBody = ['Choose a valid active workspace secret.'];
+      return { type: 'NONE' };
+    }
+  }
+  if (
     hasExactKeys(value, ['retain', 'sensitive', 'type']) &&
     value.retain === true &&
     value.sensitive === true &&
@@ -403,6 +442,31 @@ function parseStoredApiWorkflowRequestBody(value: unknown): StoredApiWorkflowReq
       type: value.type,
       sensitive: true,
       encryptedValue: value.encryptedValue,
+    };
+  }
+  if (
+    isRecord(value) &&
+    value.sensitive === true &&
+    (value.type === 'JSON' || value.type === 'FORM_URLENCODED' || value.type === 'RAW') &&
+    'secretReference' in value
+  ) {
+    const expectedKeys =
+      value.type === 'RAW'
+        ? ['contentType', 'secretReference', 'sensitive', 'type']
+        : ['secretReference', 'sensitive', 'type'];
+    if (!hasExactKeys(value, expectedKeys))
+      throw new StoredApiWorkflowConfigurationInvariantError();
+    if (
+      value.type === 'RAW' &&
+      (typeof value.contentType !== 'string' || value.contentType === '')
+    ) {
+      throw new StoredApiWorkflowConfigurationInvariantError();
+    }
+    return {
+      type: value.type,
+      sensitive: true,
+      secretReference: parseWorkspaceSecretReference(value.secretReference),
+      ...(value.type === 'RAW' ? { contentType: value.contentType as string } : {}),
     };
   }
   throw new StoredApiWorkflowConfigurationInvariantError();
@@ -602,7 +666,9 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
   }
   const requestHeaders = normalizeHeaders(command.requestHeaders, fields);
   const requestBody = normalizeRequestBody(command.requestBody, method, fields);
-  const assertions = normalizeAssertions(command.assertions, fields);
+  const assertions = containsWorkspaceSecretReference(command.assertions)
+    ? command.assertions
+    : normalizeAssertions(command.assertions, fields);
   const intervalSeconds = normalizeIntervalSeconds(command.intervalSeconds, fields, true);
 
   if (
@@ -891,6 +957,17 @@ function hasExactKeys(
   const keys = Object.keys(value).sort();
   const required = [...expected].sort();
   return keys.length === required.length && keys.every((key, index) => key === required[index]);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function containsWorkspaceSecretReference(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsWorkspaceSecretReference);
+  if (!isRecord(value)) return false;
+  if (Object.prototype.hasOwnProperty.call(value, 'secretReference')) return true;
+  return Object.values(value).some(containsWorkspaceSecretReference);
 }
 
 function normalizeAssertions(value: unknown, fields: MonitorFieldErrors): ResponseAssertions {

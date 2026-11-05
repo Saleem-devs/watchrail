@@ -9,6 +9,7 @@ export type AssertionSource = 'HEADER' | 'TEXT_BODY' | 'JSON_BODY';
 export type AssertionOperator =
   HeaderAssertionOperator | TextBodyAssertionOperator | JsonBodyAssertionOperator;
 export type JsonTargetType = JsonScalarTarget['type'];
+export type AssertionValueSource = 'INLINE' | 'VAULT';
 
 export interface ResponseAssertionRow {
   id: string;
@@ -19,11 +20,16 @@ export interface ResponseAssertionRow {
   targetValue: string;
   sensitive: boolean;
   retainSensitive: boolean;
+  valueSource: AssertionValueSource;
+  secretId: string;
+  requiresInlineReplacement: boolean;
 }
 
 interface MaskedTarget {
   sensitive: true;
   hasValue: true;
+  secretReference?: { contractVersion: 1; secretId: string };
+  valueType?: JsonTargetType;
 }
 
 interface PlainStringTarget {
@@ -86,16 +92,21 @@ export function responseAssertionRows(
       const target = assertion.target;
       const masked = isMaskedTarget(target);
       const value = !masked && target ? target.value : { type: 'string' as const, value: '' };
+      const valueSource: AssertionValueSource =
+        masked && target.secretReference ? 'VAULT' : 'INLINE';
       return {
         id: `json-${index}`,
         source: 'JSON_BODY' as const,
         subject: assertion.selector,
         operator: assertion.operator,
-        targetType: value.type,
+        targetType: masked && target.valueType ? target.valueType : value.type,
         targetValue:
           value.type === 'boolean' ? String(value.value) : value.type === 'null' ? '' : value.value,
         sensitive: masked,
-        retainSensitive: masked,
+        retainSensitive: masked && valueSource === 'INLINE',
+        valueSource,
+        secretId: masked ? (target.secretReference?.secretId ?? '') : '',
+        requiresInlineReplacement: false,
       };
     }),
   ];
@@ -147,6 +158,9 @@ export function newAssertionRow(id: string, source: AssertionSource): ResponseAs
     targetValue: '',
     sensitive: false,
     retainSensitive: false,
+    valueSource: 'INLINE',
+    secretId: '',
+    requiresInlineReplacement: false,
   };
 }
 
@@ -170,11 +184,20 @@ function rowFromStringTarget(
     targetType: 'string',
     targetValue: masked ? '' : (target?.value ?? ''),
     sensitive: masked,
-    retainSensitive: masked,
+    retainSensitive: masked && !target.secretReference,
+    valueSource: masked && target.secretReference ? 'VAULT' : 'INLINE',
+    secretId: masked ? (target.secretReference?.secretId ?? '') : '',
+    requiresInlineReplacement: false,
   };
 }
 
 function stringTarget(row: ResponseAssertionRow): Record<string, unknown> {
+  if (row.valueSource === 'VAULT') {
+    return {
+      sensitive: true,
+      secretReference: { contractVersion: 1, secretId: row.secretId },
+    };
+  }
   if (row.sensitive && row.retainSensitive && row.targetValue === '') {
     return { sensitive: true, retain: true };
   }
@@ -182,6 +205,13 @@ function stringTarget(row: ResponseAssertionRow): Record<string, unknown> {
 }
 
 function jsonTarget(row: ResponseAssertionRow): Record<string, unknown> {
+  if (row.valueSource === 'VAULT') {
+    return {
+      sensitive: true,
+      valueType: row.targetType,
+      secretReference: { contractVersion: 1, secretId: row.secretId },
+    };
+  }
   if (row.sensitive && row.retainSensitive && row.targetValue === '') {
     return { sensitive: true, retain: true };
   }
