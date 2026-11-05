@@ -143,7 +143,7 @@ export function WorkspaceSecretForm({
     <form
       id={formId}
       aria-label={secret ? 'Edit workspace secret' : 'Add workspace secret'}
-      className="mt-6 overflow-hidden rounded-rail-panel border border-rail-border bg-rail-raised"
+      className="mt-6 overflow-hidden rounded-rail-panel border border-rail-border bg-rail-raised !p-0"
       noValidate
       aria-busy={isSubmitting}
       onSubmit={handleSubmit(async (values) => {

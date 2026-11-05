@@ -162,7 +162,7 @@ export function WebhookChannelForm({
     <form
       id={formId}
       aria-label={channel ? 'Edit webhook channel' : 'Add webhook channel'}
-      className="mt-6 grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_18rem]"
+      className="mt-6 grid items-start gap-6 !p-0 xl:grid-cols-[minmax(0,1fr)_18rem]"
       noValidate
       aria-busy={isSubmitting}
       onSubmit={handleSubmit(async (values) => {
