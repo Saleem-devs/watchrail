@@ -1,9 +1,10 @@
 import '@testing-library/jest-dom/vitest';
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NotificationsPage } from './notifications-page';
+import { WebhookChannelForm } from './webhook-channel-form';
 import type { NotificationMonitor, WebhookChannel } from './types';
 
 vi.mock('../../components/app-shell', () => ({
@@ -41,28 +42,26 @@ describe('notifications page', () => {
     const user = userEvent.setup();
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(json({ data: [] }))
-      .mockResolvedValueOnce(json({ data: [monitor] }))
-      .mockResolvedValueOnce(json({ data: channel }, 201))
-      .mockResolvedValueOnce(json({ data: [channel] }))
-      .mockResolvedValueOnce(json({ data: [monitor] }));
+      .mockResolvedValueOnce(json({ data: channel }, 201));
+    const onSaved = vi.fn();
 
-    render(<NotificationsPage projectId={projectId} />);
-    await screen.findByText('No notification channels yet');
-    await user.click(screen.getByRole('button', { name: 'Add webhook' }));
+    render(
+      <WebhookChannelForm
+        formId="webhook-form"
+        projectId={projectId}
+        monitors={[monitor]}
+        onSaved={onSaved}
+      />,
+    );
     await user.type(screen.getByLabelText('Channel name'), channel.name);
     await user.type(screen.getByLabelText('Endpoint URL'), channel.url);
     await user.type(screen.getByLabelText(/^Signing secret/), 'a-strong-webhook-signing-secret');
     await user.click(screen.getByText(monitor.name));
-    await user.click(
-      within(screen.getByRole('region', { name: 'Add webhook channel' })).getByRole('button', {
-        name: 'Add webhook',
-      }),
-    );
+    fireEvent.submit(screen.getByRole('form', { name: 'Add webhook channel' }));
 
-    await screen.findByText(`${channel.name} saved.`);
-    expect(fetchMock.mock.calls[2]?.[0]).toBe('/api/webhook-endpoints');
-    expect(requestJson(fetchMock.mock.calls[2])).toEqual({
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(channel));
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/webhook-endpoints');
+    expect(requestJson(fetchMock.mock.calls[0])).toEqual({
       projectId,
       name: channel.name,
       url: channel.url,
@@ -74,7 +73,6 @@ describe('notifications page', () => {
         notifyOnRecovery: true,
       },
     });
-    expect(screen.queryByDisplayValue('a-strong-webhook-signing-secret')).not.toBeInTheDocument();
   });
 
   it('retains the encrypted signing secret while updating routing atomically', async () => {
@@ -83,24 +81,27 @@ describe('notifications page', () => {
       ...channel,
       routing: { ...channel.routing, notifyOnRecovery: false },
     };
-    const fetchMock = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(json({ data: [channel] }))
-      .mockResolvedValueOnce(json({ data: [monitor] }))
-      .mockResolvedValueOnce(json({ data: updated }))
-      .mockResolvedValueOnce(json({ data: [updated] }))
-      .mockResolvedValueOnce(json({ data: [monitor] }));
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(json({ data: updated }));
 
-    render(<NotificationsPage projectId={projectId} />);
-    await screen.findByText(channel.name);
-    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    render(
+      <WebhookChannelForm
+        formId="webhook-form"
+        projectId={projectId}
+        monitors={[monitor]}
+        channel={channel}
+        onSaved={vi.fn()}
+      />,
+    );
     expect(screen.getByLabelText(/^Replace signing secret/)).toHaveValue('');
     await user.click(screen.getByText('Incident resolved'));
-    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    fireEvent.submit(screen.getByRole('form', { name: 'Edit webhook channel' }));
 
-    await screen.findByText(`${channel.name} saved.`);
-    expect(fetchMock.mock.calls[2]?.[0]).toBe(`/api/webhook-endpoints/${channel.id}/configuration`);
-    expect(requestJson(fetchMock.mock.calls[2])).toMatchObject({
+    await waitFor(() =>
+      expect(fetchMock.mock.calls[0]?.[0]).toBe(
+        `/api/webhook-endpoints/${channel.id}/configuration`,
+      ),
+    );
+    expect(requestJson(fetchMock.mock.calls[0])).toMatchObject({
       signingSecret: { retain: true },
       routing: {
         monitorIds: [monitor.id],
@@ -152,27 +153,46 @@ describe('notifications page', () => {
   });
 
   it('keeps backend routing validation next to the editor', async () => {
-    const user = userEvent.setup();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      json(
+        {
+          code: 'VALIDATION_FAILED',
+          message: 'Webhook endpoint settings are invalid.',
+          fields: { monitorIds: ['Every monitor must belong to the selected project.'] },
+        },
+        400,
+      ),
+    );
+
+    render(
+      <WebhookChannelForm
+        formId="webhook-form"
+        projectId={projectId}
+        monitors={[monitor]}
+        channel={channel}
+        onSaved={vi.fn()}
+      />,
+    );
+    fireEvent.submit(screen.getByRole('form', { name: 'Edit webhook channel' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Every monitor must belong to the selected project.',
+    );
+  });
+
+  it('keeps list actions as dedicated create and edit routes', async () => {
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(json({ data: [channel] }))
-      .mockResolvedValueOnce(json({ data: [monitor] }))
-      .mockResolvedValueOnce(
-        json(
-          {
-            code: 'VALIDATION_FAILED',
-            message: 'Webhook endpoint settings are invalid.',
-            fields: { monitorIds: ['Every monitor must belong to the selected project.'] },
-          },
-          400,
-        ),
-      );
+      .mockResolvedValueOnce(json({ data: [monitor] }));
 
     render(<NotificationsPage projectId={projectId} />);
     await screen.findByText(channel.name);
-    await user.click(screen.getByRole('button', { name: 'Edit' }));
-    await user.click(screen.getByRole('button', { name: 'Save changes' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Every monitor must belong to the selected project.',
+    expect(screen.getByRole('link', { name: 'Add webhook' })).toHaveAttribute(
+      'href',
+      `/projects/${projectId}/notifications/new`,
+    );
+    expect(screen.getByRole('link', { name: 'Edit' })).toHaveAttribute(
+      'href',
+      `/projects/${projectId}/notifications/${channel.id}/edit`,
     );
   });
 });

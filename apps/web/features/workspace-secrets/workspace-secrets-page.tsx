@@ -1,17 +1,14 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { useForm, type FieldValues, type Path, type UseFormSetError } from 'react-hook-form';
-import { Button } from '../../components/ui/button';
+import Link from 'next/link';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { actionClassName, Button } from '../../components/ui/button';
 import { ConfirmationDialog } from '../../components/ui/confirmation-dialog';
-import { Checkbox, Input, Textarea } from '../../components/ui/form-control';
+import { Checkbox } from '../../components/ui/form-control';
 import {
   archiveWorkspaceSecret,
-  createWorkspaceSecret,
   listWorkspaceSecretAuditEvents,
   listWorkspaceSecrets,
-  rotateWorkspaceSecret,
-  updateWorkspaceSecretDescription,
   WorkspaceSecretRequestError,
 } from './workspace-secret-api';
 import type {
@@ -19,26 +16,6 @@ import type {
   WorkspaceSecretAuditAction,
   WorkspaceSecretAuditEvent,
 } from './workspace-secret-types';
-
-type Editor =
-  | { kind: 'create' }
-  | { kind: 'rotate'; secret: WorkspaceSecret }
-  | { kind: 'description'; secret: WorkspaceSecret }
-  | null;
-
-interface CreateSecretValues {
-  key: string;
-  description: string;
-  value: string;
-}
-
-interface SecretValueValues {
-  value: string;
-}
-
-interface DescriptionValues {
-  description: string;
-}
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: 'medium',
@@ -58,7 +35,6 @@ export function WorkspaceSecretsPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [editor, setEditor] = useState<Editor>(null);
   const [archiveTarget, setArchiveTarget] = useState<WorkspaceSecret | null>(null);
   const [auditSecret, setAuditSecret] = useState<WorkspaceSecret | null>(null);
   const [auditEvents, setAuditEvents] = useState<WorkspaceSecretAuditEvent[]>([]);
@@ -141,14 +117,16 @@ export function WorkspaceSecretsPage() {
             across workspace monitors.
           </p>
         </div>
-        <Button
-          variant="primary"
-          className="shrink-0 whitespace-nowrap"
-          onClick={() => setEditor({ kind: 'create' })}
+        <Link
+          href="/settings/secrets/new"
+          className={actionClassName({
+            variant: 'primary',
+            className: 'shrink-0 whitespace-nowrap',
+          })}
         >
           <PlusIcon />
           Add secret
-        </Button>
+        </Link>
       </header>
 
       {notice ? (
@@ -166,41 +144,6 @@ export function WorkspaceSecretsPage() {
             <CloseIcon />
           </button>
         </div>
-      ) : null}
-
-      {editor ? (
-        <section className="mt-6 rounded-rail-panel border border-rail-border bg-rail-surface">
-          {editor.kind === 'create' ? (
-            <CreateSecretForm
-              onCancel={() => setEditor(null)}
-              onSaved={async (secret) => {
-                setEditor(null);
-                setNotice(`${secret.key} encrypted and saved.`);
-                await load();
-              }}
-            />
-          ) : editor.kind === 'rotate' ? (
-            <RotateSecretForm
-              secret={editor.secret}
-              onCancel={() => setEditor(null)}
-              onSaved={async (secret) => {
-                setEditor(null);
-                setNotice(`${secret.key} rotated to version ${secret.versionNumber}.`);
-                await load();
-              }}
-            />
-          ) : (
-            <DescriptionForm
-              secret={editor.secret}
-              onCancel={() => setEditor(null)}
-              onSaved={async (secret) => {
-                setEditor(null);
-                setNotice(`${secret.key} description updated.`);
-                await load();
-              }}
-            />
-          )}
-        </section>
       ) : null}
 
       <section className="mt-8" aria-labelledby="secret-list-title">
@@ -250,13 +193,12 @@ export function WorkspaceSecretsPage() {
                 Add the first credential here instead of copying it into every monitor
                 configuration.
               </p>
-              <Button
-                variant="secondary"
-                size="compact"
-                onClick={() => setEditor({ kind: 'create' })}
+              <Link
+                href="/settings/secrets/new"
+                className={actionClassName({ variant: 'secondary', size: 'compact' })}
               >
                 Add the first secret
-              </Button>
+              </Link>
             </div>
           ) : (
             <div className="divide-y divide-rail-border">
@@ -273,8 +215,7 @@ export function WorkspaceSecretsPage() {
                 <SecretRow
                   key={secret.id}
                   secret={secret}
-                  onEdit={() => setEditor({ kind: 'description', secret })}
-                  onRotate={() => setEditor({ kind: 'rotate', secret })}
+                  editHref={`/settings/secrets/${secret.id}/edit`}
                   onAudit={() => void showAudit(secret)}
                   onArchive={() => setArchiveTarget(secret)}
                 />
@@ -309,231 +250,14 @@ export function WorkspaceSecretsPage() {
   );
 }
 
-function CreateSecretForm({
-  onCancel,
-  onSaved,
-}: {
-  onCancel: () => void;
-  onSaved: (secret: WorkspaceSecret) => Promise<void>;
-}) {
-  const {
-    register,
-    handleSubmit,
-    setError,
-    formState: { errors, isSubmitting },
-  } = useForm<CreateSecretValues>({ defaultValues: { key: '', description: '', value: '' } });
-  return (
-    <form
-      onSubmit={handleSubmit(async (values) => {
-        try {
-          await onSaved(
-            await createWorkspaceSecret({
-              key: values.key,
-              description: nullableText(values.description),
-              value: values.value,
-            }),
-          );
-        } catch (error) {
-          applyServerErrors(error, setError, ['key', 'description', 'value']);
-        }
-      })}
-    >
-      <FormHeading
-        title="Add workspace secret"
-        description="The value is encrypted before storage and is never returned by the API."
-        onCancel={onCancel}
-      />
-      <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <FormError message={errors.root?.message} />
-        <Field
-          id="workspace-secret-key"
-          label="Key"
-          error={errors.key?.message}
-          hint="Use an environment-style name such as STRIPE_API_KEY."
-        >
-          <Input
-            id="workspace-secret-key"
-            aria-describedby="workspace-secret-key-help"
-            autoFocus
-            autoComplete="off"
-            spellCheck={false}
-            aria-invalid={Boolean(errors.key)}
-            {...register('key', {
-              required: 'Enter a key.',
-              pattern: {
-                value: /^[A-Za-z][A-Za-z0-9_]{0,63}$/,
-                message: 'Start with a letter and use only letters, numbers, and underscores.',
-              },
-            })}
-          />
-        </Field>
-        <Field
-          id="workspace-secret-value"
-          label="Secret value"
-          error={errors.value?.message}
-          hint="8 KB maximum. The value cannot be viewed after saving."
-        >
-          <Input
-            id="workspace-secret-value"
-            aria-describedby="workspace-secret-value-help"
-            type="password"
-            autoComplete="new-password"
-            spellCheck={false}
-            aria-invalid={Boolean(errors.value)}
-            {...register('value', { required: 'Enter the secret value.' })}
-          />
-        </Field>
-        <div className="lg:col-span-2">
-          <Field
-            id="workspace-secret-description"
-            label="Description"
-            error={errors.description?.message}
-            hint="Optional. Describe where this credential belongs, not its value."
-          >
-            <Textarea
-              id="workspace-secret-description"
-              aria-describedby="workspace-secret-description-help"
-              rows={3}
-              className="resize-y py-2.5"
-              {...register('description', {
-                maxLength: {
-                  value: 240,
-                  message: 'Keep the description to 240 characters or fewer.',
-                },
-              })}
-            />
-          </Field>
-        </div>
-      </div>
-      <FormActions isSubmitting={isSubmitting} submitLabel="Save secret" onCancel={onCancel} />
-    </form>
-  );
-}
-
-function RotateSecretForm({
-  secret,
-  onCancel,
-  onSaved,
-}: {
-  secret: WorkspaceSecret;
-  onCancel: () => void;
-  onSaved: (secret: WorkspaceSecret) => Promise<void>;
-}) {
-  const {
-    register,
-    handleSubmit,
-    setError,
-    formState: { errors, isSubmitting },
-  } = useForm<SecretValueValues>({ defaultValues: { value: '' } });
-  return (
-    <form
-      onSubmit={handleSubmit(async ({ value }) => {
-        try {
-          await onSaved(await rotateWorkspaceSecret(secret.id, value));
-        } catch (error) {
-          applyServerErrors(error, setError, ['value']);
-        }
-      })}
-    >
-      <FormHeading
-        title={`Rotate ${secret.key}`}
-        description={`Replace the encrypted value. Existing references move to version ${secret.versionNumber + 1} automatically.`}
-        onCancel={onCancel}
-      />
-      <div className="max-w-2xl p-5">
-        <FormError message={errors.root?.message} />
-        <Field
-          id="workspace-secret-rotation-value"
-          label="New secret value"
-          error={errors.value?.message}
-          hint="The previous version remains encrypted in the audit history."
-        >
-          <Input
-            id="workspace-secret-rotation-value"
-            aria-describedby="workspace-secret-rotation-value-help"
-            autoFocus
-            type="password"
-            autoComplete="new-password"
-            spellCheck={false}
-            aria-invalid={Boolean(errors.value)}
-            {...register('value', { required: 'Enter the replacement value.' })}
-          />
-        </Field>
-      </div>
-      <FormActions isSubmitting={isSubmitting} submitLabel="Rotate secret" onCancel={onCancel} />
-    </form>
-  );
-}
-
-function DescriptionForm({
-  secret,
-  onCancel,
-  onSaved,
-}: {
-  secret: WorkspaceSecret;
-  onCancel: () => void;
-  onSaved: (secret: WorkspaceSecret) => Promise<void>;
-}) {
-  const {
-    register,
-    handleSubmit,
-    setError,
-    formState: { errors, isSubmitting },
-  } = useForm<DescriptionValues>({ defaultValues: { description: secret.description ?? '' } });
-  return (
-    <form
-      onSubmit={handleSubmit(async ({ description }) => {
-        try {
-          await onSaved(
-            await updateWorkspaceSecretDescription(secret.id, nullableText(description)),
-          );
-        } catch (error) {
-          applyServerErrors(error, setError, ['description']);
-        }
-      })}
-    >
-      <FormHeading
-        title={`Edit ${secret.key}`}
-        description="Descriptions help teammates choose the correct credential without revealing its value."
-        onCancel={onCancel}
-      />
-      <div className="max-w-2xl p-5">
-        <FormError message={errors.root?.message} />
-        <Field
-          id="workspace-secret-edit-description"
-          label="Description"
-          error={errors.description?.message}
-        >
-          <Textarea
-            id="workspace-secret-edit-description"
-            aria-describedby="workspace-secret-edit-description-help"
-            autoFocus
-            rows={3}
-            className="resize-y py-2.5"
-            {...register('description', {
-              maxLength: {
-                value: 240,
-                message: 'Keep the description to 240 characters or fewer.',
-              },
-            })}
-          />
-        </Field>
-      </div>
-      <FormActions isSubmitting={isSubmitting} submitLabel="Save description" onCancel={onCancel} />
-    </form>
-  );
-}
-
 function SecretRow({
   secret,
-  onEdit,
-  onRotate,
+  editHref,
   onAudit,
   onArchive,
 }: {
   secret: WorkspaceSecret;
-  onEdit: () => void;
-  onRotate: () => void;
+  editHref: string;
   onAudit: () => void;
   onArchive: () => void;
 }) {
@@ -568,12 +292,18 @@ function SecretRow({
         </Button>
         {secret.status === 'ACTIVE' ? (
           <>
-            <Button variant="quiet" size="compact" onClick={onEdit}>
+            <Link
+              href={editHref}
+              className={actionClassName({ variant: 'secondary', size: 'compact' })}
+            >
               Edit
-            </Button>
-            <Button variant="quiet" size="compact" onClick={onRotate}>
+            </Link>
+            <Link
+              href={`${editHref}#replace-value`}
+              className={actionClassName({ variant: 'quiet', size: 'compact' })}
+            >
               Rotate
-            </Button>
+            </Link>
             <Button
               variant="quiet"
               size="compact"
@@ -649,94 +379,6 @@ function AuditPanel({
   );
 }
 
-function FormHeading({
-  title,
-  description,
-  onCancel,
-}: {
-  title: string;
-  description: string;
-  onCancel: () => void;
-}) {
-  return (
-    <div className="flex items-start justify-between gap-4 border-b border-rail-border px-5 py-4">
-      <div>
-        <h2 className="m-0 text-base font-semibold text-rail-text">{title}</h2>
-        <p className="mt-1 mb-0 text-sm leading-6 text-rail-muted">{description}</p>
-      </div>
-      <button
-        type="button"
-        onClick={onCancel}
-        className="grid size-10 shrink-0 cursor-pointer appearance-none place-items-center rounded-rail-control border-0 bg-transparent p-0 text-rail-muted hover:bg-rail-hover hover:text-rail-text"
-        aria-label="Close form"
-      >
-        <CloseIcon />
-      </button>
-    </div>
-  );
-}
-
-function FormActions({
-  isSubmitting,
-  submitLabel,
-  onCancel,
-}: {
-  isSubmitting: boolean;
-  submitLabel: string;
-  onCancel: () => void;
-}) {
-  return (
-    <div className="flex justify-end gap-2 border-t border-rail-border px-5 py-4">
-      <Button variant="quiet" onClick={onCancel}>
-        Cancel
-      </Button>
-      <Button type="submit" variant="primary" disabled={isSubmitting}>
-        {isSubmitting ? 'Saving…' : submitLabel}
-      </Button>
-    </div>
-  );
-}
-
-function Field({
-  id,
-  label,
-  hint,
-  error,
-  children,
-}: {
-  id: string;
-  label: string;
-  hint?: string | undefined;
-  error?: string | undefined;
-  children: ReactNode;
-}) {
-  return (
-    <div className="grid gap-2">
-      <label htmlFor={id} className="text-sm font-medium text-rail-text">
-        {label}
-      </label>
-      {children}
-      {error ? (
-        <span id={`${id}-help`} className="text-xs font-normal text-rail-danger" role="alert">
-          {error}
-        </span>
-      ) : hint ? (
-        <span id={`${id}-help`} className="text-xs font-normal leading-5 text-rail-muted">
-          {hint}
-        </span>
-      ) : null}
-    </div>
-  );
-}
-
-function FormError({ message }: { message?: string | undefined }) {
-  return message ? (
-    <p className="m-0 text-sm text-rail-danger lg:col-span-2" role="alert">
-      {message}
-    </p>
-  ) : null;
-}
-
 function SecretListLoading() {
   return (
     <div className="divide-y divide-rail-border" aria-label="Loading workspace secrets">
@@ -784,30 +426,6 @@ function CloseIcon() {
     </svg>
   );
 }
-function nullableText(value: string): string | null {
-  const normalized = value.trim();
-  return normalized === '' ? null : normalized;
-}
 function messageFor(error: unknown, fallback: string): string {
   return error instanceof WorkspaceSecretRequestError ? error.message : fallback;
-}
-
-function applyServerErrors<T extends FieldValues>(
-  error: unknown,
-  setError: UseFormSetError<T>,
-  fields: Path<T>[],
-) {
-  if (error instanceof WorkspaceSecretRequestError) {
-    let applied = false;
-    for (const field of fields) {
-      const message = error.details.fields?.[String(field)]?.[0];
-      if (message) {
-        setError(field, { type: 'server', message });
-        applied = true;
-      }
-    }
-    if (!applied) setError('root', { type: 'server', message: error.message });
-    return;
-  }
-  setError('root', { type: 'server', message: 'The request could not be completed.' });
 }

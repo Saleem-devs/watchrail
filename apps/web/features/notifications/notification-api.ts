@@ -49,6 +49,10 @@ export function listWebhookChannels(projectId: string): Promise<WebhookChannel[]
   return request(`/api/webhook-endpoints?projectId=${encodeURIComponent(projectId)}`);
 }
 
+export function findWebhookChannel(endpointId: string): Promise<WebhookChannel> {
+  return request(`/api/webhook-endpoints/${encodeURIComponent(endpointId)}`);
+}
+
 export function createWebhookChannel(input: {
   projectId: string;
   name: string;
