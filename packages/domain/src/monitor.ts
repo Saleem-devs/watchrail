@@ -392,15 +392,16 @@ function normalizeApiWorkflowRequestBody(
           fields.requestBody = ['Workspace-secret raw bodies contain unsupported fields.'];
           return { type: 'NONE' };
         }
-        if (typeof value.contentType !== 'string' || value.contentType.trim() === '') {
-          fields.requestBody = ['Raw workflow bodies require a content type.'];
+        const contentType = normalizeRawContentType(value.contentType);
+        if (contentType === null) {
+          fields.requestBody = ['Raw workflow bodies require a valid content type.'];
           return { type: 'NONE' };
         }
         return {
           type: 'RAW',
           sensitive: true,
           secretReference,
-          contentType: value.contentType.trim(),
+          contentType,
         };
       }
       if (!hasExactKeys(value, ['sensitive', 'type', 'secretReference'])) {
@@ -456,17 +457,15 @@ function parseStoredApiWorkflowRequestBody(value: unknown): StoredApiWorkflowReq
         : ['secretReference', 'sensitive', 'type'];
     if (!hasExactKeys(value, expectedKeys))
       throw new StoredApiWorkflowConfigurationInvariantError();
-    if (
-      value.type === 'RAW' &&
-      (typeof value.contentType !== 'string' || value.contentType === '')
-    ) {
+    const contentType = value.type === 'RAW' ? normalizeRawContentType(value.contentType) : null;
+    if (value.type === 'RAW' && contentType === null) {
       throw new StoredApiWorkflowConfigurationInvariantError();
     }
     return {
       type: value.type,
       sensitive: true,
       secretReference: parseWorkspaceSecretReference(value.secretReference),
-      ...(value.type === 'RAW' ? { contentType: value.contentType as string } : {}),
+      ...(contentType === null ? {} : { contentType }),
     };
   }
   throw new StoredApiWorkflowConfigurationInvariantError();
@@ -1137,19 +1136,21 @@ function normalizeRequestBody(
     return { type: 'FORM_URLENCODED', fields: fieldsList };
   }
   if (body.type === 'RAW' && hasExactKeys(body, ['contentType', 'type', 'value'])) {
-    if (
-      typeof body.contentType !== 'string' ||
-      body.contentType.trim() === '' ||
-      /[\r\n]/u.test(body.contentType)
-    ) {
+    const contentType = normalizeRawContentType(body.contentType);
+    if (contentType === null) {
       return fail('Enter a valid content type for the raw body.');
     }
     if (typeof body.value !== 'string' || utf8Bytes(body.value) > HTTP_REQUEST_BODY_LIMIT_BYTES) {
       return fail('Keep the raw request body at 64 KB or less.');
     }
-    return { type: 'RAW', contentType: body.contentType.trim(), value: body.value };
+    return { type: 'RAW', contentType, value: body.value };
   }
   return fail('Choose none, JSON, form URL encoded, or raw request body.');
+}
+
+function normalizeRawContentType(value: unknown): string | null {
+  if (typeof value !== 'string' || value.trim() === '' || /[\r\n]/u.test(value)) return null;
+  return value.trim();
 }
 
 function utf8Bytes(value: string): number {

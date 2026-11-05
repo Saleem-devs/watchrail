@@ -399,6 +399,7 @@ export class MonitorRepository {
       current: ResponseAssertionConfigurationV1,
       method: HttpMonitorMethod,
     ) => ResponseAssertionConfigurationV1,
+    workspaceSecretUseAuthorized = true,
   ): Promise<MonitorRecord> {
     return this.db.transaction(async (tx) => {
       const [monitor] = await tx
@@ -432,6 +433,14 @@ export class MonitorRepository {
         settings.method,
       );
       assertAssertionsCompatibleWithMethod(settings.method, assertions.assertions);
+      assertWorkspaceSecretUseAuthorized(
+        {
+          requestHeaders,
+          assertions,
+          apiWorkflow: configuration.apiWorkflow,
+        },
+        workspaceSecretUseAuthorized,
+      );
 
       const [updated] = await tx
         .update(monitors)
@@ -763,6 +772,7 @@ export class MonitorRepository {
     organizationId: string,
     monitorId: string,
     update: (current: StoredApiWorkflowConfigurationV1) => StoredApiWorkflowConfigurationV1,
+    workspaceSecretUseAuthorized = true,
   ): Promise<MonitorRecord> {
     return this.db.transaction(async (tx) => {
       const [monitor] = await tx
@@ -790,6 +800,14 @@ export class MonitorRepository {
       if (!configuration.apiWorkflow) throw new Error('Monitor has no API workflow configuration.');
 
       const apiWorkflow = update(configuration.apiWorkflow);
+      assertWorkspaceSecretUseAuthorized(
+        {
+          requestHeaders: configuration.requestHeaders,
+          assertions: parseStoredAssertionConfiguration(configuration.assertions),
+          apiWorkflow,
+        },
+        workspaceSecretUseAuthorized,
+      );
       const timeoutMs = Math.max(...apiWorkflow.steps.map((step) => step.timeoutMs));
       const [updated] = await tx
         .update(monitors)

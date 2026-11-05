@@ -197,17 +197,21 @@ export class MonitorsService {
     try {
       const input = parseApiWorkflowConfiguration(value);
       this.assertSecretUse(context, workflowUsesWorkspaceSecrets(input));
-      return await this.monitors.updateApiWorkflow(context.organizationId, monitorId, (current) =>
-        storeApiWorkflowConfiguration(
-          input,
-          current,
-          { organizationId: context.organizationId, monitorId },
-          {
-            headers: this.config.headerEncryptionKeyring,
-            assertions: this.config.assertionEncryptionKeyring,
-          },
-          { allowRetain: true },
-        ),
+      return await this.monitors.updateApiWorkflow(
+        context.organizationId,
+        monitorId,
+        (current) =>
+          storeApiWorkflowConfiguration(
+            input,
+            current,
+            { organizationId: context.organizationId, monitorId },
+            {
+              headers: this.config.headerEncryptionKeyring,
+              assertions: this.config.assertionEncryptionKeyring,
+            },
+            { allowRetain: true },
+          ),
+        requestCan(context, PERMISSIONS.SECRET_USE),
       );
     } catch (error) {
       if (
@@ -239,6 +243,9 @@ export class MonitorsService {
       }
       if (error instanceof WorkspaceSecretBindingError) {
         throw workspaceSecretReferenceValidationError('workflow');
+      }
+      if (error instanceof WorkspaceSecretUseAuthorizationError) {
+        throw workspaceSecretUseForbidden();
       }
       throw error;
     }
@@ -628,6 +635,7 @@ export class MonitorsService {
             this.config.assertionEncryptionKeyring,
             { allowRetain: true },
           ),
+        requestCan(context, PERMISSIONS.SECRET_USE),
       );
     } catch (error) {
       if (error instanceof MonitorInputError) {
@@ -668,6 +676,9 @@ export class MonitorsService {
       }
       if (error instanceof WorkspaceSecretBindingError) {
         throw workspaceSecretReferenceValidationError('requestHeaders');
+      }
+      if (error instanceof WorkspaceSecretUseAuthorizationError) {
+        throw workspaceSecretUseForbidden();
       }
       throw error;
     }
