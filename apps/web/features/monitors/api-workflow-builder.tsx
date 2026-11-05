@@ -32,6 +32,7 @@ interface WorkflowHeaderFormValue {
   retain: boolean;
   source: 'INLINE' | 'VAULT';
   secretId: string;
+  requiresInlineReplacement: boolean;
 }
 
 interface WorkflowBodyFieldFormValue {
@@ -460,6 +461,7 @@ function StepEditor({
                 retain: false,
                 source: 'INLINE',
                 secretId: '',
+                requiresInlineReplacement: false,
               })
             }
           >
@@ -486,8 +488,25 @@ function StepEditor({
                     <Select
                       value={field.value}
                       onChange={(event) => {
-                        field.onChange(event.target.value);
-                        if (event.target.value === 'VAULT') {
+                        const source = event.target.value as 'INLINE' | 'VAULT';
+                        const requiresInlineReplacement =
+                          field.value === 'VAULT' && source === 'INLINE';
+                        field.onChange(source);
+                        setValue(`steps.${index}.headers.${headerIndex}.value`, '', {
+                          shouldDirty: true,
+                        });
+                        setValue(`steps.${index}.headers.${headerIndex}.retain`, false, {
+                          shouldDirty: true,
+                        });
+                        setValue(`steps.${index}.headers.${headerIndex}.secretId`, '', {
+                          shouldDirty: true,
+                        });
+                        setValue(
+                          `steps.${index}.headers.${headerIndex}.requiresInlineReplacement`,
+                          requiresInlineReplacement,
+                          { shouldDirty: true },
+                        );
+                        if (source === 'VAULT') {
                           onLoadWorkspaceSecrets();
                           setValue(`steps.${index}.headers.${headerIndex}.sensitive`, true, {
                             shouldDirty: true,
@@ -527,17 +546,27 @@ function StepEditor({
                     )}
                   />
                 ) : (
-                  <Input
-                    {...register(`steps.${index}.headers.${headerIndex}.value`)}
-                    type={step.headers[headerIndex]?.sensitive ? 'password' : 'text'}
-                    placeholder={
-                      step.headers[headerIndex]?.retain
-                        ? 'Stored securely — leave blank to retain'
-                        : 'Header value'
-                    }
-                    aria-label={`Step ${index + 1} header ${headerIndex + 1} value`}
-                    autoComplete="off"
-                  />
+                  <div className="grid gap-1.5">
+                    <Input
+                      {...register(`steps.${index}.headers.${headerIndex}.value`)}
+                      type={step.headers[headerIndex]?.sensitive ? 'password' : 'text'}
+                      placeholder={
+                        step.headers[headerIndex]?.requiresInlineReplacement
+                          ? 'Enter a replacement value'
+                          : step.headers[headerIndex]?.retain
+                            ? 'Stored securely — leave blank to retain'
+                            : 'Header value'
+                      }
+                      aria-label={`Step ${index + 1} header ${headerIndex + 1} value`}
+                      autoComplete="off"
+                      required={step.headers[headerIndex]?.requiresInlineReplacement}
+                    />
+                    {step.headers[headerIndex]?.requiresInlineReplacement ? (
+                      <span className="text-[11px] leading-4 text-rail-muted">
+                        Enter a new value to replace the workspace secret.
+                      </span>
+                    ) : null}
+                  </div>
                 )}
                 <IconButton
                   label={`Remove header ${headerIndex + 1}`}
@@ -1129,6 +1158,7 @@ function stepToFormValue(step: ApiWorkflowStepConfiguration, index: number): Wor
       retain: header.sensitive && (('hasValue' in header && header.hasValue) || 'retain' in header),
       source: 'secretReference' in header ? 'VAULT' : 'INLINE',
       secretId: 'secretReference' in header ? header.secretReference.secretId : '',
+      requiresInlineReplacement: false,
     })),
     bodyType: body.type,
     bodyValue: body.type !== 'NONE' && !bodyProtected && 'value' in body ? body.value : '',

@@ -52,13 +52,22 @@ describe('request header policy', () => {
   it('normalizes workspace secret references without accepting a plaintext shadow value', () => {
     const reference = {
       contractVersion: 1 as const,
-      secretId: '11111111-1111-4111-8111-111111111111',
+      secretId: 'A1234567-89AB-4CDE-8F01-23456789ABCD',
     };
     expect(
       normalizeRequestHeaderUpdates([
         { name: 'authorization', sensitive: true, secretReference: reference },
       ]),
-    ).toEqual([{ name: 'authorization', sensitive: true, secretReference: reference }]);
+    ).toEqual([
+      {
+        name: 'authorization',
+        sensitive: true,
+        secretReference: {
+          contractVersion: 1,
+          secretId: 'a1234567-89ab-4cde-8f01-23456789abcd',
+        },
+      },
+    ]);
     expect(() =>
       normalizeRequestHeaderUpdates([
         {

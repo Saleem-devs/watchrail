@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { ApiWorkflowBuilder } from './api-workflow-builder';
 import { CheckHistory, ManualDiagnostic, WorkflowDiagnostic } from './monitor-evidence';
+import { RequestHeadersField } from './request-headers-field';
 import type { ApiWorkflowConfiguration, ApiWorkflowResult, ManualRound } from './types';
 
 describe('API workflow builder', () => {
@@ -79,6 +80,76 @@ describe('API workflow builder', () => {
         value: '',
       }),
     );
+  });
+
+  it('requires a replacement value when a vault header changes to inline', async () => {
+    const user = userEvent.setup();
+    const configuration = workflowConfiguration();
+    configuration.steps[0]!.requestHeaders = [
+      {
+        name: 'authorization',
+        sensitive: true,
+        secretReference: {
+          contractVersion: 1,
+          secretId: '11111111-1111-4111-8111-111111111111',
+        },
+      },
+    ];
+    render(<ApiWorkflowBuilder initialConfiguration={configuration} />);
+
+    const source = screen.getByRole('combobox', { name: 'Step 1 header 1 value source' });
+    source.focus();
+    await user.keyboard('{Enter}');
+    await user.click(screen.getByRole('option', { name: 'This step' }));
+
+    const value = screen.getByLabelText('Step 1 header 1 value');
+    expect(value).toBeRequired();
+    expect(value).toHaveAttribute('placeholder', 'Enter a replacement value');
+    expect(screen.getByText(/replace the workspace secret/i)).toBeInTheDocument();
+
+    const hidden = document.querySelector<HTMLInputElement>('input[name="apiWorkflow"]');
+    expect(JSON.parse(hidden!.value).steps[0].requestHeaders).toEqual([
+      { name: 'authorization', sensitive: true, value: '' },
+    ]);
+  });
+});
+
+describe('HTTP request headers', () => {
+  it('does not retain a vault reference after switching to an inline value', async () => {
+    const user = userEvent.setup();
+    render(
+      <form>
+        <RequestHeadersField
+          initialHeaders={[
+            {
+              name: 'authorization',
+              sensitive: true,
+              value: null,
+              hasValue: true,
+              secretReference: {
+                contractVersion: 1,
+                secretId: '11111111-1111-4111-8111-111111111111',
+              },
+            },
+          ]}
+        />
+      </form>,
+    );
+
+    const source = screen.getByRole('combobox', { name: /value source for authorization/i });
+    source.focus();
+    await user.keyboard('{Enter}');
+    await user.click(screen.getByRole('option', { name: 'This monitor' }));
+
+    const value = screen.getByPlaceholderText('Enter a replacement value');
+    expect(value).toBeRequired();
+    expect(screen.getByText(/replace the workspace secret/i)).toBeInTheDocument();
+    expect(
+      document.querySelector<HTMLInputElement>('input[name="requestHeaderSecretId"]')?.value,
+    ).toBe('');
+    expect(
+      document.querySelector<HTMLInputElement>('input[name="requestHeaderHasStoredValue"]')?.value,
+    ).toBe('false');
   });
 });
 

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   BadRequestException,
+  ForbiddenException,
   HttpException,
   HttpStatus,
   Inject,
@@ -32,7 +33,8 @@ import {
   storeRequestHeaders,
 } from '@watchrail/http-header-security';
 import { decryptWorkspaceSecret } from '@watchrail/secret-vault-security';
-import type { RequestContext } from '../../auth/request-context.js';
+import { requestCan, type RequestContext } from '../../auth/request-context.js';
+import { PERMISSIONS } from '../../auth/permissions.js';
 import { PublicStatusPageRateLimiter } from '../../common/rate-limiting/public-status-page-rate-limiter.js';
 import { APP_CONFIG, type AppConfig } from '../../config/config.js';
 import {
@@ -103,6 +105,15 @@ export class MonitorConfigurationTestService {
         encryptionContext,
         this.config.headerEncryptionKeyring,
       );
+      if (
+        headersUseWorkspaceSecrets(storedHeaders) &&
+        !requestCan(context, PERMISSIONS.SECRET_USE)
+      ) {
+        throw new ForbiddenException({
+          code: 'WORKSPACE_SECRET_USE_FORBIDDEN',
+          message: 'Permission to use workspace secrets is required for this operation.',
+        });
+      }
       const requestHeaders = await resolveRequestHeadersWithWorkspaceSecrets(
         storedHeaders,
         encryptionContext,
@@ -205,6 +216,15 @@ export class MonitorConfigurationTestService {
     }
     throw error;
   }
+}
+
+function headersUseWorkspaceSecrets(headers: readonly unknown[]): boolean {
+  return headers.some(
+    (header) =>
+      header !== null &&
+      typeof header === 'object' &&
+      Object.prototype.hasOwnProperty.call(header, 'secretReference'),
+  );
 }
 
 function secretValues(

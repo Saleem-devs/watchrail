@@ -134,6 +134,11 @@ export function storeRequestHeaders(
       if (!previous?.sensitive) {
         throw new Error(`Cannot retain missing sensitive header ${update.name}.`);
       }
+      if ('secretReference' in previous) {
+        throw new Error(
+          `Cannot retain missing sensitive header ${update.name} after changing its value source.`,
+        );
+      }
       return previous;
     }
 

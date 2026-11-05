@@ -334,12 +334,14 @@ export class WorkspaceSecretRepository {
   ): (secretId: string) => Promise<string> {
     const selectedVersions = new Map<string, Promise<string>>();
     return (secretId) => {
-      const existing = selectedVersions.get(secretId);
+      const canonicalSecretId = secretId.toLowerCase();
+      const existing = selectedVersions.get(canonicalSecretId);
       if (existing) return existing;
-      const selected = this.resolveCurrentEnvelope(organizationId, secretId).then(
-        ({ encryptedValue, versionNumber }) => decrypt(encryptedValue, { secretId, versionNumber }),
+      const selected = this.resolveCurrentEnvelope(organizationId, canonicalSecretId).then(
+        ({ encryptedValue, versionNumber }) =>
+          decrypt(encryptedValue, { secretId: canonicalSecretId, versionNumber }),
       );
-      selectedVersions.set(secretId, selected);
+      selectedVersions.set(canonicalSecretId, selected);
       return selected;
     };
   }

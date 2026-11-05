@@ -78,11 +78,11 @@ describe('workspace secret monitor bindings', () => {
     ) => decryptWorkspaceSecret(encryptedValue, { organizationId, ...context }, vaultKeyring);
     const executionResolver = secrets.createExecutionValueResolver(organizationId, decrypt);
 
-    await expect(executionResolver(secret.id)).resolves.toBe('version-one');
+    await expect(executionResolver(secret.id.toUpperCase())).resolves.toBe('version-one');
     await secrets.rotate(organizationId, secret.id, actorId, (context) =>
       encryptWorkspaceSecret('version-two', { organizationId, ...context }, vaultKeyring),
     );
-    await expect(executionResolver(secret.id)).resolves.toBe('version-one');
+    await expect(executionResolver(secret.id.toLowerCase())).resolves.toBe('version-one');
     await expect(
       secrets.createExecutionValueResolver(organizationId, decrypt)(secret.id),
     ).resolves.toBe('version-two');

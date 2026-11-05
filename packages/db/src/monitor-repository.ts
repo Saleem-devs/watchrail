@@ -166,6 +166,24 @@ export class MonitorRepository {
       .orderBy(desc(monitors.createdAt));
   }
 
+  async findForOrganization(
+    organizationId: string,
+    monitorId: string,
+  ): Promise<MonitorRecord | null> {
+    const [monitor] = await this.db
+      .select()
+      .from(monitors)
+      .where(
+        and(
+          eq(monitors.organizationId, organizationId),
+          eq(monitors.id, monitorId),
+          ne(monitors.lifecycleState, 'ARCHIVED'),
+        ),
+      )
+      .limit(1);
+    return monitor ?? null;
+  }
+
   async findForProject(
     organizationId: string,
     projectId: string,

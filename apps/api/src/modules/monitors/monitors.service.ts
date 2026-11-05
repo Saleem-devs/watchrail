@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
@@ -66,7 +67,8 @@ import type { CreateMonitorCommand } from '@watchrail/domain';
 import { storeRequestHeaders } from '@watchrail/http-header-security';
 import { AssertionRetentionError, storeResponseAssertions } from '@watchrail/assertion-security';
 import { APP_CONFIG, type AppConfig } from '../../config/config.js';
-import type { RequestContext } from '../../auth/request-context.js';
+import { requestCan, type RequestContext } from '../../auth/request-context.js';
+import { PERMISSIONS } from '../../auth/permissions.js';
 import type { MonitorListQuery } from './dto/monitor-list-query.js';
 import {
   ApiWorkflowConfigurationError,
@@ -105,6 +107,7 @@ export class MonitorsService {
           },
           { allowRetain: false },
         );
+        this.assertSecretUse(context, workflowUsesWorkspaceSecrets(workflow));
         return await this.monitors.create(
           context.organizationId,
           monitorId,
@@ -131,6 +134,7 @@ export class MonitorsService {
         { organizationId: context.organizationId, monitorId },
         this.config.headerEncryptionKeyring,
       );
+      this.assertSecretUse(context, requestHeadersUseWorkspaceSecrets(requestHeaders));
       const assertions = storeResponseAssertions(
         monitor.assertions,
         EMPTY_ASSERTION_CONFIGURATION,
@@ -186,6 +190,7 @@ export class MonitorsService {
   ): Promise<MonitorRecord> {
     try {
       const input = parseApiWorkflowConfiguration(value);
+      this.assertSecretUse(context, workflowUsesWorkspaceSecrets(input));
       return await this.monitors.updateApiWorkflow(context.organizationId, monitorId, (current) =>
         storeApiWorkflowConfiguration(
           input,
@@ -281,6 +286,7 @@ export class MonitorsService {
   ): Promise<MonitorRecord> {
     try {
       const updates = normalizeRequestHeaderUpdates(value);
+      this.assertSecretUse(context, requestHeadersUseWorkspaceSecrets(updates));
       return await this.monitors.updateRequestHeaders(
         context.organizationId,
         monitorId,
@@ -526,6 +532,7 @@ export class MonitorsService {
   ): Promise<MonitorRecord> {
     try {
       const settings = parseHttpMonitorSettings(value);
+      await this.assertSecretUseForMonitor(context, monitorId);
       return await this.monitors.updateHttpSettings(context.organizationId, monitorId, settings);
     } catch (error) {
       if (error instanceof MonitorInputError || error instanceof AssertionInputError) {
@@ -579,6 +586,7 @@ export class MonitorsService {
     try {
       const update = parseMonitorConfigurationUpdate(value);
       const requestHeaderUpdates = normalizeRequestHeaderUpdates(update.requestHeaders);
+      this.assertSecretUse(context, requestHeadersUseWorkspaceSecrets(requestHeaderUpdates));
       return await this.monitors.updateConfiguration(
         context.organizationId,
         monitorId,
@@ -708,6 +716,9 @@ export class MonitorsService {
   ): Promise<MonitorRecord> {
     try {
       const { lifecycleState } = parseMonitorLifecycleSettings(value);
+      if (lifecycleState === 'ENABLED') {
+        await this.assertSecretUseForMonitor(context, monitorId);
+      }
       return await this.monitors.updateLifecycle(context.organizationId, monitorId, lifecycleState);
     } catch (error) {
       if (error instanceof MonitorInputError) {
@@ -739,6 +750,7 @@ export class MonitorsService {
           locations: ['Multi-location execution is not enabled.'],
         });
       }
+      await this.assertSecretUseForMonitor(context, monitorId);
       return await this.monitors.updateLocations(context.organizationId, monitorId, locations);
     } catch (error) {
       if (error instanceof MonitorInputError) {
@@ -760,6 +772,7 @@ export class MonitorsService {
 
   async runNow(context: RequestContext, monitorId: string): Promise<CheckRoundRecord> {
     try {
+      await this.assertSecretUseForMonitor(context, monitorId);
       return await this.manualRounds.create(context.organizationId, monitorId);
     } catch (error) {
       if (error instanceof MonitorNotFoundError) {
@@ -847,6 +860,23 @@ export class MonitorsService {
       });
     }
   }
+
+  private assertSecretUse(context: RequestContext, required: boolean): void {
+    if (required && !requestCan(context, PERMISSIONS.SECRET_USE)) {
+      throw new ForbiddenException({
+        code: 'WORKSPACE_SECRET_USE_FORBIDDEN',
+        message: 'Permission to use workspace secrets is required for this operation.',
+      });
+    }
+  }
+
+  private async assertSecretUseForMonitor(
+    context: RequestContext,
+    monitorId: string,
+  ): Promise<void> {
+    const monitor = await this.monitors.findForOrganization(context.organizationId, monitorId);
+    this.assertSecretUse(context, monitor !== null && monitorUsesWorkspaceSecrets(monitor));
+  }
 }
 
 function workspaceSecretReferenceValidationError(
@@ -857,6 +887,40 @@ function workspaceSecretReferenceValidationError(
     message: 'A referenced workspace secret is unavailable.',
     fields: { [field]: ['Choose an active secret from this workspace.'] },
   });
+}
+
+function monitorUsesWorkspaceSecrets(monitor: MonitorRecord): boolean {
+  return (
+    requestHeadersUseWorkspaceSecrets(monitor.requestHeaders) ||
+    workflowUsesWorkspaceSecrets(monitor.apiWorkflow)
+  );
+}
+
+function requestHeadersUseWorkspaceSecrets(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.some(
+      (header) =>
+        header !== null &&
+        typeof header === 'object' &&
+        Object.prototype.hasOwnProperty.call(header, 'secretReference'),
+    )
+  );
+}
+
+function workflowUsesWorkspaceSecrets(value: unknown): boolean {
+  if (value === null || typeof value !== 'object' || !('steps' in value)) return false;
+  const { steps } = value as { steps?: unknown };
+  return (
+    Array.isArray(steps) &&
+    steps.some(
+      (step) =>
+        step !== null &&
+        typeof step === 'object' &&
+        'requestHeaders' in step &&
+        requestHeadersUseWorkspaceSecrets((step as { requestHeaders: unknown }).requestHeaders),
+    )
+  );
 }
 
 function monitorListState(

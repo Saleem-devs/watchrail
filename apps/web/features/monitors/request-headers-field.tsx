@@ -18,6 +18,7 @@ interface RequestHeaderRow extends RequestHeaderFormValue {
   id: string;
   source: 'INLINE' | 'VAULT';
   secretId: string;
+  requiresInlineReplacement: boolean;
 }
 
 export function RequestHeadersField({
@@ -33,6 +34,7 @@ export function RequestHeadersField({
       id: `existing-${index}`,
       source: header.secretReference ? 'VAULT' : 'INLINE',
       secretId: header.secretReference?.secretId ?? '',
+      requiresInlineReplacement: false,
     })),
   );
   const [secrets, setSecrets] = useState<WorkspaceSecret[]>([]);
@@ -65,6 +67,7 @@ export function RequestHeadersField({
         hasValue: true,
         source: 'INLINE',
         secretId: '',
+        requiresInlineReplacement: false,
       },
     ]);
   }
@@ -105,14 +108,19 @@ export function RequestHeadersField({
                 <Select
                   value={row.source}
                   onChange={(event) => {
-                    if (event.target.value === 'VAULT') loadSecrets();
+                    const source = event.target.value as 'INLINE' | 'VAULT';
+                    if (source === 'VAULT') loadSecrets();
                     setRows((current) =>
                       current.map((candidate) =>
                         candidate.id === row.id
                           ? {
                               ...candidate,
-                              source: event.target.value as 'INLINE' | 'VAULT',
-                              sensitive: event.target.value === 'VAULT' || candidate.sensitive,
+                              source,
+                              value: source === 'INLINE' ? '' : null,
+                              secretId: '',
+                              sensitive: source === 'VAULT' || candidate.sensitive,
+                              requiresInlineReplacement:
+                                candidate.source === 'VAULT' && source === 'INLINE',
                             }
                           : candidate,
                       ),
@@ -154,15 +162,27 @@ export function RequestHeadersField({
                     ) : null}
                   </Select>
                 ) : (
-                  <Input
-                    name="requestHeaderValue"
-                    type={row.sensitive ? 'password' : 'text'}
-                    defaultValue={row.value ?? ''}
-                    placeholder={
-                      row.value === null ? 'Stored securely — leave blank to retain' : 'Value'
-                    }
-                    autoComplete="off"
-                  />
+                  <span className="grid gap-1.5">
+                    <Input
+                      name="requestHeaderValue"
+                      type={row.sensitive ? 'password' : 'text'}
+                      defaultValue={row.value ?? ''}
+                      placeholder={
+                        row.requiresInlineReplacement
+                          ? 'Enter a replacement value'
+                          : row.value === null
+                            ? 'Stored securely — leave blank to retain'
+                            : 'Value'
+                      }
+                      autoComplete="off"
+                      required={row.requiresInlineReplacement}
+                    />
+                    {row.requiresInlineReplacement ? (
+                      <span className="text-[11px] leading-4 font-normal text-rail-muted">
+                        Enter a new value to replace the workspace secret.
+                      </span>
+                    ) : null}
+                  </span>
                 )}
                 {row.source === 'VAULT' ? (
                   <input type="hidden" name="requestHeaderValue" value="" />

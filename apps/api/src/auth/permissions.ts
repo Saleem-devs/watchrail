@@ -49,6 +49,9 @@ export const PERMISSIONS = {
 
   // Reusable workspace secrets
   SECRET_READ: 'secret:read',
+  // Using a secret can disclose its value to an arbitrary monitor destination,
+  // so it is intentionally distinct from reading masked secret metadata.
+  SECRET_USE: 'secret:use',
   SECRET_MANAGE: 'secret:manage',
 
   // Members & invitations
@@ -114,6 +117,7 @@ const ADMIN_PERMISSIONS: Permission[] = [
   PERMISSIONS.MEMBER_UPDATE_ROLE,
   PERMISSIONS.ORGANIZATION_UPDATE,
   PERMISSIONS.API_KEY_MANAGE,
+  PERMISSIONS.SECRET_USE,
   PERMISSIONS.SECRET_MANAGE,
 ];
 
