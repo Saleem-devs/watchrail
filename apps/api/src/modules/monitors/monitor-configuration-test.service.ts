@@ -8,7 +8,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { executeHttpCheck, NodeHttpExecutor, type HttpCheckInput } from '@watchrail/check-engine';
-import { MonitorRepository, ProjectRepository } from '@watchrail/db';
+import {
+  MonitorRepository,
+  ProjectRepository,
+  WorkspaceSecretNotFoundError,
+  WorkspaceSecretRepository,
+} from '@watchrail/db';
 import {
   AssertionInputError,
   EMPTY_ASSERTION_CONFIGURATION,
@@ -22,7 +27,11 @@ import {
   resolveResponseAssertions,
   storeResponseAssertions,
 } from '@watchrail/assertion-security';
-import { resolveRequestHeaders, storeRequestHeaders } from '@watchrail/http-header-security';
+import {
+  resolveRequestHeadersWithWorkspaceSecrets,
+  storeRequestHeaders,
+} from '@watchrail/http-header-security';
+import { decryptWorkspaceSecret } from '@watchrail/secret-vault-security';
 import type { RequestContext } from '../../auth/request-context.js';
 import { PublicStatusPageRateLimiter } from '../../common/rate-limiting/public-status-page-rate-limiter.js';
 import { APP_CONFIG, type AppConfig } from '../../config/config.js';
@@ -52,6 +61,7 @@ export class MonitorConfigurationTestService {
   constructor(
     @Inject(MonitorRepository) private readonly monitors: MonitorRepository,
     @Inject(ProjectRepository) private readonly projects: ProjectRepository,
+    @Inject(WorkspaceSecretRepository) private readonly workspaceSecrets: WorkspaceSecretRepository,
     @Inject(NodeHttpExecutor) private readonly executor: NodeHttpExecutor,
     @Inject(MonitorConfigurationTestRateLimiter)
     private readonly limiter: MonitorConfigurationTestRateLimiter,
@@ -93,10 +103,19 @@ export class MonitorConfigurationTestService {
         encryptionContext,
         this.config.headerEncryptionKeyring,
       );
-      const requestHeaders = resolveRequestHeaders(
+      const requestHeaders = await resolveRequestHeadersWithWorkspaceSecrets(
         storedHeaders,
         encryptionContext,
         this.config.headerEncryptionKeyring,
+        this.workspaceSecrets.createExecutionValueResolver(
+          context.organizationId,
+          (encryptedValue, { secretId, versionNumber }) =>
+            decryptWorkspaceSecret(
+              encryptedValue,
+              { organizationId: context.organizationId, secretId, versionNumber },
+              this.config.workspaceSecretKeyring,
+            ),
+        ),
       );
       const storedAssertions = storeResponseAssertions(
         input.assertions,
@@ -175,6 +194,13 @@ export class MonitorConfigurationTestService {
         code: 'VALIDATION_FAILED',
         message: 'Request headers are invalid.',
         fields: { requestHeaders: [error.message] },
+      });
+    }
+    if (error instanceof WorkspaceSecretNotFoundError) {
+      throw new BadRequestException({
+        code: 'VALIDATION_FAILED',
+        message: 'A referenced workspace secret is unavailable.',
+        fields: { requestHeaders: ['Choose an active secret from this workspace.'] },
       });
     }
     throw error;

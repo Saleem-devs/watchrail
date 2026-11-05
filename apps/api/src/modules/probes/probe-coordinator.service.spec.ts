@@ -1,5 +1,9 @@
 import { BadRequestException, ConflictException, Logger } from '@nestjs/common';
-import type { ProbeCoordinatorRepository, ProbeMachineIdentity } from '@watchrail/db';
+import type {
+  ProbeCoordinatorRepository,
+  ProbeMachineIdentity,
+  WorkspaceSecretRepository,
+} from '@watchrail/db';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppConfig } from '../../config/config.js';
 import { ProbeCoordinatorService } from './probe-coordinator.service.js';
@@ -16,19 +20,35 @@ describe('ProbeCoordinatorService submission audit', () => {
   const attemptId = '66666666-6666-4666-8666-666666666666';
   const claimToken = 's'.repeat(43);
   let submit: ReturnType<typeof vi.fn>;
+  let configuration: ReturnType<typeof vi.fn>;
+  let resolveWorkspaceSecret: ReturnType<typeof vi.fn>;
   let warn: ReturnType<typeof vi.spyOn>;
   let service: ProbeCoordinatorService;
 
   beforeEach(() => {
+    configuration = vi.fn().mockResolvedValue(null);
+    resolveWorkspaceSecret = vi.fn();
     submit = vi.fn().mockResolvedValue({
       state: 'REJECTED',
       reason: 'NON_AUTHORITATIVE_LEASE',
     });
     warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     service = new ProbeCoordinatorService(
-      { submit } as unknown as ProbeCoordinatorRepository,
+      { configuration, submit } as unknown as ProbeCoordinatorRepository,
+      {
+        createExecutionValueResolver: vi.fn(() => resolveWorkspaceSecret),
+      } as unknown as WorkspaceSecretRepository,
       {} as AppConfig,
     );
+  });
+
+  it('does not resolve workspace secrets for a rejected or expired lease', async () => {
+    await expect(service.configuration(machine, attemptId, claimToken)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+
+    expect(configuration).toHaveBeenCalledWith(machine, attemptId, claimToken);
+    expect(resolveWorkspaceSecret).not.toHaveBeenCalled();
   });
 
   it('emits an attributable value-free event while preserving the generic API rejection', async () => {

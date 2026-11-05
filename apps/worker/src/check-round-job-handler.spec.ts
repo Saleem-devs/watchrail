@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Logger } from '@nestjs/common';
 import type { HttpExecutor, TcpConnector } from '@watchrail/check-engine';
-import type { CheckExecutionRepository } from '@watchrail/db';
+import type { CheckExecutionRepository, WorkspaceSecretRepository } from '@watchrail/db';
 import { encryptHeaderValue, type HeaderEncryptionKeyring } from '@watchrail/http-header-security';
 import {
   storeResponseAssertions,
@@ -41,6 +41,10 @@ const keyring: HeaderEncryptionKeyring = {
   keys: new Map([['v1', Buffer.alloc(32)]]),
 };
 const assertionKeyring: AssertionEncryptionKeyring = keyring;
+const workspaceSecrets = {
+  createExecutionValueResolver: () => () => Promise.resolve('workspace-secret'),
+} as unknown as WorkspaceSecretRepository;
+const workspaceSecretKeyring = { activeKeyId: 'v1', keys: new Map([['v1', Buffer.alloc(32)]]) };
 
 function createHandler(
   executions: CheckExecutionRepository,
@@ -54,6 +58,8 @@ function createHandler(
     45_000,
     encryptionKeyring,
     assertionKeyring,
+    workspaceSecrets,
+    workspaceSecretKeyring,
     tcpConnector,
   );
 }

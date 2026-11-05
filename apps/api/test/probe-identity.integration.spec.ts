@@ -292,10 +292,22 @@ describe('probe enrollment and machine credentials API', () => {
         .expect(201)
     ).body.data as { id: string };
     const sentinel = 'WATCHRAIL_REMOTE_CONFIGURATION_SECRET';
+    const secret = (
+      await request(app.getHttpServer())
+        .post('/api/workspace-secrets')
+        .send({ key: 'remote_probe_authorization', value: `Bearer ${sentinel}` })
+        .expect(201)
+    ).body.data as { id: string };
     await request(app.getHttpServer())
       .patch(`/api/monitors/${monitor.id}/request-headers`)
       .send({
-        requestHeaders: [{ name: 'authorization', sensitive: true, value: `Bearer ${sentinel}` }],
+        requestHeaders: [
+          {
+            name: 'authorization',
+            sensitive: true,
+            secretReference: { contractVersion: 1, secretId: secret.id },
+          },
+        ],
       })
       .expect(200);
     await request(app.getHttpServer())

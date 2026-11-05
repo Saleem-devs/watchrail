@@ -415,6 +415,9 @@ importers:
       '@watchrail/queue':
         specifier: workspace:*
         version: link:../../packages/queue
+      '@watchrail/secret-vault-security':
+        specifier: workspace:*
+        version: link:../../packages/secret-vault-security
       '@watchrail/webhook-delivery':
         specifier: workspace:*
         version: link:../../packages/webhook-delivery

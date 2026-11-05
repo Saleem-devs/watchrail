@@ -19,6 +19,8 @@ export interface HeaderEncryptionKeyring {
   keys: ReadonlyMap<string, Buffer>;
 }
 
+export type WorkspaceSecretValueResolver = (secretId: string) => Promise<string>;
+
 export class StoredRequestHeaderResolutionError extends Error {
   constructor(options?: ErrorOptions) {
     super('Stored request-header secrets could not be resolved.', options);
@@ -125,6 +127,8 @@ export function storeRequestHeaders(
   return updates.map((update) => {
     if (!update.sensitive) return update;
 
+    if (!('value' in update) && !('retain' in update)) return update;
+
     if ('retain' in update) {
       const previous = existingByName.get(update.name);
       if (!previous?.sensitive) {
@@ -149,18 +153,47 @@ export function resolveRequestHeaders(
   value: unknown,
   context: Omit<HeaderEncryptionContext, 'normalizedHeaderName'>,
   keyring: HeaderEncryptionKeyring,
+  resolveWorkspaceSecret?: (secretId: string) => string,
 ): ResolvedRequestHeader[] {
   const headers = parseStoredRequestHeaders(value);
   return headers.map((header) => ({
     name: header.name,
-    value: header.sensitive
-      ? decryptHeaderValue(
-          header.encryptedValue,
-          { ...context, normalizedHeaderName: header.name },
-          keyring,
-        )
-      : header.value,
+    value: !header.sensitive
+      ? header.value
+      : !('encryptedValue' in header)
+        ? (resolveWorkspaceSecret?.(header.secretReference.secretId) ??
+          (() => {
+            throw new StoredRequestHeaderResolutionError();
+          })())
+        : decryptHeaderValue(
+            header.encryptedValue,
+            { ...context, normalizedHeaderName: header.name },
+            keyring,
+          ),
   }));
+}
+
+export async function resolveRequestHeadersWithWorkspaceSecrets(
+  value: unknown,
+  context: Omit<HeaderEncryptionContext, 'normalizedHeaderName'>,
+  keyring: HeaderEncryptionKeyring,
+  resolveWorkspaceSecret: WorkspaceSecretValueResolver,
+): Promise<ResolvedRequestHeader[]> {
+  const headers = parseStoredRequestHeaders(value);
+  return Promise.all(
+    headers.map(async (header) => ({
+      name: header.name,
+      value: !header.sensitive
+        ? header.value
+        : !('encryptedValue' in header)
+          ? await resolveWorkspaceSecret(header.secretReference.secretId)
+          : decryptHeaderValue(
+              header.encryptedValue,
+              { ...context, normalizedHeaderName: header.name },
+              keyring,
+            ),
+    })),
+  );
 }
 
 function aad(context: HeaderEncryptionContext): Buffer {

@@ -30,6 +30,8 @@ import {
   monitors,
   probeLocations,
   projects,
+  workspaceSecretBindings,
+  workspaceSecrets,
   type MonitorRecord,
 } from './schema.js';
 import { ensureDefaultProject } from './project-repository.js';
@@ -121,6 +123,13 @@ export class MonitorRepository {
         tlsPolicy: created.tlsPolicy,
         locations: created.locations,
       });
+      await reconcileWorkspaceSecretBindings(
+        tx,
+        organizationId,
+        created.id,
+        created.requestHeaders,
+        created.apiWorkflow,
+      );
 
       await tx.insert(monitorIncidentState).values({
         organizationId,
@@ -279,7 +288,6 @@ export class MonitorRepository {
         tlsPolicy: configuration.tlsPolicy,
         locations: configuration.locations,
       });
-
       return updated;
     });
   }
@@ -346,6 +354,13 @@ export class MonitorRepository {
         tlsPolicy: configuration.tlsPolicy,
         locations: configuration.locations,
       });
+      await reconcileWorkspaceSecretBindings(
+        tx,
+        organizationId,
+        monitorId,
+        requestHeaders,
+        configuration.apiWorkflow,
+      );
 
       return updated;
     });
@@ -426,6 +441,13 @@ export class MonitorRepository {
         assertions,
         locations: configuration.locations,
       });
+      await reconcileWorkspaceSecretBindings(
+        tx,
+        organizationId,
+        monitorId,
+        requestHeaders,
+        configuration.apiWorkflow,
+      );
       return updated;
     });
   }
@@ -764,6 +786,13 @@ export class MonitorRepository {
         tlsPolicy: configuration.tlsPolicy,
         locations: configuration.locations,
       });
+      await reconcileWorkspaceSecretBindings(
+        tx,
+        organizationId,
+        monitorId,
+        configuration.requestHeaders,
+        apiWorkflow,
+      );
       return updated;
     });
   }
@@ -960,9 +989,99 @@ export class MonitorRepository {
         .where(and(eq(monitors.id, monitorId), eq(monitors.organizationId, organizationId)))
         .returning();
       if (!updated) throw new Error('The monitor update returned no record.');
+      if (lifecycleState === 'ARCHIVED') {
+        await tx
+          .delete(workspaceSecretBindings)
+          .where(
+            and(
+              eq(workspaceSecretBindings.organizationId, organizationId),
+              eq(workspaceSecretBindings.resourceType, 'MONITOR'),
+              eq(workspaceSecretBindings.resourceId, monitorId),
+            ),
+          );
+      }
       return updated;
     });
   }
+}
+
+type MonitorTransaction = Parameters<Parameters<WatchrailDatabase['transaction']>[0]>[0];
+
+interface MonitorSecretBinding {
+  secretId: string;
+  resourcePath: string;
+}
+
+async function reconcileWorkspaceSecretBindings(
+  tx: MonitorTransaction,
+  organizationId: string,
+  monitorId: string,
+  requestHeaders: readonly StoredRequestHeader[],
+  apiWorkflow: StoredApiWorkflowConfigurationV1 | null,
+): Promise<void> {
+  const bindings = collectWorkspaceSecretBindings(requestHeaders, apiWorkflow);
+  const secretIds = [...new Set(bindings.map(({ secretId }) => secretId))].sort();
+
+  // Archive takes the same row lock. Locking in stable order makes reference creation and
+  // archival mutually exclusive without introducing a cross-secret deadlock.
+  for (const secretId of secretIds) {
+    const [secret] = await tx
+      .select({ archivedAt: workspaceSecrets.archivedAt })
+      .from(workspaceSecrets)
+      .where(
+        and(eq(workspaceSecrets.organizationId, organizationId), eq(workspaceSecrets.id, secretId)),
+      )
+      .limit(1)
+      .for('update');
+    if (!secret || secret.archivedAt) throw new WorkspaceSecretBindingError(secretId);
+  }
+
+  await tx
+    .delete(workspaceSecretBindings)
+    .where(
+      and(
+        eq(workspaceSecretBindings.organizationId, organizationId),
+        eq(workspaceSecretBindings.resourceType, 'MONITOR'),
+        eq(workspaceSecretBindings.resourceId, monitorId),
+      ),
+    );
+  if (bindings.length > 0) {
+    await tx.insert(workspaceSecretBindings).values(
+      bindings.map(({ secretId, resourcePath }) => ({
+        organizationId,
+        secretId,
+        resourceType: 'MONITOR',
+        resourceId: monitorId,
+        resourcePath,
+      })),
+    );
+  }
+}
+
+function collectWorkspaceSecretBindings(
+  requestHeaders: readonly StoredRequestHeader[],
+  apiWorkflow: StoredApiWorkflowConfigurationV1 | null,
+): MonitorSecretBinding[] {
+  const bindings: MonitorSecretBinding[] = [];
+  for (const header of requestHeaders) {
+    if (header.sensitive && 'secretReference' in header) {
+      bindings.push({
+        secretId: header.secretReference.secretId,
+        resourcePath: `requestHeaders.${header.name}`,
+      });
+    }
+  }
+  for (const step of apiWorkflow?.steps ?? []) {
+    for (const header of step.requestHeaders) {
+      if (header.sensitive && 'secretReference' in header) {
+        bindings.push({
+          secretId: header.secretReference.secretId,
+          resourcePath: `workflow.steps.${step.id}.requestHeaders.${header.name}`,
+        });
+      }
+    }
+  }
+  return bindings;
 }
 
 function assertTlsPolicyUrlCompatibility(policy: { type: string }, url: string): void {
@@ -1010,5 +1129,12 @@ export class MonitorProtocolMismatchError extends Error {
   constructor(protocol: 'HTTP' | 'TCP' | 'DNS' | 'API_WORKFLOW') {
     super(`This operation requires a ${protocol} monitor.`);
     this.name = 'MonitorProtocolMismatchError';
+  }
+}
+
+export class WorkspaceSecretBindingError extends Error {
+  constructor(readonly secretId: string) {
+    super('Referenced workspace secret is unavailable.');
+    this.name = 'WorkspaceSecretBindingError';
   }
 }

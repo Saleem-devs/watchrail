@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Controller, useFieldArray, useForm, useWatch, type Control } from 'react-hook-form';
 import { Button } from '../../components/ui/button';
 import { Checkbox, Input, Select, Textarea } from '../../components/ui/form-control';
@@ -17,6 +17,8 @@ import {
   type ResponseAssertionRow,
 } from './response-assertions';
 import type { ApiWorkflowConfiguration, ApiWorkflowStepConfiguration } from './types';
+import { listWorkspaceSecrets } from '../workspace-secrets/workspace-secret-api';
+import type { WorkspaceSecret } from '../workspace-secrets/workspace-secret-types';
 
 const MAXIMUM_STEPS = 10;
 const MAXIMUM_EXECUTION_SECONDS = 90;
@@ -28,6 +30,8 @@ interface WorkflowHeaderFormValue {
   value: string;
   sensitive: boolean;
   retain: boolean;
+  source: 'INLINE' | 'VAULT';
+  secretId: string;
 }
 
 interface WorkflowBodyFieldFormValue {
@@ -91,6 +95,26 @@ export function ApiWorkflowBuilder({
   const { fields, append, remove, move } = useFieldArray({ control, name: 'steps' });
   const steps = useWatch({ control, name: 'steps' });
   const [activeIndex, setActiveIndex] = useState(0);
+  const [workspaceSecrets, setWorkspaceSecrets] = useState<WorkspaceSecret[]>([]);
+  const [workspaceSecretsLoaded, setWorkspaceSecretsLoaded] = useState(false);
+  const [workspaceSecretsUnavailable, setWorkspaceSecretsUnavailable] = useState(false);
+
+  function loadWorkspaceSecrets() {
+    if (workspaceSecretsLoaded || workspaceSecretsUnavailable) return;
+    void listWorkspaceSecrets()
+      .then((items) => setWorkspaceSecrets(items.filter((item) => item.status === 'ACTIVE')))
+      .then(() => setWorkspaceSecretsLoaded(true))
+      .catch(() => setWorkspaceSecretsUnavailable(true));
+  }
+
+  useEffect(() => {
+    const referencesVault = initialConfiguration?.steps.some((step) =>
+      step.requestHeaders.some((header) => 'secretReference' in header),
+    );
+    if (referencesVault) loadWorkspaceSecrets();
+    // Initial workflow configuration is immutable for this builder instance.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const totalTimeout = steps.reduce((total, step) => total + Number(step.timeoutSeconds || 0), 0);
   const serialized = useMemo(() => serializeWorkflow(steps), [steps]);
@@ -168,6 +192,11 @@ export function ApiWorkflowBuilder({
             {error}
           </p>
         ) : null}
+        {workspaceSecretsUnavailable ? (
+          <p className="mt-3 mb-0 text-xs leading-5 text-rail-danger" role="alert">
+            Workspace secrets could not be loaded. Inline values remain available.
+          </p>
+        ) : null}
       </div>
 
       <div className="grid min-w-0 lg:grid-cols-[15rem_minmax(0,1fr)]">
@@ -241,6 +270,9 @@ export function ApiWorkflowBuilder({
             setValue={setValue}
             index={activeIndex}
             stepCount={fields.length}
+            workspaceSecrets={workspaceSecrets}
+            workspaceSecretsLoaded={workspaceSecretsLoaded}
+            onLoadWorkspaceSecrets={loadWorkspaceSecrets}
             onMove={reorderStep}
             onRemove={removeStep}
           />
@@ -257,6 +289,9 @@ function StepEditor({
   setValue,
   index,
   stepCount,
+  workspaceSecrets,
+  workspaceSecretsLoaded,
+  onLoadWorkspaceSecrets,
   onMove,
   onRemove,
 }: {
@@ -265,6 +300,9 @@ function StepEditor({
   setValue: ReturnType<typeof useForm<WorkflowFormValue>>['setValue'];
   index: number;
   stepCount: number;
+  workspaceSecrets: readonly WorkspaceSecret[];
+  workspaceSecretsLoaded: boolean;
+  onLoadWorkspaceSecrets: () => void;
   onMove: (index: number, direction: -1 | 1) => void;
   onRemove: (index: number) => void;
 }) {
@@ -420,6 +458,8 @@ function StepEditor({
                 value: '',
                 sensitive: false,
                 retain: false,
+                source: 'INLINE',
+                secretId: '',
               })
             }
           >
@@ -430,7 +470,7 @@ function StepEditor({
           <div className="mt-4 grid gap-2">
             {headers.fields.map((header, headerIndex) => (
               <div
-                className="grid gap-2 rounded-rail-control border border-rail-border bg-rail-surface p-3 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_auto]"
+                className="grid gap-2 rounded-rail-control border border-rail-border bg-rail-surface p-3 sm:grid-cols-[minmax(0,0.7fr)_9rem_minmax(0,1.3fr)_auto]"
                 key={header.id}
               >
                 <Input
@@ -439,30 +479,82 @@ function StepEditor({
                   aria-label={`Step ${index + 1} header ${headerIndex + 1} name`}
                   required
                 />
-                <Input
-                  {...register(`steps.${index}.headers.${headerIndex}.value`)}
-                  type={step.headers[headerIndex]?.sensitive ? 'password' : 'text'}
-                  placeholder={
-                    step.headers[headerIndex]?.retain
-                      ? 'Stored securely — leave blank to retain'
-                      : 'Header value'
-                  }
-                  aria-label={`Step ${index + 1} header ${headerIndex + 1} value`}
-                  autoComplete="off"
+                <Controller
+                  control={control}
+                  name={`steps.${index}.headers.${headerIndex}.source`}
+                  render={({ field }) => (
+                    <Select
+                      value={field.value}
+                      onChange={(event) => {
+                        field.onChange(event.target.value);
+                        if (event.target.value === 'VAULT') {
+                          onLoadWorkspaceSecrets();
+                          setValue(`steps.${index}.headers.${headerIndex}.sensitive`, true, {
+                            shouldDirty: true,
+                          });
+                        }
+                      }}
+                      aria-label={`Step ${index + 1} header ${headerIndex + 1} value source`}
+                    >
+                      <option value="INLINE">This step</option>
+                      <option value="VAULT">Vault</option>
+                    </Select>
+                  )}
                 />
+                {step.headers[headerIndex]?.source === 'VAULT' ? (
+                  <Controller
+                    control={control}
+                    name={`steps.${index}.headers.${headerIndex}.secretId`}
+                    render={({ field }) => (
+                      <Select
+                        value={field.value}
+                        onChange={field.onChange}
+                        required
+                        aria-label={`Step ${index + 1} header ${headerIndex + 1} workspace secret`}
+                      >
+                        <option value="">Select a secret</option>
+                        {workspaceSecrets.map((secret) => (
+                          <option key={secret.id} value={secret.id}>
+                            {secret.key}
+                          </option>
+                        ))}
+                        {workspaceSecretsLoaded && workspaceSecrets.length === 0 ? (
+                          <option value="" disabled>
+                            No active workspace secrets
+                          </option>
+                        ) : null}
+                      </Select>
+                    )}
+                  />
+                ) : (
+                  <Input
+                    {...register(`steps.${index}.headers.${headerIndex}.value`)}
+                    type={step.headers[headerIndex]?.sensitive ? 'password' : 'text'}
+                    placeholder={
+                      step.headers[headerIndex]?.retain
+                        ? 'Stored securely — leave blank to retain'
+                        : 'Header value'
+                    }
+                    aria-label={`Step ${index + 1} header ${headerIndex + 1} value`}
+                    autoComplete="off"
+                  />
+                )}
                 <IconButton
                   label={`Remove header ${headerIndex + 1}`}
                   onClick={() => headers.remove(headerIndex)}
                 >
                   <path d="M3 4.5h10M6 4.5V3h4v1.5M5 6l.5 7h5l.5-7" />
                 </IconButton>
-                <label className="flex min-h-8 cursor-pointer items-center gap-2 text-xs text-rail-muted sm:col-span-3">
+                <label
+                  className={`flex min-h-8 items-center gap-2 text-xs text-rail-muted sm:col-span-4 ${step.headers[headerIndex]?.source === 'VAULT' ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+                >
                   <Controller
                     control={control}
                     name={`steps.${index}.headers.${headerIndex}.sensitive`}
                     render={({ field }) => (
                       <Checkbox
                         checked={field.value}
+                        disabled={step.headers[headerIndex]?.source === 'VAULT'}
                         onChange={(event) => field.onChange(event.target.checked)}
                       />
                     )}
@@ -1035,6 +1127,8 @@ function stepToFormValue(step: ApiWorkflowStepConfiguration, index: number): Wor
       value: 'value' in header ? (header.value ?? '') : '',
       sensitive: header.sensitive,
       retain: header.sensitive && (('hasValue' in header && header.hasValue) || 'retain' in header),
+      source: 'secretReference' in header ? 'VAULT' : 'INLINE',
+      secretId: 'secretReference' in header ? header.secretReference.secretId : '',
     })),
     bodyType: body.type,
     bodyValue: body.type !== 'NONE' && !bodyProtected && 'value' in body ? body.value : '',
@@ -1076,9 +1170,15 @@ function serializeWorkflow(steps: WorkflowStepFormValue[]): ApiWorkflowConfigura
         ? { type: 'MINIMUM_VALIDITY', days: step.tlsDays }
         : { type: 'DISABLED' },
       requestHeaders: step.headers.map((header) =>
-        header.sensitive && header.retain && header.value === ''
-          ? { name: header.name, sensitive: true, retain: true }
-          : { name: header.name, sensitive: header.sensitive, value: header.value },
+        header.source === 'VAULT'
+          ? {
+              name: header.name,
+              sensitive: true,
+              secretReference: { contractVersion: 1 as const, secretId: header.secretId },
+            }
+          : header.sensitive && header.retain && header.value === ''
+            ? { name: header.name, sensitive: true, retain: true }
+            : { name: header.name, sensitive: header.sensitive, value: header.value },
       ),
       requestBody: serializeRequestBody(step),
       assertions: serializeResponseAssertions(step.assertions),

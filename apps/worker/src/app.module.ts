@@ -18,6 +18,7 @@ import {
   ProbeCoordinatorRepository,
   MultiLocationRoundFinalizationRepository,
   AuthEmailOutboxRepository,
+  WorkspaceSecretRepository,
 } from '@watchrail/db';
 import type { WatchrailDatabase } from '@watchrail/db';
 import { CheckOutboxRelay, createExponentialBackoff } from './check-outbox-relay.js';
@@ -130,6 +131,11 @@ import { AuthEmailJobHandler, AuthEmailOutboxRelay } from './auth-email-worker.j
       useFactory: (db: WatchrailDatabase) => new CheckExecutionRepository(db),
     },
     {
+      provide: WorkspaceSecretRepository,
+      inject: [getDrizzleToken()],
+      useFactory: (db: WatchrailDatabase) => new WorkspaceSecretRepository(db),
+    },
+    {
       provide: ScheduledRoundRepository,
       inject: [getDrizzleToken(), WORKER_CONFIG],
       useFactory: (db: WatchrailDatabase, config: WorkerConfig) =>
@@ -146,9 +152,15 @@ import { AuthEmailJobHandler, AuthEmailOutboxRelay } from './auth-email-worker.j
     },
     {
       provide: CheckRoundJobHandler,
-      inject: [CheckExecutionRepository, NodeHttpExecutor, WORKER_CONFIG],
+      inject: [
+        CheckExecutionRepository,
+        WorkspaceSecretRepository,
+        NodeHttpExecutor,
+        WORKER_CONFIG,
+      ],
       useFactory: (
         executions: CheckExecutionRepository,
+        workspaceSecrets: WorkspaceSecretRepository,
         executor: NodeHttpExecutor,
         config: WorkerConfig,
       ) =>
@@ -158,6 +170,8 @@ import { AuthEmailJobHandler, AuthEmailOutboxRelay } from './auth-email-worker.j
           config.checkExecutionLeaseDurationMs,
           config.headerEncryptionKeyring,
           config.assertionEncryptionKeyring,
+          workspaceSecrets,
+          config.workspaceSecretKeyring,
         ),
     },
     {

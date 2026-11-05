@@ -76,7 +76,9 @@ export function storeApiWorkflowConfiguration(
   };
   const parsed = parseStoredApiWorkflowConfiguration(stored);
   try {
-    validateApiWorkflow(resolveApiWorkflowConfiguration(parsed, context, keyrings));
+    validateApiWorkflow(
+      resolveApiWorkflowConfiguration(parsed, context, keyrings, () => 'workspace-secret'),
+    );
   } catch (error) {
     if (error instanceof TypeError || error instanceof RangeError) {
       throw new ApiWorkflowConfigurationError(error.message, { cause: error });

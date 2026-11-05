@@ -49,6 +49,28 @@ describe('request header policy', () => {
     expect(() => assertNoRetainedHeaders(headers)).toThrow(RequestHeaderInputError);
   });
 
+  it('normalizes workspace secret references without accepting a plaintext shadow value', () => {
+    const reference = {
+      contractVersion: 1 as const,
+      secretId: '11111111-1111-4111-8111-111111111111',
+    };
+    expect(
+      normalizeRequestHeaderUpdates([
+        { name: 'authorization', sensitive: true, secretReference: reference },
+      ]),
+    ).toEqual([{ name: 'authorization', sensitive: true, secretReference: reference }]);
+    expect(() =>
+      normalizeRequestHeaderUpdates([
+        {
+          name: 'authorization',
+          sensitive: true,
+          secretReference: reference,
+          value: 'shadow',
+        },
+      ]),
+    ).toThrow(RequestHeaderInputError);
+  });
+
   it('parses the complete stored plaintext and encrypted header contract', () => {
     const stored = [
       { name: 'x-environment', sensitive: false, value: 'production' },
@@ -62,6 +84,14 @@ describe('request header policy', () => {
           iv: 'AAAAAAAAAAAAAAAA',
           ciphertext: 'c2VjcmV0',
           authTag: 'AAAAAAAAAAAAAAAAAAAAAA',
+        },
+      },
+      {
+        name: 'x-vault-token',
+        sensitive: true,
+        secretReference: {
+          contractVersion: 1,
+          secretId: '11111111-1111-4111-8111-111111111111',
         },
       },
     ];

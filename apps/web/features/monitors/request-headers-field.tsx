@@ -1,18 +1,23 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '../../components/ui/button';
-import { Checkbox, Input } from '../../components/ui/form-control';
+import { Checkbox, Input, Select } from '../../components/ui/form-control';
+import { listWorkspaceSecrets } from '../workspace-secrets/workspace-secret-api';
+import type { WorkspaceSecret } from '../workspace-secrets/workspace-secret-types';
 
 export interface RequestHeaderFormValue {
   name: string;
   sensitive: boolean;
   value: string | null;
   hasValue: true;
+  secretReference?: { contractVersion: 1; secretId: string };
 }
 
 interface RequestHeaderRow extends RequestHeaderFormValue {
   id: string;
+  source: 'INLINE' | 'VAULT';
+  secretId: string;
 }
 
 export function RequestHeadersField({
@@ -23,9 +28,31 @@ export function RequestHeadersField({
   error?: string | undefined;
 }) {
   const [rows, setRows] = useState<RequestHeaderRow[]>(() =>
-    initialHeaders.map((header, index) => ({ ...header, id: `existing-${index}` })),
+    initialHeaders.map((header, index) => ({
+      ...header,
+      id: `existing-${index}`,
+      source: header.secretReference ? 'VAULT' : 'INLINE',
+      secretId: header.secretReference?.secretId ?? '',
+    })),
   );
+  const [secrets, setSecrets] = useState<WorkspaceSecret[]>([]);
+  const [secretsLoaded, setSecretsLoaded] = useState(false);
+  const [secretsUnavailable, setSecretsUnavailable] = useState(false);
   const nextId = useRef(initialHeaders.length);
+
+  function loadSecrets() {
+    if (secretsLoaded || secretsUnavailable) return;
+    void listWorkspaceSecrets()
+      .then((items) => setSecrets(items.filter((item) => item.status === 'ACTIVE')))
+      .then(() => setSecretsLoaded(true))
+      .catch(() => setSecretsUnavailable(true));
+  }
+
+  useEffect(() => {
+    if (initialHeaders.some((header) => header.secretReference)) loadSecrets();
+    // Initial references are immutable for this field instance.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function addHeader() {
     setRows((current) => [
@@ -36,6 +63,8 @@ export function RequestHeadersField({
         value: '',
         sensitive: false,
         hasValue: true,
+        source: 'INLINE',
+        secretId: '',
       },
     ]);
   }
@@ -59,7 +88,7 @@ export function RequestHeadersField({
           {rows.map((row) => (
             <div
               key={row.id}
-              className="grid gap-3 rounded-rail-control border border-rail-border bg-rail-surface p-3 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_auto] sm:items-start"
+              className="grid gap-3 rounded-rail-control border border-rail-border bg-rail-surface p-3 sm:grid-cols-[minmax(0,0.75fr)_10rem_minmax(0,1.25fr)_auto] sm:items-start"
             >
               <label className="grid gap-1.5 text-xs font-medium text-rail-subtle">
                 Header name
@@ -72,23 +101,82 @@ export function RequestHeadersField({
                 />
               </label>
               <label className="grid gap-1.5 text-xs font-medium text-rail-subtle">
-                Value
-                <Input
-                  name="requestHeaderValue"
-                  type={row.sensitive ? 'password' : 'text'}
-                  defaultValue={row.value ?? ''}
-                  placeholder={
-                    row.value === null ? 'Stored securely — leave blank to retain' : 'Value'
-                  }
-                  autoComplete="off"
-                />
+                Value source
+                <Select
+                  value={row.source}
+                  onChange={(event) => {
+                    if (event.target.value === 'VAULT') loadSecrets();
+                    setRows((current) =>
+                      current.map((candidate) =>
+                        candidate.id === row.id
+                          ? {
+                              ...candidate,
+                              source: event.target.value as 'INLINE' | 'VAULT',
+                              sensitive: event.target.value === 'VAULT' || candidate.sensitive,
+                            }
+                          : candidate,
+                      ),
+                    );
+                  }}
+                  aria-label={`Value source for ${row.name || 'header'}`}
+                >
+                  <option value="INLINE">This monitor</option>
+                  <option value="VAULT">Workspace secret</option>
+                </Select>
+              </label>
+              <label className="grid gap-1.5 text-xs font-medium text-rail-subtle">
+                {row.source === 'VAULT' ? 'Workspace secret' : 'Value'}
+                {row.source === 'VAULT' ? (
+                  <Select
+                    value={row.secretId}
+                    onChange={(event) =>
+                      setRows((current) =>
+                        current.map((candidate) =>
+                          candidate.id === row.id
+                            ? { ...candidate, secretId: event.target.value }
+                            : candidate,
+                        ),
+                      )
+                    }
+                    required
+                    aria-label={`Workspace secret for ${row.name || 'header'}`}
+                  >
+                    <option value="">Select a secret</option>
+                    {secrets.map((secret) => (
+                      <option key={secret.id} value={secret.id}>
+                        {secret.key}
+                      </option>
+                    ))}
+                    {secretsLoaded && secrets.length === 0 ? (
+                      <option value="" disabled>
+                        No active workspace secrets
+                      </option>
+                    ) : null}
+                  </Select>
+                ) : (
+                  <Input
+                    name="requestHeaderValue"
+                    type={row.sensitive ? 'password' : 'text'}
+                    defaultValue={row.value ?? ''}
+                    placeholder={
+                      row.value === null ? 'Stored securely — leave blank to retain' : 'Value'
+                    }
+                    autoComplete="off"
+                  />
+                )}
+                {row.source === 'VAULT' ? (
+                  <input type="hidden" name="requestHeaderValue" value="" />
+                ) : null}
               </label>
               <div className="flex min-h-10 items-center gap-2 pt-5 sm:justify-end">
-                <label className="flex min-h-10 cursor-pointer items-center gap-2 text-xs font-medium text-rail-subtle">
+                <label
+                  className={`flex min-h-10 items-center gap-2 text-xs font-medium text-rail-subtle ${row.source === 'VAULT' ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+                >
                   <Checkbox
                     name="requestHeaderSensitive"
                     value={row.id}
                     defaultChecked={row.sensitive}
+                    disabled={row.source === 'VAULT'}
                     onChange={(event) =>
                       setRows((current) =>
                         current.map((candidate) =>
@@ -121,6 +209,8 @@ export function RequestHeadersField({
                   </svg>
                 </button>
                 <input type="hidden" name="requestHeaderId" value={row.id} />
+                <input type="hidden" name="requestHeaderSource" value={row.source} />
+                <input type="hidden" name="requestHeaderSecretId" value={row.secretId} />
                 <input
                   type="hidden"
                   name="requestHeaderHasStoredValue"
@@ -137,6 +227,11 @@ export function RequestHeadersField({
       )}
 
       {error ? <p className="mt-3 mb-0 text-xs text-rail-danger">{error}</p> : null}
+      {secretsUnavailable ? (
+        <p className="mt-3 mb-0 text-xs text-rail-danger" role="alert">
+          Workspace secrets could not be loaded. Inline values remain available.
+        </p>
+      ) : null}
     </section>
   );
 }

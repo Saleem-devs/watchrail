@@ -7,7 +7,7 @@ import {
   NodeDnsQueryResolver,
   NodeTcpConnector,
 } from '@watchrail/check-engine';
-import { resolveApiWorkflowConfiguration } from '@watchrail/api-workflow-security';
+import { resolveApiWorkflowConfigurationWithWorkspaceSecrets } from '@watchrail/api-workflow-security';
 import type {
   ApiWorkflowResult,
   DnsQueryResolver,
@@ -16,7 +16,11 @@ import type {
   TcpConnector,
 } from '@watchrail/check-engine';
 import type { ExecuteCheckRoundJobV1 } from '@watchrail/contracts';
-import type { CheckExecutionRepository } from '@watchrail/db';
+import {
+  WorkspaceSecretNotFoundError,
+  type CheckExecutionRepository,
+  type WorkspaceSecretRepository,
+} from '@watchrail/db';
 import {
   EMPTY_ASSERTION_EVALUATION,
   StoredAssertionContractError,
@@ -29,10 +33,15 @@ import {
 } from '@watchrail/assertion-security';
 import type { CheckJobHandler } from '@watchrail/queue';
 import {
-  resolveRequestHeaders,
+  resolveRequestHeadersWithWorkspaceSecrets,
   type HeaderEncryptionKeyring,
   StoredRequestHeaderResolutionError,
 } from '@watchrail/http-header-security';
+import {
+  decryptWorkspaceSecret,
+  StoredWorkspaceSecretResolutionError,
+  type WorkspaceSecretKeyring,
+} from '@watchrail/secret-vault-security';
 
 export class CheckExecutionAlreadyClaimedError extends Error {
   constructor() {
@@ -58,6 +67,8 @@ export class CheckRoundJobHandler implements CheckJobHandler {
     private readonly leaseDurationMs: number,
     private readonly headerEncryptionKeyring: HeaderEncryptionKeyring,
     private readonly assertionEncryptionKeyring: AssertionEncryptionKeyring,
+    private readonly workspaceSecrets: WorkspaceSecretRepository,
+    private readonly workspaceSecretKeyring: WorkspaceSecretKeyring,
     private readonly tcpConnector: TcpConnector = new NodeTcpConnector(),
     private readonly dnsResolver: DnsQueryResolver = new NodeDnsQueryResolver(),
   ) {}
@@ -137,7 +148,7 @@ export class CheckRoundJobHandler implements CheckJobHandler {
     if (claim.execution.type === 'API_WORKFLOW') {
       let workflowResult: ApiWorkflowResult | null = null;
       try {
-        const workflow = resolveApiWorkflowConfiguration(
+        const workflow = await resolveApiWorkflowConfigurationWithWorkspaceSecrets(
           claim.execution.workflow,
           {
             organizationId: claim.execution.organizationId,
@@ -147,6 +158,7 @@ export class CheckRoundJobHandler implements CheckJobHandler {
             headers: this.headerEncryptionKeyring,
             assertions: this.assertionEncryptionKeyring,
           },
+          this.executionSecretResolver(claim.execution.organizationId),
         );
         workflowResult = await executeApiWorkflow(workflow, { executor: this.executor });
       } catch (error) {
@@ -189,13 +201,14 @@ export class CheckRoundJobHandler implements CheckJobHandler {
       let requestHeaders;
       let assertions;
       try {
-        requestHeaders = resolveRequestHeaders(
+        requestHeaders = await resolveRequestHeadersWithWorkspaceSecrets(
           claim.execution.requestHeaders,
           {
             organizationId: claim.execution.organizationId,
             monitorId: claim.execution.monitorId,
           },
           this.headerEncryptionKeyring,
+          this.executionSecretResolver(claim.execution.organizationId),
         );
         assertions = resolveResponseAssertions(
           claim.execution.assertions,
@@ -211,7 +224,9 @@ export class CheckRoundJobHandler implements CheckJobHandler {
           !(error instanceof StoredRequestHeadersInvariantError) &&
           !(error instanceof StoredRequestHeaderResolutionError) &&
           !(error instanceof StoredAssertionContractError) &&
-          !(error instanceof StoredAssertionResolutionError)
+          !(error instanceof StoredAssertionResolutionError) &&
+          !(error instanceof WorkspaceSecretNotFoundError) &&
+          !(error instanceof StoredWorkspaceSecretResolutionError)
         ) {
           throw error;
         }
@@ -252,6 +267,18 @@ export class CheckRoundJobHandler implements CheckJobHandler {
     );
 
     if (!completed) throw new CheckExecutionClaimLostError();
+  }
+
+  private executionSecretResolver(organizationId: string) {
+    return this.workspaceSecrets.createExecutionValueResolver(
+      organizationId,
+      (encryptedValue, { secretId, versionNumber }) =>
+        decryptWorkspaceSecret(
+          encryptedValue,
+          { organizationId, secretId, versionNumber },
+          this.workspaceSecretKeyring,
+        ),
+    );
   }
 }
 

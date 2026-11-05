@@ -22,6 +22,7 @@ import {
   MonitorUpdateNotFoundError,
   MonitorProtocolMismatchError,
   MonitorLocationUnavailableError,
+  WorkspaceSecretBindingError,
   type CheckRoundRecord,
   type CheckHistoryDetail,
   type CheckHistoryPage,
@@ -163,9 +164,16 @@ export class MonitorsService {
               : error instanceof AssertionInputError
                 ? { assertions: error.issues }
                 : error instanceof RequestHeaderInputError
-                  ? { workflow: error.issues }
+                  ? command.type === 'API_WORKFLOW'
+                    ? { workflow: error.issues }
+                    : { requestHeaders: error.issues }
                   : { workflow: [error.message] },
         });
+      }
+      if (error instanceof WorkspaceSecretBindingError) {
+        throw workspaceSecretReferenceValidationError(
+          command.type === 'API_WORKFLOW' ? 'workflow' : 'requestHeaders',
+        );
       }
       throw error;
     }
@@ -217,6 +225,9 @@ export class MonitorsService {
       }
       if (error instanceof MonitorProtocolMismatchError) {
         throw new ConflictException({ code: 'MONITOR_PROTOCOL_MISMATCH', message: error.message });
+      }
+      if (error instanceof WorkspaceSecretBindingError) {
+        throw workspaceSecretReferenceValidationError('workflow');
       }
       throw error;
     }
@@ -301,6 +312,9 @@ export class MonitorsService {
           message: 'Request headers are invalid.',
           fields: { requestHeaders: [error.message] },
         });
+      }
+      if (error instanceof WorkspaceSecretBindingError) {
+        throw workspaceSecretReferenceValidationError('requestHeaders');
       }
       throw error;
     }
@@ -623,6 +637,9 @@ export class MonitorsService {
           fields: { requestHeaders: [error.message] },
         });
       }
+      if (error instanceof WorkspaceSecretBindingError) {
+        throw workspaceSecretReferenceValidationError('requestHeaders');
+      }
       throw error;
     }
   }
@@ -830,6 +847,16 @@ export class MonitorsService {
       });
     }
   }
+}
+
+function workspaceSecretReferenceValidationError(
+  field: 'requestHeaders' | 'workflow',
+): BadRequestException {
+  return new BadRequestException({
+    code: 'VALIDATION_FAILED',
+    message: 'A referenced workspace secret is unavailable.',
+    fields: { [field]: ['Choose an active secret from this workspace.'] },
+  });
 }
 
 function monitorListState(

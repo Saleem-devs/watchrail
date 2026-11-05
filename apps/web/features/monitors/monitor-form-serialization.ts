@@ -64,6 +64,8 @@ export function requestHeadersFromForm(formData: FormData): Array<Record<string,
   const values = formData.getAll('requestHeaderValue');
   const ids = formData.getAll('requestHeaderId');
   const storedValues = formData.getAll('requestHeaderHasStoredValue');
+  const sources = formData.getAll('requestHeaderSource');
+  const secretIds = formData.getAll('requestHeaderSecretId');
   const sensitiveIds = new Set(
     formData.getAll('requestHeaderSensitive').map((value) => formEntryString(value)),
   );
@@ -73,6 +75,13 @@ export function requestHeadersFromForm(formData: FormData): Array<Record<string,
     const id = formEntryString(ids[index]);
     const value = formEntryString(values[index]);
     const sensitive = sensitiveIds.has(id);
+    if (sources[index] === 'VAULT') {
+      return {
+        name: headerName,
+        sensitive: true,
+        secretReference: { contractVersion: 1, secretId: formEntryString(secretIds[index]) },
+      };
+    }
     if (storedValues[index] === 'true' && value === '') {
       return { name: headerName, sensitive: true, retain: true };
     }
