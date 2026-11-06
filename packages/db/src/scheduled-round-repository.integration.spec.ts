@@ -19,6 +19,7 @@ import {
   checkRoundOutbox,
   checkRounds,
   monitorConfigurationVersions,
+  monitorAvailabilityState,
   monitors,
   probeLocations,
 } from './schema.js';
@@ -233,10 +234,7 @@ describe('ScheduledRoundRepository', () => {
       'Queue consumer',
       heartbeatHash('missed-token'),
     );
-    await connection.db
-      .update(monitors)
-      .set({ nextCheckAt: new Date('2020-01-01T00:00:00Z') })
-      .where(eq(monitors.id, monitor.id));
+    await makeHeartbeatOverdue(monitor.id);
 
     await expect(new HeartbeatRepository(connection.db).evaluateDue(100)).resolves.toBe(1);
 
@@ -265,10 +263,7 @@ describe('ScheduledRoundRepository', () => {
       message: null,
       metadata: {},
     });
-    await connection.db
-      .update(monitors)
-      .set({ nextCheckAt: new Date('2020-01-01T00:00:00Z') })
-      .where(eq(monitors.id, monitor.id));
+    await makeHeartbeatOverdue(monitor.id);
 
     await expect(heartbeats.evaluateDue(1)).resolves.toBe(1);
     const history = new CheckHistoryRepository(connection.db);
@@ -386,10 +381,7 @@ describe('ScheduledRoundRepository', () => {
         message: null,
         metadata: {},
       });
-      await connection.db
-        .update(monitors)
-        .set({ nextCheckAt: new Date('2020-01-01T00:00:00Z') })
-        .where(eq(monitors.id, monitor.id));
+      await makeHeartbeatOverdue(monitor.id);
 
       if (order === 'EVALUATION_FIRST') {
         await expect(heartbeats.evaluateDue(1)).resolves.toBe(1);
@@ -416,10 +408,7 @@ describe('ScheduledRoundRepository', () => {
       const tokenHash = heartbeatHash(`late-ping-${order}`);
       const monitor = await createHeartbeatMonitorRecord(`Late ping ${order}`, tokenHash);
       const heartbeats = new HeartbeatRepository(connection.db);
-      await connection.db
-        .update(monitors)
-        .set({ nextCheckAt: new Date('2020-01-01T00:00:00Z') })
-        .where(eq(monitors.id, monitor.id));
+      await makeHeartbeatOverdue(monitor.id);
 
       if (order === 'EVALUATION_FIRST') {
         await expect(heartbeats.evaluateDue(1)).resolves.toBe(1);
@@ -441,6 +430,66 @@ describe('ScheduledRoundRepository', () => {
       );
     },
   );
+
+  it('recovers an overdue heartbeat by logical time despite unfavorable round identifiers', async () => {
+    const missedRoundId = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+    const recoveryRoundId = '00000000-0000-4000-8000-000000000001';
+    const roundIds = [missedRoundId, recoveryRoundId];
+    const tokenHash = heartbeatHash('ordered-late-ping');
+    const monitor = await createHeartbeatMonitorRecord('Ordered late ping', tokenHash);
+    const heartbeats = new HeartbeatRepository(connection.db, () => {
+      const roundId = roundIds.shift();
+      if (!roundId) throw new Error('Unexpected heartbeat round.');
+      return roundId;
+    });
+    const deadlineAt = await makeHeartbeatOverdue(monitor.id);
+
+    await expect(
+      heartbeats.recordSignal(tokenHash, {
+        type: 'PING',
+        runId: null,
+        message: null,
+        metadata: {},
+      }),
+    ).resolves.toMatchObject({ state: 'RECEIVED' });
+
+    const rounds = await connection.db
+      .select({ id: checkRounds.id, createdAt: checkRounds.createdAt })
+      .from(checkRounds)
+      .where(eq(checkRounds.monitorId, monitor.id));
+    expect(rounds).toEqual(
+      expect.arrayContaining([
+        { id: missedRoundId, createdAt: deadlineAt },
+        { id: recoveryRoundId, createdAt: expect.any(Date) },
+      ]),
+    );
+    expect(rounds.find(({ id }) => id === recoveryRoundId)!.createdAt.getTime()).toBeGreaterThan(
+      deadlineAt.getTime(),
+    );
+    expect(recoveryRoundId.localeCompare(missedRoundId)).toBeLessThan(0);
+
+    const incidentReads = new IncidentReadRepository(connection.db);
+    await expect(
+      incidentReads.currentForMonitor(organizationId, monitor.id),
+    ).resolves.toMatchObject({
+      failureStreak: null,
+      currentIncident: null,
+    });
+    await expect(
+      incidentReads.listForMonitor(organizationId, monitor.id, { limit: 10 }),
+    ).resolves.toMatchObject({ items: [{ status: 'RESOLVED' }] });
+    await expect(
+      new CheckHistoryRepository(connection.db).currentForMonitor(organizationId, monitor.id),
+    ).resolves.toMatchObject({ roundId: recoveryRoundId, availability: 'AVAILABLE' });
+    const [availability] = await connection.db
+      .select()
+      .from(monitorAvailabilityState)
+      .where(eq(monitorAvailabilityState.monitorId, monitor.id));
+    expect(availability).toMatchObject({
+      currentState: 'AVAILABLE',
+      lastProcessedRoundId: recoveryRoundId,
+    });
+  });
 
   it('dispatches a deterministic bounded batch ordered by deadline then id', async () => {
     const first = await createDueMonitor('First', 60, new Date('2026-01-01T00:00:00Z'));
@@ -654,6 +703,24 @@ describe('ScheduledRoundRepository', () => {
       undefined,
       tokenHash,
     );
+  }
+
+  async function makeHeartbeatOverdue(monitorId: string): Promise<Date> {
+    const [state] = await connection.db
+      .select({ trackingStartedAt: monitorAvailabilityState.trackingStartedAt })
+      .from(monitorAvailabilityState)
+      .where(eq(monitorAvailabilityState.monitorId, monitorId));
+    const [monitor] = await connection.db
+      .select({ heartbeatLastStartedAt: monitors.heartbeatLastStartedAt })
+      .from(monitors)
+      .where(eq(monitors.id, monitorId));
+    const deadlineAt = monitor?.heartbeatLastStartedAt ?? state?.trackingStartedAt;
+    if (!deadlineAt) throw new Error('Heartbeat monitor state is missing.');
+    await connection.db
+      .update(monitors)
+      .set({ nextCheckAt: deadlineAt })
+      .where(eq(monitors.id, monitorId));
+    return deadlineAt;
   }
 
   function createNamedConnection(applicationName: string): DatabaseConnection {

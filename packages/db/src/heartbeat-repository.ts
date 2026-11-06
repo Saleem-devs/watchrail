@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, lte, sql } from 'drizzle-orm';
 import {
   EMPTY_ASSERTION_EVALUATION,
@@ -34,7 +35,10 @@ export interface HeartbeatSignalReceipt {
 }
 
 export class HeartbeatRepository {
-  constructor(private readonly db: WatchrailDatabase) {}
+  constructor(
+    private readonly db: WatchrailDatabase,
+    private readonly createRoundId: () => string = randomUUID,
+  ) {}
 
   async recordSignal(
     tokenHash: string,
@@ -61,7 +65,7 @@ export class HeartbeatRepository {
       const deadlineOverdue =
         monitor.lifecycleState === 'ENABLED' &&
         monitor.nextCheckAt !== null &&
-        monitor.nextCheckAt.getTime() <= receivedAt.getTime();
+        monitor.nextCheckAt.getTime() < receivedAt.getTime();
       const activeRunAtReceipt = monitor.heartbeatLastStartedAt !== null;
       const runMatches = activeRunAtReceipt && monitor.heartbeatActiveRunId === signal.runId;
       const terminalSignal = signal.type === 'COMPLETE' || signal.type === 'FAIL';
@@ -82,7 +86,12 @@ export class HeartbeatRepository {
       let nextDeadlineAt = monitor.nextCheckAt;
 
       if (deadlineOverdue) {
-        nextDeadlineAt = await recordOverdueHeartbeat(tx, monitor, receivedAt);
+        nextDeadlineAt = await recordOverdueHeartbeat(
+          tx,
+          monitor,
+          receivedAt,
+          this.createRoundId(),
+        );
         activeStartedAt = null;
         activeRunId = null;
       }
@@ -148,18 +157,24 @@ export class HeartbeatRepository {
         monitor.lifecycleState === 'ENABLED' &&
         (signal.type === 'PING' || terminalIsAuthoritative)
       ) {
-        await createCompletedHeartbeatRound(tx, monitor.organizationId, monitor.id, {
-          outcome: signal.type === 'FAIL' ? 'FAIL' : 'PASS',
-          stage: 'HEARTBEAT',
-          reason: signal.type === 'FAIL' ? 'HEARTBEAT_FAILED' : 'SIGNAL_RECEIVED',
-          statusCode: null,
-          responseTimeMs: null,
-          attemptDurationMs: 0,
-          redirects: [],
-          assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
-          heartbeatResult: heartbeatEvidence(signal, expectedAt, receivedAt, runtimeMs),
-          checkedAt: receivedAt,
-        });
+        await createCompletedHeartbeatRound(
+          tx,
+          monitor.organizationId,
+          monitor.id,
+          {
+            outcome: signal.type === 'FAIL' ? 'FAIL' : 'PASS',
+            stage: 'HEARTBEAT',
+            reason: signal.type === 'FAIL' ? 'HEARTBEAT_FAILED' : 'SIGNAL_RECEIVED',
+            statusCode: null,
+            responseTimeMs: null,
+            attemptDurationMs: 0,
+            redirects: [],
+            assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
+            heartbeatResult: heartbeatEvidence(signal, expectedAt, receivedAt, runtimeMs),
+            checkedAt: receivedAt,
+          },
+          this.createRoundId(),
+        );
       }
 
       return {
@@ -199,7 +214,12 @@ export class HeartbeatRepository {
       const checkedAt = new Date();
       for (const monitor of due) {
         if (!monitor.heartbeat || !monitor.nextCheckAt) continue;
-        const nextCheckAt = await recordOverdueHeartbeat(tx, monitor, checkedAt);
+        const nextCheckAt = await recordOverdueHeartbeat(
+          tx,
+          monitor,
+          checkedAt,
+          this.createRoundId(),
+        );
         await tx
           .update(monitors)
           .set({
@@ -220,7 +240,8 @@ export class HeartbeatRepository {
 async function recordOverdueHeartbeat(
   tx: Transaction,
   monitor: typeof monitors.$inferSelect,
-  checkedAt: Date,
+  reconciledAt: Date,
+  roundId: string,
 ): Promise<Date> {
   if (!monitor.heartbeat || !monitor.nextCheckAt) {
     throw new Error(
@@ -229,32 +250,39 @@ async function recordOverdueHeartbeat(
   }
   const runtimeExceeded =
     monitor.heartbeat.maximumRuntimeSeconds !== null && monitor.heartbeatLastStartedAt !== null;
-  const expectedAt = expectedSignalAt(monitor.nextCheckAt, monitor.heartbeat.schedule.graceSeconds);
-  await createCompletedHeartbeatRound(tx, monitor.organizationId, monitor.id, {
-    outcome: 'FAIL',
-    stage: 'HEARTBEAT',
-    reason: runtimeExceeded ? 'RUNTIME_EXCEEDED' : 'MISSED_HEARTBEAT',
-    statusCode: null,
-    responseTimeMs: null,
-    attemptDurationMs: 0,
-    redirects: [],
-    assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
-    heartbeatResult: {
-      contractVersion: 1,
-      signal: 'MISSED',
-      runId: monitor.heartbeatActiveRunId,
-      message: null,
-      metadata: {},
-      expectedAt: expectedAt?.toISOString() ?? null,
-      receivedAt: null,
-      runtimeMs:
-        runtimeExceeded && monitor.heartbeatLastStartedAt
-          ? Math.max(0, checkedAt.getTime() - monitor.heartbeatLastStartedAt.getTime())
-          : null,
+  const deadlineAt = monitor.nextCheckAt;
+  const expectedAt = expectedSignalAt(deadlineAt, monitor.heartbeat.schedule.graceSeconds);
+  await createCompletedHeartbeatRound(
+    tx,
+    monitor.organizationId,
+    monitor.id,
+    {
+      outcome: 'FAIL',
+      stage: 'HEARTBEAT',
+      reason: runtimeExceeded ? 'RUNTIME_EXCEEDED' : 'MISSED_HEARTBEAT',
+      statusCode: null,
+      responseTimeMs: null,
+      attemptDurationMs: 0,
+      redirects: [],
+      assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
+      heartbeatResult: {
+        contractVersion: 1,
+        signal: 'MISSED',
+        runId: monitor.heartbeatActiveRunId,
+        message: null,
+        metadata: {},
+        expectedAt: expectedAt?.toISOString() ?? null,
+        receivedAt: null,
+        runtimeMs:
+          runtimeExceeded && monitor.heartbeatLastStartedAt
+            ? Math.max(0, deadlineAt.getTime() - monitor.heartbeatLastStartedAt.getTime())
+            : null,
+      },
+      checkedAt: deadlineAt,
     },
-    checkedAt,
-  });
-  return nextHeartbeatDeadline(monitor.heartbeat.schedule, checkedAt);
+    roundId,
+  );
+  return nextHeartbeatDeadline(monitor.heartbeat.schedule, reconciledAt);
 }
 
 function heartbeatEvidence(
@@ -286,6 +314,7 @@ async function createCompletedHeartbeatRound(
   organizationId: string,
   monitorId: string,
   result: AuthoritativeCheckResult,
+  roundId: string,
 ): Promise<void> {
   const [configuration] = await tx
     .select({ id: monitorConfigurationVersions.id })
@@ -303,6 +332,7 @@ async function createCompletedHeartbeatRound(
   const [round] = await tx
     .insert(checkRounds)
     .values({
+      id: roundId,
       organizationId,
       monitorId,
       monitorConfigurationVersionId: configuration.id,
