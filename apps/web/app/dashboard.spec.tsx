@@ -234,6 +234,79 @@ describe('Dashboard', () => {
     );
   });
 
+  it('creates an inbound heartbeat monitor and presents its one-time ingestion URL', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: {
+              id: 'heartbeat-monitor-1',
+              type: 'HEARTBEAT',
+              name: 'Nightly backup',
+              url: '',
+              configuration: {
+                type: 'HEARTBEAT',
+                heartbeat: {
+                  schedule: { type: 'INTERVAL', intervalSeconds: 600, graceSeconds: 120 },
+                  maximumRuntimeSeconds: 3_600,
+                },
+              },
+              method: 'GET',
+              lifecycleState: 'ENABLED',
+              timeoutMs: 10_000,
+              followRedirects: false,
+              statusPolicy: { type: 'ANY_2XX' },
+              locations: [],
+              heartbeatIngestionPath: '/api/heartbeats/one-time-token',
+              createdAt: new Date().toISOString(),
+            },
+          }),
+          { status: 201 },
+        ),
+      );
+
+    render(<Dashboard view="create" />);
+    await screen.findByRole('heading', { name: 'Create monitor' });
+    await userEvent.click(screen.getByRole('button', { name: 'Heartbeat' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Heartbeat' })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      ),
+    );
+    expect(screen.queryByRole('button', { name: 'Test configuration' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Timeout/)).not.toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText('Monitor name'), 'Nightly backup');
+    const interval = screen.getByLabelText(/Expected every/);
+    await userEvent.clear(interval);
+    await userEvent.type(interval, '10');
+    const grace = screen.getByLabelText(/Grace period/);
+    await userEvent.clear(grace);
+    await userEvent.type(grace, '2');
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Enforce maximum runtime' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save monitor' }));
+
+    const request = fetchMock.mock.calls.at(-1)?.[1];
+    if (typeof request?.body !== 'string') throw new Error('Expected a JSON request body.');
+    expect(JSON.parse(request.body)).toEqual({
+      type: 'HEARTBEAT',
+      name: 'Nightly backup',
+      heartbeat: {
+        schedule: { type: 'INTERVAL', intervalSeconds: 600, graceSeconds: 120 },
+        maximumRuntimeSeconds: 3_600,
+      },
+      lifecycleState: 'ENABLED',
+    });
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Nightly backup is ready to receive signals.',
+    );
+    expect(
+      screen.getByText('POST http://localhost:3000/api/heartbeats/one-time-token'),
+    ).toBeInTheDocument();
+  });
+
   it('creates an API workflow with serialized steps', async () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
@@ -1235,6 +1308,89 @@ describe('Dashboard', () => {
     expect(await screen.findByRole('heading', { name: 'Create monitor' })).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Monitor name' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Monitors' })).not.toBeInTheDocument();
+  });
+
+  it('loads a protocol-scoped inventory and presents protocol-specific health', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [],
+          page: { number: 1, limit: 20, total: 0, totalPages: 1 },
+          summary: {
+            total: 0,
+            operational: 0,
+            attention: 0,
+            paused: 0,
+            pending: 0,
+            openIncidents: 0,
+            averageUptimePercent: null,
+            averageCoveragePercent: null,
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+
+    render(<Dashboard view="monitors" projectId="project-1" monitorType="TCP" />);
+
+    expect(await screen.findByRole('heading', { name: 'TCP monitors' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'TCP health' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Add TCP monitor' })).toHaveAttribute(
+      'href',
+      '/projects/project-1/monitors/new/tcp',
+    );
+    expect(screen.queryByRole('link', { name: 'Add monitor' })).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('projectId=project-1&type=TCP'),
+      expect.any(Object),
+    );
+  });
+
+  it('offers direct monitor types from the unified inventory create action', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [],
+          page: { number: 1, limit: 20, total: 0, totalPages: 1 },
+        }),
+        { status: 200 },
+      ),
+    );
+
+    render(<Dashboard view="monitors" projectId="project-1" />);
+    await screen.findByRole('heading', { name: 'No monitors yet' });
+
+    expect(screen.queryByRole('link', { name: 'Add monitor' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Add monitor' }));
+    const menu = screen.getByRole('menu', { name: 'Create monitor' });
+    expect(within(menu).getByRole('menuitem', { name: /TCP monitor/ })).toHaveAttribute(
+      'href',
+      '/projects/project-1/monitors/new/tcp',
+    );
+    expect(within(menu).getByRole('menuitem', { name: /Heartbeat monitor/ })).toHaveAttribute(
+      'href',
+      '/projects/project-1/monitors/new/heartbeats',
+    );
+  });
+
+  it('locks dedicated creation routes to their selected monitor type', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ data: [] }), { status: 200 }),
+    );
+
+    render(
+      <Dashboard
+        view="create"
+        projectId="project-1"
+        initialCreateMonitorType="DNS"
+        lockCreateMonitorType
+      />,
+    );
+
+    expect(await screen.findByRole('heading', { name: 'Create DNS monitor' })).toBeInTheDocument();
+    expect(screen.queryByText('Protocol')).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/DNS name/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Test configuration' })).not.toBeInTheDocument();
   });
 });
 

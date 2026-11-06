@@ -2,6 +2,7 @@ import { Logger } from '@nestjs/common';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   AvailabilityRepository,
+  HeartbeatRepository,
   MultiLocationRoundFinalizationRepository,
   ProbeCoordinatorRepository,
   ScheduledRoundRepository,
@@ -183,6 +184,33 @@ describe('WorkerRuntime', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(finalizeDue).toHaveBeenCalledTimes(2);
     expect(finalizeDue).toHaveBeenCalledWith(100);
+    await runtime.beforeApplicationShutdown();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('evaluates due heartbeat monitors independently and drains full batches immediately', async () => {
+    vi.useFakeTimers();
+    const evaluateDue = vi.fn().mockResolvedValueOnce(100).mockResolvedValue(0);
+    const runtime = new WorkerRuntime(
+      { processNext: vi.fn().mockResolvedValue('IDLE') } as unknown as CheckOutboxRelay,
+      { close: vi.fn().mockResolvedValue(undefined) } as unknown as BullMqCheckJobConsumer,
+      { close: vi.fn().mockResolvedValue(undefined) } as unknown as BullMqCheckJobPublisher,
+      { dispatchDue: vi.fn().mockResolvedValue([]) } as unknown as ScheduledRoundRepository,
+      { flushDue: vi.fn().mockResolvedValue(0) } as unknown as AvailabilityRepository,
+      config,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { evaluateDue } as unknown as HeartbeatRepository,
+    );
+
+    runtime.onApplicationBootstrap();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(evaluateDue).toHaveBeenCalledTimes(2);
+    expect(evaluateDue).toHaveBeenCalledWith(100);
     await runtime.beforeApplicationShutdown();
     expect(vi.getTimerCount()).toBe(0);
   });

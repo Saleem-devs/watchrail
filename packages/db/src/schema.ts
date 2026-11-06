@@ -50,12 +50,20 @@ import {
   type TlsCertificatePolicy,
   type DnsRecordType,
   type StoredApiWorkflowConfigurationV1,
+  type HeartbeatMonitorSettings,
+  type HeartbeatResultEvidenceV1,
 } from '@watchrail/domain';
 
 export const httpMethodEnum = pgEnum('http_method', HTTP_METHODS);
 
 export const monitorLifecycleEnum = pgEnum('monitor_lifecycle_state', MONITOR_LIFECYCLE_STATES);
 export const monitorTypeEnum = pgEnum('monitor_type', MONITOR_TYPES);
+export const heartbeatSignalTypeEnum = pgEnum('heartbeat_signal_type', [
+  'PING',
+  'START',
+  'COMPLETE',
+  'FAIL',
+]);
 
 export const checkRoundTriggerEnum = pgEnum('check_round_trigger', CHECK_ROUND_TRIGGERS);
 
@@ -75,6 +83,7 @@ export const checkResultStageEnum = pgEnum('check_result_stage', [
   'HTTP',
   'PROBE',
   'WORKFLOW',
+  'HEARTBEAT',
 ]);
 
 export const checkResultReasonEnum = pgEnum('check_result_reason', [
@@ -110,6 +119,10 @@ export const checkResultReasonEnum = pgEnum('check_result_reason', [
   'STEP_INDETERMINATE',
   'EXTRACTION_INDETERMINATE',
   'VARIABLE_UNAVAILABLE',
+  'SIGNAL_RECEIVED',
+  'HEARTBEAT_FAILED',
+  'MISSED_HEARTBEAT',
+  'RUNTIME_EXCEEDED',
 ]);
 
 export const incidentStatusEnum = pgEnum('incident_status', ['OPEN', 'RESOLVED']);
@@ -397,6 +410,13 @@ export const monitors = pgTable(
     dnsRecordType: varchar('dns_record_type', { length: 8 }).$type<DnsRecordType>(),
     dnsExpectedValues: jsonb('dns_expected_values').$type<string[]>().notNull().default([]),
     apiWorkflow: jsonb('api_workflow').$type<StoredApiWorkflowConfigurationV1>(),
+    heartbeat: jsonb('heartbeat').$type<HeartbeatMonitorSettings>(),
+    heartbeatTokenHash: varchar('heartbeat_token_hash', { length: 64 }),
+    heartbeatLastSignalAt: timestamp('heartbeat_last_signal_at', { withTimezone: true }),
+    heartbeatLastSignalType: varchar('heartbeat_last_signal_type', { length: 16 }),
+    heartbeatLastStartedAt: timestamp('heartbeat_last_started_at', { withTimezone: true }),
+    heartbeatLastCompletedAt: timestamp('heartbeat_last_completed_at', { withTimezone: true }),
+    heartbeatActiveRunId: varchar('heartbeat_active_run_id', { length: 128 }),
 
     // Current projection.
     //
@@ -431,6 +451,7 @@ export const monitors = pgTable(
   },
   (table) => [
     unique('monitors_id_organization_unique').on(table.id, table.organizationId),
+    unique('monitors_heartbeat_token_hash_unique').on(table.heartbeatTokenHash),
 
     foreignKey({
       name: 'monitors_project_fk',
@@ -450,13 +471,15 @@ export const monitors = pgTable(
     check(
       'monitors_protocol_configuration',
       sql`(
-        (${table.type}::text = 'HTTP' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.apiWorkflow} is null)
+        (${table.type}::text = 'HTTP' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.apiWorkflow} is null and ${table.heartbeat} is null and ${table.heartbeatTokenHash} is null)
         or
-        (${table.type}::text = 'TCP' and length(btrim(${table.tcpHost})) > 0 and ${table.tcpPort} between 1 and 65535 and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.apiWorkflow} is null)
+        (${table.type}::text = 'TCP' and length(btrim(${table.tcpHost})) > 0 and ${table.tcpPort} between 1 and 65535 and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.apiWorkflow} is null and ${table.heartbeat} is null and ${table.heartbeatTokenHash} is null)
         or
-        (${table.type}::text = 'DNS' and ${table.tcpHost} is null and ${table.tcpPort} is null and length(btrim(${table.dnsName})) > 0 and ${table.dnsRecordType} in ('A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS') and ${table.apiWorkflow} is null)
+        (${table.type}::text = 'DNS' and ${table.tcpHost} is null and ${table.tcpPort} is null and length(btrim(${table.dnsName})) > 0 and ${table.dnsRecordType} in ('A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS') and ${table.apiWorkflow} is null and ${table.heartbeat} is null and ${table.heartbeatTokenHash} is null)
         or
-        (${table.type}::text = 'API_WORKFLOW' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and jsonb_typeof(${table.apiWorkflow}) = 'object')
+        (${table.type}::text = 'API_WORKFLOW' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and jsonb_typeof(${table.apiWorkflow}) = 'object' and ${table.heartbeat} is null and ${table.heartbeatTokenHash} is null)
+        or
+        (${table.type}::text = 'HEARTBEAT' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.apiWorkflow} is null and jsonb_typeof(${table.heartbeat}) = 'object' and length(${table.heartbeatTokenHash}) = 64)
       )`,
     ),
 
@@ -595,6 +618,7 @@ export const monitorConfigurationVersions = pgTable(
     dnsRecordType: varchar('dns_record_type', { length: 8 }).$type<DnsRecordType>(),
     dnsExpectedValues: jsonb('dns_expected_values').$type<string[]>().notNull().default([]),
     apiWorkflow: jsonb('api_workflow').$type<StoredApiWorkflowConfigurationV1>(),
+    heartbeat: jsonb('heartbeat').$type<HeartbeatMonitorSettings>(),
 
     url: text('url').notNull(),
     method: httpMethodEnum('method').notNull(),
@@ -652,13 +676,15 @@ export const monitorConfigurationVersions = pgTable(
     check(
       'monitor_configuration_versions_protocol_configuration',
       sql`(
-        (${table.type}::text = 'HTTP' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.apiWorkflow} is null)
+        (${table.type}::text = 'HTTP' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.apiWorkflow} is null and ${table.heartbeat} is null)
         or
-        (${table.type}::text = 'TCP' and length(btrim(${table.tcpHost})) > 0 and ${table.tcpPort} between 1 and 65535 and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.apiWorkflow} is null)
+        (${table.type}::text = 'TCP' and length(btrim(${table.tcpHost})) > 0 and ${table.tcpPort} between 1 and 65535 and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.apiWorkflow} is null and ${table.heartbeat} is null)
         or
-        (${table.type}::text = 'DNS' and ${table.tcpHost} is null and ${table.tcpPort} is null and length(btrim(${table.dnsName})) > 0 and ${table.dnsRecordType} in ('A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS') and ${table.apiWorkflow} is null)
+        (${table.type}::text = 'DNS' and ${table.tcpHost} is null and ${table.tcpPort} is null and length(btrim(${table.dnsName})) > 0 and ${table.dnsRecordType} in ('A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS') and ${table.apiWorkflow} is null and ${table.heartbeat} is null)
         or
-        (${table.type}::text = 'API_WORKFLOW' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and jsonb_typeof(${table.apiWorkflow}) = 'object')
+        (${table.type}::text = 'API_WORKFLOW' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and jsonb_typeof(${table.apiWorkflow}) = 'object' and ${table.heartbeat} is null)
+        or
+        (${table.type}::text = 'HEARTBEAT' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.apiWorkflow} is null and jsonb_typeof(${table.heartbeat}) = 'object')
       )`,
     ),
 
@@ -709,6 +735,41 @@ export const monitorConfigurationVersions = pgTable(
     check(
       'monitor_configuration_versions_dns_expected_values_array',
       sql`jsonb_typeof(${table.dnsExpectedValues}) = 'array' and jsonb_array_length(${table.dnsExpectedValues}) <= 32`,
+    ),
+  ],
+);
+
+export const heartbeatSignals = pgTable(
+  'heartbeat_signals',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull(),
+    monitorId: uuid('monitor_id').notNull(),
+    signalType: heartbeatSignalTypeEnum('signal_type').notNull(),
+    runId: varchar('run_id', { length: 128 }),
+    message: varchar('message', { length: 500 }),
+    metadata: jsonb('metadata')
+      .$type<Record<string, string | number | boolean | null>>()
+      .notNull()
+      .default({}),
+    runtimeMs: doublePrecision('runtime_ms'),
+    receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'heartbeat_signals_monitor_fk',
+      columns: [table.monitorId, table.organizationId],
+      foreignColumns: [monitors.id, monitors.organizationId],
+    }).onDelete('cascade'),
+    index('heartbeat_signals_monitor_received_idx').on(
+      table.organizationId,
+      table.monitorId,
+      table.receivedAt,
+    ),
+    check('heartbeat_signals_metadata_object', sql`jsonb_typeof(${table.metadata}) = 'object'`),
+    check(
+      'heartbeat_signals_runtime_non_negative',
+      sql`${table.runtimeMs} is null or ${table.runtimeMs} >= 0`,
     ),
   ],
 );
@@ -1021,6 +1082,7 @@ export const checkExecutionResults = pgTable(
       .default([]),
     dnsAnswers: jsonb('dns_answers').$type<string[]>().notNull().default([]),
     workflowResult: jsonb('workflow_result').$type<SerializedApiWorkflowResult>(),
+    heartbeatResult: jsonb('heartbeat_result').$type<HeartbeatResultEvidenceV1>(),
     checkedAt: timestamp('checked_at', { withTimezone: true }).notNull(),
 
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -1094,6 +1156,14 @@ export const checkExecutionResults = pgTable(
     check(
       'check_execution_results_workflow_result_consistent',
       sql`(${table.stage}::text = 'WORKFLOW') = (${table.workflowResult} is not null)`,
+    ),
+    check(
+      'check_execution_results_heartbeat_result_object',
+      sql`${table.heartbeatResult} is null or jsonb_typeof(${table.heartbeatResult}) = 'object'`,
+    ),
+    check(
+      'check_execution_results_heartbeat_result_consistent',
+      sql`(${table.stage}::text = 'HEARTBEAT') = (${table.heartbeatResult} is not null)`,
     ),
   ],
 );
@@ -1819,6 +1889,7 @@ export type ProjectRecord = typeof projects.$inferSelect;
 export type NewProjectRecord = typeof projects.$inferInsert;
 
 export type MonitorConfigurationVersionRecord = typeof monitorConfigurationVersions.$inferSelect;
+export type HeartbeatSignalRecord = typeof heartbeatSignals.$inferSelect;
 
 export type NewMonitorConfigurationVersionRecord = typeof monitorConfigurationVersions.$inferInsert;
 

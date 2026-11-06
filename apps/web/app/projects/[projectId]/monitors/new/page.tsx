@@ -1,4 +1,4 @@
-import { Dashboard } from '../../../../dashboard';
+import { redirect } from 'next/navigation';
 
 export default async function NewProjectMonitorPage({
   params,
@@ -6,7 +6,5 @@ export default async function NewProjectMonitorPage({
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = await params;
-  return (
-    <Dashboard view="create" projectId={projectId} backPath={`/projects/${projectId}/monitors`} />
-  );
+  redirect(`/projects/${projectId}/monitors/new/http`);
 }

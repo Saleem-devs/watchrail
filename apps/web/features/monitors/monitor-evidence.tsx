@@ -3,6 +3,7 @@ import { classifyScheduledObservation } from '@watchrail/domain';
 import type {
   AssertionEvaluation,
   ApiWorkflowResult,
+  HeartbeatResultEvidence,
   HistoryPage,
   IncidentHistoryPage,
   IncidentState,
@@ -205,6 +206,18 @@ export function ManualDiagnostic({
       />
     );
   }
+  if (protocol === 'HEARTBEAT') {
+    return result.heartbeatResult ? (
+      <HeartbeatDiagnostic
+        evidence={result.heartbeatResult}
+        outcome={result.outcome}
+        reason={result.reason}
+        label="Latest heartbeat evidence"
+      />
+    ) : (
+      <HeartbeatEvidenceUnavailable label="Latest heartbeat evidence" reason={result.reason} />
+    );
+  }
   const assertionEvaluation = result.assertionEvaluation ?? {
     contractVersion: 1,
     outcome: result.assertionOutcome ?? 'NOT_EVALUATED',
@@ -333,6 +346,124 @@ function EvidenceRetentionNotice() {
       inspect bounded, redacted response evidence.
     </p>
   );
+}
+
+function HeartbeatDiagnostic({
+  evidence,
+  outcome,
+  reason,
+  label,
+}: {
+  evidence: HeartbeatResultEvidence;
+  outcome: 'PASS' | 'FAIL' | 'UNKNOWN';
+  reason: string;
+  label: string;
+}) {
+  const health = singleLocationHealth(outcome, reason, 'PASS', 'HEARTBEAT');
+  const metadata = Object.entries(evidence.metadata);
+  return (
+    <section className="manual-diagnostic mt-4 overflow-hidden rounded-rail-panel border border-rail-border bg-rail-sidebar/45">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rail-border px-4 py-3">
+        <div>
+          <h4 className="m-0 text-sm font-semibold text-rail-text">{label}</h4>
+          <p className="mt-1 mb-0 text-xs text-rail-muted">{heartbeatReasonLabel(reason)}</p>
+        </div>
+        <OutcomeBadge outcome={health} />
+      </div>
+      <dl className="grid grid-cols-2 gap-px bg-rail-border sm:grid-cols-4">
+        <Metric label="Signal" value={heartbeatSignalLabel(evidence.signal)} />
+        <Metric
+          label="Runtime"
+          value={evidence.runtimeMs === null ? '—' : formatMilliseconds(evidence.runtimeMs)}
+        />
+        <Metric
+          label="Expected"
+          value={evidence.expectedAt ? new Date(evidence.expectedAt).toLocaleTimeString() : '—'}
+        />
+        <Metric
+          label="Received"
+          value={evidence.receivedAt ? new Date(evidence.receivedAt).toLocaleTimeString() : '—'}
+        />
+      </dl>
+      {evidence.runId || evidence.message ? (
+        <dl className="m-0 grid gap-px border-t border-rail-border bg-rail-border sm:grid-cols-2">
+          {evidence.runId ? (
+            <div className="min-w-0 bg-rail-header px-4 py-3">
+              <dt className="text-xs text-rail-muted">Run ID</dt>
+              <dd className="mt-1 mb-0 break-all font-mono text-xs text-rail-text">
+                {evidence.runId}
+              </dd>
+            </div>
+          ) : null}
+          {evidence.message ? (
+            <div className="min-w-0 bg-rail-header px-4 py-3">
+              <dt className="text-xs text-rail-muted">Message</dt>
+              <dd className="mt-1 mb-0 break-words text-xs text-rail-text">{evidence.message}</dd>
+            </div>
+          ) : null}
+        </dl>
+      ) : null}
+      {metadata.length > 0 ? (
+        <div className="border-t border-rail-border px-4 py-3">
+          <h5 className="m-0 text-xs font-semibold text-rail-text">Signal metadata</h5>
+          <dl className="mt-3 mb-0 grid gap-x-6 gap-y-2 sm:grid-cols-2">
+            {metadata.map(([key, value]) => (
+              <div key={key} className="grid min-w-0 grid-cols-[minmax(0,8rem)_1fr] gap-3 text-xs">
+                <dt className="truncate text-rail-muted">{key}</dt>
+                <dd className="m-0 break-all text-rail-subtle">{String(value)}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function HeartbeatEvidenceUnavailable({ label, reason }: { label: string; reason: string }) {
+  return (
+    <section className="manual-diagnostic mt-4 rounded-rail-panel border border-rail-warning/30 bg-rail-warning/5 px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h4 className="m-0 text-sm font-semibold text-rail-text">{label}</h4>
+          <p className="mt-1 mb-0 text-xs text-rail-muted">
+            Signal evidence was not retained for this result · {humanize(reason)}
+          </p>
+        </div>
+        <OutcomeBadge outcome="INDETERMINATE" />
+      </div>
+    </section>
+  );
+}
+
+function heartbeatReasonLabel(reason: string): string {
+  switch (reason) {
+    case 'SIGNAL_RECEIVED':
+      return 'Heartbeat received within its expected window.';
+    case 'HEARTBEAT_FAILED':
+      return 'The job reported a failed completion.';
+    case 'MISSED_HEARTBEAT':
+      return 'No heartbeat arrived before the schedule and grace window elapsed.';
+    case 'RUNTIME_EXCEEDED':
+      return 'The job started but did not complete within its maximum runtime.';
+    default:
+      return humanize(reason);
+  }
+}
+
+function heartbeatSignalLabel(signal: HeartbeatResultEvidence['signal']): string {
+  switch (signal) {
+    case 'PING':
+      return 'Ping';
+    case 'START':
+      return 'Start';
+    case 'COMPLETE':
+      return 'Complete';
+    case 'FAIL':
+      return 'Fail';
+    case 'MISSED':
+      return 'Missed';
+  }
 }
 
 export function WorkflowEvidenceUnavailable({
@@ -902,6 +1033,18 @@ function HistoricalSingleLocationEvidence({
         reason={result.reason}
         attemptDurationMs={result.attemptDurationMs}
       />
+    );
+  }
+  if (protocol === 'HEARTBEAT') {
+    return result.heartbeatResult ? (
+      <HeartbeatDiagnostic
+        evidence={result.heartbeatResult}
+        outcome={result.outcome}
+        reason={result.reason}
+        label="Historical heartbeat evidence"
+      />
+    ) : (
+      <HeartbeatEvidenceUnavailable label="Historical heartbeat evidence" reason={result.reason} />
     );
   }
   const assertionEvaluation = result.assertionEvaluation ?? {

@@ -13,6 +13,7 @@ export { MultiLocationRoundFinalizationRepository } from './multi-location-final
 export * from './check-execution-repository.js';
 export * from './check-history-repository.js';
 export * from './check-round-outbox-repository.js';
+export * from './heartbeat-repository.js';
 export * from './incident-read-repository.js';
 export * from './manual-round-repository.js';
 export * from './notification-delivery-repository.js';

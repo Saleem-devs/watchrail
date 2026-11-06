@@ -31,7 +31,7 @@ export interface MonitorResponse {
   id: string;
   projectId: string;
   name: string;
-  type: 'HTTP' | 'TCP' | 'DNS' | 'API_WORKFLOW';
+  type: 'HTTP' | 'TCP' | 'DNS' | 'API_WORKFLOW' | 'HEARTBEAT';
   configuration:
     | { type: 'HTTP'; url: string }
     | { type: 'TCP'; host: string; port: number }
@@ -41,7 +41,8 @@ export interface MonitorResponse {
         recordType: 'A' | 'AAAA' | 'CNAME' | 'MX' | 'TXT' | 'NS';
         expectedValues: string[];
       }
-    | { type: 'API_WORKFLOW'; workflow: unknown };
+    | { type: 'API_WORKFLOW'; workflow: unknown }
+    | { type: 'HEARTBEAT'; heartbeat: unknown };
   url: string;
   method: string;
   lifecycleState: string;
@@ -145,20 +146,22 @@ export function toResponse(
             type: 'API_WORKFLOW',
             workflow: redactApiWorkflow(monitor.apiWorkflow),
           }
-        : monitor.type === 'TCP'
-          ? {
-              type: 'TCP',
-              host: requireTcpField(monitor.tcpHost, 'host'),
-              port: requireTcpField(monitor.tcpPort, 'port'),
-            }
-          : monitor.type === 'DNS'
+        : monitor.type === 'HEARTBEAT'
+          ? { type: 'HEARTBEAT', heartbeat: monitor.heartbeat }
+          : monitor.type === 'TCP'
             ? {
-                type: 'DNS',
-                name: requireDnsField(monitor.dnsName, 'name'),
-                recordType: requireDnsField(monitor.dnsRecordType, 'record type'),
-                expectedValues: monitor.dnsExpectedValues,
+                type: 'TCP',
+                host: requireTcpField(monitor.tcpHost, 'host'),
+                port: requireTcpField(monitor.tcpPort, 'port'),
               }
-            : { type: 'HTTP', url: monitor.url },
+            : monitor.type === 'DNS'
+              ? {
+                  type: 'DNS',
+                  name: requireDnsField(monitor.dnsName, 'name'),
+                  recordType: requireDnsField(monitor.dnsRecordType, 'record type'),
+                  expectedValues: monitor.dnsExpectedValues,
+                }
+              : { type: 'HTTP', url: monitor.url },
     url: monitor.url,
     method: monitor.method,
     lifecycleState: monitor.lifecycleState,
@@ -398,6 +401,7 @@ function toSingleLocationDetailResponse(
     ...(result.workflowResult === null
       ? {}
       : { workflowResult: serializeApiWorkflowResult(result.workflowResult) }),
+    ...(result.heartbeatResult === null ? {} : { heartbeatResult: result.heartbeatResult }),
     checkedAt: result.checkedAt.toISOString(),
   };
 }

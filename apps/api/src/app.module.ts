@@ -37,6 +37,7 @@ import { ProjectsController } from './modules/projects/projects.controller.js';
 import { ProjectsModule } from './modules/projects/projects.module.js';
 import { WorkspaceSecretsController } from './modules/workspace-secrets/workspace-secrets.controller.js';
 import { WorkspaceSecretsModule } from './modules/workspace-secrets/workspace-secrets.module.js';
+import { HeartbeatsModule } from './modules/heartbeats/heartbeats.module.js';
 
 @Module({
   imports: [
@@ -53,6 +54,7 @@ import { WorkspaceSecretsModule } from './modules/workspace-secrets/workspace-se
     StatusPagesModule,
     WebhookEndpointsModule,
     WorkspaceSecretsModule,
+    HeartbeatsModule,
   ],
   providers: [
     DevelopmentIdentityMiddleware,

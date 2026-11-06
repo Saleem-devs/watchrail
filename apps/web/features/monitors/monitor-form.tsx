@@ -15,6 +15,7 @@ import { ConfigurationTestPanel } from './configuration-test-result';
 import { TlsCertificatePolicyField } from './tls-certificate-policy-field';
 import { DnsExpectedValuesField } from './dns-expected-values-field';
 import { ApiWorkflowBuilder } from './api-workflow-builder';
+import { HeartbeatSettingsField } from './heartbeat-settings-field';
 
 export interface MonitorFormValues {
   type: Monitor['type'];
@@ -46,6 +47,7 @@ export function MonitorForm({
   onConfigurationChange,
   onTypeChange,
   selectedType,
+  showTypeSelector = true,
 }: {
   mode: 'create' | 'edit';
   initialValues?: MonitorFormValues;
@@ -59,6 +61,7 @@ export function MonitorForm({
   onConfigurationChange: () => void;
   onTypeChange?: (type: Monitor['type']) => void;
   selectedType?: Monitor['type'];
+  showTypeSelector?: boolean;
 }) {
   const id = useId();
   const [policyMode, setPolicyMode] = useState<'ANY_2XX' | 'EXACT'>(
@@ -106,11 +109,11 @@ export function MonitorForm({
               Name the service and provide the network target Watchrail should monitor.
             </p>
             <div className="mt-5 grid gap-5">
-              {mode === 'create' ? (
+              {mode === 'create' && showTypeSelector ? (
                 <fieldset className="m-0 grid gap-2 border-0 p-0">
                   <legend className="p-0 text-xs font-medium text-rail-subtle">Protocol</legend>
-                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                    {(['HTTP', 'TCP', 'DNS', 'API_WORKFLOW'] as const).map((type) => (
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+                    {(['HTTP', 'TCP', 'DNS', 'API_WORKFLOW', 'HEARTBEAT'] as const).map((type) => (
                       <button
                         key={type}
                         type="button"
@@ -138,7 +141,9 @@ export function MonitorForm({
                             ? 'TCP port'
                             : type === 'DNS'
                               ? 'DNS record'
-                              : 'API workflow'}
+                              : type === 'API_WORKFLOW'
+                                ? 'API workflow'
+                                : 'Heartbeat'}
                       </button>
                     ))}
                   </div>
@@ -333,7 +338,14 @@ export function MonitorForm({
             </div>
           </section>
 
-          {monitorType === 'API_WORKFLOW' ? (
+          {monitorType === 'HEARTBEAT' ? (
+            <HeartbeatSettingsField
+              {...(initialValues?.configuration.type === 'HEARTBEAT'
+                ? { initialSettings: initialValues.configuration.heartbeat }
+                : {})}
+              errors={errors}
+            />
+          ) : monitorType === 'API_WORKFLOW' ? (
             <ApiWorkflowBuilder
               {...(initialValues?.configuration.type === 'API_WORKFLOW'
                 ? { initialConfiguration: initialValues.configuration.workflow }
@@ -514,7 +526,11 @@ export function MonitorForm({
                 ) : null}
               </label>
             ) : null}
-            {monitorType !== 'API_WORKFLOW' ? (
+            {monitorType === 'API_WORKFLOW' ? (
+              <p className="m-0 text-xs leading-5 text-rail-muted">
+                Workflow timeouts are configured per step and share a 90-second execution budget.
+              </p>
+            ) : monitorType !== 'HEARTBEAT' ? (
               <label className="grid gap-1.5 text-xs font-medium text-rail-subtle">
                 Timeout
                 <div className="relative">
@@ -537,24 +553,29 @@ export function MonitorForm({
                   <span className="font-normal text-rail-danger">{errors.timeoutMs[0]}</span>
                 ) : null}
               </label>
+            ) : null}
+            {monitorType === 'HEARTBEAT' ? (
+              <div className="rounded-rail-control border border-rail-border bg-rail-surface px-3 py-3">
+                <p className="m-0 text-xs font-medium text-rail-text">Watchrail ingestion</p>
+                <p className="mt-1 mb-0 text-xs leading-5 text-rail-muted">
+                  Your job sends signals to a private URL. No probe location is required.
+                </p>
+              </div>
             ) : (
-              <p className="m-0 text-xs leading-5 text-rail-muted">
-                Workflow timeouts are configured per step and share a 90-second execution budget.
-              </p>
+              <label className="grid gap-1.5 text-xs font-medium text-rail-subtle">
+                Location
+                <Select
+                  name="location"
+                  defaultValue={initialValues?.locations[0] ?? 'local'}
+                  aria-invalid={Boolean(errors.locations)}
+                >
+                  <option value="local">Local</option>
+                </Select>
+                {errors.locations ? (
+                  <span className="font-normal text-rail-danger">{errors.locations[0]}</span>
+                ) : null}
+              </label>
             )}
-            <label className="grid gap-1.5 text-xs font-medium text-rail-subtle">
-              Location
-              <Select
-                name="location"
-                defaultValue={initialValues?.locations[0] ?? 'local'}
-                aria-invalid={Boolean(errors.locations)}
-              >
-                <option value="local">Local</option>
-              </Select>
-              {errors.locations ? (
-                <span className="font-normal text-rail-danger">{errors.locations[0]}</span>
-              ) : null}
-            </label>
             <label className="grid gap-1.5 text-xs font-medium text-rail-subtle">
               Lifecycle
               <Select

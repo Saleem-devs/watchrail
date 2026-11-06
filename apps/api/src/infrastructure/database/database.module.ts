@@ -19,6 +19,7 @@ import {
   AuthApiKeyRepository,
   AuthEmailOutboxRepository,
   WorkspaceSecretRepository,
+  HeartbeatRepository,
 } from '@watchrail/db';
 import type { WatchrailDatabase } from '@watchrail/db';
 import { ConfigModule } from '../../config/config.module.js';
@@ -102,6 +103,11 @@ import { APP_CONFIG, type AppConfig } from '../../config/config.js';
       useFactory: (db: WatchrailDatabase) => new UptimeReadRepository(db),
     },
     {
+      provide: HeartbeatRepository,
+      inject: [getDrizzleToken()],
+      useFactory: (db: WatchrailDatabase) => new HeartbeatRepository(db),
+    },
+    {
       provide: MonitorRepository,
       inject: [getDrizzleToken()],
       useFactory: (db: WatchrailDatabase) => new MonitorRepository(db),
@@ -141,6 +147,7 @@ import { APP_CONFIG, type AppConfig } from '../../config/config.js';
     WebhookEndpointRepository,
     WebhookDeliveryReadRepository,
     WorkspaceSecretRepository,
+    HeartbeatRepository,
   ],
 })
 export class DatabaseModule {}

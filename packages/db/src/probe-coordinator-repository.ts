@@ -180,6 +180,7 @@ export class ProbeCoordinatorRepository {
         .for('update', { of: checkExecutionAssignments });
       if (
         !row ||
+        row.type === 'HEARTBEAT' ||
         row.attemptStatus !== 'LEASED' ||
         !row.attemptUnexpired ||
         row.claimTokenVerifier !== verifier(claimToken) ||
@@ -792,6 +793,9 @@ function observationFromResult(result: AuthoritativeCheckResult) {
 }
 
 function diagnosticSummaryFromResult(result: AuthoritativeCheckResult) {
+  if (result.stage === 'HEARTBEAT') {
+    throw new Error('Heartbeat results cannot be submitted by remote probes.');
+  }
   return {
     stage: result.stage,
     reason: result.reason,

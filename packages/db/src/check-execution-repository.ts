@@ -21,6 +21,7 @@ import {
   type TlsCertificatePolicy,
   type DnsRecordType,
   type StoredApiWorkflowConfigurationV1,
+  type HeartbeatResultEvidenceV1,
   API_WORKFLOW_LIMITS,
 } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
@@ -111,6 +112,7 @@ export interface AuthoritativeCheckResult {
   tlsCertificates?: readonly TlsCertificateEvidenceV1[];
   dnsAnswers?: readonly string[];
   workflowResult?: ApiWorkflowResult;
+  heartbeatResult?: HeartbeatResultEvidenceV1;
   checkedAt: Date;
 }
 
@@ -413,6 +415,7 @@ export async function finalizeCheckExecution(
       input.result.workflowResult === undefined
         ? null
         : serializeApiWorkflowResult(input.result.workflowResult),
+    heartbeatResult: input.result.heartbeatResult ?? null,
     checkedAt: input.result.checkedAt,
   });
 
@@ -546,7 +549,13 @@ async function applyIncidentObservation(
     })
     .where(eq(monitorIncidentState.monitorId, round.monitorId));
 
-  if (consecutiveFailures === INCIDENT_FAILURE_THRESHOLD) {
+  const failureThreshold =
+    result.reason === 'MISSED_HEARTBEAT' ||
+    result.reason === 'HEARTBEAT_FAILED' ||
+    result.reason === 'RUNTIME_EXCEEDED'
+      ? 1
+      : INCIDENT_FAILURE_THRESHOLD;
+  if (consecutiveFailures === failureThreshold) {
     const openedAt = laterDate(result.checkedAt, failureStreakStartedAt);
     const [opened] = await tx
       .insert(incidents)

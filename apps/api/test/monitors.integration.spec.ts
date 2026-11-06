@@ -191,6 +191,128 @@ describe('monitor API', () => {
     const listed = await request(app.getHttpServer()).get('/api/monitors').expect(200);
     expect(listed.body.data).toHaveLength(1);
     expect(listed.body.data[0].id).toBe(created.body.data.id);
+    expect(listed.body.summary).toMatchObject({
+      total: 1,
+      operational: 0,
+      attention: 0,
+      paused: 0,
+      pending: 1,
+      openIncidents: 0,
+    });
+
+    const filtered = await request(app.getHttpServer())
+      .get(`/api/monitors?projectId=${projectId}&type=TCP`)
+      .expect(200);
+    expect(filtered.body.data).toEqual([]);
+    expect(filtered.body.summary.total).toBe(0);
+  });
+
+  it('creates a heartbeat monitor, reveals its credential once, and records redacted signals', async () => {
+    const created = await request(app.getHttpServer())
+      .post(`/api/monitors?projectId=${projectId}`)
+      .send({
+        type: 'HEARTBEAT',
+        name: 'Nightly backup',
+        heartbeat: {
+          schedule: { type: 'INTERVAL', intervalSeconds: 300, graceSeconds: 60 },
+          maximumRuntimeSeconds: 3_600,
+        },
+      })
+      .expect(201);
+
+    expect(created.body.data).toMatchObject({
+      type: 'HEARTBEAT',
+      configuration: {
+        type: 'HEARTBEAT',
+        heartbeat: {
+          schedule: { type: 'INTERVAL', intervalSeconds: 300, graceSeconds: 60 },
+          maximumRuntimeSeconds: 3_600,
+        },
+      },
+      locations: ['local'],
+    });
+    const ingestionPath = created.body.data.heartbeatIngestionPath as string;
+    expect(ingestionPath).toMatch(/^\/api\/heartbeats\/[A-Za-z0-9_-]{43}$/);
+
+    const monitorId = created.body.data.id as string;
+    const updated = await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/heartbeat-settings`)
+      .send({
+        schedule: {
+          type: 'CRON',
+          expression: '0 3 * * *',
+          timezone: 'Africa/Lagos',
+          graceSeconds: 900,
+        },
+        maximumRuntimeSeconds: 7_200,
+      })
+      .expect(200);
+    expect(updated.body.data).toMatchObject({
+      configuration: {
+        type: 'HEARTBEAT',
+        heartbeat: {
+          schedule: { type: 'CRON', expression: '0 3 * * *', timezone: 'Africa/Lagos' },
+          maximumRuntimeSeconds: 7_200,
+        },
+      },
+    });
+    expect(updated.body.data).not.toHaveProperty('heartbeatIngestionPath');
+
+    await request(app.getHttpServer())
+      .post(ingestionPath)
+      .send({ type: 'START', runId: 'backup-42' })
+      .expect(202)
+      .expect(({ body }) => {
+        expect(body.data).toMatchObject({ monitorId, state: 'STARTED' });
+      });
+
+    await request(app.getHttpServer())
+      .post(ingestionPath)
+      .send({
+        type: 'COMPLETE',
+        runId: 'backup-42',
+        message: 'completed with Bearer reflected-secret',
+        metadata: { rows: 42, accessToken: 'request-secret' },
+      })
+      .expect(202)
+      .expect(({ body }) => {
+        expect(body.data).toMatchObject({ monitorId, state: 'RECEIVED' });
+      });
+
+    const list = await request(app.getHttpServer()).get('/api/monitors').expect(200);
+    expect(list.body.data[0]).not.toHaveProperty('heartbeatIngestionPath');
+    expect(JSON.stringify(list.body)).not.toContain('request-secret');
+    await request(app.getHttpServer()).post(`/api/monitors/${monitorId}/check-rounds`).expect(409);
+
+    const history = await request(app.getHttpServer())
+      .get(`/api/monitors/${monitorId}/check-rounds?limit=1`)
+      .expect(200);
+    const roundId = history.body.data[0].id as string;
+    const detail = await request(app.getHttpServer())
+      .get(`/api/monitors/${monitorId}/check-rounds/${roundId}`)
+      .expect(200);
+    expect(detail.body.data.result).toMatchObject({
+      outcome: 'PASS',
+      stage: 'HEARTBEAT',
+      reason: 'SIGNAL_RECEIVED',
+      heartbeatResult: {
+        signal: 'COMPLETE',
+        runId: 'backup-42',
+        message: 'completed with Bearer [REDACTED]',
+        metadata: { rows: 42, accessToken: '[REDACTED]' },
+      },
+    });
+    expect(JSON.stringify(detail.body)).not.toContain('request-secret');
+    expect(JSON.stringify(detail.body)).not.toContain('reflected-secret');
+
+    await request(app.getHttpServer())
+      .post(`/api/heartbeats/${'x'.repeat(43)}`)
+      .send({ type: 'PING' })
+      .expect(404)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({ code: 'HEARTBEAT_NOT_FOUND' });
+        expect(JSON.stringify(body)).not.toContain('credential');
+      });
   });
 
   it('creates and updates a TCP monitor without exposing HTTP configuration', async () => {

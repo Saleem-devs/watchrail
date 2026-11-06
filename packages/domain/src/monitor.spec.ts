@@ -10,6 +10,93 @@ import {
   parseMonitorLocationSettings,
   parseMonitorScheduleSettings,
 } from './monitor.js';
+import {
+  HeartbeatInputError,
+  parseHeartbeatMonitorSettings,
+  parseHeartbeatSignal,
+  redactHeartbeatSignal,
+} from './heartbeat.js';
+
+describe('heartbeat monitoring contracts', () => {
+  it('creates interval and cron heartbeat monitors without outbound routing', () => {
+    expect(
+      createMonitor({
+        type: 'HEARTBEAT',
+        name: 'Nightly backup',
+        heartbeat: {
+          schedule: { type: 'INTERVAL', intervalSeconds: 300, graceSeconds: 60 },
+          maximumRuntimeSeconds: 3_600,
+        },
+      }),
+    ).toMatchObject({
+      type: 'HEARTBEAT',
+      name: 'Nightly backup',
+      lifecycleState: 'ENABLED',
+      locations: ['local'],
+    });
+
+    expect(
+      parseHeartbeatMonitorSettings({
+        schedule: {
+          type: 'CRON',
+          expression: '0 3 * * *',
+          timezone: 'Africa/Lagos',
+          graceSeconds: 900,
+        },
+        maximumRuntimeSeconds: null,
+      }),
+    ).toMatchObject({ schedule: { type: 'CRON', expression: '0 3 * * *' } });
+  });
+
+  it('rejects invalid cron ranges and outbound check configuration', () => {
+    expect(() =>
+      parseHeartbeatMonitorSettings({
+        schedule: {
+          type: 'CRON',
+          expression: '99 99 * * *',
+          timezone: 'UTC',
+          graceSeconds: 60,
+        },
+        maximumRuntimeSeconds: null,
+      }),
+    ).toThrow(HeartbeatInputError);
+    expect(() =>
+      createMonitor({
+        type: 'HEARTBEAT',
+        name: 'Unsafe heartbeat',
+        url: 'https://example.com',
+        heartbeat: {
+          schedule: { type: 'INTERVAL', intervalSeconds: 300, graceSeconds: 60 },
+          maximumRuntimeSeconds: null,
+        },
+      }),
+    ).toThrow(MonitorInputError);
+  });
+
+  it('bounds and redacts signal metadata before retention', () => {
+    const signal = parseHeartbeatSignal({
+      type: 'COMPLETE',
+      runId: 'backup-42',
+      message: 'uploaded with Bearer super-secret-token',
+      metadata: {
+        rows: 42,
+        accessToken: 'short',
+        credentials: 'database-password',
+      },
+    });
+
+    expect(redactHeartbeatSignal(signal)).toEqual({
+      type: 'COMPLETE',
+      runId: 'backup-42',
+      message: 'uploaded with Bearer [REDACTED]',
+      metadata: {
+        rows: 42,
+        accessToken: '[REDACTED]',
+        credentials: '[REDACTED]',
+      },
+    });
+  });
+});
 
 describe('createMonitor', () => {
   it('accepts canonical remote multi-location settings and rejects mixed local routing', () => {

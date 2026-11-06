@@ -2,9 +2,10 @@
 
 import Link from 'next/link';
 import Image from 'next/image';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { OrgSwitcher } from './org-switcher';
 import { ProjectSwitcher } from './project-switcher';
+import { MONITOR_TYPES, type MonitorType } from '../features/monitors/monitor-types';
 
 type Page =
   | 'workspaces'
@@ -405,13 +406,19 @@ function Navigation({
   workspaceId,
   collapsed = false,
   onNavigate,
+  monitorType,
 }: {
   page: Page;
   projectId?: string | undefined;
   workspaceId?: string | undefined;
   collapsed?: boolean;
   onNavigate?: () => void;
+  monitorType?: MonitorType | undefined;
 }) {
+  const monitorsActive = page === 'monitors' || page === 'monitor-detail' || page === 'new-monitor';
+  const [monitorsOpen, setMonitorsOpen] = useState(monitorsActive);
+  const monitorNavigationId = useId();
+
   return (
     <nav aria-label="Workspace navigation" className="grid content-start gap-4">
       {navigationGroups(projectId, workspaceId).map((group) => (
@@ -423,7 +430,8 @@ function Navigation({
           </p>
           {group.items.map((item) => {
             const active =
-              item.page === page || (item.page === 'monitors' && page === 'monitor-detail');
+              item.page === page ||
+              (item.page === 'monitors' && (page === 'monitor-detail' || page === 'new-monitor'));
             const sharedClassName = `group relative flex min-h-9 items-center gap-3 rounded-rail-control px-3 text-[13px] whitespace-nowrap transition-colors ${active ? 'bg-rail-selected font-medium text-rail-text' : 'font-normal text-rail-subtle'} ${item.disabled ? 'cursor-not-allowed' : 'hover:bg-rail-hover hover:text-rail-text'}`;
             const content = (
               <>
@@ -439,6 +447,63 @@ function Navigation({
                 </span>
               </>
             );
+
+            if (item.page === 'monitors' && projectId) {
+              const base = `/projects/${projectId}/monitors`;
+              return (
+                <div key={item.label} className="grid gap-1">
+                  <button
+                    type="button"
+                    className={`${sharedClassName} w-full cursor-pointer appearance-none border-0 bg-transparent text-left`}
+                    aria-expanded={monitorsOpen}
+                    aria-controls={monitorNavigationId}
+                    title={collapsed ? 'Monitors' : undefined}
+                    onClick={() => setMonitorsOpen((current) => !current)}
+                  >
+                    {content}
+                    <svg
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      className={`ml-auto size-4 shrink-0 text-rail-muted transition-[transform,opacity] ${collapsed ? 'opacity-0' : 'opacity-100'} ${monitorsOpen ? 'rotate-90' : ''}`}
+                      aria-hidden="true"
+                    >
+                      <path d="m6 3.5 4.5 4.5L6 12.5" />
+                    </svg>
+                  </button>
+                  {!collapsed && monitorsOpen ? (
+                    <div
+                      id={monitorNavigationId}
+                      className="ml-4 grid gap-0.5 border-l border-rail-border pl-3"
+                    >
+                      <Link
+                        href={base}
+                        {...(onNavigate ? { onClick: onNavigate } : {})}
+                        aria-current={page === 'monitors' && !monitorType ? 'page' : undefined}
+                        className={`flex min-h-8 items-center rounded-rail-control px-3 text-xs no-underline transition-colors ${page === 'monitors' && !monitorType ? 'bg-rail-selected font-medium text-rail-text' : 'text-rail-muted hover:bg-rail-hover hover:text-rail-text'}`}
+                      >
+                        All monitors
+                      </Link>
+                      {MONITOR_TYPES.map((definition) => {
+                        const childActive = monitorType === definition.type;
+                        return (
+                          <Link
+                            key={definition.type}
+                            href={`${base}/${definition.slug}`}
+                            {...(onNavigate ? { onClick: onNavigate } : {})}
+                            aria-current={childActive ? 'page' : undefined}
+                            className={`flex min-h-8 items-center rounded-rail-control px-3 text-xs no-underline transition-colors ${childActive ? 'bg-rail-selected font-medium text-rail-text' : 'text-rail-muted hover:bg-rail-hover hover:text-rail-text'}`}
+                          >
+                            {definition.label}
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            }
 
             if (item.disabled || !item.href) {
               return (
@@ -476,10 +541,12 @@ function MobileNavigation({
   page,
   projectId,
   workspaceId,
+  monitorType,
 }: {
   page: Page;
   projectId?: string | undefined;
   workspaceId?: string | undefined;
+  monitorType?: MonitorType | undefined;
 }) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -532,6 +599,7 @@ function MobileNavigation({
             page={page}
             projectId={projectId}
             workspaceId={workspaceId}
+            monitorType={monitorType}
             onNavigate={() => setOpen(false)}
           />
         </div>
@@ -545,11 +613,13 @@ export function AppShell({
   page,
   projectId,
   workspaceId,
+  monitorType,
 }: {
   children: ReactNode;
   page: Page;
   projectId?: string | undefined;
   workspaceId?: string | undefined;
+  monitorType?: MonitorType | undefined;
 }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
@@ -591,7 +661,12 @@ export function AppShell({
           <div className="ml-auto flex items-center gap-2">
             <GlobalSearch />
             <div className="lg:hidden">
-              <MobileNavigation page={page} projectId={projectId} workspaceId={workspaceId} />
+              <MobileNavigation
+                page={page}
+                projectId={projectId}
+                workspaceId={workspaceId}
+                monitorType={monitorType}
+              />
             </div>
           </div>
         </div>
@@ -609,6 +684,7 @@ export function AppShell({
             projectId={projectId}
             workspaceId={workspaceId}
             collapsed={sidebarCollapsed}
+            monitorType={monitorType}
           />
           <div className="mt-auto">
             <button

@@ -21,6 +21,7 @@ import {
   type TcpMonitorSettings,
   type DnsMonitorSettings,
   type StoredApiWorkflowConfigurationV1,
+  type HeartbeatMonitorSettings,
 } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
 import {
@@ -39,6 +40,7 @@ import {
 } from './schema.js';
 import { ensureDefaultProject } from './project-repository.js';
 import { assertWorkspaceSecretUseAuthorized } from './workspace-secret-use-policy.js';
+import { nextHeartbeatDeadline } from './heartbeat-schedule.js';
 
 export class MonitorRepository {
   constructor(private readonly db: WatchrailDatabase) {}
@@ -51,6 +53,7 @@ export class MonitorRepository {
     suppliedAssertions: ResponseAssertionConfigurationV1 = EMPTY_ASSERTION_CONFIGURATION,
     suppliedProjectId?: string,
     suppliedApiWorkflow?: StoredApiWorkflowConfigurationV1,
+    heartbeatTokenHash?: string,
   ): Promise<MonitorRecord> {
     const monitorId = typeof monitorOrId === 'string' ? monitorOrId : randomUUID();
     const monitor = typeof monitorOrId === 'string' ? suppliedMonitor : monitorOrId;
@@ -63,6 +66,13 @@ export class MonitorRepository {
     if (monitor.type === 'API_WORKFLOW' && !apiWorkflow) {
       throw new Error('Stored API workflow configuration is required.');
     }
+    if (monitor.type === 'HEARTBEAT' && !heartbeatTokenHash) {
+      throw new Error('Heartbeat credential hash is required.');
+    }
+    const heartbeatDeadline =
+      monitor.type === 'HEARTBEAT'
+        ? nextHeartbeatDeadline(monitor.heartbeat.schedule, new Date())
+        : null;
 
     return this.db.transaction(async (tx) => {
       const [created] = await tx
@@ -79,6 +89,8 @@ export class MonitorRepository {
           dnsRecordType: monitor.type === 'DNS' ? monitor.dnsRecordType : null,
           dnsExpectedValues: monitor.type === 'DNS' ? monitor.dnsExpectedValues : [],
           apiWorkflow,
+          heartbeat: monitor.type === 'HEARTBEAT' ? monitor.heartbeat : null,
+          heartbeatTokenHash: monitor.type === 'HEARTBEAT' ? heartbeatTokenHash : null,
           url: monitor.type === 'HTTP' ? monitor.url : '',
           method: monitor.type === 'HTTP' ? monitor.method : 'GET',
           lifecycleState: monitor.lifecycleState,
@@ -86,7 +98,9 @@ export class MonitorRepository {
           intervalSeconds: monitor.intervalSeconds,
           nextCheckAt:
             monitor.lifecycleState === 'ENABLED'
-              ? sql`clock_timestamp() + (${monitor.intervalSeconds} * interval '1 second')`
+              ? monitor.type === 'HEARTBEAT'
+                ? heartbeatDeadline
+                : sql`clock_timestamp() + (${monitor.intervalSeconds} * interval '1 second')`
               : null,
           followRedirects: monitor.type === 'HTTP' ? monitor.followRedirects : false,
           statusPolicy:
@@ -114,6 +128,7 @@ export class MonitorRepository {
         dnsRecordType: created.dnsRecordType,
         dnsExpectedValues: created.dnsExpectedValues,
         apiWorkflow: created.apiWorkflow,
+        heartbeat: created.heartbeat,
 
         url: created.url,
         method: created.method,
@@ -864,6 +879,9 @@ export class MonitorRepository {
         .limit(1)
         .for('update');
       if (!monitor) throw new MonitorUpdateNotFoundError();
+      if (monitor.type === 'HEARTBEAT') {
+        throw new MonitorProtocolMismatchError('HTTP');
+      }
 
       if (monitor.intervalSeconds === intervalSeconds) return monitor;
 
@@ -916,6 +934,79 @@ export class MonitorRepository {
         assertions: configuration.assertions,
         tlsPolicy: configuration.tlsPolicy,
         locations: configuration.locations,
+      });
+      return updated;
+    });
+  }
+
+  async updateHeartbeatSettings(
+    organizationId: string,
+    monitorId: string,
+    heartbeat: HeartbeatMonitorSettings,
+  ): Promise<MonitorRecord> {
+    return this.db.transaction(async (tx) => {
+      const [monitor] = await tx
+        .select()
+        .from(monitors)
+        .where(and(eq(monitors.id, monitorId), eq(monitors.organizationId, organizationId)))
+        .limit(1)
+        .for('update');
+      if (!monitor) throw new MonitorUpdateNotFoundError();
+      if (monitor.type !== 'HEARTBEAT') throw new MonitorProtocolMismatchError('HEARTBEAT');
+
+      const [configuration] = await tx
+        .select()
+        .from(monitorConfigurationVersions)
+        .where(
+          and(
+            eq(monitorConfigurationVersions.monitorId, monitorId),
+            eq(monitorConfigurationVersions.organizationId, organizationId),
+          ),
+        )
+        .orderBy(desc(monitorConfigurationVersions.versionNumber))
+        .limit(1);
+      if (!configuration) throw new Error('Monitor has no configuration version.');
+
+      const intervalSeconds =
+        heartbeat.schedule.type === 'INTERVAL' ? heartbeat.schedule.intervalSeconds : 60;
+      const [updated] = await tx
+        .update(monitors)
+        .set({
+          heartbeat,
+          intervalSeconds,
+          nextCheckAt:
+            monitor.lifecycleState === 'ENABLED'
+              ? nextHeartbeatDeadline(heartbeat.schedule, new Date())
+              : null,
+          updatedAt: sql`clock_timestamp()`,
+        })
+        .where(and(eq(monitors.id, monitorId), eq(monitors.organizationId, organizationId)))
+        .returning();
+      if (!updated) throw new Error('The heartbeat update returned no record.');
+
+      await tx.insert(monitorConfigurationVersions).values({
+        organizationId,
+        monitorId,
+        versionNumber: configuration.versionNumber + 1,
+        type: 'HEARTBEAT',
+        tcpHost: null,
+        tcpPort: null,
+        dnsName: null,
+        dnsRecordType: null,
+        dnsExpectedValues: [],
+        apiWorkflow: null,
+        heartbeat,
+        url: '',
+        method: 'GET',
+        timeoutMs: configuration.timeoutMs,
+        intervalSeconds,
+        followRedirects: false,
+        statusPolicy: { type: 'ANY_2XX' },
+        requestHeaders: [],
+        requestBody: { type: 'NONE' },
+        assertions: EMPTY_ASSERTION_CONFIGURATION,
+        tlsPolicy: { type: 'DISABLED' },
+        locations: ['local'],
       });
       return updated;
     });
@@ -1042,7 +1133,9 @@ export class MonitorRepository {
           lifecycleState,
           nextCheckAt:
             lifecycleState === 'ENABLED'
-              ? sql`clock_timestamp() + (${monitor.intervalSeconds} * interval '1 second')`
+              ? monitor.type === 'HEARTBEAT' && monitor.heartbeat
+                ? nextHeartbeatDeadline(monitor.heartbeat.schedule, new Date())
+                : sql`clock_timestamp() + (${monitor.intervalSeconds} * interval '1 second')`
               : null,
           updatedAt: sql`clock_timestamp()`,
         })
@@ -1222,7 +1315,7 @@ export class MonitorLocationUnavailableError extends Error {
 }
 
 export class MonitorProtocolMismatchError extends Error {
-  constructor(protocol: 'HTTP' | 'TCP' | 'DNS' | 'API_WORKFLOW') {
+  constructor(protocol: 'HTTP' | 'TCP' | 'DNS' | 'API_WORKFLOW' | 'HEARTBEAT') {
     super(`This operation requires a ${protocol} monitor.`);
     this.name = 'MonitorProtocolMismatchError';
   }
