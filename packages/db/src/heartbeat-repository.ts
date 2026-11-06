@@ -30,7 +30,7 @@ export interface HeartbeatSignalReceipt {
   monitorId: string;
   receivedAt: Date;
   nextExpectedAt: Date | null;
-  state: 'RECEIVED' | 'STARTED' | 'FAILED';
+  state: 'RECEIVED' | 'STARTED' | 'FAILED' | 'IGNORED';
 }
 
 export class HeartbeatRepository {
@@ -54,26 +54,54 @@ export class HeartbeatRepository {
       if (monitor.lifecycleState === 'ARCHIVED') throw new HeartbeatCredentialNotFoundError();
 
       const receivedAt = new Date();
-      const startedAt = monitor.heartbeatLastStartedAt;
-      const runMatches =
-        startedAt !== null &&
-        (signal.runId === null ||
-          monitor.heartbeatActiveRunId === null ||
-          monitor.heartbeatActiveRunId === signal.runId);
+      const expectedAt = expectedSignalAt(
+        monitor.nextCheckAt,
+        monitor.heartbeat.schedule.graceSeconds,
+      );
+      const deadlineOverdue =
+        monitor.lifecycleState === 'ENABLED' &&
+        monitor.nextCheckAt !== null &&
+        monitor.nextCheckAt.getTime() <= receivedAt.getTime();
+      const activeRunAtReceipt = monitor.heartbeatLastStartedAt !== null;
+      const runMatches = activeRunAtReceipt && monitor.heartbeatActiveRunId === signal.runId;
+      const terminalSignal = signal.type === 'COMPLETE' || signal.type === 'FAIL';
+      const terminalIsAuthoritative =
+        terminalSignal &&
+        !deadlineOverdue &&
+        (runMatches || (!activeRunAtReceipt && monitor.heartbeat.maximumRuntimeSeconds === null));
+      const signalIsAuthoritative =
+        signal.type === 'PING' || signal.type === 'START' || terminalIsAuthoritative;
+      const duplicateStart = signal.type === 'START' && runMatches && !deadlineOverdue;
       const runtimeMs =
-        (signal.type === 'COMPLETE' || signal.type === 'FAIL') && runMatches
-          ? Math.max(0, receivedAt.getTime() - startedAt.getTime())
+        terminalIsAuthoritative && runMatches && monitor.heartbeatLastStartedAt
+          ? Math.max(0, receivedAt.getTime() - monitor.heartbeatLastStartedAt.getTime())
           : null;
-      const activeStartedAt =
-        signal.type === 'START'
-          ? receivedAt
-          : signal.type === 'COMPLETE' || signal.type === 'FAIL'
-            ? null
-            : monitor.heartbeatLastStartedAt;
-      const nextDeadlineAt =
-        monitor.lifecycleState !== 'ENABLED'
-          ? null
-          : activeStartedAt !== null && monitor.heartbeat.maximumRuntimeSeconds !== null
+
+      let activeStartedAt = monitor.heartbeatLastStartedAt;
+      let activeRunId = monitor.heartbeatActiveRunId;
+      let nextDeadlineAt = monitor.nextCheckAt;
+
+      if (deadlineOverdue) {
+        nextDeadlineAt = await recordOverdueHeartbeat(tx, monitor, receivedAt);
+        activeStartedAt = null;
+        activeRunId = null;
+      }
+
+      if (signal.type === 'START' && !duplicateStart) {
+        activeStartedAt = receivedAt;
+        activeRunId = signal.runId;
+      } else if (terminalIsAuthoritative) {
+        activeStartedAt = null;
+        activeRunId = null;
+      }
+
+      if (monitor.lifecycleState !== 'ENABLED') {
+        nextDeadlineAt = null;
+      } else if (signal.type === 'START' && duplicateStart) {
+        nextDeadlineAt = monitor.nextCheckAt;
+      } else if (signalIsAuthoritative) {
+        nextDeadlineAt =
+          activeStartedAt !== null && monitor.heartbeat.maximumRuntimeSeconds !== null
             ? new Date(
                 activeStartedAt.getTime() +
                   (monitor.heartbeat.maximumRuntimeSeconds +
@@ -81,6 +109,7 @@ export class HeartbeatRepository {
                     1_000,
               )
             : nextHeartbeatDeadline(monitor.heartbeat.schedule, receivedAt);
+      }
 
       await tx.insert(heartbeatSignals).values({
         organizationId: monitor.organizationId,
@@ -93,33 +122,32 @@ export class HeartbeatRepository {
         receivedAt,
       });
 
-      await tx
-        .update(monitors)
-        .set({
-          heartbeatLastSignalAt: receivedAt,
-          heartbeatLastSignalType: signal.type,
-          heartbeatLastStartedAt:
-            signal.type === 'START'
-              ? receivedAt
-              : signal.type === 'COMPLETE' || signal.type === 'FAIL'
-                ? null
-                : monitor.heartbeatLastStartedAt,
-          heartbeatLastCompletedAt:
-            signal.type === 'COMPLETE' ? receivedAt : monitor.heartbeatLastCompletedAt,
-          heartbeatActiveRunId:
-            signal.type === 'START'
-              ? signal.runId
-              : signal.type === 'COMPLETE' || signal.type === 'FAIL'
-                ? null
-                : monitor.heartbeatActiveRunId,
-          nextCheckAt: nextDeadlineAt,
-          updatedAt: sql`clock_timestamp()`,
-        })
-        .where(
-          and(eq(monitors.organizationId, monitor.organizationId), eq(monitors.id, monitor.id)),
-        );
+      if (deadlineOverdue || signalIsAuthoritative) {
+        await tx
+          .update(monitors)
+          .set({
+            ...(signalIsAuthoritative
+              ? {
+                  heartbeatLastSignalAt: receivedAt,
+                  heartbeatLastSignalType: signal.type,
+                  heartbeatLastCompletedAt:
+                    signal.type === 'COMPLETE' ? receivedAt : monitor.heartbeatLastCompletedAt,
+                }
+              : {}),
+            heartbeatLastStartedAt: activeStartedAt,
+            heartbeatActiveRunId: activeRunId,
+            nextCheckAt: nextDeadlineAt,
+            updatedAt: sql`clock_timestamp()`,
+          })
+          .where(
+            and(eq(monitors.organizationId, monitor.organizationId), eq(monitors.id, monitor.id)),
+          );
+      }
 
-      if (monitor.lifecycleState === 'ENABLED' && signal.type !== 'START') {
+      if (
+        monitor.lifecycleState === 'ENABLED' &&
+        (signal.type === 'PING' || terminalIsAuthoritative)
+      ) {
         await createCompletedHeartbeatRound(tx, monitor.organizationId, monitor.id, {
           outcome: signal.type === 'FAIL' ? 'FAIL' : 'PASS',
           stage: 'HEARTBEAT',
@@ -129,12 +157,7 @@ export class HeartbeatRepository {
           attemptDurationMs: 0,
           redirects: [],
           assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
-          heartbeatResult: heartbeatEvidence(
-            signal,
-            expectedSignalAt(monitor.nextCheckAt, monitor.heartbeat.schedule.graceSeconds),
-            receivedAt,
-            runtimeMs,
-          ),
+          heartbeatResult: heartbeatEvidence(signal, expectedAt, receivedAt, runtimeMs),
           checkedAt: receivedAt,
         });
       }
@@ -143,7 +166,13 @@ export class HeartbeatRepository {
         monitorId: monitor.id,
         receivedAt,
         nextExpectedAt: expectedSignalAt(nextDeadlineAt, monitor.heartbeat.schedule.graceSeconds),
-        state: signal.type === 'START' ? 'STARTED' : signal.type === 'FAIL' ? 'FAILED' : 'RECEIVED',
+        state: !signalIsAuthoritative
+          ? 'IGNORED'
+          : signal.type === 'START'
+            ? 'STARTED'
+            : signal.type === 'FAIL'
+              ? 'FAILED'
+              : 'RECEIVED',
       };
     });
   }
@@ -170,42 +199,11 @@ export class HeartbeatRepository {
       const checkedAt = new Date();
       for (const monitor of due) {
         if (!monitor.heartbeat || !monitor.nextCheckAt) continue;
-        const runtimeExceeded =
-          monitor.heartbeat.maximumRuntimeSeconds !== null &&
-          monitor.heartbeatLastStartedAt !== null;
-        const reason = runtimeExceeded ? 'RUNTIME_EXCEEDED' : 'MISSED_HEARTBEAT';
-        const expectedAt = expectedSignalAt(
-          monitor.nextCheckAt,
-          monitor.heartbeat.schedule.graceSeconds,
-        );
-        await createCompletedHeartbeatRound(tx, monitor.organizationId, monitor.id, {
-          outcome: 'FAIL',
-          stage: 'HEARTBEAT',
-          reason,
-          statusCode: null,
-          responseTimeMs: null,
-          attemptDurationMs: 0,
-          redirects: [],
-          assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
-          heartbeatResult: {
-            contractVersion: 1,
-            signal: 'MISSED',
-            runId: monitor.heartbeatActiveRunId,
-            message: null,
-            metadata: {},
-            expectedAt: expectedAt?.toISOString() ?? null,
-            receivedAt: null,
-            runtimeMs:
-              runtimeExceeded && monitor.heartbeatLastStartedAt
-                ? Math.max(0, checkedAt.getTime() - monitor.heartbeatLastStartedAt.getTime())
-                : null,
-          },
-          checkedAt,
-        });
+        const nextCheckAt = await recordOverdueHeartbeat(tx, monitor, checkedAt);
         await tx
           .update(monitors)
           .set({
-            nextCheckAt: nextHeartbeatDeadline(monitor.heartbeat.schedule, checkedAt),
+            nextCheckAt,
             heartbeatActiveRunId: null,
             heartbeatLastStartedAt: null,
             updatedAt: sql`clock_timestamp()`,
@@ -217,6 +215,46 @@ export class HeartbeatRepository {
       return due.length;
     });
   }
+}
+
+async function recordOverdueHeartbeat(
+  tx: Transaction,
+  monitor: typeof monitors.$inferSelect,
+  checkedAt: Date,
+): Promise<Date> {
+  if (!monitor.heartbeat || !monitor.nextCheckAt) {
+    throw new Error(
+      'Heartbeat deadline reconciliation requires heartbeat settings and a deadline.',
+    );
+  }
+  const runtimeExceeded =
+    monitor.heartbeat.maximumRuntimeSeconds !== null && monitor.heartbeatLastStartedAt !== null;
+  const expectedAt = expectedSignalAt(monitor.nextCheckAt, monitor.heartbeat.schedule.graceSeconds);
+  await createCompletedHeartbeatRound(tx, monitor.organizationId, monitor.id, {
+    outcome: 'FAIL',
+    stage: 'HEARTBEAT',
+    reason: runtimeExceeded ? 'RUNTIME_EXCEEDED' : 'MISSED_HEARTBEAT',
+    statusCode: null,
+    responseTimeMs: null,
+    attemptDurationMs: 0,
+    redirects: [],
+    assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
+    heartbeatResult: {
+      contractVersion: 1,
+      signal: 'MISSED',
+      runId: monitor.heartbeatActiveRunId,
+      message: null,
+      metadata: {},
+      expectedAt: expectedAt?.toISOString() ?? null,
+      receivedAt: null,
+      runtimeMs:
+        runtimeExceeded && monitor.heartbeatLastStartedAt
+          ? Math.max(0, checkedAt.getTime() - monitor.heartbeatLastStartedAt.getTime())
+          : null,
+    },
+    checkedAt,
+  });
+  return nextHeartbeatDeadline(monitor.heartbeat.schedule, checkedAt);
 }
 
 function heartbeatEvidence(

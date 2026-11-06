@@ -260,6 +260,14 @@ describe('monitor API', () => {
 
     await request(app.getHttpServer())
       .post(ingestionPath)
+      .send({ type: 'START', runId: 'backup-42' })
+      .expect(202)
+      .expect(({ body }) => {
+        expect(body.data).toMatchObject({ monitorId, state: 'STARTED' });
+      });
+
+    await request(app.getHttpServer())
+      .post(ingestionPath)
       .send({
         type: 'COMPLETE',
         runId: 'backup-42',

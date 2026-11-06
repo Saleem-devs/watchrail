@@ -281,6 +281,167 @@ describe('ScheduledRoundRepository', () => {
     });
   });
 
+  it('keeps the replacement run authoritative when stale terminal signals arrive', async () => {
+    const tokenHash = heartbeatHash('overlapping-runs-token');
+    const monitor = await createHeartbeatMonitorRecord('Overlapping export', tokenHash, 60);
+    const heartbeats = new HeartbeatRepository(connection.db);
+
+    await heartbeats.recordSignal(tokenHash, {
+      type: 'START',
+      runId: 'job-100',
+      message: null,
+      metadata: {},
+    });
+    await heartbeats.recordSignal(tokenHash, {
+      type: 'START',
+      runId: 'job-101',
+      message: null,
+      metadata: {},
+    });
+    const [active] = await connection.db.select().from(monitors).where(eq(monitors.id, monitor.id));
+
+    await expect(
+      heartbeats.recordSignal(tokenHash, {
+        type: 'COMPLETE',
+        runId: 'job-100',
+        message: null,
+        metadata: {},
+      }),
+    ).resolves.toMatchObject({ state: 'IGNORED' });
+    await expect(
+      heartbeats.recordSignal(tokenHash, {
+        type: 'FAIL',
+        runId: 'job-100',
+        message: 'Late failure',
+        metadata: {},
+      }),
+    ).resolves.toMatchObject({ state: 'IGNORED' });
+
+    const [afterStaleSignals] = await connection.db
+      .select()
+      .from(monitors)
+      .where(eq(monitors.id, monitor.id));
+    expect(afterStaleSignals).toMatchObject({
+      heartbeatActiveRunId: 'job-101',
+      heartbeatLastStartedAt: active?.heartbeatLastStartedAt,
+      nextCheckAt: active?.nextCheckAt,
+    });
+    await expect(heartbeatHistoryReasons(monitor.id)).resolves.toEqual([]);
+
+    await expect(
+      heartbeats.recordSignal(tokenHash, {
+        type: 'COMPLETE',
+        runId: 'job-101',
+        message: null,
+        metadata: {},
+      }),
+    ).resolves.toMatchObject({ state: 'RECEIVED' });
+    await expect(heartbeatHistoryReasons(monitor.id)).resolves.toEqual(['SIGNAL_RECEIVED']);
+  });
+
+  it('does not extend a runtime deadline when the active run sends a duplicate start', async () => {
+    const tokenHash = heartbeatHash('duplicate-start-token');
+    const monitor = await createHeartbeatMonitorRecord('Idempotent export', tokenHash, 60);
+    const heartbeats = new HeartbeatRepository(connection.db);
+    await heartbeats.recordSignal(tokenHash, {
+      type: 'START',
+      runId: 'export-duplicate',
+      message: null,
+      metadata: {},
+    });
+    const startedAt = new Date(Date.now() - 10_000);
+    const deadlineAt = new Date(Date.now() + 110_000);
+    await connection.db
+      .update(monitors)
+      .set({ heartbeatLastStartedAt: startedAt, nextCheckAt: deadlineAt })
+      .where(eq(monitors.id, monitor.id));
+
+    await heartbeats.recordSignal(tokenHash, {
+      type: 'START',
+      runId: 'export-duplicate',
+      message: 'Duplicate delivery',
+      metadata: {},
+    });
+
+    const [afterDuplicate] = await connection.db
+      .select()
+      .from(monitors)
+      .where(eq(monitors.id, monitor.id));
+    expect(afterDuplicate).toMatchObject({
+      heartbeatActiveRunId: 'export-duplicate',
+      heartbeatLastStartedAt: startedAt,
+      nextCheckAt: deadlineAt,
+    });
+  });
+
+  it.each(['INGESTION_FIRST', 'EVALUATION_FIRST'] as const)(
+    'preserves a runtime breach when a completion arrives after the deadline (%s)',
+    async (order) => {
+      const tokenHash = heartbeatHash(`late-runtime-${order}`);
+      const monitor = await createHeartbeatMonitorRecord(`Late runtime ${order}`, tokenHash, 60);
+      const heartbeats = new HeartbeatRepository(connection.db);
+      await heartbeats.recordSignal(tokenHash, {
+        type: 'START',
+        runId: 'late-export',
+        message: null,
+        metadata: {},
+      });
+      await connection.db
+        .update(monitors)
+        .set({ nextCheckAt: new Date('2020-01-01T00:00:00Z') })
+        .where(eq(monitors.id, monitor.id));
+
+      if (order === 'EVALUATION_FIRST') {
+        await expect(heartbeats.evaluateDue(1)).resolves.toBe(1);
+      }
+      await expect(
+        heartbeats.recordSignal(tokenHash, {
+          type: 'COMPLETE',
+          runId: 'late-export',
+          message: null,
+          metadata: {},
+        }),
+      ).resolves.toMatchObject({ state: 'IGNORED' });
+      if (order === 'INGESTION_FIRST') {
+        await expect(heartbeats.evaluateDue(1)).resolves.toBe(0);
+      }
+
+      await expect(heartbeatHistoryReasons(monitor.id)).resolves.toEqual(['RUNTIME_EXCEEDED']);
+    },
+  );
+
+  it.each(['INGESTION_FIRST', 'EVALUATION_FIRST'] as const)(
+    'records a missed interval before accepting a late ping (%s)',
+    async (order) => {
+      const tokenHash = heartbeatHash(`late-ping-${order}`);
+      const monitor = await createHeartbeatMonitorRecord(`Late ping ${order}`, tokenHash);
+      const heartbeats = new HeartbeatRepository(connection.db);
+      await connection.db
+        .update(monitors)
+        .set({ nextCheckAt: new Date('2020-01-01T00:00:00Z') })
+        .where(eq(monitors.id, monitor.id));
+
+      if (order === 'EVALUATION_FIRST') {
+        await expect(heartbeats.evaluateDue(1)).resolves.toBe(1);
+      }
+      await expect(
+        heartbeats.recordSignal(tokenHash, {
+          type: 'PING',
+          runId: null,
+          message: null,
+          metadata: {},
+        }),
+      ).resolves.toMatchObject({ state: 'RECEIVED' });
+      if (order === 'INGESTION_FIRST') {
+        await expect(heartbeats.evaluateDue(1)).resolves.toBe(0);
+      }
+
+      await expect(heartbeatHistoryReasons(monitor.id)).resolves.toEqual(
+        expect.arrayContaining(['MISSED_HEARTBEAT', 'SIGNAL_RECEIVED']),
+      );
+    },
+  );
+
   it('dispatches a deterministic bounded batch ordered by deadline then id', async () => {
     const first = await createDueMonitor('First', 60, new Date('2026-01-01T00:00:00Z'));
     const second = await createDueMonitor('Second', 60, new Date('2026-01-01T00:00:01Z'));
@@ -503,5 +664,16 @@ describe('ScheduledRoundRepository', () => {
 
   function heartbeatHash(token: string): string {
     return createHash('sha256').update(token, 'utf8').digest('hex');
+  }
+
+  async function heartbeatHistoryReasons(monitorId: string): Promise<string[]> {
+    const history = new CheckHistoryRepository(connection.db);
+    const page = await history.listForMonitor(organizationId, monitorId, { limit: 20 });
+    const details = await Promise.all(
+      page.items.map((item) => history.findForMonitor(organizationId, monitorId, item.id)),
+    );
+    return details.flatMap((detail) =>
+      detail?.result?.kind === 'SINGLE_LOCATION' ? [detail.result.reason] : [],
+    );
   }
 });
