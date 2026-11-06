@@ -1522,6 +1522,8 @@ export const webhookEndpoints = pgTable(
     projectId: uuid('project_id'),
     name: varchar('name', { length: 120 }).notNull(),
     enabled: boolean('enabled').notNull().default(true),
+    notifyOnIncident: boolean('notify_on_incident').notNull().default(true),
+    notifyOnRecovery: boolean('notify_on_recovery').notNull().default(true),
     currentVersionNumber: integer('current_version_number').notNull().default(1),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -1588,8 +1590,6 @@ export const webhookEndpointMonitorRoutes = pgTable(
     organizationId: uuid('organization_id').notNull(),
     endpointId: uuid('endpoint_id').notNull(),
     monitorId: uuid('monitor_id').notNull(),
-    notifyOnIncident: boolean('notify_on_incident').notNull().default(true),
-    notifyOnRecovery: boolean('notify_on_recovery').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

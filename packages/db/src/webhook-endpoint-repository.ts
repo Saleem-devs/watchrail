@@ -96,6 +96,8 @@ export class WebhookEndpointRepository {
           projectId: input.projectId ?? null,
           name: settings.name,
           enabled: input.enabled ?? true,
+          notifyOnIncident: routing.notifyOnIncident,
+          notifyOnRecovery: routing.notifyOnRecovery,
         })
         .returning();
       if (!endpoint) throw new Error('Webhook endpoint creation returned no record.');
@@ -197,6 +199,8 @@ export class WebhookEndpointRepository {
         current.endpoint.projectId,
         input.routing,
       );
+      const currentRouting = await this.readRouting(tx, organizationId, endpointId);
+      const routingChanged = !sameRouting(currentRouting, routing);
       const configurationChanged = settings.url !== current.version.url || input.rotateSecret;
       const nextVersionNumber = configurationChanged
         ? current.endpoint.currentVersionNumber + 1
@@ -225,7 +229,8 @@ export class WebhookEndpointRepository {
       }
       const endpointChanged =
         settings.name !== current.endpoint.name ||
-        nextVersionNumber !== current.endpoint.currentVersionNumber;
+        nextVersionNumber !== current.endpoint.currentVersionNumber ||
+        routingChanged;
       const endpoint = endpointChanged
         ? (
             await tx
@@ -233,6 +238,8 @@ export class WebhookEndpointRepository {
               .set({
                 name: settings.name,
                 currentVersionNumber: nextVersionNumber,
+                notifyOnIncident: routing.notifyOnIncident,
+                notifyOnRecovery: routing.notifyOnRecovery,
                 updatedAt: sql`clock_timestamp()`,
               })
               .where(
@@ -303,13 +310,31 @@ export class WebhookEndpointRepository {
         current.endpoint.projectId,
         input,
       );
+      const currentRouting = await this.readRouting(tx, organizationId, endpointId);
+      if (sameRouting(currentRouting, routing))
+        return toRecord(
+          current.endpoint,
+          current.version.versionNumber,
+          current.version.url,
+          routing,
+        );
+      const [endpoint] = await tx
+        .update(webhookEndpoints)
+        .set({
+          notifyOnIncident: routing.notifyOnIncident,
+          notifyOnRecovery: routing.notifyOnRecovery,
+          updatedAt: sql`clock_timestamp()`,
+        })
+        .where(
+          and(
+            eq(webhookEndpoints.organizationId, organizationId),
+            eq(webhookEndpoints.id, endpointId),
+          ),
+        )
+        .returning();
+      if (!endpoint) throw new WebhookEndpointNotFoundError();
       await this.replaceRouting(tx, organizationId, endpointId, routing);
-      return toRecord(
-        current.endpoint,
-        current.version.versionNumber,
-        current.version.url,
-        routing,
-      );
+      return toRecord(endpoint, current.version.versionNumber, current.version.url, routing);
     });
   }
 
@@ -476,8 +501,6 @@ export class WebhookEndpointRepository {
           organizationId,
           endpointId,
           monitorId,
-          notifyOnIncident: routing.notifyOnIncident,
-          notifyOnRecovery: routing.notifyOnRecovery,
         })),
       );
   }
@@ -487,11 +510,23 @@ export class WebhookEndpointRepository {
     organizationId: string,
     endpointId: string,
   ): Promise<WebhookEndpointRoutingInput> {
+    const [endpoint] = await db
+      .select({
+        notifyOnIncident: webhookEndpoints.notifyOnIncident,
+        notifyOnRecovery: webhookEndpoints.notifyOnRecovery,
+      })
+      .from(webhookEndpoints)
+      .where(
+        and(
+          eq(webhookEndpoints.organizationId, organizationId),
+          eq(webhookEndpoints.id, endpointId),
+        ),
+      )
+      .limit(1);
+    if (!endpoint) throw new WebhookEndpointNotFoundError();
     const routes = await db
       .select({
         monitorId: webhookEndpointMonitorRoutes.monitorId,
-        notifyOnIncident: webhookEndpointMonitorRoutes.notifyOnIncident,
-        notifyOnRecovery: webhookEndpointMonitorRoutes.notifyOnRecovery,
       })
       .from(webhookEndpointMonitorRoutes)
       .where(
@@ -503,10 +538,23 @@ export class WebhookEndpointRepository {
       .orderBy(webhookEndpointMonitorRoutes.monitorId);
     return {
       monitorIds: routes.map((route) => route.monitorId),
-      notifyOnIncident: routes[0]?.notifyOnIncident ?? true,
-      notifyOnRecovery: routes[0]?.notifyOnRecovery ?? true,
+      notifyOnIncident: endpoint.notifyOnIncident,
+      notifyOnRecovery: endpoint.notifyOnRecovery,
     };
   }
+}
+
+function sameRouting(
+  left: WebhookEndpointRoutingInput,
+  right: WebhookEndpointRoutingInput,
+): boolean {
+  const rightMonitorIds = new Set(right.monitorIds);
+  return (
+    left.notifyOnIncident === right.notifyOnIncident &&
+    left.notifyOnRecovery === right.notifyOnRecovery &&
+    left.monitorIds.length === right.monitorIds.length &&
+    left.monitorIds.every((monitorId) => rightMonitorIds.has(monitorId))
+  );
 }
 
 function parseSettings(nameValue: string, urlValue: string): { name: string; url: string } {

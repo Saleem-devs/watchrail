@@ -16,6 +16,16 @@ export class NotificationRequestError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  return (await requestEnvelope<T>(path, init)).data;
+}
+
+async function requestEnvelope<T>(
+  path: string,
+  init?: RequestInit,
+): Promise<{
+  data: T;
+  page?: { number: number; limit: number; total: number; totalPages: number };
+}> {
   const response = await fetch(path, {
     ...init,
     headers: {
@@ -29,6 +39,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     code?: string;
     message?: string;
     fields?: Record<string, string[]>;
+    page?: { number: number; limit: number; total: number; totalPages: number };
   };
   if (!response.ok || body.data === undefined) {
     throw new NotificationRequestError(
@@ -37,12 +48,25 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       body,
     );
   }
-  return body.data;
+  return {
+    data: body.data,
+    ...(body.page ? { page: body.page } : {}),
+  };
 }
 
 export async function listNotificationMonitors(projectId: string): Promise<NotificationMonitor[]> {
-  const query = new URLSearchParams({ projectId, page: '1', limit: '100' });
-  return request(`/api/monitors?${query}`);
+  const monitors = new Map<string, NotificationMonitor>();
+  let page = 1;
+  let totalPages = 1;
+  do {
+    const query = new URLSearchParams({ projectId, page: String(page), limit: '100' });
+    const response = await requestEnvelope<NotificationMonitor[]>(`/api/monitors?${query}`);
+    for (const monitor of response.data) monitors.set(monitor.id, monitor);
+    if (!response.page) break;
+    totalPages = response.page.totalPages;
+    page += 1;
+  } while (page <= totalPages);
+  return [...monitors.values()];
 }
 
 export function listWebhookChannels(projectId: string): Promise<WebhookChannel[]> {

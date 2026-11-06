@@ -534,6 +534,61 @@ describe('webhook endpoint API', () => {
     });
   });
 
+  it('preserves event preferences when project routing has no monitors', async () => {
+    const project = await new ProjectRepository(database).create(
+      DEVELOPMENT_REQUEST_CONTEXT.organizationId,
+      parseNewProject({ name: 'Quiet services', slug: 'quiet-services' }),
+    );
+    const created = await request(app.getHttpServer())
+      .post('/api/webhook-endpoints')
+      .send({
+        name: 'Recovery-only channel',
+        url: 'https://hooks.example.com/recovery-only',
+        signingSecret: sentinel,
+        projectId: project.id,
+        routing: {
+          monitorIds: [],
+          notifyOnIncident: false,
+          notifyOnRecovery: true,
+        },
+      })
+      .expect(201);
+    expect(created.body.data.routing).toEqual({
+      monitorIds: [],
+      notifyOnIncident: false,
+      notifyOnRecovery: true,
+    });
+
+    const reloaded = await request(app.getHttpServer())
+      .get(`/api/webhook-endpoints/${created.body.data.id as string}`)
+      .expect(200);
+    expect(reloaded.body.data.routing).toEqual(created.body.data.routing);
+
+    const updated = await request(app.getHttpServer())
+      .patch(`/api/webhook-endpoints/${created.body.data.id as string}/configuration`)
+      .send({
+        name: created.body.data.name,
+        url: created.body.data.url,
+        signingSecret: { retain: true },
+        routing: {
+          monitorIds: [],
+          notifyOnIncident: true,
+          notifyOnRecovery: false,
+        },
+      })
+      .expect(200);
+    expect(updated.body.data.routing).toEqual({
+      monitorIds: [],
+      notifyOnIncident: true,
+      notifyOnRecovery: false,
+    });
+
+    const reloadedAfterEdit = await request(app.getHttpServer())
+      .get(`/api/webhook-endpoints/${created.body.data.id as string}`)
+      .expect(200);
+    expect(reloadedAfterEdit.body.data.routing).toEqual(updated.body.data.routing);
+  });
+
   it('reads paginated delivery history with immutable target context and no durable secrets', async () => {
     const endpoint = await createEndpoint();
     const monitor = await new MonitorRepository(database).create(

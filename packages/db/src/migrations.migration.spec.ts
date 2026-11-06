@@ -18,6 +18,7 @@ const legacyUppercaseRemoteLocationId = legacyRemoteLocationId.toUpperCase();
 const legacyAuthUserId = '77777777-7777-4777-8777-777777777777';
 const legacyAuthOrganizationId = '88888888-8888-4888-8888-888888888888';
 const legacyAuthApiKeyId = '99999999-9999-4999-8999-999999999999';
+const legacyWebhookEndpointId = '12121212-1212-4121-8121-121212121212';
 
 const existingRound = {
   id: '22222222-2222-4222-8222-222222222222',
@@ -199,9 +200,52 @@ describe('database migrations', () => {
       values (${legacyAuthApiKeyId}, 'legacy-api-key-hash', ${legacyAuthUserId});
     `);
 
-    for (let index = identityRepairMigrationIndex; index < migrations.length; index += 1) {
+    const webhookPolicyMigrationIndex = migrations.findIndex((migration) =>
+      migration.sql.some((statement) => statement.includes('ADD COLUMN "notify_on_incident"')),
+    );
+    expect(webhookPolicyMigrationIndex).toBeGreaterThan(identityRepairMigrationIndex);
+    for (
+      let index = identityRepairMigrationIndex;
+      index < webhookPolicyMigrationIndex;
+      index += 1
+    ) {
       await applyMigration(migrations, index);
     }
+    await connection.db.execute(sql`
+      insert into webhook_endpoints (id, organization_id, name)
+      values (${legacyWebhookEndpointId}, ${existingMonitor.organizationId}, 'Legacy recovery only')
+    `);
+    await connection.db.execute(sql`
+      insert into webhook_endpoint_monitor_routes (
+        organization_id,
+        endpoint_id,
+        monitor_id,
+        notify_on_incident,
+        notify_on_recovery
+      ) values (
+        ${existingMonitor.organizationId},
+        ${legacyWebhookEndpointId},
+        ${existingMonitor.id},
+        false,
+        true
+      )
+    `);
+    await applyMigration(migrations, webhookPolicyMigrationIndex);
+    for (let index = webhookPolicyMigrationIndex + 1; index < migrations.length; index += 1) {
+      await applyMigration(migrations, index);
+    }
+
+    const migratedWebhookPolicy = await connection.db.execute<{
+      notify_on_incident: boolean;
+      notify_on_recovery: boolean;
+    }>(sql`
+      select notify_on_incident, notify_on_recovery
+      from webhook_endpoints
+      where id = ${legacyWebhookEndpointId}
+    `);
+    expect(migratedWebhookPolicy.rows).toEqual([
+      { notify_on_incident: false, notify_on_recovery: true },
+    ]);
 
     const repairedIdentity = await connection.db.execute<{
       organization_id: string;

@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { listNotificationMonitors } from './notification-api';
 import { NotificationsPage } from './notifications-page';
 import { WebhookChannelForm } from './webhook-channel-form';
 import type { NotificationMonitor, WebhookChannel } from './types';
@@ -194,6 +195,51 @@ describe('notifications page', () => {
       'href',
       `/projects/${projectId}/notifications/${channel.id}/edit`,
     );
+  });
+
+  it('loads every monitor page and preserves a selected monitor beyond the first 100', async () => {
+    const monitors = Array.from({ length: 101 }, (_, index): NotificationMonitor => ({
+      id: `monitor-${index + 1}`,
+      name: `Monitor ${index + 1}`,
+      type: 'HTTP',
+      lifecycleState: 'ENABLED',
+    }));
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        json({
+          data: monitors.slice(0, 100),
+          page: { number: 1, limit: 100, total: 101, totalPages: 2 },
+        }),
+      )
+      .mockResolvedValueOnce(
+        json({
+          data: monitors.slice(100),
+          page: { number: 2, limit: 100, total: 101, totalPages: 2 },
+        }),
+      );
+
+    const loaded = await listNotificationMonitors(projectId);
+    expect(loaded).toHaveLength(101);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      `/api/monitors?projectId=${projectId}&page=1&limit=100`,
+      `/api/monitors?projectId=${projectId}&page=2&limit=100`,
+    ]);
+
+    render(
+      <WebhookChannelForm
+        formId="webhook-form"
+        projectId={projectId}
+        monitors={loaded}
+        channel={{
+          ...channel,
+          routing: { ...channel.routing, monitorIds: [monitors[100]!.id] },
+        }}
+        onSaved={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('checkbox', { name: /Monitor 101/ })).toBeChecked();
+    expect(screen.getByText('1 selected')).toBeInTheDocument();
   });
 });
 
