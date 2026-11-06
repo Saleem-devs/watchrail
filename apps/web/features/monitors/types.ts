@@ -24,7 +24,7 @@ export interface TlsCertificateEvidence {
 export interface Monitor {
   id: string;
   projectId?: string;
-  type: 'HTTP' | 'TCP' | 'DNS' | 'API_WORKFLOW';
+  type: 'HTTP' | 'TCP' | 'DNS' | 'API_WORKFLOW' | 'HEARTBEAT';
   name: string;
   url: string;
   configuration:
@@ -36,7 +36,8 @@ export interface Monitor {
         recordType: 'A' | 'AAAA' | 'CNAME' | 'MX' | 'TXT' | 'NS';
         expectedValues: string[];
       }
-    | { type: 'API_WORKFLOW'; workflow: ApiWorkflowConfiguration };
+    | { type: 'API_WORKFLOW'; workflow: ApiWorkflowConfiguration }
+    | { type: 'HEARTBEAT'; heartbeat: HeartbeatMonitorSettings };
   method: string;
   lifecycleState: 'ENABLED' | 'PAUSED';
   timeoutMs: number;
@@ -57,6 +58,27 @@ export interface Monitor {
   currentCheck: CurrentCheck | null;
   incidentState: IncidentState;
   uptime: { uptimePercent: number | null; coveragePercent: number | null };
+  heartbeatIngestionPath?: string;
+}
+
+export type HeartbeatSchedule =
+  | { type: 'INTERVAL'; intervalSeconds: number; graceSeconds: number }
+  | { type: 'CRON'; expression: string; timezone: string; graceSeconds: number };
+
+export interface HeartbeatMonitorSettings {
+  schedule: HeartbeatSchedule;
+  maximumRuntimeSeconds: number | null;
+}
+
+export interface HeartbeatResultEvidence {
+  contractVersion: 1;
+  signal: 'PING' | 'START' | 'COMPLETE' | 'FAIL' | 'MISSED';
+  runId: string | null;
+  message: string | null;
+  metadata: Record<string, string | number | boolean | null>;
+  expectedAt: string | null;
+  receivedAt: string | null;
+  runtimeMs: number | null;
 }
 
 export interface ListPage {
@@ -64,6 +86,17 @@ export interface ListPage {
   limit: number;
   total: number;
   totalPages: number;
+}
+
+export interface MonitorListSummary {
+  total: number;
+  operational: number;
+  attention: number;
+  paused: number;
+  pending: number;
+  openIncidents: number;
+  averageUptimePercent: number | null;
+  averageCoveragePercent: number | null;
 }
 
 export interface ProbeLocation {
@@ -130,6 +163,13 @@ export interface FieldErrors {
   assertions?: string[];
   tlsPolicy?: string[];
   workflow?: string[];
+  heartbeat?: string[];
+  schedule?: string[];
+  expression?: string[];
+  timezone?: string[];
+  intervalSeconds?: string[];
+  graceSeconds?: string[];
+  maximumRuntimeSeconds?: string[];
 }
 
 export type ApiWorkflowRequestBody =
@@ -271,7 +311,7 @@ export interface ManualRound {
     | {
         kind?: 'SINGLE_LOCATION';
         outcome: 'PASS' | 'FAIL' | 'UNKNOWN';
-        stage: 'DNS' | 'CONNECT' | 'TLS' | 'HTTP' | 'PROBE' | 'WORKFLOW';
+        stage: 'DNS' | 'CONNECT' | 'TLS' | 'HTTP' | 'PROBE' | 'WORKFLOW' | 'HEARTBEAT';
         reason: string;
         statusCode: number | null;
         responseTimeMs: number | null;
@@ -282,6 +322,7 @@ export interface ManualRound {
         tlsCertificates?: TlsCertificateEvidence[];
         dnsAnswers?: string[];
         workflowResult?: ApiWorkflowResult;
+        heartbeatResult?: HeartbeatResultEvidence;
         checkedAt: string;
       }
     | {

@@ -41,6 +41,13 @@ export class MonitorConfigurationInvariantError extends Error {
   }
 }
 
+export class InboundMonitorManualExecutionError extends Error {
+  constructor() {
+    super('Heartbeat monitors are evaluated from inbound signals and cannot be run manually.');
+    this.name = 'InboundMonitorManualExecutionError';
+  }
+}
+
 export class ManualRoundRepository {
   constructor(
     private readonly db: WatchrailDatabase,
@@ -63,6 +70,7 @@ export class ManualRoundRepository {
       const [monitor] = await tx
         .select({
           id: monitors.id,
+          type: monitors.type,
           lifecycleState: monitors.lifecycleState,
           requestHeaders: monitors.requestHeaders,
           assertions: monitors.assertions,
@@ -79,6 +87,9 @@ export class ManualRoundRepository {
 
       if (monitor.lifecycleState !== 'ENABLED') {
         throw new MonitorNotRunnableError(monitor.lifecycleState);
+      }
+      if (monitor.type === 'HEARTBEAT') {
+        throw new InboundMonitorManualExecutionError();
       }
       assertWorkspaceSecretUseAuthorized(monitor, workspaceSecretUseAuthorized);
 

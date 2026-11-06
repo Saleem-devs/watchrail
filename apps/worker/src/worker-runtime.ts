@@ -13,6 +13,7 @@ import type {
   MultiLocationRoundFinalizationRepository,
   ProbeCoordinatorRepository,
   ScheduledRoundRepository,
+  HeartbeatRepository,
 } from '@watchrail/db';
 import type { CheckOutboxRelay } from './check-outbox-relay.js';
 import type { WorkerConfig } from './config.js';
@@ -30,6 +31,7 @@ export class WorkerRuntime
   private stopping = false;
   private outboxRunning: Promise<void> | undefined;
   private schedulerRunning: Promise<void> | undefined;
+  private heartbeatRunning: Promise<void> | undefined;
   private availabilityRunning: Promise<void> | undefined;
   private probeReconciliationRunning: Promise<void> | undefined;
   private roundFinalizationRunning: Promise<void> | undefined;
@@ -50,11 +52,13 @@ export class WorkerRuntime
     private readonly authEmailRelay?: AuthEmailOutboxRelay,
     private readonly authEmailConsumer?: BullMqAuthEmailConsumer,
     private readonly authEmailPublisher?: BullMqAuthEmailPublisher,
+    private readonly heartbeats?: HeartbeatRepository,
   ) {}
 
   onApplicationBootstrap(): void {
     this.outboxRunning = this.runOutboxRelay();
     this.schedulerRunning = this.runScheduledDispatch();
+    this.heartbeatRunning = this.heartbeats ? this.runHeartbeatEvaluation() : undefined;
     this.availabilityRunning = this.runAvailabilityFlush();
     this.probeReconciliationRunning = this.probeCoordinator
       ? this.runProbeReconciliation()
@@ -76,6 +80,7 @@ export class WorkerRuntime
     await Promise.all([
       this.outboxRunning,
       this.schedulerRunning,
+      this.heartbeatRunning,
       this.availabilityRunning,
       this.probeReconciliationRunning,
       this.roundFinalizationRunning,
@@ -132,6 +137,21 @@ export class WorkerRuntime
       } catch (error) {
         this.logger.error(
           error instanceof Error ? error.message : 'Unknown scheduled dispatch dependency failure.',
+        );
+        await this.wait(this.config.dependencyErrorDelayMs);
+      }
+    }
+  }
+  private async runHeartbeatEvaluation(): Promise<void> {
+    while (!this.stopping) {
+      try {
+        const count = await this.heartbeats!.evaluateDue(this.config.scheduleDispatchBatchSize);
+        if (count < this.config.scheduleDispatchBatchSize) {
+          await this.wait(this.config.scheduleIdlePollIntervalMs);
+        }
+      } catch (error) {
+        this.logger.error(
+          error instanceof Error ? error.message : 'Unknown heartbeat evaluation failure.',
         );
         await this.wait(this.config.dependencyErrorDelayMs);
       }

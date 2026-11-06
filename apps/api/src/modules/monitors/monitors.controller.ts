@@ -72,9 +72,13 @@ export class MonitorsController {
     @Req() request: RequestWithContext,
     @Query('projectId', ParseUUIDPipe) projectId: string,
     @Body() command: CreateMonitorCommand,
-  ): Promise<{ data: MonitorResponse }> {
+  ): Promise<{ data: MonitorResponse & { heartbeatIngestionPath?: string } }> {
     const monitor = await this.monitors.create(request.watchrailContext, projectId, command);
-    return { data: await this.toMonitorResponse(request, monitor) };
+    const response = await this.toMonitorResponse(request, monitor);
+    const token = (monitor as MonitorRecord & { heartbeatToken?: string }).heartbeatToken;
+    return {
+      data: token ? { ...response, heartbeatIngestionPath: `/api/heartbeats/${token}` } : response,
+    };
   }
 
   @Get()
@@ -90,6 +94,16 @@ export class MonitorsController {
   ): Promise<{
     data: MonitorResponse[];
     page: { number: number; limit: number; total: number; totalPages: number };
+    summary: {
+      total: number;
+      operational: number;
+      attention: number;
+      paused: number;
+      pending: number;
+      openIncidents: number;
+      averageUptimePercent: number | null;
+      averageCoveragePercent: number | null;
+    };
   }> {
     const result = await this.monitors.list(request.watchrailContext, query);
     return {
@@ -102,6 +116,7 @@ export class MonitorsController {
         total: result.total,
         totalPages: result.totalPages,
       },
+      summary: result.summary,
     };
   }
 
@@ -169,6 +184,21 @@ export class MonitorsController {
     @Body() body: unknown,
   ): Promise<{ data: MonitorResponse }> {
     const monitor = await this.monitors.updateDnsSettings(
+      request.watchrailContext,
+      monitorId,
+      body,
+    );
+    return { data: await this.toMonitorResponse(request, monitor) };
+  }
+
+  @Patch(':monitorId/heartbeat-settings')
+  @RequirePermission(PERMISSIONS.MONITOR_UPDATE)
+  async updateHeartbeatSettings(
+    @Req() request: RequestWithContext,
+    @Param('monitorId') monitorId: string,
+    @Body() body: unknown,
+  ): Promise<{ data: MonitorResponse }> {
+    const monitor = await this.monitors.updateHeartbeatSettings(
       request.watchrailContext,
       monitorId,
       body,

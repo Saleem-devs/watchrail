@@ -28,6 +28,11 @@ import {
   parseDnsMonitorSettings,
   type DnsRecordType,
 } from './dns.js';
+import {
+  parseHeartbeatMonitorSettings,
+  HeartbeatInputError,
+  type HeartbeatMonitorSettings,
+} from './heartbeat.js';
 
 export const HTTP_METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] as const;
 export const HTTP_MONITOR_METHODS = [
@@ -40,7 +45,7 @@ export const HTTP_MONITOR_METHODS = [
   'OPTIONS',
 ] as const;
 export const MONITOR_LIFECYCLE_STATES = ['ENABLED', 'PAUSED', 'ARCHIVED'] as const;
-export const MONITOR_TYPES = ['HTTP', 'TCP', 'DNS', 'API_WORKFLOW'] as const;
+export const MONITOR_TYPES = ['HTTP', 'TCP', 'DNS', 'API_WORKFLOW', 'HEARTBEAT'] as const;
 export const MONITOR_LOCATIONS = ['local'] as const;
 export const MONITOR_INTERVAL_LIMITS = {
   minimumSeconds: 60,
@@ -100,6 +105,7 @@ export interface CreateMonitorCommand {
   requestBody?: unknown;
   assertions?: unknown;
   workflow?: unknown;
+  heartbeat?: unknown;
   intervalSeconds?: unknown;
 }
 
@@ -141,7 +147,13 @@ export interface NewApiWorkflowMonitor extends NewMonitorBase {
   workflow: ApiWorkflowConfigurationInput;
 }
 
-export type NewMonitor = NewHttpMonitor | NewTcpMonitor | NewDnsMonitor | NewApiWorkflowMonitor;
+export interface NewHeartbeatMonitor extends NewMonitorBase {
+  type: 'HEARTBEAT';
+  heartbeat: HeartbeatMonitorSettings;
+}
+
+export type NewMonitor =
+  NewHttpMonitor | NewTcpMonitor | NewDnsMonitor | NewApiWorkflowMonitor | NewHeartbeatMonitor;
 
 export interface MonitorFieldErrors {
   name?: string[];
@@ -159,6 +171,12 @@ export interface MonitorFieldErrors {
   requestBody?: string[];
   assertions?: string[];
   workflow?: string[];
+  heartbeat?: string[];
+  schedule?: string[];
+  expression?: string[];
+  timezone?: string[];
+  graceSeconds?: string[];
+  maximumRuntimeSeconds?: string[];
   method?: string[];
   timeoutMs?: string[];
   followRedirects?: string[];
@@ -638,6 +656,7 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
   if (type === 'TCP') return createTcpMonitor(command, name, fields);
   if (type === 'DNS') return createDnsMonitor(command, name, fields);
   if (type === 'API_WORKFLOW') return createApiWorkflowMonitor(command, name, fields);
+  if (type === 'HEARTBEAT') return createHeartbeatMonitor(command, name, fields);
   const url = normalizeUrl(command.url, fields);
   const statusPolicy = normalizeStatusPolicy(command.statusPolicy, fields);
   const tlsPolicy = normalizeTlsPolicy(command.tlsPolicy, url, fields, true);
@@ -678,6 +697,7 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
       command.dnsRecordType,
       command.dnsExpectedValues,
       command.workflow,
+      command.heartbeat,
     ].some((value) => value !== undefined)
   ) {
     fields.type = ['HTTP monitors cannot include TCP, DNS, or workflow configuration.'];
@@ -700,6 +720,58 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
     requestBody,
     assertions,
     locations,
+  };
+}
+
+function createHeartbeatMonitor(
+  command: CreateMonitorCommand,
+  name: string,
+  fields: MonitorFieldErrors,
+): NewHeartbeatMonitor {
+  let heartbeat: HeartbeatMonitorSettings = {
+    schedule: { type: 'INTERVAL', intervalSeconds: 300, graceSeconds: 60 },
+    maximumRuntimeSeconds: null,
+  };
+  try {
+    heartbeat = parseHeartbeatMonitorSettings(command.heartbeat);
+  } catch (error) {
+    if (!(error instanceof HeartbeatInputError)) throw error;
+    Object.assign(fields, error.fields);
+  }
+  const lifecycleState = normalizeInitialLifecycleState(command.lifecycleState, fields);
+  const incompatibleFields = [
+    command.url,
+    command.host,
+    command.port,
+    command.dnsName,
+    command.dnsRecordType,
+    command.dnsExpectedValues,
+    command.statusPolicy,
+    command.tlsPolicy,
+    command.method,
+    command.timeoutMs,
+    command.followRedirects,
+    command.requestHeaders,
+    command.requestBody,
+    command.assertions,
+    command.workflow,
+    command.intervalSeconds,
+    command.locations,
+  ];
+  if (incompatibleFields.some((value) => value !== undefined)) {
+    fields.type = ['Heartbeat monitors cannot include outbound check configuration.'];
+  }
+  if (Object.keys(fields).length > 0) throw new MonitorInputError(fields);
+  const intervalSeconds =
+    heartbeat.schedule.type === 'INTERVAL' ? heartbeat.schedule.intervalSeconds : 60;
+  return {
+    type: 'HEARTBEAT',
+    name,
+    heartbeat,
+    lifecycleState,
+    timeoutMs: MONITOR_DEFAULTS.timeoutMs,
+    intervalSeconds,
+    locations: ['local'],
   };
 }
 
@@ -889,7 +961,7 @@ function createTcpMonitor(
 function normalizeMonitorType(value: unknown, fields: MonitorFieldErrors): MonitorType {
   if (value === undefined) return 'HTTP';
   if (typeof value !== 'string' || !MONITOR_TYPES.includes(value as MonitorType)) {
-    fields.type = ['Choose HTTP, TCP, DNS, or API workflow.'];
+    fields.type = ['Choose HTTP, TCP, DNS, API workflow, or heartbeat.'];
     return 'HTTP';
   }
   return value as MonitorType;

@@ -27,6 +27,30 @@ export function dnsSettingsFromForm(formData: FormData) {
   };
 }
 
+export function heartbeatSettingsFromForm(formData: FormData) {
+  const type = formData.get('heartbeatScheduleType') === 'CRON' ? 'CRON' : 'INTERVAL';
+  const graceSeconds = Number(formData.get('heartbeatGraceMinutes')) * 60;
+  return {
+    schedule:
+      type === 'CRON'
+        ? {
+            type,
+            expression: formEntryString(formData.get('heartbeatCronExpression') ?? undefined),
+            timezone: formEntryString(formData.get('heartbeatTimezone') ?? undefined),
+            graceSeconds,
+          }
+        : {
+            type,
+            intervalSeconds: Number(formData.get('heartbeatIntervalMinutes')) * 60,
+            graceSeconds,
+          },
+    maximumRuntimeSeconds:
+      formData.get('heartbeatRuntimeEnabled') === 'on'
+        ? Number(formData.get('heartbeatMaximumRuntimeMinutes')) * 60
+        : null,
+  };
+}
+
 export function httpConfigurationTestFromForm(formData: FormData) {
   return {
     httpSettings: {

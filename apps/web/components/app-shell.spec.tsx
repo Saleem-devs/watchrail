@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { AppShell } from './app-shell';
@@ -22,10 +22,8 @@ describe('AppShell', () => {
       'aria-current',
       'page',
     );
-    expect(screen.getAllByRole('link', { name: 'Monitors' })[0]).toHaveAttribute(
-      'href',
-      '/projects/project-1/monitors',
-    );
+    const monitorDisclosure = screen.getAllByRole('button', { name: 'Monitors' })[0]!;
+    expect(monitorDisclosure).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByRole('main')).toContainElement(
       screen.getByRole('heading', { name: 'Dashboard' }),
     );
@@ -46,7 +44,7 @@ describe('AppShell', () => {
       'aria-expanded',
       'false',
     );
-    expect(screen.getAllByRole('link', { name: 'Monitors' })[0]).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Monitors' })[0]).toBeInTheDocument();
     expect(window.localStorage.getItem('watchrail.sidebar-collapsed')).toBe('true');
   });
 
@@ -67,7 +65,11 @@ describe('AppShell', () => {
       'aria-current',
       'page',
     );
-    await user.click(screen.getAllByRole('link', { name: 'Monitors' })[1]!);
+    const mobileNavigation = document
+      .getElementById('mobile-workspace-navigation')!
+      .querySelector('nav')!;
+    await user.click(within(mobileNavigation).getByRole('button', { name: 'Monitors' }));
+    await user.click(within(mobileNavigation).getByRole('link', { name: 'All monitors' }));
     expect(screen.getByRole('button', { name: 'Open workspace navigation' })).toHaveAttribute(
       'aria-expanded',
       'false',

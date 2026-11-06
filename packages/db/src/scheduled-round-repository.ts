@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, lte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, lte, ne, sql } from 'drizzle-orm';
 import {
   MULTI_LOCATION_AGGREGATION_POLICY_VERSION,
   MULTI_LOCATION_CONFIRMATION_POLICY_VERSION,
@@ -34,6 +34,7 @@ export class ScheduledRoundRepository {
         .where(
           and(
             eq(monitors.lifecycleState, 'ENABLED'),
+            ne(monitors.type, 'HEARTBEAT'),
             lte(monitors.nextCheckAt, sql`clock_timestamp()`),
             this.multiLocationExecutionEnabled
               ? undefined

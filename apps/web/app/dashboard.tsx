@@ -15,6 +15,7 @@ import { monitorDetailHref, monitorEditHref } from '../lib/navigation-origin';
 import { StatusBadge } from '../components/ui/status-badge';
 import { OverviewDashboard } from '../features/overview/overview-dashboard';
 import { DashboardHeader } from '../features/monitors/dashboard-header';
+import { CreateMonitorMenu } from '../features/monitors/create-monitor-menu';
 import { MonitorFiltersDialog } from '../features/monitors/monitor-filters-dialog';
 import {
   EMPTY_MONITOR_FILTERS,
@@ -45,6 +46,7 @@ import {
   httpConfigurationTestFromForm,
   apiWorkflowFromForm,
   dnsSettingsFromForm,
+  heartbeatSettingsFromForm,
   requiresStateChangingMethodConfirmation,
   requestBodyFromForm,
   requestHeadersFromForm,
@@ -56,6 +58,13 @@ import { HTTP_METHODS } from '../features/monitors/http-method-options';
 import { MonitorAvailabilityHistory } from '../features/monitors/monitor-availability-history';
 import { MonitorResponseTimeChart } from '../features/monitors/monitor-response-time-chart';
 import { MonitorTable } from '../features/monitors/monitor-table';
+import { MonitorTypeOverview } from '../features/monitors/monitor-type-overview';
+import {
+  createMonitorTypePath,
+  monitorTypeDefinition,
+  monitorTypePath,
+  type MonitorType,
+} from '../features/monitors/monitor-types';
 import type {
   ApiError,
   FieldErrors,
@@ -66,6 +75,7 @@ import type {
   IncidentHistoryPage,
   ResponseTimeOverview,
   ConfigurationTestResult,
+  MonitorListSummary,
 } from '../features/monitors/types';
 
 const multiLocationUiEnabled = process.env.NEXT_PUBLIC_MULTI_LOCATION_EXECUTION_ENABLED === 'true';
@@ -81,7 +91,25 @@ function monitorTargetLabel(monitor: Monitor | undefined): string {
   if (monitor.configuration.type === 'API_WORKFLOW') {
     return `${monitor.configuration.workflow.steps.length} ordered HTTP steps`;
   }
+  if (monitor.configuration.type === 'HEARTBEAT') {
+    return heartbeatScheduleLabel(monitor.configuration.heartbeat);
+  }
   return monitor.url;
+}
+
+function heartbeatScheduleLabel(
+  settings: Extract<Monitor['configuration'], { type: 'HEARTBEAT' }>['heartbeat'],
+): string {
+  return settings.schedule.type === 'INTERVAL'
+    ? `Every ${formatScheduleDuration(settings.schedule.intervalSeconds)} + ${formatScheduleDuration(settings.schedule.graceSeconds)} grace`
+    : `${settings.schedule.expression} · ${settings.schedule.timezone} + ${formatScheduleDuration(settings.schedule.graceSeconds)} grace`;
+}
+
+function formatScheduleDuration(seconds: number): string {
+  if (seconds % 86_400 === 0) return `${seconds / 86_400}d`;
+  if (seconds % 3_600 === 0) return `${seconds / 3_600}h`;
+  if (seconds % 60 === 0) return `${seconds / 60}m`;
+  return `${seconds}s`;
 }
 
 type DashboardView = 'legacy' | 'overview' | 'monitors' | 'create' | 'detail' | 'edit';
@@ -93,6 +121,9 @@ export function Dashboard({
   initialMonitorFilters,
   initialMonitorPagination,
   backPath = '/monitors',
+  monitorType,
+  initialCreateMonitorType,
+  lockCreateMonitorType = false,
 }: {
   view?: DashboardView;
   projectId?: string;
@@ -100,6 +131,9 @@ export function Dashboard({
   initialMonitorFilters?: MonitorListFilters;
   initialMonitorPagination?: MonitorListPagination;
   backPath?: string;
+  monitorType?: MonitorType;
+  initialCreateMonitorType?: MonitorType;
+  lockCreateMonitorType?: boolean;
 }) {
   const router = useRouter();
   const projectBase = projectId ? `/projects/${projectId}` : '';
@@ -130,11 +164,16 @@ export function Dashboard({
   const [actionError, setActionError] = useState<string>();
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [createdMonitor, setCreatedMonitor] = useState<Monitor>();
+  const [createdHeartbeatUrl, setCreatedHeartbeatUrl] = useState<string>();
+  const [heartbeatUrlCopied, setHeartbeatUrlCopied] = useState(false);
   const [configurationTest, setConfigurationTest] = useState<ConfigurationTestResult>();
   const [configurationTestError, setConfigurationTestError] = useState<string>();
   const [isTestingConfiguration, setIsTestingConfiguration] = useState(false);
   const [stateChangingTestMethod, setStateChangingTestMethod] = useState<string>();
-  const [createMonitorType, setCreateMonitorType] = useState<Monitor['type']>('HTTP');
+  const [createMonitorType, setCreateMonitorType] = useState<Monitor['type']>(
+    initialCreateMonitorType ?? 'HTTP',
+  );
+  const [monitorSummary, setMonitorSummary] = useState<MonitorListSummary>();
   const [manualRounds, setManualRounds] = useState<Record<string, ManualRound>>({});
   const [runningMonitorIds, setRunningMonitorIds] = useState<Set<string>>(() => new Set());
   const [runErrors, setRunErrors] = useState<Record<string, string>>({});
@@ -273,6 +312,7 @@ export function Dashboard({
     try {
       const query = new URLSearchParams();
       if (projectId) query.set('projectId', projectId);
+      if (monitorType) query.set('type', monitorType);
       if (filters.name.trim()) query.set('name', filters.name.trim());
       if (filters.state !== 'all') query.set('state', filters.state);
       if (filters.location) query.set('location', filters.location);
@@ -284,8 +324,13 @@ export function Dashboard({
         headers: { Accept: 'application/json' },
       });
       if (!response.ok) throw new Error('Could not load monitors.');
-      const body = (await response.json()) as { data: Monitor[]; page?: PaginationState };
+      const body = (await response.json()) as {
+        data: Monitor[];
+        page?: PaginationState;
+        summary?: MonitorListSummary;
+      };
       setMonitors(body.data);
+      setMonitorSummary(body.summary);
       if (pagination && body.page) setMonitorPage(body.page);
       setKnownMonitorLocations((current) =>
         [...new Set([...current, ...body.data.flatMap((monitor) => monitor.locations)])].sort(),
@@ -304,14 +349,14 @@ export function Dashboard({
     const pagination = { ...monitorPagination, page: 1 };
     setMonitorPagination(pagination);
     const query = monitorListSearchParams(filters, pagination).toString();
-    window.history.pushState(null, '', `${projectBase}/monitors?${query}`);
+    window.history.pushState(null, '', `${monitorInventoryPath}?${query}`);
     void loadMonitors(filters, pagination);
   }
 
   function changeMonitorPage(pagination: MonitorListPagination): void {
     setMonitorPagination(pagination);
     const query = monitorListSearchParams(monitorFilters, pagination).toString();
-    window.history.pushState(null, '', `${projectBase}/monitors?${query}`);
+    window.history.pushState(null, '', `${monitorInventoryPath}?${query}`);
     void loadMonitors(monitorFilters, pagination);
   }
 
@@ -347,7 +392,10 @@ export function Dashboard({
     const formData = new FormData(form);
     const requestedType = formData.get('monitorType');
     const monitorType: Monitor['type'] =
-      requestedType === 'TCP' || requestedType === 'DNS' || requestedType === 'API_WORKFLOW'
+      requestedType === 'TCP' ||
+      requestedType === 'DNS' ||
+      requestedType === 'API_WORKFLOW' ||
+      requestedType === 'HEARTBEAT'
         ? requestedType
         : 'HTTP';
 
@@ -358,48 +406,55 @@ export function Dashboard({
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify(
-            monitorType === 'API_WORKFLOW'
+            monitorType === 'HEARTBEAT'
               ? {
-                  type: 'API_WORKFLOW',
+                  type: 'HEARTBEAT',
                   name: formData.get('name'),
-                  workflow: apiWorkflowFromForm(formData),
-                  locations: [formData.get('location')],
+                  heartbeat: heartbeatSettingsFromForm(formData),
                   lifecycleState: formData.get('lifecycleState'),
                 }
-              : monitorType === 'TCP'
+              : monitorType === 'API_WORKFLOW'
                 ? {
-                    type: 'TCP',
+                    type: 'API_WORKFLOW',
                     name: formData.get('name'),
-                    ...tcpSettingsFromForm(formData),
+                    workflow: apiWorkflowFromForm(formData),
                     locations: [formData.get('location')],
                     lifecycleState: formData.get('lifecycleState'),
                   }
-                : monitorType === 'DNS'
+                : monitorType === 'TCP'
                   ? {
-                      type: 'DNS',
+                      type: 'TCP',
                       name: formData.get('name'),
-                      dnsName: dnsSettingsFromForm(formData).name,
-                      dnsRecordType: dnsSettingsFromForm(formData).recordType,
-                      dnsExpectedValues: dnsSettingsFromForm(formData).expectedValues,
-                      timeoutMs: dnsSettingsFromForm(formData).timeoutMs,
+                      ...tcpSettingsFromForm(formData),
                       locations: [formData.get('location')],
                       lifecycleState: formData.get('lifecycleState'),
                     }
-                  : {
-                      type: 'HTTP',
-                      name: formData.get('name'),
-                      url: urlFromMonitorForm(formData),
-                      statusPolicy: statusPolicyFromForm(formData),
-                      tlsPolicy: tlsPolicyFromForm(formData),
-                      method: formData.get('method'),
-                      timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
-                      followRedirects: formData.get('followRedirects') === 'on',
-                      locations: [formData.get('location')],
-                      lifecycleState: formData.get('lifecycleState'),
-                      requestHeaders: requestHeadersFromForm(formData),
-                      requestBody: requestBodyFromForm(formData),
-                      assertions: responseAssertionsFromForm(formData),
-                    },
+                  : monitorType === 'DNS'
+                    ? {
+                        type: 'DNS',
+                        name: formData.get('name'),
+                        dnsName: dnsSettingsFromForm(formData).name,
+                        dnsRecordType: dnsSettingsFromForm(formData).recordType,
+                        dnsExpectedValues: dnsSettingsFromForm(formData).expectedValues,
+                        timeoutMs: dnsSettingsFromForm(formData).timeoutMs,
+                        locations: [formData.get('location')],
+                        lifecycleState: formData.get('lifecycleState'),
+                      }
+                    : {
+                        type: 'HTTP',
+                        name: formData.get('name'),
+                        url: urlFromMonitorForm(formData),
+                        statusPolicy: statusPolicyFromForm(formData),
+                        tlsPolicy: tlsPolicyFromForm(formData),
+                        method: formData.get('method'),
+                        timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
+                        followRedirects: formData.get('followRedirects') === 'on',
+                        locations: [formData.get('location')],
+                        lifecycleState: formData.get('lifecycleState'),
+                        requestHeaders: requestHeadersFromForm(formData),
+                        requestBody: requestBodyFromForm(formData),
+                        assertions: responseAssertionsFromForm(formData),
+                      },
           ),
         },
       );
@@ -414,6 +469,12 @@ export function Dashboard({
       if (!body.data) throw new Error('The API returned no monitor.');
       setMonitors((current) => [body.data as Monitor, ...current]);
       setCreatedMonitor(body.data);
+      setCreatedHeartbeatUrl(
+        body.data.heartbeatIngestionPath
+          ? new URL(body.data.heartbeatIngestionPath, window.location.origin).toString()
+          : undefined,
+      );
+      setHeartbeatUrlCopied(false);
       form.reset();
     } catch {
       setActionError('Watchrail could not reach the API. Check the local services and try again.');
@@ -433,32 +494,36 @@ export function Dashboard({
     const formData = new FormData(event.currentTarget);
     const monitorType = detailMonitor?.type ?? 'HTTP';
     const requests: Array<{ path: string; body: unknown }> = [
-      monitorType === 'API_WORKFLOW'
-        ? { path: 'api-workflow', body: apiWorkflowFromForm(formData) }
-        : monitorType === 'TCP'
-          ? { path: 'tcp-settings', body: tcpSettingsFromForm(formData) }
-          : monitorType === 'DNS'
-            ? { path: 'dns-settings', body: dnsSettingsFromForm(formData) }
-            : {
-                path: 'configuration',
-                body: {
-                  httpSettings: {
-                    url: urlFromMonitorForm(formData),
-                    method: formData.get('method'),
-                    timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
-                    followRedirects: formData.get('followRedirects') === 'on',
-                    requestBody: requestBodyFromForm(formData),
-                    tlsPolicy: tlsPolicyFromForm(formData),
+      monitorType === 'HEARTBEAT'
+        ? { path: 'heartbeat-settings', body: heartbeatSettingsFromForm(formData) }
+        : monitorType === 'API_WORKFLOW'
+          ? { path: 'api-workflow', body: apiWorkflowFromForm(formData) }
+          : monitorType === 'TCP'
+            ? { path: 'tcp-settings', body: tcpSettingsFromForm(formData) }
+            : monitorType === 'DNS'
+              ? { path: 'dns-settings', body: dnsSettingsFromForm(formData) }
+              : {
+                  path: 'configuration',
+                  body: {
+                    httpSettings: {
+                      url: urlFromMonitorForm(formData),
+                      method: formData.get('method'),
+                      timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
+                      followRedirects: formData.get('followRedirects') === 'on',
+                      requestBody: requestBodyFromForm(formData),
+                      tlsPolicy: tlsPolicyFromForm(formData),
+                    },
+                    requestHeaders: requestHeadersFromForm(formData),
+                    assertions: responseAssertionsFromForm(formData),
                   },
-                  requestHeaders: requestHeadersFromForm(formData),
-                  assertions: responseAssertionsFromForm(formData),
                 },
-              },
       { path: 'name', body: { name: formData.get('name') } },
       ...(monitorType === 'HTTP'
         ? [{ path: 'status-policy', body: { statusPolicy: statusPolicyFromForm(formData) } }]
         : []),
-      { path: 'locations', body: { locations: [formData.get('location')] } },
+      ...(monitorType === 'HEARTBEAT'
+        ? []
+        : [{ path: 'locations', body: { locations: [formData.get('location')] } }]),
       { path: 'lifecycle', body: { lifecycleState: formData.get('lifecycleState') } },
     ];
 
@@ -981,7 +1046,9 @@ export function Dashboard({
   const detailMonitor = visibleMonitors[0];
   const detailPath = monitorId ? monitorDetailHref(monitorId, backPath, projectId) : backPath;
   const monitorListQuery = monitorListSearchParams(monitorFilters, monitorPagination).toString();
-  const monitorListOrigin = `${projectBase}/monitors?${monitorListQuery}`;
+  const monitorInventoryPath =
+    projectId && monitorType ? monitorTypePath(projectId, monitorType) : `${projectBase}/monitors`;
+  const monitorListOrigin = `${monitorInventoryPath}?${monitorListQuery}`;
   const hasActiveMonitorFilters =
     Boolean(monitorFilters.name.trim()) ||
     monitorFilters.state !== 'all' ||
@@ -998,12 +1065,16 @@ export function Dashboard({
             : 'monitors';
 
   return (
-    <AppShell page={shellPage} projectId={projectId}>
+    <AppShell page={shellPage} projectId={projectId} monitorType={monitorType}>
       <main id="main-content" data-watchrail-dashboard className="w-full min-w-0 pb-16">
         {view !== 'detail' && view !== 'edit' ? (
           <DashboardHeader
             view={view === 'create' ? 'create' : view === 'monitors' ? 'monitors' : 'overview'}
             basePath={projectBase}
+            monitorType={view === 'monitors' ? monitorType : undefined}
+            createMonitorType={
+              view === 'create' && lockCreateMonitorType ? createMonitorType : undefined
+            }
             actions={
               view === 'monitors' ? (
                 <>
@@ -1012,28 +1083,42 @@ export function Dashboard({
                     locations={knownMonitorLocations}
                     onApply={applyMonitorFilters}
                   />
-                  <Link
-                    href={`${projectBase}/monitors/new`}
-                    className={actionClassName({ variant: 'primary', className: 'px-5' })}
-                  >
-                    <svg
-                      viewBox="0 0 16 16"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                      aria-hidden="true"
-                      className="size-4"
+                  {projectId && !monitorType ? (
+                    <CreateMonitorMenu projectId={projectId} />
+                  ) : (
+                    <Link
+                      href={
+                        projectId && monitorType
+                          ? createMonitorTypePath(projectId, monitorType)
+                          : `${projectBase}/monitors/new`
+                      }
+                      className={actionClassName({ variant: 'primary', className: 'px-5' })}
                     >
-                      <path d="M8 3v10M3 8h10" />
-                    </svg>
-                    Add monitor
-                  </Link>
+                      <svg
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        aria-hidden="true"
+                        className="size-4"
+                      >
+                        <path d="M8 3v10M3 8h10" />
+                      </svg>
+                      {monitorType
+                        ? `Add ${monitorTypeDefinition(monitorType).singular}`
+                        : 'Add monitor'}
+                    </Link>
+                  )}
                 </>
               ) : view === 'create' ? (
                 <>
                   <Link
-                    href={`${projectBase}/monitors`}
+                    href={
+                      projectId && lockCreateMonitorType
+                        ? monitorTypePath(projectId, createMonitorType)
+                        : `${projectBase}/monitors`
+                    }
                     className={actionClassName({ variant: 'quiet' })}
                   >
                     Cancel
@@ -1143,13 +1228,43 @@ export function Dashboard({
             className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-rail-panel border border-rail-success/30 bg-rail-success/5 px-4 py-3 text-sm text-rail-success"
             role="status"
           >
-            <span>{createdMonitor.name} is ready for its first check.</span>
+            <span>
+              {createdMonitor.type === 'HEARTBEAT'
+                ? `${createdMonitor.name} is ready to receive signals.`
+                : `${createdMonitor.name} is ready for its first check.`}
+            </span>
             <Link
               href={`${projectBase}/monitors/${createdMonitor.id}`}
               className="inline-flex min-h-9 items-center rounded-rail-control px-3 font-medium text-rail-success no-underline hover:bg-rail-hover"
             >
               View monitor
             </Link>
+          </div>
+        ) : null}
+
+        {view === 'create' && createdMonitor?.heartbeatIngestionPath && createdHeartbeatUrl ? (
+          <div className="mt-3 rounded-rail-panel border border-rail-border bg-rail-raised px-4 py-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="m-0 text-sm font-semibold text-rail-text">Heartbeat URL</h2>
+                <p className="mt-1 mb-0 text-xs leading-5 text-rail-muted">
+                  Copy this credential now. Watchrail will not show it again.
+                </p>
+              </div>
+              <Button
+                variant="secondary"
+                size="compact"
+                onClick={() => {
+                  void navigator.clipboard.writeText(createdHeartbeatUrl);
+                  setHeartbeatUrlCopied(true);
+                }}
+              >
+                {heartbeatUrlCopied ? 'Copied' : 'Copy URL'}
+              </Button>
+            </div>
+            <code className="mt-3 block overflow-x-auto rounded-rail-control border border-rail-border bg-rail-surface px-3 py-2 text-xs text-rail-text">
+              POST {createdHeartbeatUrl}
+            </code>
           </div>
         ) : null}
 
@@ -1163,6 +1278,10 @@ export function Dashboard({
             onRetryResponseTimes={() => void loadOverviewAnalytics()}
             onDeleteMonitor={deleteMonitor}
           />
+        ) : null}
+
+        {view === 'monitors' && monitorType && !isLoading && !loadError ? (
+          <MonitorTypeOverview type={monitorType} monitors={monitors} summary={monitorSummary} />
         ) : null}
 
         <div
@@ -1186,10 +1305,14 @@ export function Dashboard({
                       id="monitors-heading"
                       className="m-0 text-lg font-semibold tracking-tight text-rail-text"
                     >
-                      Monitors
+                      {monitorType
+                        ? `${monitorTypeDefinition(monitorType).label} inventory`
+                        : 'Monitors'}
                     </h2>
                     <p className="mt-1 mb-0 text-xs text-rail-muted">
-                      Latest reported state for every configured endpoint.
+                      {monitorType
+                        ? `Latest reported state for every ${monitorTypeDefinition(monitorType).singular.toLowerCase()} in this project.`
+                        : 'Latest reported state for every configured target.'}
                     </p>
                   </div>
                   <button
@@ -1256,6 +1379,7 @@ export function Dashboard({
                     onDeleteMonitor={deleteMonitor}
                     origin={monitorListOrigin}
                     projectId={projectId}
+                    type={monitorType}
                   />
                   <TablePagination
                     page={monitorPage}
@@ -1325,6 +1449,10 @@ export function Dashboard({
                               <span className="block max-w-full truncate text-sm text-rail-subtle">
                                 {monitor.configuration.workflow.steps.length} ordered HTTP steps
                               </span>
+                            ) : monitor.configuration?.type === 'HEARTBEAT' ? (
+                              <span className="block max-w-full truncate text-sm text-rail-subtle">
+                                {heartbeatScheduleLabel(monitor.configuration.heartbeat)}
+                              </span>
                             ) : (
                               <a
                                 href={monitor.url}
@@ -1336,20 +1464,27 @@ export function Dashboard({
                               </a>
                             )}
                           </div>
-                          <Button
-                            variant="secondary"
-                            size="compact"
-                            disabled={runningMonitorIds.has(monitor.id)}
-                            onClick={() => void runNow(monitor.id)}
-                          >
-                            {runningMonitorIds.has(monitor.id) ? 'Checking…' : 'Run now'}
-                          </Button>
+                          {monitor.type !== 'HEARTBEAT' ? (
+                            <Button
+                              variant="secondary"
+                              size="compact"
+                              disabled={runningMonitorIds.has(monitor.id)}
+                              onClick={() => void runNow(monitor.id)}
+                            >
+                              {runningMonitorIds.has(monitor.id) ? 'Checking…' : 'Run now'}
+                            </Button>
+                          ) : null}
                         </div>
                         <div className="flex flex-wrap gap-x-4 gap-y-2 border-b border-rail-border px-5 py-3 text-xs text-rail-muted">
                           <span className="font-medium text-rail-subtle">
                             {monitor.type ?? 'HTTP'}
                           </span>
-                          <span>{monitor.timeoutMs / 1000}s timeout</span>
+                          {monitor.type === 'HEARTBEAT' &&
+                          monitor.configuration.type === 'HEARTBEAT' ? (
+                            <span>{heartbeatScheduleLabel(monitor.configuration.heartbeat)}</span>
+                          ) : (
+                            <span>{monitor.timeoutMs / 1000}s timeout</span>
+                          )}
                           {(monitor.type ?? 'HTTP') === 'HTTP' ? (
                             <>
                               <span>{monitor.method}</span>
@@ -1359,7 +1494,9 @@ export function Dashboard({
                               <span>{statusPolicyLabel(monitor.statusPolicy)}</span>
                             </>
                           ) : null}
-                          <span>{monitor.locations.join(', ')}</span>
+                          {monitor.type !== 'HEARTBEAT' ? (
+                            <span>{monitor.locations.join(', ')}</span>
+                          ) : null}
                         </div>
                         <div className="p-5">
                           {monitor.currentCheck?.kind === 'MULTI_LOCATION' ? (
@@ -1497,6 +1634,7 @@ export function Dashboard({
               onConfigurationChange={invalidateConfigurationTest}
               onTypeChange={setCreateMonitorType}
               selectedType={createMonitorType}
+              showTypeSelector={!lockCreateMonitorType}
             />
           ) : null}
           {view === 'edit' && detailMonitor ? (
@@ -1612,25 +1750,30 @@ function MonitorDetailView({
               {monitor.lifecycleState === 'PAUSED' ? 'Last evidence' : 'Checked'} {lastEvidence}
             </span>
           </div>
-          <Button variant="secondary" disabled={running} onClick={onRun}>
-            <svg
-              viewBox="0 0 16 16"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-              className={`size-4 ${running ? 'motion-safe:animate-spin' : ''}`}
-            >
-              <path d="M13 8a5 5 0 1 1-1.46-3.54M13 3v4H9" />
-            </svg>
-            {running ? 'Checking…' : 'Run check'}
-          </Button>
+          {monitor.type !== 'HEARTBEAT' ? (
+            <Button variant="secondary" disabled={running} onClick={onRun}>
+              <svg
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+                className={`size-4 ${running ? 'motion-safe:animate-spin' : ''}`}
+              >
+                <path d="M13 8a5 5 0 1 1-1.46-3.54M13 3v4H9" />
+              </svg>
+              {running ? 'Checking…' : 'Run check'}
+            </Button>
+          ) : null}
         </div>
         <dl className="grid gap-px bg-rail-border sm:grid-cols-2 xl:grid-cols-4">
           <DetailMetric label="7-day uptime" value={formatPercent(monitor.uptime?.uptimePercent)} />
-          <DetailMetric label="Latest response" value={latestResponse} />
+          <DetailMetric
+            label={monitor.type === 'HEARTBEAT' ? 'Latest signal' : 'Latest response'}
+            value={monitor.type === 'HEARTBEAT' ? lastEvidence : latestResponse}
+          />
           <DetailMetric
             label="Evidence coverage"
             value={formatPercent(monitor.uptime?.coveragePercent)}
@@ -1649,51 +1792,55 @@ function MonitorDetailView({
         </dl>
       </section>
 
-      <MonitorResponseTimeChart
-        page={checkHistory}
-        loading={checkHistoryLoading}
-        protocol={monitor.type ?? 'HTTP'}
-      />
+      {monitor.type !== 'HEARTBEAT' ? (
+        <MonitorResponseTimeChart
+          page={checkHistory}
+          loading={checkHistoryLoading}
+          protocol={monitor.type ?? 'HTTP'}
+        />
+      ) : null}
 
       <div className="grid min-w-0 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="grid min-w-0 gap-6">
-          <section className="overflow-hidden rounded-rail-panel border border-rail-border bg-rail-raised">
-            <div className="border-b border-rail-border px-5 py-4 sm:px-6">
-              <h2 className="m-0 text-sm font-semibold text-rail-text">Latest diagnostic</h2>
-              <p className="mt-1 mb-0 text-xs text-rail-muted">
-                Protocol-specific evidence from the latest manual check.
-              </p>
-            </div>
-            <div className="p-5 sm:p-6 [&>.manual-diagnostic]:mt-0 [&>p]:mt-0 [&>p]:border-t-0 [&>p]:pt-0">
-              {monitor.currentCheck?.kind === 'MULTI_LOCATION' ? (
-                <dl
-                  className="mb-5 grid gap-px overflow-hidden rounded-rail-control border border-rail-border bg-rail-border sm:grid-cols-3"
-                  aria-label={`Latest regional aggregate for ${monitor.name}`}
-                >
-                  <DetailMetric
-                    label="Aggregate"
-                    value={monitor.currentCheck.aggregateOutcome ?? 'Unknown'}
-                    compact
-                  />
-                  <DetailMetric
-                    label="Evidence coverage"
-                    value={formatRatio(monitor.currentCheck.coverage)}
-                    compact
-                  />
-                  <DetailMetric
-                    label="Reachability"
-                    value={formatRatio(monitor.currentCheck.reachability)}
-                    compact
-                  />
-                </dl>
-              ) : null}
-              <ManualDiagnostic
-                round={manualRound}
-                error={runError}
-                protocol={monitor.type ?? 'HTTP'}
-              />
-            </div>
-          </section>
+          {monitor.type !== 'HEARTBEAT' ? (
+            <section className="overflow-hidden rounded-rail-panel border border-rail-border bg-rail-raised">
+              <div className="border-b border-rail-border px-5 py-4 sm:px-6">
+                <h2 className="m-0 text-sm font-semibold text-rail-text">Latest diagnostic</h2>
+                <p className="mt-1 mb-0 text-xs text-rail-muted">
+                  Protocol-specific evidence from the latest manual check.
+                </p>
+              </div>
+              <div className="p-5 sm:p-6 [&>.manual-diagnostic]:mt-0 [&>p]:mt-0 [&>p]:border-t-0 [&>p]:pt-0">
+                {monitor.currentCheck?.kind === 'MULTI_LOCATION' ? (
+                  <dl
+                    className="mb-5 grid gap-px overflow-hidden rounded-rail-control border border-rail-border bg-rail-border sm:grid-cols-3"
+                    aria-label={`Latest regional aggregate for ${monitor.name}`}
+                  >
+                    <DetailMetric
+                      label="Aggregate"
+                      value={monitor.currentCheck.aggregateOutcome ?? 'Unknown'}
+                      compact
+                    />
+                    <DetailMetric
+                      label="Evidence coverage"
+                      value={formatRatio(monitor.currentCheck.coverage)}
+                      compact
+                    />
+                    <DetailMetric
+                      label="Reachability"
+                      value={formatRatio(monitor.currentCheck.reachability)}
+                      compact
+                    />
+                  </dl>
+                ) : null}
+                <ManualDiagnostic
+                  round={manualRound}
+                  error={runError}
+                  protocol={monitor.type ?? 'HTTP'}
+                />
+              </div>
+            </section>
+          ) : null}
 
           <section className="overflow-hidden rounded-rail-panel border border-rail-border bg-rail-raised">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rail-border px-5 py-4 sm:px-6">
@@ -1804,10 +1951,29 @@ function MonitorDetailView({
                     }s / 90s`}
                   />
                 </>
+              ) : monitor.configuration?.type === 'HEARTBEAT' ? (
+                <>
+                  <DetailRow
+                    label="Schedule"
+                    value={heartbeatScheduleLabel(monitor.configuration.heartbeat)}
+                  />
+                  <DetailRow
+                    label="Maximum runtime"
+                    value={
+                      monitor.configuration.heartbeat.maximumRuntimeSeconds === null
+                        ? 'Not enforced'
+                        : formatScheduleDuration(
+                            monitor.configuration.heartbeat.maximumRuntimeSeconds,
+                          )
+                    }
+                  />
+                </>
               ) : (
                 <DetailRow label="Method" value={monitor.method} />
               )}
-              <DetailRow label="Timeout" value={`${monitor.timeoutMs / 1000} seconds`} />
+              {monitor.type !== 'HEARTBEAT' ? (
+                <DetailRow label="Timeout" value={`${monitor.timeoutMs / 1000} seconds`} />
+              ) : null}
               {(monitor.type ?? 'HTTP') === 'HTTP' ? (
                 <>
                   <DetailRow
@@ -1820,10 +1986,12 @@ function MonitorDetailView({
                   />
                 </>
               ) : null}
-              <DetailRow
-                label="Locations"
-                value={monitor.locations.length > 0 ? monitor.locations.join(', ') : 'None'}
-              />
+              {monitor.type !== 'HEARTBEAT' ? (
+                <DetailRow
+                  label="Locations"
+                  value={monitor.locations.length > 0 ? monitor.locations.join(', ') : 'None'}
+                />
+              ) : null}
               <DetailRow
                 label="Lifecycle"
                 value={monitor.lifecycleState.toLowerCase()}
@@ -1933,43 +2101,45 @@ function MonitorConfiguration({
         Configure monitor
       </summary>
       <div className="border-t border-rail-border p-4">
-        <Form className="status-policy-form" onSubmit={onUpdateLocation}>
-          <label>
-            Execution {multiLocationUiEnabled ? 'locations' : 'location'}
-            <div onFocusCapture={onLoadProbeLocations}>
-              {multiLocationUiEnabled ? (
-                <select name="location" multiple defaultValue={monitor.locations}>
-                  <option value="local">Local</option>
-                  {probeLocations.map((location) => (
-                    <option
-                      key={location.id}
-                      value={location.id}
-                      disabled={location.status !== 'ACTIVE'}
-                    >
-                      {location.name} — {location.health.toLowerCase()}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <Select name="location" defaultValue={monitor.locations[0] ?? 'local'}>
-                  <option value="local">Local</option>
-                  {probeLocations.map((location) => (
-                    <option
-                      key={location.id}
-                      value={location.id}
-                      disabled={location.status !== 'ACTIVE'}
-                    >
-                      {location.name} — {location.health.toLowerCase()}
-                    </option>
-                  ))}
-                </Select>
-              )}
-            </div>
-          </label>
-          <button type="submit" disabled={updatingSettings}>
-            Save location
-          </button>
-        </Form>
+        {monitor.type !== 'HEARTBEAT' ? (
+          <Form className="status-policy-form" onSubmit={onUpdateLocation}>
+            <label>
+              Execution {multiLocationUiEnabled ? 'locations' : 'location'}
+              <div onFocusCapture={onLoadProbeLocations}>
+                {multiLocationUiEnabled ? (
+                  <select name="location" multiple defaultValue={monitor.locations}>
+                    <option value="local">Local</option>
+                    {probeLocations.map((location) => (
+                      <option
+                        key={location.id}
+                        value={location.id}
+                        disabled={location.status !== 'ACTIVE'}
+                      >
+                        {location.name} — {location.health.toLowerCase()}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <Select name="location" defaultValue={monitor.locations[0] ?? 'local'}>
+                    <option value="local">Local</option>
+                    {probeLocations.map((location) => (
+                      <option
+                        key={location.id}
+                        value={location.id}
+                        disabled={location.status !== 'ACTIVE'}
+                      >
+                        {location.name} — {location.health.toLowerCase()}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </div>
+            </label>
+            <button type="submit" disabled={updatingSettings}>
+              Save location
+            </button>
+          </Form>
+        ) : null}
         {(monitor.type ?? 'HTTP') === 'HTTP' ? (
           <Form className="status-policy-form" onSubmit={onUpdateHttpSettings}>
             <label>

@@ -19,6 +19,7 @@ import {
   MultiLocationRoundFinalizationRepository,
   AuthEmailOutboxRepository,
   WorkspaceSecretRepository,
+  HeartbeatRepository,
 } from '@watchrail/db';
 import type { WatchrailDatabase } from '@watchrail/db';
 import { CheckOutboxRelay, createExponentialBackoff } from './check-outbox-relay.js';
@@ -136,6 +137,11 @@ import { AuthEmailJobHandler, AuthEmailOutboxRelay } from './auth-email-worker.j
       useFactory: (db: WatchrailDatabase) => new WorkspaceSecretRepository(db),
     },
     {
+      provide: HeartbeatRepository,
+      inject: [getDrizzleToken()],
+      useFactory: (db: WatchrailDatabase) => new HeartbeatRepository(db),
+    },
+    {
       provide: ScheduledRoundRepository,
       inject: [getDrizzleToken(), WORKER_CONFIG],
       useFactory: (db: WatchrailDatabase, config: WorkerConfig) =>
@@ -207,6 +213,7 @@ import { AuthEmailJobHandler, AuthEmailOutboxRelay } from './auth-email-worker.j
         ScheduledRoundRepository,
         AvailabilityRepository,
         WORKER_CONFIG,
+        HeartbeatRepository,
         WebhookDeliveryWorker,
         ProbeCoordinatorRepository,
         MultiLocationRoundFinalizationRepository,
@@ -221,6 +228,7 @@ import { AuthEmailJobHandler, AuthEmailOutboxRelay } from './auth-email-worker.j
         scheduledRounds: ScheduledRoundRepository,
         availability: AvailabilityRepository,
         config: WorkerConfig,
+        heartbeats: HeartbeatRepository,
         webhookDelivery: WebhookDeliveryWorker,
         probeCoordinator: ProbeCoordinatorRepository,
         multiLocationFinalization: MultiLocationRoundFinalizationRepository,
@@ -241,6 +249,7 @@ import { AuthEmailJobHandler, AuthEmailOutboxRelay } from './auth-email-worker.j
           authEmailRelay,
           authEmailConsumer,
           authEmailPublisher,
+          heartbeats,
         ),
     },
   ],

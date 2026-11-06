@@ -1,11 +1,15 @@
+import { createHash, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import { asc, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { createMonitor } from '@watchrail/domain';
+import { createMonitor, EMPTY_ASSERTION_CONFIGURATION } from '@watchrail/domain';
 import { createDatabaseConnection, type DatabaseConnection } from './client.js';
 import { ManualRoundRepository } from './manual-round-repository.js';
+import { CheckHistoryRepository } from './check-history-repository.js';
+import { HeartbeatRepository } from './heartbeat-repository.js';
+import { IncidentReadRepository } from './incident-read-repository.js';
 import { migrateDatabase } from './migration.js';
 import { MonitorRepository } from './monitor-repository.js';
 import { ScheduledRoundRepository } from './scheduled-round-repository.js';
@@ -189,6 +193,92 @@ describe('ScheduledRoundRepository', () => {
     expect(projections.find((value) => value.id === future.id)?.nextCheckAt).not.toBeNull();
     expect(projections.find((value) => value.id === paused.id)?.nextCheckAt).toBeNull();
     expect(projections.find((value) => value.id === archived.id)?.nextCheckAt).toBeNull();
+  });
+
+  it('records heartbeat signals as protocol-specific history without outbound dispatch', async () => {
+    const tokenHash = heartbeatHash('heartbeat-token');
+    const monitor = await createHeartbeatMonitorRecord('Nightly backup', tokenHash);
+    const heartbeats = new HeartbeatRepository(connection.db);
+
+    const receipt = await heartbeats.recordSignal(tokenHash, {
+      type: 'COMPLETE',
+      runId: 'backup-42',
+      message: 'Backup completed',
+      metadata: { rows: 42, region: 'lagos', clientSecret: 'do-not-retain' },
+    });
+
+    expect(receipt).toMatchObject({ monitorId: monitor.id, state: 'RECEIVED' });
+    await expect(new ScheduledRoundRepository(connection.db).dispatchDue(100)).resolves.toEqual([]);
+
+    const history = new CheckHistoryRepository(connection.db);
+    const page = await history.listForMonitor(organizationId, monitor.id, { limit: 10 });
+    expect(page.items).toHaveLength(1);
+    const detail = await history.findForMonitor(organizationId, monitor.id, page.items[0]!.id);
+    expect(detail?.result).toMatchObject({
+      kind: 'SINGLE_LOCATION',
+      outcome: 'PASS',
+      stage: 'HEARTBEAT',
+      reason: 'SIGNAL_RECEIVED',
+      heartbeatResult: {
+        signal: 'COMPLETE',
+        runId: 'backup-42',
+        metadata: { rows: 42, region: 'lagos', clientSecret: '[REDACTED]' },
+      },
+    });
+    expect(JSON.stringify(detail)).not.toContain('do-not-retain');
+  });
+
+  it('opens an incident immediately when an enabled heartbeat misses its deadline', async () => {
+    const monitor = await createHeartbeatMonitorRecord(
+      'Queue consumer',
+      heartbeatHash('missed-token'),
+    );
+    await connection.db
+      .update(monitors)
+      .set({ nextCheckAt: new Date('2020-01-01T00:00:00Z') })
+      .where(eq(monitors.id, monitor.id));
+
+    await expect(new HeartbeatRepository(connection.db).evaluateDue(100)).resolves.toBe(1);
+
+    const history = new CheckHistoryRepository(connection.db);
+    const page = await history.listForMonitor(organizationId, monitor.id, { limit: 10 });
+    const detail = await history.findForMonitor(organizationId, monitor.id, page.items[0]!.id);
+    expect(detail?.result).toMatchObject({
+      kind: 'SINGLE_LOCATION',
+      outcome: 'FAIL',
+      stage: 'HEARTBEAT',
+      reason: 'MISSED_HEARTBEAT',
+      heartbeatResult: { signal: 'MISSED', receivedAt: null },
+    });
+    await expect(
+      new IncidentReadRepository(connection.db).currentForMonitor(organizationId, monitor.id),
+    ).resolves.toMatchObject({ currentIncident: { status: 'OPEN' } });
+  });
+
+  it('classifies an unfinished started job as a runtime breach', async () => {
+    const tokenHash = heartbeatHash('runtime-token');
+    const monitor = await createHeartbeatMonitorRecord('Report export', tokenHash, 60);
+    const heartbeats = new HeartbeatRepository(connection.db);
+    await heartbeats.recordSignal(tokenHash, {
+      type: 'START',
+      runId: 'export-9',
+      message: null,
+      metadata: {},
+    });
+    await connection.db
+      .update(monitors)
+      .set({ nextCheckAt: new Date('2020-01-01T00:00:00Z') })
+      .where(eq(monitors.id, monitor.id));
+
+    await expect(heartbeats.evaluateDue(1)).resolves.toBe(1);
+    const history = new CheckHistoryRepository(connection.db);
+    const page = await history.listForMonitor(organizationId, monitor.id, { limit: 10 });
+    const detail = await history.findForMonitor(organizationId, monitor.id, page.items[0]!.id);
+    expect(detail?.result).toMatchObject({
+      kind: 'SINGLE_LOCATION',
+      reason: 'RUNTIME_EXCEEDED',
+      heartbeatResult: { signal: 'MISSED', runId: 'export-9' },
+    });
   });
 
   it('dispatches a deterministic bounded batch ordered by deadline then id', async () => {
@@ -381,9 +471,37 @@ describe('ScheduledRoundRepository', () => {
     return due!;
   }
 
+  async function createHeartbeatMonitorRecord(
+    name: string,
+    tokenHash: string,
+    maximumRuntimeSeconds: number | null = null,
+  ) {
+    return new MonitorRepository(connection.db).create(
+      organizationId,
+      randomUUID(),
+      createMonitor({
+        type: 'HEARTBEAT',
+        name,
+        heartbeat: {
+          schedule: { type: 'INTERVAL', intervalSeconds: 300, graceSeconds: 60 },
+          maximumRuntimeSeconds,
+        },
+      }),
+      [],
+      EMPTY_ASSERTION_CONFIGURATION,
+      undefined,
+      undefined,
+      tokenHash,
+    );
+  }
+
   function createNamedConnection(applicationName: string): DatabaseConnection {
     const uri = new URL(container.getConnectionUri());
     uri.searchParams.set('application_name', applicationName);
     return createDatabaseConnection(uri.toString());
+  }
+
+  function heartbeatHash(token: string): string {
+    return createHash('sha256').update(token, 'utf8').digest('hex');
   }
 });

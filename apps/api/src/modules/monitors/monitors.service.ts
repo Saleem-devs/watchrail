@@ -1,3 +1,4 @@
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
   BadRequestException,
   ConflictException,
@@ -8,6 +9,7 @@ import {
 } from '@nestjs/common';
 import {
   ManualRoundRepository,
+  InboundMonitorManualExecutionError,
   CheckHistoryRepository,
   CheckHistoryMonitorNotFoundError,
   CheckHistoryQueryError,
@@ -55,6 +57,8 @@ import {
   parseHttpStatusPolicy,
   parseTcpMonitorSettings,
   parseDnsMonitorSettings,
+  parseHeartbeatMonitorSettings,
+  HeartbeatInputError,
   parseMonitorConfigurationUpdate,
   parseMonitorLifecycleSettings,
   parseMonitorLocationSettings,
@@ -118,6 +122,23 @@ export class MonitorsService {
           projectId,
           workflow,
         );
+      }
+      if (monitor.type === 'HEARTBEAT') {
+        const heartbeatToken = randomBytes(32).toString('base64url');
+        const heartbeatTokenHash = createHash('sha256')
+          .update(heartbeatToken, 'utf8')
+          .digest('hex');
+        const created = await this.monitors.create(
+          context.organizationId,
+          monitorId,
+          monitor,
+          [],
+          EMPTY_ASSERTION_CONFIGURATION,
+          projectId,
+          undefined,
+          heartbeatTokenHash,
+        );
+        return Object.assign(created, { heartbeatToken });
       }
       if (monitor.type !== 'HTTP') {
         return await this.monitors.create(
@@ -277,6 +298,36 @@ export class MonitorsService {
     }
   }
 
+  async updateHeartbeatSettings(
+    context: RequestContext,
+    monitorId: string,
+    value: unknown,
+  ): Promise<MonitorRecord> {
+    try {
+      const heartbeat = parseHeartbeatMonitorSettings(value);
+      return await this.monitors.updateHeartbeatSettings(
+        context.organizationId,
+        monitorId,
+        heartbeat,
+      );
+    } catch (error) {
+      if (error instanceof HeartbeatInputError) {
+        throw new BadRequestException({
+          code: 'VALIDATION_FAILED',
+          message: error.message,
+          fields: error.fields,
+        });
+      }
+      if (error instanceof MonitorUpdateNotFoundError) {
+        throw new NotFoundException({ code: 'MONITOR_NOT_FOUND', message: error.message });
+      }
+      if (error instanceof MonitorProtocolMismatchError) {
+        throw new ConflictException({ code: 'MONITOR_PROTOCOL_MISMATCH', message: error.message });
+      }
+      throw error;
+    }
+  }
+
   async updateName(
     context: RequestContext,
     monitorId: string,
@@ -384,7 +435,7 @@ export class MonitorsService {
 
   async list(
     context: RequestContext,
-    query: MonitorListQuery = { name: undefined, location: undefined },
+    query: MonitorListQuery = { name: undefined, location: undefined, type: undefined },
   ): Promise<{
     items: Array<{
       monitor: MonitorRecord;
@@ -396,6 +447,16 @@ export class MonitorsService {
     limit: number;
     total: number;
     totalPages: number;
+    summary: {
+      total: number;
+      operational: number;
+      attention: number;
+      paused: number;
+      pending: number;
+      openIncidents: number;
+      averageUptimePercent: number | null;
+      averageCoveragePercent: number | null;
+    };
   }> {
     const [monitors, currentChecks, incidentStates, uptimes] = await Promise.all([
       query.projectId
@@ -405,20 +466,22 @@ export class MonitorsService {
       this.incidentReads.currentForOrganization(context.organizationId),
       this.uptimeReads.currentForOrganization(context.organizationId),
     ]);
-    const results = monitors.map((monitor) => ({
-      monitor,
-      uptime:
-        uptimes.get(monitor.id) ??
-        (() => {
-          throw new Error('Monitor uptime projection is missing.');
-        })(),
-      currentCheck: currentChecks.get(monitor.id) ?? null,
-      incidentState:
-        incidentStates.get(monitor.id) ??
-        (() => {
-          throw new Error('Monitor incident state is missing.');
-        })(),
-    }));
+    const results = monitors
+      .filter((monitor) => !query.type || monitor.type === query.type)
+      .map((monitor) => ({
+        monitor,
+        uptime:
+          uptimes.get(monitor.id) ??
+          (() => {
+            throw new Error('Monitor uptime projection is missing.');
+          })(),
+        currentCheck: currentChecks.get(monitor.id) ?? null,
+        incidentState:
+          incidentStates.get(monitor.id) ??
+          (() => {
+            throw new Error('Monitor incident state is missing.');
+          })(),
+      }));
     const name = query.name?.toLocaleLowerCase();
     const location = query.location?.toLocaleLowerCase();
     const filtered = results.filter(({ monitor, currentCheck }) => {
@@ -444,6 +507,7 @@ export class MonitorsService {
       limit,
       total,
       totalPages,
+      summary: monitorListSummary(results),
     };
   }
 
@@ -830,6 +894,10 @@ export class MonitorsService {
         throw new ConflictException({ code: 'MONITOR_NOT_RUNNABLE', message: error.message });
       }
 
+      if (error instanceof InboundMonitorManualExecutionError) {
+        throw new ConflictException({ code: 'MONITOR_NOT_RUNNABLE', message: error.message });
+      }
+
       if (error instanceof WorkspaceSecretUseAuthorizationError) {
         throw workspaceSecretUseForbidden();
       }
@@ -981,4 +1049,40 @@ function monitorListState(
   return 'pending';
 }
 
-import { randomUUID } from 'node:crypto';
+function monitorListSummary(
+  rows: Array<{
+    monitor: MonitorRecord;
+    currentCheck: CurrentCheck | null;
+    incidentState: CurrentIncidentState;
+    uptime: UptimeMetrics;
+  }>,
+) {
+  const summary = {
+    total: rows.length,
+    operational: 0,
+    attention: 0,
+    paused: 0,
+    pending: 0,
+    openIncidents: 0,
+    averageUptimePercent: null as number | null,
+    averageCoveragePercent: null as number | null,
+  };
+  const uptimes: number[] = [];
+  const coverages: number[] = [];
+  for (const row of rows) {
+    const state = monitorListState(row.monitor, row.currentCheck);
+    summary[state] += 1;
+    if (row.incidentState.currentIncident) summary.openIncidents += 1;
+    if (row.uptime.uptimePercent != null) uptimes.push(row.uptime.uptimePercent);
+    if (row.uptime.coveragePercent != null) coverages.push(row.uptime.coveragePercent);
+  }
+  summary.averageUptimePercent = averageOrNull(uptimes);
+  summary.averageCoveragePercent = averageOrNull(coverages);
+  return summary;
+}
+
+function averageOrNull(values: number[]): number | null {
+  return values.length === 0
+    ? null
+    : values.reduce((total, value) => total + value, 0) / values.length;
+}

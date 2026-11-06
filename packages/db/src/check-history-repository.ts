@@ -11,6 +11,8 @@ import {
   type AggregateHealthState,
   type RegionalEvaluationV1,
   type TlsCertificateEvidenceV1,
+  type HeartbeatResultEvidenceV1,
+  parseHeartbeatResultEvidence,
 } from '@watchrail/domain';
 import { parseApiWorkflowResult, type ApiWorkflowResult } from '@watchrail/check-engine';
 import type { WatchrailDatabase } from './client.js';
@@ -89,6 +91,7 @@ export interface CheckHistoryDetail extends Omit<CheckHistoryListItem, 'result'>
         tlsCertificates: TlsCertificateEvidenceV1[];
         dnsAnswers: string[];
         workflowResult: ApiWorkflowResult | null;
+        heartbeatResult: HeartbeatResultEvidenceV1 | null;
         checkedAt: Date;
       }
     | {
@@ -198,6 +201,7 @@ interface HistoryRow {
   tlsCertificates: TlsCertificateEvidenceV1[] | null;
   dnsAnswers: string[] | null;
   workflowResult: CheckExecutionResultRecord['workflowResult'];
+  heartbeatResult: CheckExecutionResultRecord['heartbeatResult'];
   checkedAt: Date | null;
 }
 
@@ -742,6 +746,10 @@ export class CheckHistoryRepository {
             dnsAnswers: parseDnsAnswers(row.dnsAnswers ?? []),
             workflowResult:
               row.workflowResult === null ? null : parseApiWorkflowResult(row.workflowResult),
+            heartbeatResult:
+              row.heartbeatResult === null
+                ? null
+                : parseHeartbeatResultEvidence(row.heartbeatResult),
             checkedAt: required(row.checkedAt),
           }
         : null,
@@ -786,6 +794,7 @@ const historySelection = {
   tlsCertificates: checkExecutionResults.tlsCertificates,
   dnsAnswers: checkExecutionResults.dnsAnswers,
   workflowResult: checkExecutionResults.workflowResult,
+  heartbeatResult: checkExecutionResults.heartbeatResult,
   checkedAt: checkExecutionResults.checkedAt,
 };
 
