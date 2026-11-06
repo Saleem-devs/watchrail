@@ -16,6 +16,8 @@ export * from './check-round-outbox-repository.js';
 export * from './heartbeat-repository.js';
 export * from './incident-read-repository.js';
 export * from './manual-round-repository.js';
+export * from './maintenance-window-repository.js';
+export * from './maintenance-policy.js';
 export * from './notification-delivery-repository.js';
 export * from './public-status-page-repository.js';
 export * from './probe-identity-repository.js';

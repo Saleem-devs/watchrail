@@ -11,6 +11,7 @@ const labels: Record<PublicStatusState, string> = {
   OPERATIONAL: 'Operational',
   PARTIAL_OUTAGE: 'Partial outage',
   MAJOR_OUTAGE: 'Major outage',
+  MAINTENANCE: 'Maintenance',
   MONITORING_IMPAIRED: 'Status unavailable',
 };
 
@@ -23,6 +24,7 @@ function statusHeadline(status: PublicStatusState): string {
   if (status === 'OPERATIONAL') return 'All services operational';
   if (status === 'PARTIAL_OUTAGE') return 'Some services are degraded';
   if (status === 'MAJOR_OUTAGE') return 'Service disruption detected';
+  if (status === 'MAINTENANCE') return 'Planned maintenance in progress';
   return 'Service status unavailable';
 }
 
@@ -166,6 +168,9 @@ function stateSurfaceClass(status: PublicStatusState): string {
     return 'border-rail-warning/35 bg-rail-warning/10 text-rail-warning';
   }
   if (status === 'MAJOR_OUTAGE') return 'border-rail-danger/35 bg-rail-danger/10 text-rail-danger';
+  if (status === 'MAINTENANCE') {
+    return 'border-rail-accent/35 bg-rail-accent/10 text-rail-accent';
+  }
   return 'border-rail-impaired/35 bg-rail-impaired/10 text-rail-impaired';
 }
 

@@ -18,6 +18,7 @@ describe('public status page', () => {
     ['OPERATIONAL', 'All services operational', 'All systems operational'],
     ['PARTIAL_OUTAGE', 'Some services are degraded', 'Partial outage'],
     ['MAJOR_OUTAGE', 'Service disruption detected', 'Major outage'],
+    ['MAINTENANCE', 'Planned maintenance in progress', 'Maintenance'],
     ['MONITORING_IMPAIRED', 'Service status unavailable', 'Status unavailable'],
   ] as const)('renders %s as visible text', (status, headline, label) => {
     render(<StatusPageView page={projection(status)} />);

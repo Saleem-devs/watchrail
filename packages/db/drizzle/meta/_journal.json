@@ -330,6 +330,13 @@
       "when": 1793953845678,
       "tag": "0046_stormy_carnage",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1793968862585,
+      "tag": "0047_wealthy_bullseye",
+      "breakpoints": true
     }
   ]
 }

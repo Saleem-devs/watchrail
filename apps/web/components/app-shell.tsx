@@ -16,6 +16,7 @@ type Page =
   | 'monitor-detail'
   | 'incidents'
   | 'notifications'
+  | 'maintenance'
   | 'status-pages'
   | 'organization'
   | 'secrets';
@@ -27,6 +28,7 @@ type IconName =
   | 'status-pages'
   | 'probes'
   | 'notifications'
+  | 'maintenance'
   | 'webhooks'
   | 'organization'
   | 'members'
@@ -58,6 +60,7 @@ const projectNavigationGroups: { label: string; items: NavigationItem[] }[] = [
     items: [
       { label: 'Probe locations', icon: 'probes', disabled: true },
       { label: 'Notifications', icon: 'notifications', page: 'notifications' },
+      { label: 'Maintenance', icon: 'maintenance', page: 'maintenance' },
       { label: 'Webhooks', icon: 'webhooks' },
     ],
   },
@@ -134,9 +137,11 @@ function navigationGroups(
           items: group.items.map((item) =>
             item.icon === 'notifications'
               ? { ...item, href: `${base}/notifications` }
-              : item.icon === 'webhooks'
-                ? { ...item, href: `${base}/notifications#webhooks` }
-                : item,
+              : item.icon === 'maintenance'
+                ? { ...item, href: `${base}/maintenance` }
+                : item.icon === 'webhooks'
+                  ? { ...item, href: `${base}/notifications#webhooks` }
+                  : item,
           ),
         },
   );
@@ -191,6 +196,13 @@ function ShellIcon({ name, className = 'size-[18px]' }: { name: IconName; classN
       <>
         <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
         <path d="M10 21h4" />
+      </>
+    ),
+    maintenance: (
+      <>
+        <rect x="4" y="5" width="16" height="15" rx="2" />
+        <path d="M8 3v4M16 3v4M4 10h16" />
+        <path d="M8 14h3M8 17h6" />
       </>
     ),
     webhooks: (

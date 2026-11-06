@@ -12,6 +12,7 @@ import { createDatabaseConnection, type DatabaseConnection } from './client.js';
 import { ManualRoundRepository } from './manual-round-repository.js';
 import { IncidentReadRepository } from './incident-read-repository.js';
 import { migrateDatabase } from './migration.js';
+import { MaintenanceWindowRepository } from './maintenance-window-repository.js';
 import { MonitorRepository } from './monitor-repository.js';
 import { ScheduledRoundRepository } from './scheduled-round-repository.js';
 import {
@@ -21,6 +22,7 @@ import {
   incidents,
   monitorIncidentState,
   monitors,
+  notificationEvents,
 } from './schema.js';
 
 const organizationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -39,6 +41,7 @@ describe('incident lifecycle', () => {
   beforeEach(async () => {
     await connection.pool.query(`
       truncate table
+        maintenance_windows,
         incidents,
         monitor_incident_state,
         check_execution_results,
@@ -239,6 +242,47 @@ describe('incident lifecycle', () => {
     expect(await connection.db.select().from(incidents)).toHaveLength(1);
   });
 
+  it('suppresses new incidents and notifications independently during maintenance', async () => {
+    const [monitor] = await connection.db
+      .select({ projectId: monitors.projectId })
+      .from(monitors)
+      .where(eq(monitors.id, monitorId));
+    const windows = new MaintenanceWindowRepository(connection.db);
+    const incidentSuppression = await windows.create(
+      organizationId,
+      monitor!.projectId,
+      '11111111-1111-4111-8111-111111111111',
+      maintenanceInput({ suppressIncidentCreation: true, suppressNotifications: false }),
+    );
+    await complete((await scheduledRound()).id, unhealthy());
+    await complete((await scheduledRound()).id, unhealthy());
+    await complete((await scheduledRound()).id, unhealthy());
+    expect(await connection.db.select().from(incidents)).toEqual([]);
+    expect(await state()).toMatchObject({ consecutiveFailures: 0 });
+
+    await windows.archive(
+      organizationId,
+      monitor!.projectId,
+      incidentSuppression.id,
+      '11111111-1111-4111-8111-111111111111',
+    );
+    await complete((await scheduledRound()).id, unhealthy());
+    await complete((await scheduledRound()).id, unhealthy());
+    await complete((await scheduledRound()).id, unhealthy());
+    expect(await connection.db.select().from(incidents)).toHaveLength(1);
+    expect(await connection.db.select().from(notificationEvents)).toHaveLength(1);
+
+    await windows.create(
+      organizationId,
+      monitor!.projectId,
+      '11111111-1111-4111-8111-111111111111',
+      maintenanceInput({ suppressIncidentCreation: false, suppressNotifications: true }),
+    );
+    await complete((await scheduledRound()).id, healthy());
+    expect((await connection.db.select().from(incidents))[0]).toMatchObject({ status: 'RESOLVED' });
+    expect(await connection.db.select().from(notificationEvents)).toHaveLength(1);
+  });
+
   it('rolls back result completion and state when incident insertion fails', async () => {
     await complete((await scheduledRound()).id, unhealthy());
     await complete((await scheduledRound()).id, unhealthy());
@@ -316,6 +360,27 @@ describe('incident lifecycle', () => {
     return value;
   }
 });
+
+function maintenanceInput(effects: {
+  suppressIncidentCreation: boolean;
+  suppressNotifications: boolean;
+}) {
+  const now = new Date();
+  return {
+    name: 'Planned maintenance',
+    schedule: {
+      type: 'ONE_TIME' as const,
+      startsAt: new Date(now.getTime() - 60_000).toISOString(),
+      endsAt: new Date(now.getTime() + 60 * 60_000).toISOString(),
+    },
+    target: { type: 'PROJECT' as const },
+    effects: {
+      ...effects,
+      excludeFromUptime: true,
+      publishToStatusPage: false,
+    },
+  };
+}
 
 function result(
   values: Partial<AuthoritativeCheckResult> &

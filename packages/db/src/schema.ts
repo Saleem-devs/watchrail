@@ -52,6 +52,8 @@ import {
   type StoredApiWorkflowConfigurationV1,
   type HeartbeatMonitorSettings,
   type HeartbeatResultEvidenceV1,
+  type MaintenanceWindowEffects,
+  type MaintenanceWindowSchedule,
 } from '@watchrail/domain';
 
 export const httpMethodEnum = pgEnum('http_method', HTTP_METHODS);
@@ -134,6 +136,11 @@ export const workspaceSecretAuditActionEnum = pgEnum('workspace_secret_audit_act
   'CREATED',
   'DESCRIPTION_UPDATED',
   'ROTATED',
+  'ARCHIVED',
+]);
+export const maintenanceWindowAuditActionEnum = pgEnum('maintenance_window_audit_action', [
+  'CREATED',
+  'UPDATED',
   'ARCHIVED',
 ]);
 export const availabilityStateEnum = pgEnum(
@@ -451,6 +458,7 @@ export const monitors = pgTable(
   },
   (table) => [
     unique('monitors_id_organization_unique').on(table.id, table.organizationId),
+    unique('monitors_project_identity_unique').on(table.id, table.organizationId, table.projectId),
     unique('monitors_heartbeat_token_hash_unique').on(table.heartbeatTokenHash),
 
     foreignKey({
@@ -599,6 +607,173 @@ export const statusPageComponents = pgTable(
       sql`${table.groupName} is null or length(btrim(${table.groupName})) > 0`,
     ),
     check('status_page_components_position_non_negative', sql`${table.position} >= 0`),
+  ],
+);
+
+export const maintenanceWindows = pgTable(
+  'maintenance_windows',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull(),
+    projectId: uuid('project_id').notNull(),
+    currentVersionNumber: integer('current_version_number').notNull().default(1),
+    createdByActorId: uuid('created_by_actor_id').notNull(),
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
+    archivedByActorId: uuid('archived_by_actor_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('maintenance_windows_identity_unique').on(table.organizationId, table.id),
+    unique('maintenance_windows_project_identity_unique').on(
+      table.organizationId,
+      table.projectId,
+      table.id,
+    ),
+    foreignKey({
+      name: 'maintenance_windows_project_fk',
+      columns: [table.projectId, table.organizationId],
+      foreignColumns: [projects.id, projects.organizationId],
+    }).onDelete('cascade'),
+    index('maintenance_windows_project_created_idx').on(
+      table.organizationId,
+      table.projectId,
+      table.createdAt,
+      table.id,
+    ),
+    check('maintenance_windows_current_version_positive', sql`${table.currentVersionNumber} > 0`),
+    check(
+      'maintenance_windows_archive_consistent',
+      sql`(${table.archivedAt} is null) = (${table.archivedByActorId} is null)`,
+    ),
+  ],
+);
+
+export const maintenanceWindowVersions = pgTable(
+  'maintenance_window_versions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull(),
+    projectId: uuid('project_id').notNull(),
+    maintenanceWindowId: uuid('maintenance_window_id').notNull(),
+    versionNumber: integer('version_number').notNull(),
+    name: varchar('name', { length: 100 }).notNull(),
+    schedule: jsonb('schedule').$type<MaintenanceWindowSchedule>().notNull(),
+    targetType: varchar('target_type', { length: 16 }).notNull(),
+    effects: jsonb('effects').$type<MaintenanceWindowEffects>().notNull(),
+    effectiveAt: timestamp('effective_at', { withTimezone: true }).notNull().defaultNow(),
+    createdByActorId: uuid('created_by_actor_id').notNull(),
+  },
+  (table) => [
+    unique('maintenance_window_versions_identity_unique').on(table.organizationId, table.id),
+    unique('maintenance_window_versions_project_identity_unique').on(
+      table.organizationId,
+      table.projectId,
+      table.id,
+    ),
+    unique('maintenance_window_versions_number_unique').on(
+      table.organizationId,
+      table.maintenanceWindowId,
+      table.versionNumber,
+    ),
+    foreignKey({
+      name: 'maintenance_window_versions_window_fk',
+      columns: [table.organizationId, table.projectId, table.maintenanceWindowId],
+      foreignColumns: [
+        maintenanceWindows.organizationId,
+        maintenanceWindows.projectId,
+        maintenanceWindows.id,
+      ],
+    }).onDelete('cascade'),
+    index('maintenance_window_versions_effective_idx').on(
+      table.organizationId,
+      table.projectId,
+      table.effectiveAt,
+      table.id,
+    ),
+    check('maintenance_window_versions_number_positive', sql`${table.versionNumber} > 0`),
+    check('maintenance_window_versions_name_not_blank', sql`length(btrim(${table.name})) > 0`),
+    check(
+      'maintenance_window_versions_schedule_object',
+      sql`jsonb_typeof(${table.schedule}) = 'object'`,
+    ),
+    check(
+      'maintenance_window_versions_target_valid',
+      sql`${table.targetType} in ('PROJECT', 'MONITORS')`,
+    ),
+    check(
+      'maintenance_window_versions_effects_object',
+      sql`jsonb_typeof(${table.effects}) = 'object'`,
+    ),
+  ],
+);
+
+export const maintenanceWindowVersionMonitors = pgTable(
+  'maintenance_window_version_monitors',
+  {
+    organizationId: uuid('organization_id').notNull(),
+    projectId: uuid('project_id').notNull(),
+    maintenanceWindowVersionId: uuid('maintenance_window_version_id').notNull(),
+    monitorId: uuid('monitor_id').notNull(),
+  },
+  (table) => [
+    primaryKey({
+      name: 'maintenance_window_version_monitors_pk',
+      columns: [table.organizationId, table.maintenanceWindowVersionId, table.monitorId],
+    }),
+    foreignKey({
+      name: 'maintenance_window_version_monitors_version_fk',
+      columns: [table.organizationId, table.projectId, table.maintenanceWindowVersionId],
+      foreignColumns: [
+        maintenanceWindowVersions.organizationId,
+        maintenanceWindowVersions.projectId,
+        maintenanceWindowVersions.id,
+      ],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'maintenance_window_version_monitors_monitor_fk',
+      columns: [table.monitorId, table.organizationId, table.projectId],
+      foreignColumns: [monitors.id, monitors.organizationId, monitors.projectId],
+    }).onDelete('cascade'),
+    index('maintenance_window_version_monitors_monitor_idx').on(
+      table.organizationId,
+      table.projectId,
+      table.monitorId,
+      table.maintenanceWindowVersionId,
+    ),
+  ],
+);
+
+export const maintenanceWindowAuditEvents = pgTable(
+  'maintenance_window_audit_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull(),
+    projectId: uuid('project_id').notNull(),
+    maintenanceWindowId: uuid('maintenance_window_id').notNull(),
+    action: maintenanceWindowAuditActionEnum('action').notNull(),
+    versionNumber: integer('version_number').notNull(),
+    actorId: uuid('actor_id').notNull(),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'maintenance_window_audit_events_window_fk',
+      columns: [table.organizationId, table.projectId, table.maintenanceWindowId],
+      foreignColumns: [
+        maintenanceWindows.organizationId,
+        maintenanceWindows.projectId,
+        maintenanceWindows.id,
+      ],
+    }).onDelete('cascade'),
+    index('maintenance_window_audit_events_history_idx').on(
+      table.organizationId,
+      table.projectId,
+      table.maintenanceWindowId,
+      table.occurredAt,
+      table.id,
+    ),
+    check('maintenance_window_audit_events_version_positive', sql`${table.versionNumber} > 0`),
   ],
 );
 

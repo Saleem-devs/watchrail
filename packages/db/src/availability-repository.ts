@@ -8,6 +8,7 @@ import {
   type AggregateHealthState,
 } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
+import { maintenanceExclusionIntervals } from './maintenance-policy.js';
 import { monitorAvailabilityState, monitors } from './schema.js';
 
 type Transaction = Parameters<Parameters<WatchrailDatabase['transaction']>[0]>[0];
@@ -217,28 +218,92 @@ export async function accrueAvailability(
   if (at < state.accountedThrough)
     throw new Error('Availability accounting clock moved backwards.');
   if (at > state.accountedThrough) {
-    // UTC timestamp arithmetic avoids session timezone and DST changes. Intervals are half-open.
-    await tx.execute(sql`
+    const segments = await availabilitySegments(tx, state, at);
+    for (const segment of segments) {
+      await accrueSegment(tx, state, segment.startsAt, segment.endsAt, segment.state, at);
+    }
+  }
+  await tx
+    .update(monitorAvailabilityState)
+    .set({ accountedThrough: at, updatedAt: at })
+    .where(eq(monitorAvailabilityState.monitorId, state.monitorId));
+}
+
+async function availabilitySegments(tx: Transaction, state: AvailabilityState, at: Date) {
+  if (state.currentState === 'EXCLUDED') {
+    return [
+      {
+        startsAt: state.accountedThrough,
+        endsAt: at,
+        state: 'EXCLUDED' as const,
+      },
+    ];
+  }
+  const [monitor] = await tx
+    .select({ projectId: monitors.projectId })
+    .from(monitors)
+    .where(and(eq(monitors.organizationId, state.organizationId), eq(monitors.id, state.monitorId)))
+    .limit(1);
+  if (!monitor) throw new Error('Monitor is missing during availability accounting.');
+  const exclusions = await maintenanceExclusionIntervals(
+    tx,
+    state.organizationId,
+    monitor.projectId,
+    state.monitorId,
+    state.accountedThrough,
+    at,
+  );
+  const segments: Array<{
+    startsAt: Date;
+    endsAt: Date;
+    state: AvailabilityState['currentState'];
+  }> = [];
+  let cursor = state.accountedThrough;
+  for (const exclusion of exclusions) {
+    if (cursor < exclusion.startsAt) {
+      segments.push({ startsAt: cursor, endsAt: exclusion.startsAt, state: state.currentState });
+    }
+    segments.push({
+      startsAt: exclusion.startsAt,
+      endsAt: exclusion.endsAt,
+      state: 'EXCLUDED',
+    });
+    cursor = exclusion.endsAt;
+  }
+  if (cursor < at) segments.push({ startsAt: cursor, endsAt: at, state: state.currentState });
+  return segments;
+}
+
+async function accrueSegment(
+  tx: Transaction,
+  state: AvailabilityState,
+  startsAt: Date,
+  endsAt: Date,
+  availabilityState: AvailabilityState['currentState'],
+  updatedAt: Date,
+) {
+  // UTC timestamp arithmetic avoids session timezone and DST changes. Intervals are half-open.
+  await tx.execute(sql`
       with buckets as (
         select day,
           (extract(epoch from (
-            least(${at.toISOString()}::timestamptz at time zone 'UTC', day + interval '1 day')
-            - greatest(${state.accountedThrough.toISOString()}::timestamptz at time zone 'UTC', day)
+            least(${endsAt.toISOString()}::timestamptz at time zone 'UTC', day + interval '1 day')
+            - greatest(${startsAt.toISOString()}::timestamptz at time zone 'UTC', day)
           )) * 1000)::integer as duration
         from generate_series(
-          date_trunc('day', ${state.accountedThrough.toISOString()}::timestamptz at time zone 'UTC'),
-          date_trunc('day', ${at.toISOString()}::timestamptz at time zone 'UTC'),
+          date_trunc('day', ${startsAt.toISOString()}::timestamptz at time zone 'UTC'),
+          date_trunc('day', ${endsAt.toISOString()}::timestamptz at time zone 'UTC'),
           interval '1 day'
         ) as day
       )
       insert into monitor_availability_daily
         (organization_id, monitor_id, day_utc, available_ms, unavailable_ms, unknown_ms, excluded_ms, updated_at)
       select ${state.organizationId}::uuid, ${state.monitorId}::uuid, day::date,
-        case when ${state.currentState} = 'AVAILABLE' then duration else 0 end,
-        case when ${state.currentState} = 'UNAVAILABLE' then duration else 0 end,
-        case when ${state.currentState} = 'UNKNOWN' then duration else 0 end,
-        case when ${state.currentState} = 'EXCLUDED' then duration else 0 end,
-        ${at.toISOString()}::timestamptz
+        case when ${availabilityState} = 'AVAILABLE' then duration else 0 end,
+        case when ${availabilityState} = 'UNAVAILABLE' then duration else 0 end,
+        case when ${availabilityState} = 'UNKNOWN' then duration else 0 end,
+        case when ${availabilityState} = 'EXCLUDED' then duration else 0 end,
+        ${updatedAt.toISOString()}::timestamptz
       from buckets where duration > 0
       on conflict (organization_id, monitor_id, day_utc) do update set
         available_ms = monitor_availability_daily.available_ms + excluded.available_ms,
@@ -247,9 +312,4 @@ export async function accrueAvailability(
         excluded_ms = monitor_availability_daily.excluded_ms + excluded.excluded_ms,
         updated_at = excluded.updated_at
     `);
-  }
-  await tx
-    .update(monitorAvailabilityState)
-    .set({ accountedThrough: at, updatedAt: at })
-    .where(eq(monitorAvailabilityState.monitorId, state.monitorId));
 }

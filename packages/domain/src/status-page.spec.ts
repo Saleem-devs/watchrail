@@ -33,6 +33,9 @@ describe('status-page domain contract', () => {
     [['MONITORING_IMPAIRED', 'MAJOR_OUTAGE'], 'MONITORING_IMPAIRED'],
     [['OPERATIONAL', 'MONITORING_IMPAIRED'], 'MONITORING_IMPAIRED'],
     [['PARTIAL_OUTAGE', 'MONITORING_IMPAIRED'], 'MONITORING_IMPAIRED'],
+    [['OPERATIONAL', 'MAINTENANCE'], 'MAINTENANCE'],
+    [['MAINTENANCE', 'MAJOR_OUTAGE'], 'PARTIAL_OUTAGE'],
+    [['MAINTENANCE', 'MONITORING_IMPAIRED'], 'MONITORING_IMPAIRED'],
   ] as const)('aggregates %j as %s', (states, expected) => {
     expect(derivePublicPageStatus(states)).toBe(expected);
   });
