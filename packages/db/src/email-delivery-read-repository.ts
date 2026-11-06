@@ -39,7 +39,7 @@ export class EmailDeliveryReadRepository {
     const cutoffResult = await this.db.execute<{ cutoff: Date | string }>(sql`
       select clock_timestamp() as cutoff from webhook_endpoints
       where organization_id=${organizationId}::uuid and id=${channelId}::uuid
-        and channel_type='EMAIL' limit 1
+        and channel_type='EMAIL' and archived_at is null limit 1
     `);
     const cutoffValue = cutoffResult.rows[0]?.cutoff;
     if (!cutoffValue) throw new EmailDeliveryChannelNotFoundError();

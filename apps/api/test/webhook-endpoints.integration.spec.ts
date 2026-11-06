@@ -13,6 +13,7 @@ import {
   ProjectRepository,
   notificationDeliveries,
   notificationEvents,
+  webhookEndpoints,
   ScheduledRoundRepository,
   WebhookEndpointRepository,
   monitors,
@@ -119,6 +120,15 @@ describe('webhook endpoint API', () => {
       .expect(200);
     expect(listed.body.data).toEqual([created]);
     expect(detail.body.data).toEqual(created);
+
+    await request(app.getHttpServer())
+      .delete(`/api/webhook-endpoints/${created.id}`)
+      .expect(200, { data: { deleted: true } });
+    await request(app.getHttpServer()).get(`/api/webhook-endpoints/${created.id}`).expect(404);
+    await request(app.getHttpServer()).delete(`/api/webhook-endpoints/${created.id}`).expect(404);
+    expect(
+      (await request(app.getHttpServer()).get('/api/webhook-endpoints').expect(200)).body.data,
+    ).toEqual([]);
   });
 
   it('keeps metadata changes idempotent and versions URL, retained secret, and rotations', async () => {
@@ -661,6 +671,35 @@ describe('webhook endpoint API', () => {
     expect(invalidName.body).toMatchObject({
       code: 'VALIDATION_FAILED',
       fields: { name: [expect.any(String)] },
+    });
+
+    await request(app.getHttpServer())
+      .delete(`/api/email-channels/${created.id}`)
+      .expect(200, { data: { deleted: true } });
+    await request(app.getHttpServer()).get(`/api/email-channels/${created.id}`).expect(404);
+    await request(app.getHttpServer())
+      .get(`/api/email-channels/${created.id}/deliveries?limit=10`)
+      .expect(404);
+    expect(
+      (
+        await request(app.getHttpServer())
+          .get(`/api/email-channels?projectId=${project.id}`)
+          .expect(200)
+      ).body.data,
+    ).toEqual([]);
+    const [archived] = await database
+      .select()
+      .from(webhookEndpoints)
+      .where(eq(webhookEndpoints.id, created.id));
+    expect(archived).toMatchObject({ enabled: false, archivedAt: expect.any(Date) });
+    const [suppressed] = await database
+      .select()
+      .from(notificationDeliveries)
+      .where(eq(notificationDeliveries.id, testResponse.body.data.deliveryId as string));
+    expect(suppressed).toMatchObject({
+      claimToken: null,
+      suppressedAt: expect.any(Date),
+      suppressionReason: 'CHANNEL_DELETED',
     });
   });
 

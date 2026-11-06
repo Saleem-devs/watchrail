@@ -1776,6 +1776,7 @@ export const webhookEndpoints = pgTable(
     notifyOnIncident: boolean('notify_on_incident').notNull().default(true),
     notifyOnRecovery: boolean('notify_on_recovery').notNull().default(true),
     currentVersionNumber: integer('current_version_number').notNull().default(1),
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

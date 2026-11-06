@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Inject,
   Param,
@@ -93,6 +94,16 @@ export class EmailChannelsController {
         await this.channels.setEnabled(request.watchrailContext, channelId, input),
       ),
     };
+  }
+
+  @Delete(':channelId')
+  @RequirePermission(PERMISSIONS.NOTIFICATION_MANAGE)
+  async remove(
+    @Req() request: RequestWithContext,
+    @Param('channelId', ParseUUIDPipe) channelId: string,
+  ) {
+    await this.channels.remove(request.watchrailContext, channelId);
+    return { data: { deleted: true } };
   }
 
   @Post(':channelId/test')

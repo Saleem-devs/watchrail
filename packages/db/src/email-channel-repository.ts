@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { createEmailTestNotification } from '@watchrail/contracts';
 import type { WatchrailDatabase } from './client.js';
+import { archiveNotificationChannel } from './notification-channel-archive.js';
 import {
   monitors,
   notificationDeliveries,
@@ -253,6 +254,11 @@ export class EmailChannelRepository {
       return { deliveryId };
     });
   }
+
+  async archive(organizationId: string, channelId: string): Promise<void> {
+    if (!(await archiveNotificationChannel(this.db, organizationId, channelId, 'EMAIL')))
+      throw new EmailChannelNotFoundError();
+  }
 }
 
 async function lockCurrent(tx: Transaction, organizationId: string, channelId: string) {
@@ -264,6 +270,7 @@ async function lockCurrent(tx: Transaction, organizationId: string, channelId: s
         eq(webhookEndpoints.organizationId, organizationId),
         eq(webhookEndpoints.id, channelId),
         eq(webhookEndpoints.channelType, 'EMAIL'),
+        isNull(webhookEndpoints.archivedAt),
       ),
     )
     .limit(1)
@@ -307,6 +314,7 @@ function currentQuery(
       and(
         eq(webhookEndpoints.organizationId, organizationId),
         eq(webhookEndpoints.channelType, 'EMAIL'),
+        isNull(webhookEndpoints.archivedAt),
         channelId ? eq(webhookEndpoints.id, channelId) : undefined,
         projectId ? eq(webhookEndpoints.projectId, projectId) : undefined,
       ),

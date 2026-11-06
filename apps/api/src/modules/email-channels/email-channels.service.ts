@@ -90,6 +90,14 @@ export class EmailChannelsService {
     }
   }
 
+  async remove(context: RequestContext, channelId: string): Promise<void> {
+    try {
+      await this.channels.archive(context.organizationId, channelId);
+    } catch (error) {
+      this.translate(error);
+    }
+  }
+
   async listDeliveries(
     context: RequestContext,
     channelId: string,

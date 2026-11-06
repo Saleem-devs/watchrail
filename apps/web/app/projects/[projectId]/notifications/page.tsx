@@ -1,4 +1,4 @@
-import { NotificationsPage } from '../../../../features/notifications/notifications-page';
+import { NotificationChannelsPage } from '../../../../features/notifications/notification-channels-page';
 
 export default async function ProjectNotificationsRoute({
   params,
@@ -6,5 +6,5 @@ export default async function ProjectNotificationsRoute({
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = await params;
-  return <NotificationsPage projectId={projectId} />;
+  return <NotificationChannelsPage projectId={projectId} />;
 }

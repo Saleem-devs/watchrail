@@ -201,7 +201,7 @@ export class WebhookDeliveryReadRepository {
       select clock_timestamp() as cutoff
       from webhook_endpoints
       where organization_id=${organizationId}::uuid and id=${endpointId}::uuid
-        and channel_type='WEBHOOK'
+        and channel_type='WEBHOOK' and archived_at is null
       limit 1
     `);
     const row = result.rows[0];

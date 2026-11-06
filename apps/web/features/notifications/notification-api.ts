@@ -121,6 +121,10 @@ export function listEmailDeliveries(channelId: string): Promise<NotificationDeli
   return request(`/api/email-channels/${encodeURIComponent(channelId)}/deliveries?limit=25`);
 }
 
+export function deleteEmailChannel(channelId: string): Promise<{ deleted: true }> {
+  return request(`/api/email-channels/${encodeURIComponent(channelId)}`, { method: 'DELETE' });
+}
+
 export function findWebhookChannel(endpointId: string): Promise<WebhookChannel> {
   return request(`/api/webhook-endpoints/${encodeURIComponent(endpointId)}`);
 }
@@ -166,4 +170,10 @@ export function setWebhookChannelEnabled(
 
 export function listWebhookDeliveries(endpointId: string): Promise<NotificationDelivery[]> {
   return request(`/api/webhook-endpoints/${encodeURIComponent(endpointId)}/deliveries?limit=25`);
+}
+
+export function deleteWebhookChannel(endpointId: string): Promise<{ deleted: true }> {
+  return request(`/api/webhook-endpoints/${encodeURIComponent(endpointId)}`, {
+    method: 'DELETE',
+  });
 }

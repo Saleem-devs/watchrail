@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import {
   parseStoredWebhookSigningSecret,
   type EncryptedWebhookSigningSecretV1,
 } from '@watchrail/webhook-security';
 import type { WatchrailDatabase } from './client.js';
+import { archiveNotificationChannel } from './notification-channel-archive.js';
 import {
   monitors,
   projects,
@@ -376,6 +377,11 @@ export class WebhookEndpointRepository {
       : null;
   }
 
+  async archive(organizationId: string, endpointId: string): Promise<void> {
+    if (!(await archiveNotificationChannel(this.db, organizationId, endpointId, 'WEBHOOK')))
+      throw new WebhookEndpointNotFoundError();
+  }
+
   private currentQuery(
     db: WatchrailDatabase,
     organizationId: string,
@@ -397,6 +403,7 @@ export class WebhookEndpointRepository {
         and(
           eq(webhookEndpoints.organizationId, organizationId),
           eq(webhookEndpoints.channelType, 'WEBHOOK'),
+          isNull(webhookEndpoints.archivedAt),
           endpointId === undefined ? undefined : eq(webhookEndpoints.id, endpointId),
           projectId === undefined ? undefined : eq(webhookEndpoints.projectId, projectId),
         ),
@@ -413,6 +420,7 @@ export class WebhookEndpointRepository {
           eq(webhookEndpoints.organizationId, organizationId),
           eq(webhookEndpoints.id, endpointId),
           eq(webhookEndpoints.channelType, 'WEBHOOK'),
+          isNull(webhookEndpoints.archivedAt),
         ),
       )
       .limit(1)
