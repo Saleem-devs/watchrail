@@ -6,16 +6,20 @@ import { AppShell } from '../../components/app-shell';
 import { actionClassName, Button } from '../../components/ui/button';
 import { PageHeader } from '../../components/ui/page-header';
 import {
+  listEmailChannels,
+  listEmailDeliveries,
   listNotificationMonitors,
   listWebhookChannels,
   listWebhookDeliveries,
   setWebhookChannelEnabled,
+  setEmailChannelEnabled,
+  sendEmailChannelTest,
 } from './notification-api';
 import type {
   NotificationDelivery,
   NotificationDeliveryStatus,
+  NotificationChannel,
   NotificationMonitor,
-  WebhookChannel,
 } from './types';
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
@@ -24,24 +28,28 @@ const dateFormatter = new Intl.DateTimeFormat(undefined, {
 });
 
 export function NotificationsPage({ projectId }: { projectId: string }) {
-  const [channels, setChannels] = useState<WebhookChannel[]>([]);
+  const [channels, setChannels] = useState<NotificationChannel[]>([]);
   const [monitors, setMonitors] = useState<NotificationMonitor[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busyChannelIds, setBusyChannelIds] = useState<Set<string>>(() => new Set());
-  const [historyChannel, setHistoryChannel] = useState<WebhookChannel | null>(null);
+  const [historyChannel, setHistoryChannel] = useState<NotificationChannel | null>(null);
   const [deliveries, setDeliveries] = useState<NotificationDelivery[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const [nextChannels, nextMonitors] = await Promise.all([
+      const [nextWebhooks, nextEmails, nextMonitors] = await Promise.all([
         listWebhookChannels(projectId),
+        listEmailChannels(projectId),
         listNotificationMonitors(projectId),
       ]);
-      setChannels(nextChannels);
+      setChannels([
+        ...nextEmails,
+        ...nextWebhooks.map((channel) => ({ ...channel, type: 'WEBHOOK' as const })),
+      ]);
       setMonitors(nextMonitors);
       setLoadError(null);
     } catch (error) {
@@ -62,10 +70,16 @@ export function NotificationsPage({ projectId }: { projectId: string }) {
     [channels],
   );
 
-  async function toggleChannel(channel: WebhookChannel) {
+  async function toggleChannel(channel: NotificationChannel) {
     setBusyChannelIds((current) => new Set(current).add(channel.id));
     try {
-      const updated = await setWebhookChannelEnabled(channel.id, !channel.enabled);
+      const updated =
+        channel.type === 'EMAIL'
+          ? await setEmailChannelEnabled(channel.id, !channel.enabled)
+          : {
+              ...(await setWebhookChannelEnabled(channel.id, !channel.enabled)),
+              type: 'WEBHOOK' as const,
+            };
       setChannels((current) =>
         current.map((candidate) => (candidate.id === updated.id ? updated : candidate)),
       );
@@ -81,17 +95,39 @@ export function NotificationsPage({ projectId }: { projectId: string }) {
     }
   }
 
-  async function showHistory(channel: WebhookChannel) {
+  async function showHistory(channel: NotificationChannel) {
     setHistoryChannel(channel);
     setDeliveries([]);
     setHistoryError(null);
     setHistoryLoading(true);
     try {
-      setDeliveries(await listWebhookDeliveries(channel.id));
+      setDeliveries(
+        channel.type === 'EMAIL'
+          ? await listEmailDeliveries(channel.id)
+          : await listWebhookDeliveries(channel.id),
+      );
     } catch (error) {
       setHistoryError(messageFor(error, 'Could not load delivery history.'));
     } finally {
       setHistoryLoading(false);
+    }
+  }
+
+  async function testEmailChannel(channel: NotificationChannel) {
+    if (channel.type !== 'EMAIL') return;
+    setBusyChannelIds((current) => new Set(current).add(channel.id));
+    try {
+      await sendEmailChannelTest(channel.id);
+      setNotice(`Test notification queued for ${channel.name}.`);
+      if (historyChannel?.id === channel.id) await showHistory(channel);
+    } catch (error) {
+      setNotice(messageFor(error, `Could not test ${channel.name}.`));
+    } finally {
+      setBusyChannelIds((current) => {
+        const next = new Set(current);
+        next.delete(channel.id);
+        return next;
+      });
     }
   }
 
@@ -102,13 +138,22 @@ export function NotificationsPage({ projectId }: { projectId: string }) {
           title="Notifications"
           description="Route confirmed incidents and recoveries to the people and systems responsible for this project."
           actions={
-            <Link
-              href={`/projects/${projectId}/notifications/new`}
-              className={actionClassName({ variant: 'primary' })}
-            >
-              <PlusIcon />
-              Add webhook
-            </Link>
+            <div className="flex flex-wrap gap-2">
+              <Link
+                href={`/projects/${projectId}/notifications/new`}
+                className={actionClassName({ variant: 'secondary' })}
+              >
+                <WebhookIcon />
+                Add webhook
+              </Link>
+              <Link
+                href={`/projects/${projectId}/notifications/email/new`}
+                className={actionClassName({ variant: 'primary' })}
+              >
+                <MailIcon />
+                Add email channel
+              </Link>
+            </div>
           }
         />
 
@@ -133,7 +178,7 @@ export function NotificationsPage({ projectId }: { projectId: string }) {
           <div className="flex flex-wrap items-end justify-between gap-4 pb-4">
             <div>
               <h2 id="channels-title" className="m-0 text-base font-semibold text-rail-text">
-                Webhook channels
+                Notification channels
               </h2>
               <p className="mt-1 mb-0 text-sm text-rail-muted">
                 {channels.length} {channels.length === 1 ? 'channel' : 'channels'} ·{' '}
@@ -156,14 +201,14 @@ export function NotificationsPage({ projectId }: { projectId: string }) {
                   No notification channels yet
                 </h3>
                 <p className="mt-1.5 mb-4 max-w-xl text-sm leading-6 text-rail-muted">
-                  Add a signed webhook, choose the monitors it covers, and decide whether recovery
-                  events should be delivered too.
+                  Add email recipients or a signed webhook, then choose which monitors and incident
+                  transitions each channel receives.
                 </p>
                 <Link
-                  href={`/projects/${projectId}/notifications/new`}
+                  href={`/projects/${projectId}/notifications/email/new`}
                   className={actionClassName({ variant: 'secondary', size: 'compact' })}
                 >
-                  Add the first webhook
+                  Add the first channel
                 </Link>
               </div>
             ) : (
@@ -183,7 +228,14 @@ export function NotificationsPage({ projectId }: { projectId: string }) {
                     channel={channel}
                     monitorCount={channel.routing.monitorIds.length}
                     busy={busyChannelIds.has(channel.id)}
-                    editHref={`/projects/${projectId}/notifications/${channel.id}/edit`}
+                    editHref={
+                      channel.type === 'EMAIL'
+                        ? `/projects/${projectId}/notifications/email/${channel.id}/edit`
+                        : `/projects/${projectId}/notifications/${channel.id}/edit`
+                    }
+                    onTest={
+                      channel.type === 'EMAIL' ? () => void testEmailChannel(channel) : undefined
+                    }
                     onHistory={() => void showHistory(channel)}
                     onToggle={() => void toggleChannel(channel)}
                   />
@@ -216,19 +268,26 @@ function ChannelRow({
   editHref,
   onHistory,
   onToggle,
+  onTest,
 }: {
-  channel: WebhookChannel;
+  channel: NotificationChannel;
   monitorCount: number;
   busy: boolean;
   editHref: string;
   onHistory: () => void;
   onToggle: () => void;
+  onTest?: (() => void) | undefined;
 }) {
-  let hostname = channel.url;
-  try {
-    hostname = new URL(channel.url).hostname;
-  } catch {
-    hostname = channel.url.replace(/^https?:\/\//, '');
+  let destination =
+    channel.type === 'EMAIL'
+      ? `${channel.recipientEmails.length} ${channel.recipientEmails.length === 1 ? 'recipient' : 'recipients'}`
+      : channel.url;
+  if (channel.type === 'WEBHOOK') {
+    try {
+      destination = new URL(channel.url).hostname;
+    } catch {
+      destination = channel.url.replace(/^https?:\/\//, '');
+    }
   }
   const eventLabel = [
     channel.routing.notifyOnIncident ? 'Incidents' : null,
@@ -251,12 +310,14 @@ function ChannelRow({
             {channel.enabled ? 'Active' : 'Paused'}
           </span>
         </div>
-        <p className="mt-1 mb-0 text-xs text-rail-muted lg:hidden">Webhook channel</p>
+        <p className="mt-1 mb-0 text-xs text-rail-muted lg:hidden">
+          {channel.type === 'EMAIL' ? 'Email channel' : 'Webhook channel'}
+        </p>
       </div>
       <div className="min-w-0">
-        <p className="m-0 truncate text-sm text-rail-subtle">{hostname}</p>
+        <p className="m-0 truncate text-sm text-rail-subtle">{destination}</p>
         <p className="mt-1 mb-0 truncate text-xs text-rail-muted">
-          Signed · version {channel.versionNumber}
+          {channel.type === 'EMAIL' ? 'Email' : 'Signed webhook'} · version {channel.versionNumber}
         </p>
       </div>
       <div className="text-sm text-rail-subtle lg:text-right">
@@ -265,6 +326,11 @@ function ChannelRow({
       </div>
       <div className="text-sm text-rail-subtle">{eventLabel || 'No events'}</div>
       <div className="flex flex-wrap gap-2 lg:justify-end">
+        {onTest ? (
+          <Button size="compact" variant="quiet" onClick={onTest} disabled={busy}>
+            Send test
+          </Button>
+        ) : null}
         <Button size="compact" variant="quiet" onClick={onHistory}>
           History
         </Button>
@@ -291,7 +357,7 @@ function DeliveryHistory({
   onClose,
   onRetry,
 }: {
-  channel: WebhookChannel;
+  channel: NotificationChannel;
   monitors: NotificationMonitor[];
   deliveries: NotificationDelivery[];
   loading: boolean;
@@ -348,7 +414,9 @@ function DeliveryHistory({
                   <span className="font-medium text-rail-text">
                     {delivery.event.type === 'INCIDENT_OPENED'
                       ? 'Incident opened'
-                      : 'Incident resolved'}
+                      : delivery.event.type === 'INCIDENT_RESOLVED'
+                        ? 'Incident resolved'
+                        : 'Test notification'}
                   </span>
                   {delivery.lastErrorCode ? (
                     <span className="mt-1 block text-xs text-rail-muted">
@@ -358,7 +426,9 @@ function DeliveryHistory({
                   ) : null}
                 </div>
                 <span className="truncate text-rail-subtle">
-                  {monitorNames.get(delivery.event.monitorId) ?? 'Monitor unavailable'}
+                  {delivery.event.monitorId
+                    ? (monitorNames.get(delivery.event.monitorId) ?? 'Monitor unavailable')
+                    : 'Channel test'}
                 </span>
                 <DeliveryStatus status={delivery.status} />
                 <span className="tabular-nums text-rail-subtle lg:text-right">
@@ -446,7 +516,7 @@ function messageFor(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
-function PlusIcon() {
+function MailIcon() {
   return (
     <svg
       viewBox="0 0 16 16"
@@ -456,7 +526,24 @@ function PlusIcon() {
       strokeWidth="1.5"
       aria-hidden="true"
     >
-      <path d="M8 3v10M3 8h10" strokeLinecap="round" />
+      <path d="M2.5 4.25h11v7.5h-11z" strokeLinejoin="round" />
+      <path d="m3 5 5 3.75L13 5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function WebhookIcon() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      className="size-4"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      aria-hidden="true"
+    >
+      <path d="M5.2 5.3A3 3 0 1 1 8 9.5H4.5" strokeLinecap="round" />
+      <path d="M10.8 10.7A3 3 0 1 1 8 6.5h3.5" strokeLinecap="round" />
     </svg>
   );
 }

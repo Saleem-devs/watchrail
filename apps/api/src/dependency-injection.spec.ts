@@ -24,6 +24,8 @@ import { OverviewController } from './modules/overview/overview.controller.js';
 import { OverviewService } from './modules/overview/overview.service.js';
 import { WorkspaceSecretsController } from './modules/workspace-secrets/workspace-secrets.controller.js';
 import { WorkspaceSecretsService } from './modules/workspace-secrets/workspace-secrets.service.js';
+import { EmailChannelsController } from './modules/email-channels/email-channels.controller.js';
+import { EmailChannelsService } from './modules/email-channels/email-channels.service.js';
 
 describe('tsx dependency injection metadata', () => {
   it.each([
@@ -50,6 +52,8 @@ describe('tsx dependency injection metadata', () => {
     WebhookEndpointsService,
     WorkspaceSecretsController,
     WorkspaceSecretsService,
+    EmailChannelsController,
+    EmailChannelsService,
   ])('$name explicitly declares every constructor dependency', (dependency) => {
     const injectedIndexes = new Set(
       (

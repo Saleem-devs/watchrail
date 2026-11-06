@@ -1,6 +1,7 @@
 import type {
   NotificationApiError,
   NotificationDelivery,
+  EmailChannel,
   NotificationMonitor,
   WebhookChannel,
 } from './types';
@@ -71,6 +72,53 @@ export async function listNotificationMonitors(projectId: string): Promise<Notif
 
 export function listWebhookChannels(projectId: string): Promise<WebhookChannel[]> {
   return request(`/api/webhook-endpoints?projectId=${encodeURIComponent(projectId)}`);
+}
+
+export function listEmailChannels(projectId: string): Promise<EmailChannel[]> {
+  return request(`/api/email-channels?projectId=${encodeURIComponent(projectId)}`);
+}
+
+export function findEmailChannel(channelId: string): Promise<EmailChannel> {
+  return request(`/api/email-channels/${encodeURIComponent(channelId)}`);
+}
+
+export function createEmailChannel(input: {
+  projectId: string;
+  name: string;
+  recipientEmails: string[];
+  enabled: boolean;
+  routing: EmailChannel['routing'];
+}): Promise<EmailChannel> {
+  return request('/api/email-channels', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function updateEmailChannel(
+  channelId: string,
+  input: {
+    name: string;
+    recipientEmails: string[];
+    routing: EmailChannel['routing'];
+  },
+): Promise<EmailChannel> {
+  return request(`/api/email-channels/${encodeURIComponent(channelId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export function setEmailChannelEnabled(channelId: string, enabled: boolean): Promise<EmailChannel> {
+  return request(`/api/email-channels/${encodeURIComponent(channelId)}/enabled`, {
+    method: 'PATCH',
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+export function sendEmailChannelTest(channelId: string): Promise<{ deliveryId: string }> {
+  return request(`/api/email-channels/${encodeURIComponent(channelId)}/test`, { method: 'POST' });
+}
+
+export function listEmailDeliveries(channelId: string): Promise<NotificationDelivery[]> {
+  return request(`/api/email-channels/${encodeURIComponent(channelId)}/deliveries?limit=25`);
 }
 
 export function findWebhookChannel(endpointId: string): Promise<WebhookChannel> {

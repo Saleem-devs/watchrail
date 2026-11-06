@@ -29,6 +29,7 @@ export interface WorkerConfig {
   webhookDeliveryRetryMaxMs: number;
   webhookDeliveryConcurrency: number;
   webhookDeliveryIdlePollIntervalMs: number;
+  emailNotificationConcurrency: number;
   authEmailKeyring: AuthEmailKeyring;
   smtp: { host: string; port: number; secure: boolean; user?: string; pass?: string; from: string };
 }
@@ -195,6 +196,13 @@ export function loadWorkerConfig(environment: NodeJS.ProcessEnv = process.env): 
       environment.WEBHOOK_DELIVERY_IDLE_POLL_INTERVAL_MS,
       'WEBHOOK_DELIVERY_IDLE_POLL_INTERVAL_MS',
       500,
+    ),
+    emailNotificationConcurrency: parseIntegerRange(
+      environment.EMAIL_NOTIFICATION_CONCURRENCY,
+      'EMAIL_NOTIFICATION_CONCURRENCY',
+      3,
+      1,
+      50,
     ),
     authEmailKeyring: loadAuthEmailKeyring(
       environment.NODE_ENV === 'production'

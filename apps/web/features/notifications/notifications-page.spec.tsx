@@ -6,7 +6,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { listNotificationMonitors } from './notification-api';
 import { NotificationsPage } from './notifications-page';
 import { WebhookChannelForm } from './webhook-channel-form';
-import type { NotificationMonitor, WebhookChannel } from './types';
+import { EmailChannelForm } from './email-channel-form';
+import type { EmailChannel, NotificationMonitor, WebhookChannel } from './types';
 
 vi.mock('../../components/app-shell', () => ({
   AppShell: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -34,6 +35,18 @@ const channel: WebhookChannel = {
   },
   createdAt: '2026-11-05T09:00:00.000Z',
   updatedAt: '2026-11-05T09:00:00.000Z',
+};
+const emailChannel: EmailChannel = {
+  id: '77777777-7777-4777-8777-777777777777',
+  projectId,
+  type: 'EMAIL',
+  name: 'Primary on-call',
+  enabled: true,
+  versionNumber: 1,
+  recipientEmails: ['alerts@example.com'],
+  routing: channel.routing,
+  createdAt: channel.createdAt,
+  updatedAt: channel.updatedAt,
 };
 
 afterEach(() => vi.restoreAllMocks());
@@ -112,6 +125,42 @@ describe('notifications page', () => {
     });
   });
 
+  it('creates an email channel with normalized recipients and explicit routing', async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(json({ data: emailChannel }, 201));
+    const onSaved = vi.fn();
+    render(
+      <EmailChannelForm
+        formId="email-form"
+        projectId={projectId}
+        monitors={[monitor]}
+        onSaved={onSaved}
+      />,
+    );
+    await user.type(screen.getByLabelText('Channel name'), emailChannel.name);
+    await user.type(
+      screen.getByLabelText(/^Recipient emails/),
+      'Alerts@Example.com\noncall@example.com',
+    );
+    await user.click(screen.getByText(monitor.name));
+    fireEvent.submit(document.querySelector('#email-form')!);
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(emailChannel));
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/email-channels');
+    expect(requestJson(fetchMock.mock.calls[0])).toMatchObject({
+      projectId,
+      name: emailChannel.name,
+      recipientEmails: ['alerts@example.com', 'oncall@example.com'],
+      routing: {
+        monitorIds: [monitor.id],
+        notifyOnIncident: true,
+        notifyOnRecovery: true,
+      },
+    });
+  });
+
   it('shows failed delivery evidence without exposing a payload or signing secret', async () => {
     const user = userEvent.setup();
     const delivery = {
@@ -139,6 +188,7 @@ describe('notifications page', () => {
     } as const;
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(json({ data: [channel] }))
+      .mockResolvedValueOnce(json({ data: [] }))
       .mockResolvedValueOnce(json({ data: [monitor] }))
       .mockResolvedValueOnce(json({ data: [delivery] }));
 
@@ -182,6 +232,7 @@ describe('notifications page', () => {
     } as const;
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(json({ data: [channel] }))
+      .mockResolvedValueOnce(json({ data: [] }))
       .mockResolvedValueOnce(json({ data: [monitor] }))
       .mockResolvedValueOnce(json({ data: [delivery] }));
 
@@ -227,6 +278,7 @@ describe('notifications page', () => {
   it('keeps list actions as dedicated create and edit routes', async () => {
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(json({ data: [channel] }))
+      .mockResolvedValueOnce(json({ data: [] }))
       .mockResolvedValueOnce(json({ data: [monitor] }));
 
     render(<NotificationsPage projectId={projectId} />);
@@ -234,6 +286,10 @@ describe('notifications page', () => {
     expect(screen.getByRole('link', { name: 'Add webhook' })).toHaveAttribute(
       'href',
       `/projects/${projectId}/notifications/new`,
+    );
+    expect(screen.getByRole('link', { name: 'Add email channel' })).toHaveAttribute(
+      'href',
+      `/projects/${projectId}/notifications/email/new`,
     );
     expect(screen.getByRole('link', { name: 'Edit' })).toHaveAttribute(
       'href',

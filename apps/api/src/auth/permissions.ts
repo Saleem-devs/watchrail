@@ -50,6 +50,7 @@ export const PERMISSIONS = {
 
   // Notifications (read-only; delivery is worker-triggered)
   NOTIFICATION_READ: 'notification:read',
+  NOTIFICATION_MANAGE: 'notification:manage',
 
   // Reusable workspace secrets
   SECRET_READ: 'secret:read',
@@ -111,6 +112,7 @@ const EDITOR_PERMISSIONS: Permission[] = [
   PERMISSIONS.MAINTENANCE_MANAGE,
   PERMISSIONS.STATUS_PAGE_MANAGE,
   PERMISSIONS.WEBHOOK_MANAGE,
+  PERMISSIONS.NOTIFICATION_MANAGE,
   PERMISSIONS.SECRET_READ,
 ];
 

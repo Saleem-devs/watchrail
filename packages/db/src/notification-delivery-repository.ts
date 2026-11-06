@@ -45,10 +45,16 @@ export class NotificationDeliveryRepository {
       }
     >(sql`
       with candidate as (
-        select id from notification_deliveries
-        where delivered_at is null and dead_at is null and suppressed_at is null
-          and available_at <= clock_timestamp()
-        order by available_at, created_at, id for update skip locked limit 1
+        select delivery.id from notification_deliveries delivery
+        join webhook_endpoint_versions version
+          on version.organization_id=delivery.organization_id
+          and version.endpoint_id=delivery.endpoint_id
+          and version.id=delivery.endpoint_version_id
+          and version.channel_type='WEBHOOK'
+        where delivery.delivered_at is null and delivery.dead_at is null
+          and delivery.suppressed_at is null and delivery.available_at <= clock_timestamp()
+        order by delivery.available_at, delivery.created_at, delivery.id
+        for update of delivery skip locked limit 1
       ), claimed as (
         update notification_deliveries delivery set
           claim_token=${token}::uuid,
@@ -70,6 +76,7 @@ export class NotificationDeliveryRepository {
       join notification_events event on event.organization_id=claimed.organization_id and event.id=claimed.event_id
       join webhook_endpoint_versions version on version.organization_id=claimed.organization_id
         and version.endpoint_id=claimed.endpoint_id and version.id=claimed.endpoint_version_id
+        and version.channel_type='WEBHOOK'
     `);
     const row = result.rows[0];
     if (!row) return null;

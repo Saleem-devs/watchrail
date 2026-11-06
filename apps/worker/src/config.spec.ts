@@ -49,6 +49,7 @@ describe('loadWorkerConfig', () => {
       webhookDeliveryRetryMaxMs: 300_000,
       webhookDeliveryConcurrency: 5,
       webhookDeliveryIdlePollIntervalMs: 500,
+      emailNotificationConcurrency: 3,
       authEmailKeyring: { activeKeyId: 'development' },
       smtp: {
         host: 'localhost',

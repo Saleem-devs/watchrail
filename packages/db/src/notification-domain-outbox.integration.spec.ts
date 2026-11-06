@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { parseWebhookNotification } from '@watchrail/contracts';
+import { parseEmailNotification, parseWebhookNotification } from '@watchrail/contracts';
 import { createMonitor, EMPTY_ASSERTION_EVALUATION } from '@watchrail/domain';
 import {
   CheckExecutionRepository,
@@ -28,6 +28,8 @@ import {
   webhookEndpointVersions,
 } from './schema.js';
 import { WebhookEndpointRepository } from './webhook-endpoint-repository.js';
+import { EmailChannelRepository } from './email-channel-repository.js';
+import { EmailDeliveryRepository } from './email-delivery-repository.js';
 
 const organizationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const signingSecretEnvelope = {
@@ -146,6 +148,52 @@ describe('notification domain outbox', () => {
       incident: { status: 'RESOLVED', resolvedAt: expect.any(String) },
       triggeringRoundId: recoveryRound.id,
     });
+  });
+
+  it('fans incidents out to email, pins recipient versions, and stages rate-limited tests', async () => {
+    const channels = new EmailChannelRepository(connection.db);
+    const channel = await channels.create(organizationId, {
+      projectId,
+      name: 'Primary on-call',
+      recipientEmails: ['alerts@example.com'],
+      routing: {
+        monitorIds: [monitorId],
+        notifyOnIncident: true,
+        notifyOnRecovery: true,
+      },
+    });
+
+    const test = await channels.stageTest(organizationId, channel.id);
+    await expect(channels.stageTest(organizationId, channel.id)).rejects.toMatchObject({
+      name: 'EmailChannelTestRateLimitError',
+    });
+    const emailDeliveries = new EmailDeliveryRepository(connection.db);
+    const testClaim = await emailDeliveries.claimNext();
+    expect(testClaim).toMatchObject({
+      id: test.deliveryId,
+      recipientEmails: ['alerts@example.com'],
+      payload: { eventType: 'TEST' },
+    });
+    expect(parseEmailNotification(testClaim!.payload).eventType).toBe('TEST');
+    await emailDeliveries.acknowledgeDelivered(testClaim!.id, testClaim!.claimToken);
+
+    await openIncident();
+    const incidentClaim = await emailDeliveries.claimNext();
+    expect(incidentClaim).toMatchObject({
+      monitorId,
+      recipientEmails: ['alerts@example.com'],
+      payload: { eventType: 'INCIDENT_OPENED' },
+    });
+
+    await channels.updateConfiguration(organizationId, channel.id, {
+      name: channel.name,
+      recipientEmails: ['new-oncall@example.com'],
+      routing: channel.routing,
+    });
+    expect(incidentClaim!.recipientEmails).toEqual(['alerts@example.com']);
+    expect(
+      (await channels.findForOrganization(organizationId, channel.id))?.recipientEmails,
+    ).toEqual(['new-oncall@example.com']);
   });
 
   it('ignores manual and indeterminate observations and deduplicates concurrent threshold work', async () => {

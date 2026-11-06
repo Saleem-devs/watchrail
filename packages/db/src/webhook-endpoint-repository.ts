@@ -133,9 +133,9 @@ export class WebhookEndpointRepository {
             versionNumber: nextVersionNumber,
             current: {
               versionNumber: current.version.versionNumber,
-              url: current.version.url,
+              url: webhookUrl(current.version.url),
               signingSecretEnvelope: parseStoredWebhookSigningSecret(
-                current.version.signingSecretEnvelope,
+                webhookSecret(current.version.signingSecretEnvelope),
               ),
             },
           }),
@@ -212,9 +212,9 @@ export class WebhookEndpointRepository {
             versionNumber: nextVersionNumber,
             current: {
               versionNumber: current.version.versionNumber,
-              url: current.version.url,
+              url: webhookUrl(current.version.url),
               signingSecretEnvelope: parseStoredWebhookSigningSecret(
-                current.version.signingSecretEnvelope,
+                webhookSecret(current.version.signingSecretEnvelope),
               ),
             },
           }),
@@ -270,7 +270,7 @@ export class WebhookEndpointRepository {
         return toRecord(
           current.endpoint,
           current.version.versionNumber,
-          current.version.url,
+          webhookUrl(current.version.url),
           await this.readRouting(tx, organizationId, endpointId),
         );
       const [endpoint] = await tx
@@ -287,7 +287,7 @@ export class WebhookEndpointRepository {
       return toRecord(
         endpoint,
         current.version.versionNumber,
-        current.version.url,
+        webhookUrl(current.version.url),
         await this.readRouting(tx, organizationId, endpointId),
       );
     });
@@ -315,7 +315,7 @@ export class WebhookEndpointRepository {
         return toRecord(
           current.endpoint,
           current.version.versionNumber,
-          current.version.url,
+          webhookUrl(current.version.url),
           routing,
         );
       const [endpoint] = await tx
@@ -334,7 +334,12 @@ export class WebhookEndpointRepository {
         .returning();
       if (!endpoint) throw new WebhookEndpointNotFoundError();
       await this.replaceRouting(tx, organizationId, endpointId, routing);
-      return toRecord(endpoint, current.version.versionNumber, current.version.url, routing);
+      return toRecord(
+        endpoint,
+        current.version.versionNumber,
+        webhookUrl(current.version.url),
+        routing,
+      );
     });
   }
 
@@ -348,7 +353,7 @@ export class WebhookEndpointRepository {
         toRecord(
           row.endpoint,
           row.version.versionNumber,
-          row.version.url,
+          webhookUrl(row.version.url),
           await this.readRouting(this.db, organizationId, row.endpoint.id),
         ),
       ),
@@ -365,7 +370,7 @@ export class WebhookEndpointRepository {
       ? toRecord(
           row.endpoint,
           row.version.versionNumber,
-          row.version.url,
+          webhookUrl(row.version.url),
           await this.readRouting(this.db, organizationId, row.endpoint.id),
         )
       : null;
@@ -391,6 +396,7 @@ export class WebhookEndpointRepository {
       .where(
         and(
           eq(webhookEndpoints.organizationId, organizationId),
+          eq(webhookEndpoints.channelType, 'WEBHOOK'),
           endpointId === undefined ? undefined : eq(webhookEndpoints.id, endpointId),
           projectId === undefined ? undefined : eq(webhookEndpoints.projectId, projectId),
         ),
@@ -406,6 +412,7 @@ export class WebhookEndpointRepository {
         and(
           eq(webhookEndpoints.organizationId, organizationId),
           eq(webhookEndpoints.id, endpointId),
+          eq(webhookEndpoints.channelType, 'WEBHOOK'),
         ),
       )
       .limit(1)
@@ -555,6 +562,16 @@ function sameRouting(
     left.monitorIds.length === right.monitorIds.length &&
     left.monitorIds.every((monitorId) => rightMonitorIds.has(monitorId))
   );
+}
+
+function webhookUrl(value: string | null): string {
+  if (!value) throw new Error('Webhook endpoint version is missing its URL.');
+  return value;
+}
+
+function webhookSecret(value: unknown): unknown {
+  if (!value) throw new Error('Webhook endpoint version is missing its signing secret.');
+  return value;
 }
 
 function parseSettings(nameValue: string, urlValue: string): { name: string; url: string } {

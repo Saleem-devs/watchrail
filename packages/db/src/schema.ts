@@ -18,7 +18,7 @@ import {
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
-import type { ExecuteCheckRoundJobV1, WebhookNotificationV1 } from '@watchrail/contracts';
+import type { EmailNotificationV1, ExecuteCheckRoundJobV1 } from '@watchrail/contracts';
 import type { EncryptedWebhookSigningSecretV1 } from '@watchrail/webhook-security';
 import type { EncryptedWorkspaceSecretV1 } from '@watchrail/secret-vault-security';
 import type { SerializedApiWorkflowResult } from '@watchrail/check-engine';
@@ -131,6 +131,11 @@ export const incidentStatusEnum = pgEnum('incident_status', ['OPEN', 'RESOLVED']
 export const notificationEventTypeEnum = pgEnum('notification_event_type', [
   'INCIDENT_OPENED',
   'INCIDENT_RESOLVED',
+  'TEST',
+]);
+export const notificationChannelTypeEnum = pgEnum('notification_channel_type', [
+  'WEBHOOK',
+  'EMAIL',
 ]);
 export const workspaceSecretAuditActionEnum = pgEnum('workspace_secret_audit_action', [
   'CREATED',
@@ -1765,6 +1770,7 @@ export const webhookEndpoints = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     organizationId: uuid('organization_id').notNull(),
     projectId: uuid('project_id'),
+    channelType: notificationChannelTypeEnum('channel_type').notNull().default('WEBHOOK'),
     name: varchar('name', { length: 120 }).notNull(),
     enabled: boolean('enabled').notNull().default(true),
     notifyOnIncident: boolean('notify_on_incident').notNull().default(true),
@@ -1775,6 +1781,11 @@ export const webhookEndpoints = pgTable(
   },
   (table) => [
     unique('webhook_endpoints_identity_unique').on(table.organizationId, table.id),
+    unique('webhook_endpoints_typed_identity_unique').on(
+      table.organizationId,
+      table.id,
+      table.channelType,
+    ),
     foreignKey({
       name: 'webhook_endpoints_project_fk',
       columns: [table.projectId, table.organizationId],
@@ -1797,18 +1808,23 @@ export const webhookEndpointVersions = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     organizationId: uuid('organization_id').notNull(),
     endpointId: uuid('endpoint_id').notNull(),
+    channelType: notificationChannelTypeEnum('channel_type').notNull().default('WEBHOOK'),
     versionNumber: integer('version_number').notNull(),
-    url: text('url').notNull(),
-    signingSecretEnvelope: jsonb('signing_secret_envelope')
-      .$type<EncryptedWebhookSigningSecretV1>()
-      .notNull(),
+    url: text('url'),
+    signingSecretEnvelope:
+      jsonb('signing_secret_envelope').$type<EncryptedWebhookSigningSecretV1>(),
+    recipientEmails: jsonb('recipient_emails').$type<string[]>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     foreignKey({
       name: 'webhook_endpoint_versions_endpoint_fk',
-      columns: [table.organizationId, table.endpointId],
-      foreignColumns: [webhookEndpoints.organizationId, webhookEndpoints.id],
+      columns: [table.organizationId, table.endpointId, table.channelType],
+      foreignColumns: [
+        webhookEndpoints.organizationId,
+        webhookEndpoints.id,
+        webhookEndpoints.channelType,
+      ],
     }).onDelete('cascade'),
     unique('webhook_endpoint_versions_identity_unique').on(
       table.organizationId,
@@ -1821,10 +1837,20 @@ export const webhookEndpointVersions = pgTable(
       table.versionNumber,
     ),
     check('webhook_endpoint_versions_version_positive', sql`${table.versionNumber} > 0`),
-    check('webhook_endpoint_versions_url_length', sql`length(${table.url}) between 1 and 2048`),
     check(
-      'webhook_endpoint_versions_secret_object',
-      sql`jsonb_typeof(${table.signingSecretEnvelope}) = 'object'`,
+      'webhook_endpoint_versions_configuration',
+      sql`(
+        ${table.channelType} = 'WEBHOOK'
+        and length(${table.url}) between 1 and 2048
+        and jsonb_typeof(${table.signingSecretEnvelope}) = 'object'
+        and ${table.recipientEmails} is null
+      ) or (
+        ${table.channelType} = 'EMAIL'
+        and ${table.url} is null
+        and ${table.signingSecretEnvelope} is null
+        and jsonb_typeof(${table.recipientEmails}) = 'array'
+        and jsonb_array_length(${table.recipientEmails}) between 1 and 20
+      )`,
     ),
   ],
 );
@@ -1865,12 +1891,12 @@ export const notificationEvents = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     organizationId: uuid('organization_id').notNull(),
-    monitorId: uuid('monitor_id').notNull(),
-    incidentId: uuid('incident_id').notNull(),
+    monitorId: uuid('monitor_id'),
+    incidentId: uuid('incident_id'),
     eventType: notificationEventTypeEnum('event_type').notNull(),
     occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
-    triggeringRoundId: uuid('triggering_round_id').notNull(),
-    payload: jsonb('payload').$type<WebhookNotificationV1>().notNull(),
+    triggeringRoundId: uuid('triggering_round_id'),
+    payload: jsonb('payload').$type<EmailNotificationV1>().notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -1897,7 +1923,19 @@ export const notificationEvents = pgTable(
     }),
     check(
       'notification_events_payload_contract',
-      sql`jsonb_typeof(${table.payload}) = 'object' and ${table.payload}->>'contractVersion' = '1' and ${table.payload}->>'eventId' = ${table.id}::text and ${table.payload}->>'organizationId' = ${table.organizationId}::text and ${table.payload}->>'eventType' = ${table.eventType}::text and ${table.payload}->>'triggeringRoundId' = ${table.triggeringRoundId}::text`,
+      sql`jsonb_typeof(${table.payload}) = 'object'
+        and ${table.payload}->>'contractVersion' = '1'
+        and ${table.payload}->>'eventId' = ${table.id}::text
+        and ${table.payload}->>'organizationId' = ${table.organizationId}::text
+        and ${table.payload}->>'eventType' = ${table.eventType}::text
+        and (
+          (${table.eventType}::text = 'TEST' and ${table.monitorId} is null and ${table.incidentId} is null
+            and ${table.triggeringRoundId} is null and ${table.payload}->'channel' is not null)
+          or
+          (${table.eventType}::text <> 'TEST' and ${table.monitorId} is not null and ${table.incidentId} is not null
+            and ${table.triggeringRoundId} is not null
+            and ${table.payload}->>'triggeringRoundId' = ${table.triggeringRoundId}::text)
+        )`,
     ),
   ],
 );

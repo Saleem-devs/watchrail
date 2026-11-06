@@ -1,7 +1,12 @@
 import { Buffer } from 'node:buffer';
 import { and, desc, eq, lt, or, sql } from 'drizzle-orm';
 import type { WatchrailDatabase } from './client.js';
-import { notificationDeliveries, notificationEvents, webhookEndpointVersions } from './schema.js';
+import {
+  notificationDeliveries,
+  notificationEvents,
+  webhookEndpoints,
+  webhookEndpointVersions,
+} from './schema.js';
 
 export type WebhookDeliveryStatus =
   'PENDING' | 'IN_FLIGHT' | 'RETRY_SCHEDULED' | 'DELIVERED' | 'SUPPRESSED' | 'DEAD';
@@ -73,11 +78,11 @@ interface DeliveryRow {
   suppressionReason: string | null;
   createdAt: Date;
   eventId: string;
-  eventType: 'INCIDENT_OPENED' | 'INCIDENT_RESOLVED';
+  eventType: 'INCIDENT_OPENED' | 'INCIDENT_RESOLVED' | 'TEST';
   occurredAt: Date;
-  monitorId: string;
-  incidentId: string;
-  triggeringRoundId: string;
+  monitorId: string | null;
+  incidentId: string | null;
+  triggeringRoundId: string | null;
 }
 
 export class WebhookDeliveryReadRepository {
@@ -162,6 +167,14 @@ export class WebhookDeliveryReadRepository {
           eq(webhookEndpointVersions.id, notificationDeliveries.endpointVersionId),
         ),
       )
+      .innerJoin(
+        webhookEndpoints,
+        and(
+          eq(webhookEndpoints.organizationId, notificationDeliveries.organizationId),
+          eq(webhookEndpoints.id, notificationDeliveries.endpointId),
+          eq(webhookEndpoints.channelType, 'WEBHOOK'),
+        ),
+      )
       .where(
         and(
           eq(notificationDeliveries.organizationId, organizationId),
@@ -177,9 +190,9 @@ export class WebhookDeliveryReadRepository {
       endpointVersion: {
         id: row.endpointVersionId,
         versionNumber: row.endpointVersionNumber,
-        url: row.endpointVersionUrl,
+        url: requiredUrl(row.endpointVersionUrl),
       },
-      triggeringRoundId: row.triggeringRoundId,
+      triggeringRoundId: requiredIncidentValue(row.triggeringRoundId),
     };
   }
 
@@ -188,12 +201,18 @@ export class WebhookDeliveryReadRepository {
       select clock_timestamp() as cutoff
       from webhook_endpoints
       where organization_id=${organizationId}::uuid and id=${endpointId}::uuid
+        and channel_type='WEBHOOK'
       limit 1
     `);
     const row = result.rows[0];
     if (!row) throw new WebhookDeliveryEndpointNotFoundError();
     return row.cutoff instanceof Date ? row.cutoff : new Date(row.cutoff);
   }
+}
+
+function requiredUrl(value: string | null): string {
+  if (!value) throw new Error('Webhook endpoint version is missing its URL.');
+  return value;
 }
 
 const deliverySelection = {
@@ -221,6 +240,7 @@ const deliverySelection = {
 };
 
 function toListItem(row: DeliveryRow, cutoff: Date): WebhookDeliveryListItem {
+  if (row.eventType === 'TEST') throw new Error('Webhook delivery contains a test event.');
   const status = deriveStatus(row, cutoff);
   return {
     id: row.id,
@@ -228,8 +248,8 @@ function toListItem(row: DeliveryRow, cutoff: Date): WebhookDeliveryListItem {
       id: row.eventId,
       type: row.eventType,
       occurredAt: row.occurredAt,
-      monitorId: row.monitorId,
-      incidentId: row.incidentId,
+      monitorId: requiredIncidentValue(row.monitorId),
+      incidentId: requiredIncidentValue(row.incidentId),
     },
     status,
     attemptCount: row.attemptCount,
@@ -245,6 +265,11 @@ function toListItem(row: DeliveryRow, cutoff: Date): WebhookDeliveryListItem {
     suppressionReason: row.suppressionReason,
     createdAt: row.createdAt,
   };
+}
+
+function requiredIncidentValue(value: string | null): string {
+  if (!value) throw new Error('Webhook incident delivery is missing required evidence.');
+  return value;
 }
 
 function deriveStatus(

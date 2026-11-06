@@ -21,6 +21,8 @@ import {
   WorkspaceSecretRepository,
   HeartbeatRepository,
   MaintenanceWindowRepository,
+  EmailChannelRepository,
+  EmailDeliveryReadRepository,
 } from '@watchrail/db';
 import type { WatchrailDatabase } from '@watchrail/db';
 import { ConfigModule } from '../../config/config.module.js';
@@ -37,6 +39,16 @@ import { APP_CONFIG, type AppConfig } from '../../config/config.js';
     }),
   ],
   providers: [
+    {
+      provide: EmailChannelRepository,
+      inject: [getDrizzleToken()],
+      useFactory: (db: WatchrailDatabase) => new EmailChannelRepository(db),
+    },
+    {
+      provide: EmailDeliveryReadRepository,
+      inject: [getDrizzleToken()],
+      useFactory: (db: WatchrailDatabase) => new EmailDeliveryReadRepository(db),
+    },
     {
       provide: AuthEmailOutboxRepository,
       inject: [getDrizzleToken()],
@@ -155,6 +167,8 @@ import { APP_CONFIG, type AppConfig } from '../../config/config.js';
     WorkspaceSecretRepository,
     HeartbeatRepository,
     MaintenanceWindowRepository,
+    EmailChannelRepository,
+    EmailDeliveryReadRepository,
   ],
 })
 export class DatabaseModule {}
