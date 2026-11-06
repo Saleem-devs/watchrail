@@ -1,0 +1,9 @@
+ALTER TABLE "notification_deliveries" DROP CONSTRAINT "notification_deliveries_one_terminal_state";--> statement-breakpoint
+ALTER TABLE "notification_deliveries" DROP CONSTRAINT "notification_deliveries_terminal_claim_cleared";--> statement-breakpoint
+DROP INDEX "notification_deliveries_eligible_idx";--> statement-breakpoint
+ALTER TABLE "notification_deliveries" ADD COLUMN "suppressed_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "notification_deliveries" ADD COLUMN "suppression_reason" varchar(64);--> statement-breakpoint
+CREATE INDEX "notification_deliveries_eligible_idx" ON "notification_deliveries" USING btree ("available_at","created_at","id") WHERE "notification_deliveries"."delivered_at" is null and "notification_deliveries"."dead_at" is null and "notification_deliveries"."suppressed_at" is null;--> statement-breakpoint
+ALTER TABLE "notification_deliveries" ADD CONSTRAINT "notification_deliveries_suppression_fields_consistent" CHECK (("notification_deliveries"."suppressed_at" is null) = ("notification_deliveries"."suppression_reason" is null));--> statement-breakpoint
+ALTER TABLE "notification_deliveries" ADD CONSTRAINT "notification_deliveries_one_terminal_state" CHECK (num_nonnulls("notification_deliveries"."delivered_at", "notification_deliveries"."dead_at", "notification_deliveries"."suppressed_at") <= 1);--> statement-breakpoint
+ALTER TABLE "notification_deliveries" ADD CONSTRAINT "notification_deliveries_terminal_claim_cleared" CHECK (("notification_deliveries"."delivered_at" is null and "notification_deliveries"."dead_at" is null and "notification_deliveries"."suppressed_at" is null) or "notification_deliveries"."claim_token" is null);

@@ -94,6 +94,16 @@ describe('WebhookDeliveryWorker', () => {
   it('dead-letters malformed payloads and malformed or unauthentic secret envelopes', async () => {
     for (const [value, expected] of [
       [{ ...claim(), payload: { contractVersion: 99 } }, 'INVALID_CONTRACT'],
+      [
+        {
+          ...claim(),
+          payload: {
+            ...(claim().payload as Record<string, unknown>),
+            monitor: { id: '99999999-9999-4999-8999-999999999999', name: 'Other monitor' },
+          },
+        },
+        'INVALID_CONTRACT',
+      ],
       [{ ...claim(), signingSecretEnvelope: { version: 1 } }, 'INVALID_SECRET_ENVELOPE'],
       [
         {
@@ -184,6 +194,23 @@ describe('WebhookDeliveryWorker', () => {
     const { deliver } = engine;
     expect(deliver).not.toHaveBeenCalled();
   });
+
+  it('suppresses a claimed delivery before resolving credentials or making a request', async () => {
+    const fixture = storeReturning(claim());
+    fixture.applyMaintenancePolicy.mockResolvedValue('SUPPRESSED');
+    const engine = engineResult({ type: 'HTTP', statusCode: 204 });
+
+    await expect(createWorker(fixture.store, engine).processNext()).resolves.toBe('SUPPRESSED');
+
+    expect(fixture.applyMaintenancePolicy).toHaveBeenCalledWith(
+      deliveryId,
+      'claim-token',
+      organizationId,
+      '11111111-1111-4111-8111-111111111111',
+    );
+    expect(engine.deliver).not.toHaveBeenCalled();
+    expect(fixture.acknowledgeDelivered).not.toHaveBeenCalled();
+  });
 });
 
 function claim(): ClaimedNotificationDelivery {
@@ -191,6 +218,7 @@ function claim(): ClaimedNotificationDelivery {
     id: deliveryId,
     organizationId,
     eventId,
+    monitorId: '11111111-1111-4111-8111-111111111111',
     endpointId,
     endpointVersionId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
     endpointVersionNumber: 1,
@@ -224,16 +252,27 @@ function claim(): ClaimedNotificationDelivery {
 
 function storeReturning(delivery: ClaimedNotificationDelivery | null, mutationResult = true) {
   const claimNext = vi.fn(() => Promise.resolve(delivery));
+  const applyMaintenancePolicy = vi.fn(() =>
+    Promise.resolve<'CONTINUE' | 'SUPPRESSED'>('CONTINUE'),
+  );
   const acknowledgeDelivered = vi.fn(() => Promise.resolve(mutationResult));
   const releaseForRetry = vi.fn(() => Promise.resolve(mutationResult));
   const markDead = vi.fn(() => Promise.resolve(mutationResult));
   const store: NotificationDeliveryStore = {
     claimNext,
+    applyMaintenancePolicy,
     acknowledgeDelivered,
     releaseForRetry,
     markDead,
   };
-  return { store, claimNext, acknowledgeDelivered, releaseForRetry, markDead };
+  return {
+    store,
+    claimNext,
+    applyMaintenancePolicy,
+    acknowledgeDelivered,
+    releaseForRetry,
+    markDead,
+  };
 }
 
 function engineResult(

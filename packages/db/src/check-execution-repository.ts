@@ -26,6 +26,7 @@ import {
 } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
 import { applyAvailabilityObservation } from './availability-repository.js';
+import { activeMaintenancePolicyForMonitor } from './maintenance-policy.js';
 import {
   stageIncidentNotification,
   type IncidentTransition,
@@ -438,14 +439,27 @@ export async function finalizeCheckExecution(
 
   if (!round) throw new Error('Completed check round is missing.');
   if (round.trigger === 'SCHEDULED') {
-    const incidentTransition = await applyIncidentObservation(tx, round, input.result);
+    const maintenance = await activeMaintenancePolicyForMonitor(
+      tx,
+      round.organizationId,
+      round.monitorId,
+      round.createdAt,
+    );
+    const incidentTransition = await applyIncidentObservation(
+      tx,
+      round,
+      input.result,
+      maintenance.effects.suppressIncidentCreation,
+    );
     await applyAvailabilityObservation(tx, round, {
       trigger: round.trigger,
       outcome: input.result.outcome,
       reason: input.result.reason,
       assertionOutcome: assertionEvaluation.outcome,
     });
-    await stageIncidentNotification(tx, incidentTransition);
+    if (!maintenance.effects.suppressNotifications) {
+      await stageIncidentNotification(tx, incidentTransition);
+    }
   }
 }
 
@@ -458,6 +472,7 @@ async function applyIncidentObservation(
     createdAt: Date;
   },
   result: AuthoritativeCheckResult,
+  suppressIncidentCreation: boolean,
 ): Promise<IncidentTransition> {
   const [state] = await tx
     .select()
@@ -490,6 +505,19 @@ async function applyIncidentObservation(
     await tx
       .update(monitorIncidentState)
       .set(processed)
+      .where(eq(monitorIncidentState.monitorId, round.monitorId));
+    return { type: 'NONE' };
+  }
+
+  if (observation === 'UNHEALTHY' && suppressIncidentCreation) {
+    await tx
+      .update(monitorIncidentState)
+      .set({
+        ...processed,
+        consecutiveFailures: 0,
+        failureStreakStartedAt: null,
+        failureStreakStartedRoundId: null,
+      })
       .where(eq(monitorIncidentState.monitorId, round.monitorId));
     return { type: 'NONE' };
   }

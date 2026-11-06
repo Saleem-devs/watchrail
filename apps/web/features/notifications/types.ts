@@ -23,7 +23,7 @@ export interface WebhookChannel {
 }
 
 export type NotificationDeliveryStatus =
-  'PENDING' | 'IN_FLIGHT' | 'RETRY_SCHEDULED' | 'DELIVERED' | 'DEAD';
+  'PENDING' | 'IN_FLIGHT' | 'RETRY_SCHEDULED' | 'DELIVERED' | 'SUPPRESSED' | 'DEAD';
 
 export interface NotificationDelivery {
   id: string;
@@ -44,6 +44,8 @@ export interface NotificationDelivery {
   deliveredAt: string | null;
   deadAt: string | null;
   deadReason: string | null;
+  suppressedAt: string | null;
+  suppressionReason: string | null;
   createdAt: string;
 }
 

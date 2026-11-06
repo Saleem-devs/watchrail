@@ -8,6 +8,7 @@ import { createMonitor, type ProbeObservationV1 } from '@watchrail/domain';
 import { createDatabaseConnection, type DatabaseConnection } from './client.js';
 import { migrateDatabase } from './migration.js';
 import { IncidentReadRepository } from './incident-read-repository.js';
+import { MaintenanceWindowRepository } from './maintenance-window-repository.js';
 import { MonitorRepository } from './monitor-repository.js';
 import { MultiLocationRoundFinalizationRepository } from './multi-location-finalization-repository.js';
 import { ProbeCoordinatorRepository } from './probe-coordinator-repository.js';
@@ -22,6 +23,7 @@ import {
   monitorConfigurationVersions,
   notificationEvents,
   probeLocations,
+  monitors,
 } from './schema.js';
 
 const organizationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -39,6 +41,7 @@ describe('authoritative multi-location finalization', () => {
   beforeEach(async () => {
     await connection.pool.query(`
       truncate table
+        maintenance_windows,
         notification_deliveries, notification_events, incidents,
         check_round_aggregates, check_regional_evaluations, check_regional_executions,
         check_round_outbox, check_execution_assignments, check_round_locations, check_rounds,
@@ -233,6 +236,55 @@ describe('authoritative multi-location finalization', () => {
       status: 'RESOLVED',
     });
     expect(await connection.db.select().from(notificationEvents)).toHaveLength(2);
+  });
+
+  it('does not open a regional incident during an active suppression window', async () => {
+    const fixture = await createFixture(2, 'SCHEDULED');
+    const [monitor] = await connection.db
+      .select({ projectId: monitors.projectId })
+      .from(monitors)
+      .where(eq(monitors.id, fixture.monitorId));
+    const now = new Date();
+    await new MaintenanceWindowRepository(connection.db).create(
+      organizationId,
+      monitor!.projectId,
+      '11111111-1111-4111-8111-111111111111',
+      {
+        name: 'Regional maintenance',
+        schedule: {
+          type: 'ONE_TIME',
+          startsAt: new Date(now.getTime() - 60_000).toISOString(),
+          endsAt: new Date(now.getTime() + 60 * 60_000).toISOString(),
+        },
+        target: { type: 'PROJECT' },
+        effects: {
+          suppressNotifications: true,
+          suppressIncidentCreation: true,
+          excludeFromUptime: true,
+          publishToStatusPage: false,
+        },
+      },
+    );
+    await connection.db
+      .update(checkRounds)
+      .set({
+        createdAt: sql`clock_timestamp()`,
+        finalizationDeadlineAt: sql`clock_timestamp() + interval '2 minutes'`,
+      })
+      .where(eq(checkRounds.id, fixture.roundId));
+    const repository = new MultiLocationRoundFinalizationRepository(connection.db);
+    await repository.initializeRound(organizationId, fixture.roundId);
+    await failAndConfirm(repository, fixture, 0);
+    await failAndConfirm(repository, fixture, 1);
+    expect(await connection.db.select().from(incidents)).toEqual([]);
+    expect(await connection.db.select().from(notificationEvents)).toEqual([]);
+    expect(await connection.db.select().from(monitorIncidentState)).toEqual([
+      expect.objectContaining({
+        monitorId: fixture.monitorId,
+        multiLocationSeverity: null,
+        multiLocationHealthyRecoveryStreak: 0,
+      }),
+    ]);
   });
 
   it('adopts an existing single-location incident when multi-location evaluation begins', async () => {

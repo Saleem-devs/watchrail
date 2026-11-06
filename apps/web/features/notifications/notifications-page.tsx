@@ -386,6 +386,7 @@ function DeliveryStatus({ status }: { status: NotificationDeliveryStatus }) {
     IN_FLIGHT: 'Sending',
     RETRY_SCHEDULED: 'Retrying',
     DELIVERED: 'Delivered',
+    SUPPRESSED: 'Suppressed',
     DEAD: 'Failed',
   };
   const tone =
@@ -393,9 +394,13 @@ function DeliveryStatus({ status }: { status: NotificationDeliveryStatus }) {
       ? 'border-rail-success/35 bg-rail-success/10 text-rail-success'
       : status === 'DEAD'
         ? 'border-rail-danger/40 bg-rail-danger/10 text-rail-danger'
-        : 'border-rail-warning/35 bg-rail-warning/10 text-rail-warning';
+        : status === 'SUPPRESSED'
+          ? 'border-rail-border-strong bg-rail-raised text-rail-subtle'
+          : 'border-rail-warning/35 bg-rail-warning/10 text-rail-warning';
   return (
-    <span className={`w-fit rounded-[4px] border px-1.5 py-0.5 text-xs font-medium ${tone}`}>
+    <span
+      className={`w-fit whitespace-nowrap rounded-[4px] border px-1.5 py-0.5 text-xs font-medium ${tone}`}
+    >
       {label[status]}
     </span>
   );

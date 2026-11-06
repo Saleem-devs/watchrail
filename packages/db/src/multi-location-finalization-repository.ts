@@ -12,6 +12,7 @@ import {
 } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
 import { applyAggregateAvailabilityObservation } from './availability-repository.js';
+import { activeMaintenancePolicyForMonitor } from './maintenance-policy.js';
 import {
   stageIncidentNotification,
   type IncidentTransition,
@@ -227,9 +228,23 @@ async function tryFinalizeLocked(
     finalizedAt: now,
   });
   if (round.trigger === 'SCHEDULED') {
-    const transition = await applyMultiLocationIncident(tx, round, decision.aggregate, now);
+    const maintenance = await activeMaintenancePolicyForMonitor(
+      tx,
+      round.organizationId,
+      round.monitorId,
+      round.createdAt,
+    );
+    const transition = await applyMultiLocationIncident(
+      tx,
+      round,
+      decision.aggregate,
+      now,
+      maintenance.effects.suppressIncidentCreation,
+    );
     await applyAggregateAvailabilityObservation(tx, round, decision.aggregate.outcome);
-    await stageIncidentNotification(tx, transition);
+    if (!maintenance.effects.suppressNotifications) {
+      await stageIncidentNotification(tx, transition);
+    }
   }
   await tx.update(checkRounds).set({ status: 'COMPLETED' }).where(eq(checkRounds.id, round.id));
   await tx
@@ -273,6 +288,7 @@ async function applyMultiLocationIncident(
   round: Awaited<ReturnType<typeof lockRound>>,
   aggregate: AggregateRoundDecisionV1,
   finalizedAt: Date,
+  suppressIncidentCreation: boolean,
 ): Promise<IncidentTransition> {
   const [state] = await tx
     .select()
@@ -326,12 +342,6 @@ async function applyMultiLocationIncident(
       .set({ severity: adoptedSeverity })
       .where(eq(incidents.id, active.id));
   }
-  const directive = deriveMultiLocationIncidentDirective({
-    selectedLocations: aggregate.counts.selected,
-    outcome: aggregate.outcome,
-    activeSeverity: adoptedSeverity,
-    healthyRecoveryStreak: state.multiLocationHealthyRecoveryStreak as 0 | 1,
-  });
   const common = {
     consecutiveFailures: 0,
     failureStreakStartedAt: null,
@@ -340,6 +350,27 @@ async function applyMultiLocationIncident(
     lastProcessedRoundId: round.id,
     updatedAt: finalizedAt,
   };
+  if (
+    suppressIncidentCreation &&
+    !active &&
+    (aggregate.outcome === 'DEGRADED' || aggregate.outcome === 'DOWN')
+  ) {
+    await tx
+      .update(monitorIncidentState)
+      .set({
+        ...common,
+        multiLocationSeverity: null,
+        multiLocationHealthyRecoveryStreak: 0,
+      })
+      .where(eq(monitorIncidentState.monitorId, round.monitorId));
+    return { type: 'NONE' };
+  }
+  const directive = deriveMultiLocationIncidentDirective({
+    selectedLocations: aggregate.counts.selected,
+    outcome: aggregate.outcome,
+    activeSeverity: adoptedSeverity,
+    healthyRecoveryStreak: state.multiLocationHealthyRecoveryStreak as 0 | 1,
+  });
   if (directive.type === 'OPEN') {
     const [opened] = await tx
       .insert(incidents)

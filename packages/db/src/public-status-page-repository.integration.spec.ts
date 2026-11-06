@@ -9,6 +9,7 @@ import {
 } from './check-execution-repository.js';
 import { createDatabaseConnection, type DatabaseConnection } from './client.js';
 import { migrateDatabase } from './migration.js';
+import { MaintenanceWindowRepository } from './maintenance-window-repository.js';
 import { MonitorRepository } from './monitor-repository.js';
 import { PublicStatusPageRepository } from './public-status-page-repository.js';
 import { incidents, monitors } from './schema.js';
@@ -179,6 +180,59 @@ describe('PublicStatusPageRepository', () => {
       status: 'PARTIAL_OUTAGE',
       components: [{ status: 'PARTIAL_OUTAGE' }, { status: 'OPERATIONAL' }],
     });
+  });
+
+  it('publishes bounded planned-maintenance evidence only for affected components', async () => {
+    const configured = await createPage(true);
+    await completeScheduled(apiMonitorId, healthy());
+    await completeScheduled(webMonitorId, healthy());
+    const [api] = await connection.db
+      .select({ projectId: monitors.projectId })
+      .from(monitors)
+      .where(eq(monitors.id, apiMonitorId));
+    const now = new Date();
+    await new MaintenanceWindowRepository(connection.db).create(
+      organizationId,
+      api!.projectId,
+      '11111111-1111-4111-8111-111111111111',
+      {
+        name: 'Database maintenance',
+        schedule: {
+          type: 'ONE_TIME',
+          startsAt: new Date(now.getTime() - 60_000).toISOString(),
+          endsAt: new Date(now.getTime() + 60 * 60_000).toISOString(),
+        },
+        target: { type: 'MONITORS', monitorIds: [apiMonitorId] },
+        effects: {
+          suppressNotifications: true,
+          suppressIncidentCreation: true,
+          excludeFromUptime: true,
+          publishToStatusPage: true,
+        },
+      },
+    );
+
+    const projection = await new PublicStatusPageRepository(connection.db).findPublishedBySlug(
+      slug,
+    );
+    expect(projection).toMatchObject({
+      status: 'MAINTENANCE',
+      components: [
+        {
+          id: configured.components[0]!.id,
+          status: 'MAINTENANCE',
+          maintenance: [
+            {
+              name: 'Database maintenance',
+              startsAt: expect.any(String),
+              endsAt: expect.any(String),
+            },
+          ],
+        },
+        { id: configured.components[1]!.id, status: 'OPERATIONAL' },
+      ],
+    });
+    expect(JSON.stringify(projection)).not.toContain(apiMonitorId);
   });
 
   async function createPage(published: boolean) {

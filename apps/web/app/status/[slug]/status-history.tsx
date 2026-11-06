@@ -104,12 +104,20 @@ export function StatusHistory({
                     return (
                       <li key={component.id} className="mt-px bg-rail-canvas py-4">
                         <div className="mb-3 flex items-center justify-between gap-4 px-1">
-                          <span className="inline-flex min-w-0 items-center gap-2 text-sm text-rail-text">
-                            <StatusIcon status={component.status} />
-                            <span className="sr-only">
-                              Current status: {stateLabel(component.status)}.
+                          <span className="min-w-0">
+                            <span className="inline-flex min-w-0 items-center gap-2 text-sm text-rail-text">
+                              <StatusIcon status={component.status} />
+                              <span className="sr-only">
+                                Current status: {stateLabel(component.status)}.
+                              </span>
+                              <span className="truncate">{component.displayName}</span>
                             </span>
-                            <span className="truncate">{component.displayName}</span>
+                            {component.maintenance?.[0] ? (
+                              <span className="mt-1 block pl-6 text-xs text-rail-accent">
+                                {component.maintenance[0].name} until{' '}
+                                {formatMaintenanceEnd(component.maintenance[0].endsAt)}
+                              </span>
+                            ) : null}
                           </span>
                           <span className="shrink-0 text-xs font-medium tabular-nums text-rail-subtle">
                             {formatUptime(componentUptime)}
@@ -354,6 +362,7 @@ function deriveGroupStatus(components: PublicStatusPageComponentV1[]): PublicSta
     return 'MONITORING_IMPAIRED';
   if (components.some(({ status }) => status === 'MAJOR_OUTAGE')) return 'MAJOR_OUTAGE';
   if (components.some(({ status }) => status === 'PARTIAL_OUTAGE')) return 'PARTIAL_OUTAGE';
+  if (components.some(({ status }) => status === 'MAINTENANCE')) return 'MAINTENANCE';
   return 'OPERATIONAL';
 }
 
@@ -408,6 +417,23 @@ function StatusIcon({ status }: { status: PublicStatusState }) {
     );
   }
 
+  if (status === 'MAINTENANCE') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" className={className}>
+        <rect
+          x="2"
+          y="3.5"
+          width="12"
+          height="10"
+          rx="2"
+          stroke="currentColor"
+          strokeWidth="1.35"
+        />
+        <path d="M5 2v3M11 2v3M2 7h12" stroke="currentColor" strokeWidth="1.35" />
+      </svg>
+    );
+  }
+
   return (
     <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" className={className}>
       <circle cx="8" cy="8" r="6.75" stroke="currentColor" strokeWidth="1.5" />
@@ -440,6 +466,7 @@ function statusIconClass(state: PublicStatusState): string {
   if (state === 'OPERATIONAL') return 'text-rail-success';
   if (state === 'PARTIAL_OUTAGE') return 'text-rail-warning';
   if (state === 'MAJOR_OUTAGE') return 'text-rail-danger';
+  if (state === 'MAINTENANCE') return 'text-rail-accent';
   return 'text-rail-impaired';
 }
 
@@ -452,7 +479,20 @@ function stateLabel(state: PublicStatusState): string {
   if (state === 'OPERATIONAL') return 'Operational';
   if (state === 'PARTIAL_OUTAGE') return 'Degraded';
   if (state === 'MAJOR_OUTAGE') return 'Major outage';
+  if (state === 'MAINTENANCE') return 'Maintenance';
   return 'Status unavailable';
+}
+
+function formatMaintenanceEnd(value: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'UTC',
+    timeZoneName: 'short',
+  }).format(new Date(value));
 }
 
 function clampRatio(value: number): number {

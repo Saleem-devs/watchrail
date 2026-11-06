@@ -7,6 +7,10 @@ import {
   type AvailabilityDurations,
 } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
+import {
+  maintenanceExclusionIntervals,
+  type MaintenanceExclusionInterval,
+} from './maintenance-policy.js';
 import { monitorAvailabilityDaily, monitorAvailabilityState, monitors } from './schema.js';
 
 export type UptimeWindow = 'TODAY' | 'LAST_7_DAYS' | 'LAST_30_DAYS';
@@ -98,7 +102,11 @@ export class UptimeReadRepository {
         const start = utcDayStart(cutoff);
         start.setUTCDate(start.getUTCDate() - (days - 1));
         const states = await tx
-          .select({ monitorId: monitors.id, state: monitorAvailabilityState })
+          .select({
+            monitorId: monitors.id,
+            projectId: monitors.projectId,
+            state: monitorAvailabilityState,
+          })
           .from(monitors)
           .leftJoin(
             monitorAvailabilityState,
@@ -153,6 +161,17 @@ export class UptimeReadRepository {
             excludedMs: row.excludedMs,
           });
         }
+        const maintenanceByMonitor = new Map<string, MaintenanceExclusionInterval[]>();
+        for (const { monitorId: id, projectId, state } of states) {
+          if (!state || state.currentState === 'EXCLUDED') continue;
+          // Historical buckets are immutable. Policy versions are evaluated only for
+          // the unaccounted tail, so later edits or archival cannot rewrite uptime.
+          const from = new Date(Math.max(start.getTime(), state.accountedThrough.getTime()));
+          maintenanceByMonitor.set(
+            id,
+            await maintenanceExclusionIntervals(tx, organizationId, projectId, id, from, cutoff),
+          );
+        }
         return states.map(({ monitorId: id, state }) => {
           if (!state) throw new Error('Monitor availability state is missing.');
           if (state.accountedThrough > cutoff || state.trackingStartedAt > cutoff)
@@ -163,18 +182,14 @@ export class UptimeReadRepository {
               : null;
           const measuredStart = measurement?.start ?? cutoff;
           const series: DailyUptime[] = [];
-          const field = {
-            AVAILABLE: 'availableMs',
-            UNAVAILABLE: 'unavailableMs',
-            UNKNOWN: 'unknownMs',
-            EXCLUDED: 'excludedMs',
-          } as const;
           if (!includeDaily) {
             const duration = { ...(totalsByMonitor.get(id) ?? emptyDurations()) };
-            duration[field[state.currentState]] += Math.max(
-              0,
-              cutoff.getTime() -
-                Math.max(measuredStart.getTime(), state.accountedThrough.getTime()),
+            addTailDurations(
+              duration,
+              new Date(Math.max(measuredStart.getTime(), state.accountedThrough.getTime())),
+              cutoff,
+              state.currentState,
+              maintenanceByMonitor.get(id) ?? [],
             );
             return {
               monitorId: id,
@@ -188,9 +203,16 @@ export class UptimeReadRepository {
             const bucketEnd = new Date(Math.min(nextUtcDayStart(day).getTime(), cutoff.getTime()));
             if (bucketStart >= bucketEnd) continue;
             const bucket = { ...(byMonitor.get(id)?.get(dayKey(day)) ?? emptyDurations()) };
-            const tailStart = Math.max(bucketStart.getTime(), state.accountedThrough.getTime());
-            const tailMs = Math.max(0, bucketEnd.getTime() - tailStart);
-            bucket[field[state.currentState]] += tailMs;
+            const tailStart = new Date(
+              Math.max(bucketStart.getTime(), state.accountedThrough.getTime()),
+            );
+            addTailDurations(
+              bucket,
+              tailStart,
+              bucketEnd,
+              state.currentState,
+              maintenanceByMonitor.get(id) ?? [],
+            );
             for (const key of Object.keys(durations) as Array<keyof AvailabilityDurations>)
               durations[key] += bucket[key];
             series.push({ dayUtc: dayKey(day), ...metrics(bucketStart, bucketEnd, bucket) });
@@ -206,6 +228,35 @@ export class UptimeReadRepository {
     );
   }
 }
+
+function addTailDurations(
+  duration: AvailabilityDurations,
+  startsAt: Date,
+  endsAt: Date,
+  state: 'AVAILABLE' | 'UNAVAILABLE' | 'UNKNOWN' | 'EXCLUDED',
+  exclusions: MaintenanceExclusionInterval[],
+) {
+  if (endsAt <= startsAt) return;
+  const field = {
+    AVAILABLE: 'availableMs',
+    UNAVAILABLE: 'unavailableMs',
+    UNKNOWN: 'unknownMs',
+    EXCLUDED: 'excludedMs',
+  } as const;
+  if (state === 'EXCLUDED') {
+    duration.excludedMs += endsAt.getTime() - startsAt.getTime();
+    return;
+  }
+  let excludedMs = 0;
+  for (const exclusion of exclusions) {
+    const overlapStart = Math.max(startsAt.getTime(), exclusion.startsAt.getTime());
+    const overlapEnd = Math.min(endsAt.getTime(), exclusion.endsAt.getTime());
+    excludedMs += Math.max(0, overlapEnd - overlapStart);
+  }
+  duration.excludedMs += excludedMs;
+  duration[field[state]] += endsAt.getTime() - startsAt.getTime() - excludedMs;
+}
+
 function emptyDurations(): AvailabilityDurations {
   return { availableMs: 0, unavailableMs: 0, unknownMs: 0, excludedMs: 0 };
 }

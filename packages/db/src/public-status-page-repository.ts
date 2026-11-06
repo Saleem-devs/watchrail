@@ -9,6 +9,7 @@ import {
   type PublicStatusPageProjectionV1,
 } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
+import { MaintenancePolicyRepository } from './maintenance-policy.js';
 import {
   incidents,
   monitorAvailabilityState,
@@ -37,6 +38,8 @@ export class PublicStatusPageRepository {
         const [page] = await tx
           .select({
             id: statusPages.id,
+            organizationId: statusPages.organizationId,
+            projectId: statusPages.projectId,
             name: statusPages.name,
             slug: statusPages.slug,
             logoUrl: statusPages.logoUrl,
@@ -85,6 +88,12 @@ export class PublicStatusPageRepository {
           .where(eq(statusPageComponents.statusPageId, page.id))
           .orderBy(asc(statusPageComponents.position), asc(statusPageComponents.id));
 
+        const maintenance = await new MaintenancePolicyRepository(tx).activeForProject(
+          page.organizationId,
+          page.projectId,
+          cutoff,
+        );
+        const projectMaintenance = maintenance.get('*')?.windows ?? [];
         const componentByMonitor = new Map(rows.map((row) => [row.monitorId, row.componentId]));
         const components = rows.map((row) => {
           if (!row.availabilityState) throw new PublicStatusPageStateInvariantError();
@@ -95,16 +104,33 @@ export class PublicStatusPageRepository {
             : row.availabilityState === 'AVAILABLE'
               ? 'UP'
               : 'UNKNOWN';
+          const publishedMaintenance = [
+            ...projectMaintenance,
+            ...(maintenance.get(row.monitorId)?.windows ?? []),
+          ].filter(({ effects }) => effects.publishToStatusPage);
+          const status = derivePublicComponentStatus({
+            lifecycleState: row.lifecycleState,
+            aggregateState,
+          });
           return {
             id: row.componentId,
             displayName: row.displayName,
             groupName: row.groupName,
             position: row.position,
             monitoringStartedAt: row.monitoringStartedAt.toISOString(),
-            status: derivePublicComponentStatus({
-              lifecycleState: row.lifecycleState,
-              aggregateState,
-            }),
+            status:
+              row.activeIncidentId === null && publishedMaintenance.length > 0
+                ? ('MAINTENANCE' as const)
+                : status,
+            ...(publishedMaintenance.length > 0
+              ? {
+                  maintenance: publishedMaintenance.map(({ name, occurrence }) => ({
+                    name,
+                    startsAt: occurrence.startsAt.toISOString(),
+                    endsAt: occurrence.endsAt.toISOString(),
+                  })),
+                }
+              : {}),
           };
         });
 

@@ -33,9 +33,7 @@ export function HeartbeatSettingsField({
       <div className="mt-5 grid gap-5">
         <div
           className={
-            scheduleType === 'INTERVAL'
-              ? 'grid gap-4 sm:grid-cols-2'
-              : 'grid max-w-sm gap-4'
+            scheduleType === 'INTERVAL' ? 'grid gap-4 sm:grid-cols-2' : 'grid max-w-sm gap-4'
           }
         >
           <label className="grid gap-1.5 text-xs font-medium text-rail-subtle">

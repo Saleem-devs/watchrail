@@ -38,6 +38,8 @@ import { ProjectsModule } from './modules/projects/projects.module.js';
 import { WorkspaceSecretsController } from './modules/workspace-secrets/workspace-secrets.controller.js';
 import { WorkspaceSecretsModule } from './modules/workspace-secrets/workspace-secrets.module.js';
 import { HeartbeatsModule } from './modules/heartbeats/heartbeats.module.js';
+import { MaintenanceWindowsController } from './modules/maintenance-windows/maintenance-windows.controller.js';
+import { MaintenanceWindowsModule } from './modules/maintenance-windows/maintenance-windows.module.js';
 
 @Module({
   imports: [
@@ -55,6 +57,7 @@ import { HeartbeatsModule } from './modules/heartbeats/heartbeats.module.js';
     WebhookEndpointsModule,
     WorkspaceSecretsModule,
     HeartbeatsModule,
+    MaintenanceWindowsModule,
   ],
   providers: [
     DevelopmentIdentityMiddleware,
@@ -99,6 +102,7 @@ export class AppModule implements NestModule {
         ProjectsController,
         ApiCredentialsController,
         WorkspaceSecretsController,
+        MaintenanceWindowsController,
       );
 
     consumer.apply(ProbeMachineNoStoreMiddleware).forRoutes(ProbeMachineController);

@@ -4,6 +4,7 @@ export const PUBLIC_STATUS_STATES = [
   'OPERATIONAL',
   'PARTIAL_OUTAGE',
   'MAJOR_OUTAGE',
+  'MAINTENANCE',
   'MONITORING_IMPAIRED',
 ] as const;
 export type PublicStatusState = (typeof PUBLIC_STATUS_STATES)[number];
@@ -66,6 +67,13 @@ export interface PublicStatusPageComponentV1 {
   monitoringStartedAt?: string;
   position: number;
   status: PublicStatusState;
+  maintenance?: PublicMaintenanceWindowV1[];
+}
+
+export interface PublicMaintenanceWindowV1 {
+  name: string;
+  startsAt: string;
+  endsAt: string;
 }
 
 export interface PublicStatusPageIncidentV1 {
@@ -189,6 +197,7 @@ export function derivePublicPageStatus(
   if (outages > 0 || componentStatuses.some((status) => status === 'PARTIAL_OUTAGE')) {
     return 'PARTIAL_OUTAGE';
   }
+  if (componentStatuses.some((status) => status === 'MAINTENANCE')) return 'MAINTENANCE';
   return 'OPERATIONAL';
 }
 
