@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Inject,
   Param,
@@ -171,5 +172,15 @@ export class WebhookEndpointsController {
         await this.endpoints.updateRouting(request.watchrailContext, endpointId, input),
       ),
     };
+  }
+
+  @Delete(':endpointId')
+  @RequirePermission(PERMISSIONS.WEBHOOK_MANAGE)
+  async remove(
+    @Req() request: RequestWithContext,
+    @Param('endpointId', ParseUUIDPipe) endpointId: string,
+  ) {
+    await this.endpoints.remove(request.watchrailContext, endpointId);
+    return { data: { deleted: true } };
   }
 }

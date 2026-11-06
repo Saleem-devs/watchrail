@@ -344,6 +344,20 @@
       "when": 1793975105384,
       "tag": "0048_fat_quicksilver",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1793989929894,
+      "tag": "0049_classy_chat",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1794003325831,
+      "tag": "0050_wealthy_puck",
+      "breakpoints": true
     }
   ]
 }

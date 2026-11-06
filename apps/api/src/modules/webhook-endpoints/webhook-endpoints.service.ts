@@ -218,6 +218,14 @@ export class WebhookEndpointsService {
     }
   }
 
+  async remove(context: RequestContext, endpointId: string): Promise<void> {
+    try {
+      await this.endpoints.archive(context.organizationId, endpointId);
+    } catch (error) {
+      this.translate(error);
+    }
+  }
+
   private translate(error: unknown): never {
     if (error instanceof WebhookEndpointNotFoundError) this.notFound();
     if (error instanceof WebhookEndpointInputError)

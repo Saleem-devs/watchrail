@@ -18,9 +18,13 @@ import type {
 import type { CheckOutboxRelay } from './check-outbox-relay.js';
 import type { WorkerConfig } from './config.js';
 import type { WebhookDeliveryCycleResult } from './webhook-delivery-worker.js';
+import type { EmailNotificationCycleResult } from './email-notification-worker.js';
 
 interface WebhookDeliveryProcessor {
   processNext(): Promise<WebhookDeliveryCycleResult>;
+}
+interface EmailNotificationProcessor {
+  processNext(): Promise<EmailNotificationCycleResult>;
 }
 
 @Injectable()
@@ -36,6 +40,7 @@ export class WorkerRuntime
   private probeReconciliationRunning: Promise<void> | undefined;
   private roundFinalizationRunning: Promise<void> | undefined;
   private webhookRunning: Promise<void>[] = [];
+  private emailNotificationRunning: Promise<void>[] = [];
   private authEmailRunning: Promise<void> | undefined;
   private readonly wakeups = new Set<() => void>();
 
@@ -53,6 +58,7 @@ export class WorkerRuntime
     private readonly authEmailConsumer?: BullMqAuthEmailConsumer,
     private readonly authEmailPublisher?: BullMqAuthEmailPublisher,
     private readonly heartbeats?: HeartbeatRepository,
+    private readonly emailNotifications?: EmailNotificationProcessor,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -72,6 +78,11 @@ export class WorkerRuntime
         )
       : [];
     this.authEmailRunning = this.authEmailRelay ? this.runAuthEmailRelay() : undefined;
+    this.emailNotificationRunning = this.emailNotifications
+      ? Array.from({ length: this.config.emailNotificationConcurrency }, () =>
+          this.runEmailNotifications(),
+        )
+      : [];
   }
 
   async beforeApplicationShutdown(): Promise<void> {
@@ -85,6 +96,7 @@ export class WorkerRuntime
       this.probeReconciliationRunning,
       this.roundFinalizationRunning,
       ...this.webhookRunning,
+      ...this.emailNotificationRunning,
       this.authEmailRunning,
       this.consumer.close(),
       this.authEmailConsumer?.close(),
@@ -185,6 +197,20 @@ export class WorkerRuntime
         }
       } catch {
         this.logger.error('Webhook delivery dependency failure.');
+        await this.wait(this.config.dependencyErrorDelayMs);
+      }
+    }
+  }
+
+  private async runEmailNotifications(): Promise<void> {
+    while (!this.stopping) {
+      try {
+        const result = await this.emailNotifications!.processNext();
+        if (result === 'IDLE') await this.wait(this.config.webhookDeliveryIdlePollIntervalMs);
+        else if (result === 'LOST_CLAIM')
+          this.logger.warn('An email notification claim expired before its final update.');
+      } catch {
+        this.logger.error('Email notification delivery dependency failure.');
         await this.wait(this.config.dependencyErrorDelayMs);
       }
     }

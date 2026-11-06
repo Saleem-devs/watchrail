@@ -30,6 +30,7 @@ export type DataTableAction<Row> = {
   onSelect?: (row: Row) => void | Promise<void>;
   tone?: 'neutral' | 'danger';
   pendingLabel?: string;
+  visible?: (row: Row) => boolean;
 };
 
 export function DataTable<Row>({
@@ -139,6 +140,7 @@ export function DataTable<Row>({
             const rowKey = getRowKey(row);
             const highlighted = highlightedRowKey === rowKey;
             const rowLabel = getRowLabel(row);
+            const rowActions = actions.filter((action) => action.visible?.(row) ?? true);
             return (
               <tr
                 key={rowKey}
@@ -165,7 +167,7 @@ export function DataTable<Row>({
                       row={row}
                       rowKey={rowKey}
                       rowLabel={rowLabel}
-                      actions={actions}
+                      actions={rowActions}
                       open={openActionRowKey === rowKey}
                       pendingAction={pendingAction}
                       onToggle={() =>
@@ -277,7 +279,7 @@ function ActionMenu<Row>({
     >
       {actions.map((action) => {
         const actionKey = `${rowKey}:${action.id}`;
-        const className = `flex min-h-9 w-full items-center rounded-rail-control px-3 text-left text-sm font-medium no-underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-rail-accent ${
+        const className = `flex min-h-9 w-full cursor-pointer items-center rounded-rail-control px-3 text-left text-sm font-medium no-underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-rail-accent ${
           action.tone === 'danger'
             ? 'text-rail-danger hover:bg-rail-danger/10'
             : 'text-rail-subtle hover:bg-rail-hover hover:text-rail-text'
@@ -314,7 +316,7 @@ function ActionMenu<Row>({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
-        className="inline-flex size-8 items-center justify-center rounded-rail-control border-0 bg-transparent text-rail-muted hover:bg-rail-hover hover:text-rail-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-rail-accent"
+        className="inline-flex size-8 cursor-pointer items-center justify-center rounded-rail-control border-0 bg-transparent text-rail-muted hover:bg-rail-hover hover:text-rail-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-rail-accent"
         onClick={onToggle}
       >
         <svg aria-hidden="true" viewBox="0 0 20 20" className="size-4" fill="currentColor">

@@ -15,6 +15,7 @@ import {
   AvailabilityRepository,
   createWatchrailDatabase,
   NotificationDeliveryRepository,
+  EmailDeliveryRepository,
   ProbeCoordinatorRepository,
   MultiLocationRoundFinalizationRepository,
   AuthEmailOutboxRepository,
@@ -29,6 +30,10 @@ import { WORKER_CONFIG, type WorkerConfig } from './config.js';
 import { WorkerRuntime } from './worker-runtime.js';
 import { WebhookDeliveryWorker } from './webhook-delivery-worker.js';
 import { AuthEmailJobHandler, AuthEmailOutboxRelay } from './auth-email-worker.js';
+import {
+  EmailNotificationWorker,
+  NodemailerNotificationEmailSender,
+} from './email-notification-worker.js';
 
 @Module({
   imports: [
@@ -89,6 +94,38 @@ import { AuthEmailJobHandler, AuthEmailOutboxRelay } from './auth-email-worker.j
       provide: NotificationDeliveryRepository,
       inject: [getDrizzleToken()],
       useFactory: (db: WatchrailDatabase) => new NotificationDeliveryRepository(db),
+    },
+    {
+      provide: EmailDeliveryRepository,
+      inject: [getDrizzleToken()],
+      useFactory: (db: WatchrailDatabase) => new EmailDeliveryRepository(db),
+    },
+    {
+      provide: NodemailerNotificationEmailSender,
+      inject: [WORKER_CONFIG],
+      useFactory: (config: WorkerConfig) =>
+        new NodemailerNotificationEmailSender(config.smtp.from, config.smtp, {
+          connectionTimeoutMs: config.emailNotificationConnectionTimeoutMs,
+          socketTimeoutMs: config.emailNotificationSocketTimeoutMs,
+        }),
+    },
+    {
+      provide: EmailNotificationWorker,
+      inject: [EmailDeliveryRepository, NodemailerNotificationEmailSender, WORKER_CONFIG],
+      useFactory: (
+        deliveries: EmailDeliveryRepository,
+        sender: NodemailerNotificationEmailSender,
+        config: WorkerConfig,
+      ) =>
+        new EmailNotificationWorker(deliveries, sender, {
+          leaseDurationMs: config.emailNotificationLeaseDurationMs,
+          sendTimeoutMs: config.emailNotificationSendTimeoutMs,
+          maxAttempts: config.webhookDeliveryMaxAttempts,
+          retryDelayMs: createExponentialBackoff(
+            config.webhookDeliveryRetryBaseMs,
+            config.webhookDeliveryRetryMaxMs,
+          ),
+        }),
     },
     {
       provide: WebhookDeliveryEngine,
@@ -220,6 +257,7 @@ import { AuthEmailJobHandler, AuthEmailOutboxRelay } from './auth-email-worker.j
         AuthEmailOutboxRelay,
         BullMqAuthEmailConsumer,
         BullMqAuthEmailPublisher,
+        EmailNotificationWorker,
       ],
       useFactory: (
         relay: CheckOutboxRelay,
@@ -235,6 +273,7 @@ import { AuthEmailJobHandler, AuthEmailOutboxRelay } from './auth-email-worker.j
         authEmailRelay: AuthEmailOutboxRelay,
         authEmailConsumer: BullMqAuthEmailConsumer,
         authEmailPublisher: BullMqAuthEmailPublisher,
+        emailNotifications: EmailNotificationWorker,
       ) =>
         new WorkerRuntime(
           relay,
@@ -250,6 +289,7 @@ import { AuthEmailJobHandler, AuthEmailOutboxRelay } from './auth-email-worker.j
           authEmailConsumer,
           authEmailPublisher,
           heartbeats,
+          emailNotifications,
         ),
     },
   ],

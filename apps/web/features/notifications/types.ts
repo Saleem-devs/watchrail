@@ -6,6 +6,7 @@ export interface NotificationMonitor {
 }
 
 export interface WebhookChannel {
+  type?: 'WEBHOOK';
   id: string;
   projectId: string | null;
   name: string;
@@ -22,6 +23,21 @@ export interface WebhookChannel {
   updatedAt: string;
 }
 
+export interface EmailChannel {
+  id: string;
+  projectId: string;
+  type: 'EMAIL';
+  name: string;
+  enabled: boolean;
+  versionNumber: number;
+  recipientEmails: string[];
+  routing: WebhookChannel['routing'];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type NotificationChannel = (WebhookChannel & { type: 'WEBHOOK' }) | EmailChannel;
+
 export type NotificationDeliveryStatus =
   'PENDING' | 'IN_FLIGHT' | 'RETRY_SCHEDULED' | 'DELIVERED' | 'SUPPRESSED' | 'DEAD';
 
@@ -29,10 +45,10 @@ export interface NotificationDelivery {
   id: string;
   event: {
     id: string;
-    type: 'INCIDENT_OPENED' | 'INCIDENT_RESOLVED';
+    type: 'INCIDENT_OPENED' | 'INCIDENT_RESOLVED' | 'TEST';
     occurredAt: string;
-    monitorId: string;
-    incidentId: string;
+    monitorId: string | null;
+    incidentId: string | null;
   };
   status: NotificationDeliveryStatus;
   attemptCount: number;

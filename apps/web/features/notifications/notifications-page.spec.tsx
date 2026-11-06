@@ -4,12 +4,18 @@ import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { listNotificationMonitors } from './notification-api';
-import { NotificationsPage } from './notifications-page';
+import { NotificationChannelDetailPage } from './notification-channel-detail-page';
+import { NotificationChannelsPage } from './notification-channels-page';
 import { WebhookChannelForm } from './webhook-channel-form';
-import type { NotificationMonitor, WebhookChannel } from './types';
+import { EmailChannelForm } from './email-channel-form';
+import type { EmailChannel, NotificationMonitor, WebhookChannel } from './types';
 
 vi.mock('../../components/app-shell', () => ({
   AppShell: ({ children }: { children: ReactNode }) => <>{children}</>,
+}));
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
 }));
 
 const projectId = '11111111-1111-4111-8111-111111111111';
@@ -34,6 +40,18 @@ const channel: WebhookChannel = {
   },
   createdAt: '2026-11-05T09:00:00.000Z',
   updatedAt: '2026-11-05T09:00:00.000Z',
+};
+const emailChannel: EmailChannel = {
+  id: '77777777-7777-4777-8777-777777777777',
+  projectId,
+  type: 'EMAIL',
+  name: 'Primary on-call',
+  enabled: true,
+  versionNumber: 1,
+  recipientEmails: ['alerts@example.com'],
+  routing: channel.routing,
+  createdAt: channel.createdAt,
+  updatedAt: channel.updatedAt,
 };
 
 afterEach(() => vi.restoreAllMocks());
@@ -112,8 +130,43 @@ describe('notifications page', () => {
     });
   });
 
-  it('shows failed delivery evidence without exposing a payload or signing secret', async () => {
+  it('creates an email channel with normalized recipients and explicit routing', async () => {
     const user = userEvent.setup();
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(json({ data: emailChannel }, 201));
+    const onSaved = vi.fn();
+    render(
+      <EmailChannelForm
+        formId="email-form"
+        projectId={projectId}
+        monitors={[monitor]}
+        onSaved={onSaved}
+      />,
+    );
+    await user.type(screen.getByLabelText('Channel name'), emailChannel.name);
+    await user.type(
+      screen.getByLabelText(/^Recipient emails/),
+      'Alerts@Example.com\noncall@example.com',
+    );
+    await user.click(screen.getByText(monitor.name));
+    fireEvent.submit(document.querySelector('#email-form')!);
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(emailChannel));
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/email-channels');
+    expect(requestJson(fetchMock.mock.calls[0])).toMatchObject({
+      projectId,
+      name: emailChannel.name,
+      recipientEmails: ['alerts@example.com', 'oncall@example.com'],
+      routing: {
+        monitorIds: [monitor.id],
+        notifyOnIncident: true,
+        notifyOnRecovery: true,
+      },
+    });
+  });
+
+  it('shows failed delivery evidence without exposing a payload or signing secret', async () => {
     const delivery = {
       id: '44444444-4444-4444-8444-444444444444',
       event: {
@@ -138,13 +191,17 @@ describe('notifications page', () => {
       createdAt: '2026-11-05T10:00:00.000Z',
     } as const;
     vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(json({ data: [channel] }))
+      .mockResolvedValueOnce(json({ data: channel }))
       .mockResolvedValueOnce(json({ data: [monitor] }))
       .mockResolvedValueOnce(json({ data: [delivery] }));
 
-    render(<NotificationsPage projectId={projectId} />);
-    await screen.findByText(channel.name);
-    await user.click(screen.getByRole('button', { name: 'History' }));
+    render(
+      <NotificationChannelDetailPage
+        projectId={projectId}
+        channelId={channel.id}
+        channelType="WEBHOOK"
+      />,
+    );
 
     const history = await screen.findByRole('heading', { name: 'Delivery history' });
     const section = history.closest('section');
@@ -156,7 +213,6 @@ describe('notifications page', () => {
   });
 
   it('presents maintenance suppression as a neutral terminal delivery state', async () => {
-    const user = userEvent.setup();
     const delivery = {
       id: '44444444-4444-4444-8444-444444444444',
       event: {
@@ -181,13 +237,17 @@ describe('notifications page', () => {
       createdAt: '2026-11-05T10:00:00.000Z',
     } as const;
     vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(json({ data: [channel] }))
+      .mockResolvedValueOnce(json({ data: channel }))
       .mockResolvedValueOnce(json({ data: [monitor] }))
       .mockResolvedValueOnce(json({ data: [delivery] }));
 
-    render(<NotificationsPage projectId={projectId} />);
-    await screen.findByText(channel.name);
-    await user.click(screen.getByRole('button', { name: 'History' }));
+    render(
+      <NotificationChannelDetailPage
+        projectId={projectId}
+        channelId={channel.id}
+        channelType="WEBHOOK"
+      />,
+    );
 
     const section = (await screen.findByRole('heading', { name: 'Delivery history' })).closest(
       'section',
@@ -225,20 +285,50 @@ describe('notifications page', () => {
   });
 
   it('keeps list actions as dedicated create and edit routes', async () => {
+    const user = userEvent.setup();
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(json({ data: [channel] }))
-      .mockResolvedValueOnce(json({ data: [monitor] }));
+      .mockResolvedValueOnce(json({ data: [] }));
 
-    render(<NotificationsPage projectId={projectId} />);
+    render(<NotificationChannelsPage projectId={projectId} />);
     await screen.findByText(channel.name);
     expect(screen.getByRole('link', { name: 'Add webhook' })).toHaveAttribute(
       'href',
       `/projects/${projectId}/notifications/new`,
     );
-    expect(screen.getByRole('link', { name: 'Edit' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Add email channel' })).toHaveAttribute(
+      'href',
+      `/projects/${projectId}/notifications/email/new`,
+    );
+    await user.click(screen.getByRole('button', { name: `Actions for ${channel.name}` }));
+    expect(screen.getByRole('menuitem', { name: 'View' })).toHaveAttribute(
+      'href',
+      `/projects/${projectId}/notifications/${channel.id}`,
+    );
+    expect(screen.getByRole('menuitem', { name: 'Edit' })).toHaveAttribute(
       'href',
       `/projects/${projectId}/notifications/${channel.id}/edit`,
     );
+  });
+
+  it('confirms channel deletion from the row action menu', async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(json({ data: [channel] }))
+      .mockResolvedValueOnce(json({ data: [] }))
+      .mockResolvedValueOnce(json({ data: { deleted: true } }));
+
+    render(<NotificationChannelsPage projectId={projectId} />);
+    await screen.findByText(channel.name);
+    await user.click(screen.getByRole('button', { name: `Actions for ${channel.name}` }));
+    await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
+    expect(screen.getByRole('alertdialog')).toHaveTextContent(`Delete ${channel.name}?`);
+    await user.click(screen.getByRole('button', { name: 'Delete channel' }));
+
+    await waitFor(() => expect(screen.queryByText(channel.name)).not.toBeInTheDocument());
+    expect(fetchMock.mock.calls[2]?.[0]).toBe(`/api/webhook-endpoints/${channel.id}`);
+    expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({ method: 'DELETE' });
   });
 
   it('loads every monitor page and preserves a selected monitor beyond the first 100', async () => {

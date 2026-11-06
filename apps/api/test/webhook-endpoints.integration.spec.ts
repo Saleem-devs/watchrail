@@ -13,6 +13,7 @@ import {
   ProjectRepository,
   notificationDeliveries,
   notificationEvents,
+  webhookEndpoints,
   ScheduledRoundRepository,
   WebhookEndpointRepository,
   monitors,
@@ -119,6 +120,15 @@ describe('webhook endpoint API', () => {
       .expect(200);
     expect(listed.body.data).toEqual([created]);
     expect(detail.body.data).toEqual(created);
+
+    await request(app.getHttpServer())
+      .delete(`/api/webhook-endpoints/${created.id}`)
+      .expect(200, { data: { deleted: true } });
+    await request(app.getHttpServer()).get(`/api/webhook-endpoints/${created.id}`).expect(404);
+    await request(app.getHttpServer()).delete(`/api/webhook-endpoints/${created.id}`).expect(404);
+    expect(
+      (await request(app.getHttpServer()).get('/api/webhook-endpoints').expect(200)).body.data,
+    ).toEqual([]);
   });
 
   it('keeps metadata changes idempotent and versions URL, retained secret, and rotations', async () => {
@@ -587,6 +597,110 @@ describe('webhook endpoint API', () => {
       .get(`/api/webhook-endpoints/${created.body.data.id as string}`)
       .expect(200);
     expect(reloadedAfterEdit.body.data.routing).toEqual(updated.body.data.routing);
+  });
+
+  it('creates and tests an email channel through the durable notification outbox', async () => {
+    const project = await new ProjectRepository(database).create(
+      DEVELOPMENT_REQUEST_CONTEXT.organizationId,
+      parseNewProject({ name: 'Email services', slug: 'email-services' }),
+    );
+    const createdResponse = await request(app.getHttpServer())
+      .post('/api/email-channels')
+      .send({
+        projectId: project.id,
+        name: 'Primary on-call',
+        recipientEmails: ['Alerts@Example.com', 'oncall@example.com'],
+        routing: {
+          monitorIds: [],
+          notifyOnIncident: true,
+          notifyOnRecovery: true,
+        },
+      })
+      .expect(201);
+    const created = createdResponse.body.data as {
+      id: string;
+      projectId: string;
+      recipientEmails: string[];
+      versionNumber: number;
+    };
+    expect(created).toMatchObject({
+      projectId: project.id,
+      recipientEmails: ['alerts@example.com', 'oncall@example.com'],
+      versionNumber: 1,
+    });
+
+    const listed = await request(app.getHttpServer())
+      .get(`/api/email-channels?projectId=${project.id}`)
+      .expect(200);
+    expect(listed.body.data).toEqual([createdResponse.body.data]);
+
+    const testResponse = await request(app.getHttpServer())
+      .post(`/api/email-channels/${created.id}/test`)
+      .expect(201);
+    expect(testResponse.body.data.deliveryId).toEqual(expect.any(String));
+    await request(app.getHttpServer()).post(`/api/email-channels/${created.id}/test`).expect(429);
+
+    const deliveries = await request(app.getHttpServer())
+      .get(`/api/email-channels/${created.id}/deliveries?limit=10`)
+      .expect(200);
+    expect(deliveries.body.data).toEqual([
+      expect.objectContaining({
+        id: testResponse.body.data.deliveryId,
+        status: 'PENDING',
+        event: expect.objectContaining({ type: 'TEST', monitorId: null, incidentId: null }),
+      }),
+    ]);
+    for (const query of ['limit=0', 'limit=101', 'limit=1.5', 'limit=invalid', 'extra=true'])
+      await request(app.getHttpServer())
+        .get(`/api/email-channels/${created.id}/deliveries?${query}`)
+        .expect(400);
+
+    const invalidName = await request(app.getHttpServer())
+      .post('/api/email-channels')
+      .send({
+        projectId: project.id,
+        name: 'On-call\nBcc: attacker@example.com',
+        recipientEmails: ['alerts@example.com'],
+        routing: {
+          monitorIds: [],
+          notifyOnIncident: true,
+          notifyOnRecovery: false,
+        },
+      })
+      .expect(400);
+    expect(invalidName.body).toMatchObject({
+      code: 'VALIDATION_FAILED',
+      fields: { name: [expect.any(String)] },
+    });
+
+    await request(app.getHttpServer())
+      .delete(`/api/email-channels/${created.id}`)
+      .expect(200, { data: { deleted: true } });
+    await request(app.getHttpServer()).get(`/api/email-channels/${created.id}`).expect(404);
+    await request(app.getHttpServer())
+      .get(`/api/email-channels/${created.id}/deliveries?limit=10`)
+      .expect(404);
+    expect(
+      (
+        await request(app.getHttpServer())
+          .get(`/api/email-channels?projectId=${project.id}`)
+          .expect(200)
+      ).body.data,
+    ).toEqual([]);
+    const [archived] = await database
+      .select()
+      .from(webhookEndpoints)
+      .where(eq(webhookEndpoints.id, created.id));
+    expect(archived).toMatchObject({ enabled: false, archivedAt: expect.any(Date) });
+    const [suppressed] = await database
+      .select()
+      .from(notificationDeliveries)
+      .where(eq(notificationDeliveries.id, testResponse.body.data.deliveryId as string));
+    expect(suppressed).toMatchObject({
+      claimToken: null,
+      suppressedAt: expect.any(Date),
+      suppressionReason: 'CHANNEL_DELETED',
+    });
   });
 
   it('reads paginated delivery history with immutable target context and no durable secrets', async () => {

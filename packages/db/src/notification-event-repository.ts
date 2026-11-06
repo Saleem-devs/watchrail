@@ -91,6 +91,7 @@ export async function stageIncidentNotification(
       and(
         eq(webhookEndpoints.organizationId, transition.organizationId),
         eq(webhookEndpoints.enabled, true),
+        isNull(webhookEndpoints.archivedAt),
         or(
           isNull(webhookEndpoints.projectId),
           and(

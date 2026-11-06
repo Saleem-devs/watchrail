@@ -40,6 +40,8 @@ import { WorkspaceSecretsModule } from './modules/workspace-secrets/workspace-se
 import { HeartbeatsModule } from './modules/heartbeats/heartbeats.module.js';
 import { MaintenanceWindowsController } from './modules/maintenance-windows/maintenance-windows.controller.js';
 import { MaintenanceWindowsModule } from './modules/maintenance-windows/maintenance-windows.module.js';
+import { EmailChannelsController } from './modules/email-channels/email-channels.controller.js';
+import { EmailChannelsModule } from './modules/email-channels/email-channels.module.js';
 
 @Module({
   imports: [
@@ -58,6 +60,7 @@ import { MaintenanceWindowsModule } from './modules/maintenance-windows/maintena
     WorkspaceSecretsModule,
     HeartbeatsModule,
     MaintenanceWindowsModule,
+    EmailChannelsModule,
   ],
   providers: [
     DevelopmentIdentityMiddleware,
@@ -103,6 +106,7 @@ export class AppModule implements NestModule {
         ApiCredentialsController,
         WorkspaceSecretsController,
         MaintenanceWindowsController,
+        EmailChannelsController,
       );
 
     consumer.apply(ProbeMachineNoStoreMiddleware).forRoutes(ProbeMachineController);
