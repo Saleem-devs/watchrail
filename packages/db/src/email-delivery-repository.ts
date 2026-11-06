@@ -17,6 +17,10 @@ export interface ClaimedEmailNotificationDelivery {
   attemptCount: number;
 }
 
+export type EmailDeliveryDispatchDecision =
+  | { state: 'CONTINUE'; databaseNow: Date; leaseExpiresAt: Date }
+  | { state: 'SUPPRESSED' | 'LOST_CLAIM' };
+
 export class EmailDeliveryRepository {
   constructor(private readonly db: WatchrailDatabase) {}
 
@@ -75,34 +79,55 @@ export class EmailDeliveryRepository {
     token: string,
     organizationId: string,
     monitorId: string | null,
-  ): Promise<'CONTINUE' | 'SUPPRESSED' | 'LOST_CLAIM'> {
-    if (!monitorId) return 'CONTINUE';
+  ): Promise<EmailDeliveryDispatchDecision> {
     return this.db.transaction(async (tx) => {
-      const claimed = await tx.execute<{ dispatchAt: string }>(sql`
-        select date_trunc('milliseconds', clock_timestamp()) as "dispatchAt"
+      const claimed = await tx.execute<{ policyAt: Date | string }>(sql`
+        select date_trunc('milliseconds', clock_timestamp()) as "policyAt"
         from notification_deliveries
         where id=${id}::uuid and organization_id=${organizationId}::uuid
           and claim_token=${token}::uuid and delivered_at is null and dead_at is null
           and suppressed_at is null for update
       `);
       const row = claimed.rows[0];
-      if (!row) return 'LOST_CLAIM';
-      const policy = await activeMaintenancePolicyForMonitor(
-        tx,
-        organizationId,
-        monitorId,
-        new Date(row.dispatchAt),
-      );
-      if (!policy.effects.suppressNotifications) return 'CONTINUE';
-      const result = await tx.execute<{ id: string }>(sql`
-        update notification_deliveries set claim_token=null,
-          suppressed_at=${new Date(row.dispatchAt)}, suppression_reason='MAINTENANCE_WINDOW',
-          last_error_code=null, last_http_status=null
+      if (!row) return { state: 'LOST_CLAIM' };
+      if (monitorId) {
+        const policy = await activeMaintenancePolicyForMonitor(
+          tx,
+          organizationId,
+          monitorId,
+          new Date(row.policyAt),
+        );
+        if (policy.effects.suppressNotifications) {
+          const result = await tx.execute<{ id: string }>(sql`
+            update notification_deliveries set claim_token=null,
+              suppressed_at=clock_timestamp(), suppression_reason='MAINTENANCE_WINDOW',
+              last_error_code=null, last_http_status=null
+            where id=${id}::uuid and organization_id=${organizationId}::uuid
+              and claim_token=${token}::uuid and delivered_at is null and dead_at is null
+              and suppressed_at is null returning id
+          `);
+          return { state: result.rowCount === 1 ? 'SUPPRESSED' : 'LOST_CLAIM' };
+        }
+      }
+      const lease = await tx.execute<{
+        databaseNow: Date | string;
+        leaseExpiresAt: Date | string;
+      }>(sql`
+        select date_trunc('milliseconds', clock_timestamp()) as "databaseNow",
+          available_at as "leaseExpiresAt"
+        from notification_deliveries
         where id=${id}::uuid and organization_id=${organizationId}::uuid
           and claim_token=${token}::uuid and delivered_at is null and dead_at is null
-          and suppressed_at is null returning id
+          and suppressed_at is null
       `);
-      return result.rowCount === 1 ? 'SUPPRESSED' : 'LOST_CLAIM';
+      const current = lease.rows[0];
+      return current
+        ? {
+            state: 'CONTINUE',
+            databaseNow: new Date(current.databaseNow),
+            leaseExpiresAt: new Date(current.leaseExpiresAt),
+          }
+        : { state: 'LOST_CLAIM' };
     });
   }
 

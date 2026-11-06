@@ -6,6 +6,8 @@ import {
 } from '@watchrail/contracts';
 import type { ClaimedEmailNotificationDelivery } from '@watchrail/db';
 
+const EMAIL_DELIVERY_CLEANUP_MARGIN_MS = 5_000;
+
 export type EmailNotificationCycleResult =
   'IDLE' | 'DELIVERED' | 'SUPPRESSED' | 'RETRY_SCHEDULED' | 'DEAD' | 'LOST_CLAIM';
 
@@ -16,7 +18,10 @@ export interface EmailNotificationDeliveryStore {
     token: string,
     organizationId: string,
     monitorId: string | null,
-  ): Promise<'CONTINUE' | 'SUPPRESSED' | 'LOST_CLAIM'>;
+  ): Promise<
+    | { state: 'CONTINUE'; databaseNow: Date; leaseExpiresAt: Date }
+    | { state: 'SUPPRESSED' | 'LOST_CLAIM' }
+  >;
   acknowledgeDelivered(id: string, token: string): Promise<boolean>;
   releaseForRetry(
     id: string,
@@ -109,7 +114,7 @@ export class EmailNotificationWorker {
     if (
       !Number.isSafeInteger(options.leaseDurationMs) ||
       !Number.isSafeInteger(options.sendTimeoutMs) ||
-      options.leaseDurationMs < options.sendTimeoutMs + 5_000
+      options.leaseDurationMs < options.sendTimeoutMs + EMAIL_DELIVERY_CLEANUP_MARGIN_MS
     )
       throw new Error('Email delivery lease must exceed the send timeout by at least 5000 ms.');
   }
@@ -140,7 +145,14 @@ export class EmailNotificationWorker {
       delivery.organizationId,
       delivery.monitorId,
     );
-    if (maintenance !== 'CONTINUE') return maintenance;
+    if (maintenance.state !== 'CONTINUE') return maintenance.state;
+    const sendTimeoutMs = Math.min(
+      this.options.sendTimeoutMs,
+      maintenance.leaseExpiresAt.getTime() -
+        maintenance.databaseNow.getTime() -
+        EMAIL_DELIVERY_CLEANUP_MARGIN_MS,
+    );
+    if (sendTimeoutMs <= 0) return this.retryOrExhaust(delivery, 'INSUFFICIENT_LEASE_BUDGET');
 
     try {
       const message = renderEmail(payload, delivery.recipientEmails);
@@ -150,7 +162,7 @@ export class EmailNotificationWorker {
       // a stale worker from recording the authoritative terminal state.
       const result = await withSendDeadline(
         (signal) => this.sender.send(message, { signal }),
-        this.options.sendTimeoutMs,
+        sendTimeoutMs,
       );
       const acceptance = recipientAcceptance(message.to, result);
       if (acceptance === 'PARTIAL')

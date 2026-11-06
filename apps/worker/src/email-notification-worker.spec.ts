@@ -45,7 +45,7 @@ describe('EmailNotificationWorker', () => {
 
   it('suppresses incident mail before SMTP and retries transient SMTP failures', async () => {
     const suppressed = setup();
-    suppressed.applyMaintenancePolicy.mockResolvedValue('SUPPRESSED');
+    suppressed.applyMaintenancePolicy.mockResolvedValue({ state: 'SUPPRESSED' });
     await expect(suppressed.worker.processNext()).resolves.toBe('SUPPRESSED');
     expect(suppressed.send).not.toHaveBeenCalled();
 
@@ -86,6 +86,56 @@ describe('EmailNotificationWorker', () => {
     expect(fixture.acknowledgeDelivered).not.toHaveBeenCalled();
   });
 
+  it('derives the send deadline from the remaining database lease budget', async () => {
+    vi.useFakeTimers();
+    const fixture = setup();
+    fixture.applyMaintenancePolicy.mockResolvedValue({
+      state: 'CONTINUE',
+      databaseNow: new Date('2026-11-06T12:00:22.000Z'),
+      leaseExpiresAt: new Date('2026-11-06T12:00:30.000Z'),
+    });
+    let observedSignal: AbortSignal | undefined;
+    fixture.send.mockImplementation(
+      (_message, { signal }) =>
+        new Promise((_resolve, reject) => {
+          observedSignal = signal;
+          signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+        }),
+    );
+
+    const result = fixture.worker.processNext();
+    await vi.advanceTimersByTimeAsync(2_999);
+    expect(observedSignal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+
+    await expect(result).resolves.toBe('RETRY_SCHEDULED');
+    expect(observedSignal?.aborted).toBe(true);
+    expect(fixture.releaseForRetry).toHaveBeenCalledWith(
+      claim.id,
+      'claim-token',
+      1_000,
+      'SMTP_DELIVERY_TIMEOUT',
+    );
+  });
+
+  it('reschedules without sending when the cleanup margin consumes the remaining lease', async () => {
+    const fixture = setup();
+    fixture.applyMaintenancePolicy.mockResolvedValue({
+      state: 'CONTINUE',
+      databaseNow: new Date('2026-11-06T12:00:25.000Z'),
+      leaseExpiresAt: new Date('2026-11-06T12:00:30.000Z'),
+    });
+
+    await expect(fixture.worker.processNext()).resolves.toBe('RETRY_SCHEDULED');
+    expect(fixture.send).not.toHaveBeenCalled();
+    expect(fixture.releaseForRetry).toHaveBeenCalledWith(
+      claim.id,
+      'claim-token',
+      1_000,
+      'INSUFFICIENT_LEASE_BUDGET',
+    );
+  });
+
   it('dead-letters partial recipient acceptance without retrying accepted recipients', async () => {
     const delivery = {
       ...claim,
@@ -123,8 +173,13 @@ describe('EmailNotificationWorker', () => {
 
 function setup(delivery = claim) {
   const claimNext = vi.fn(() => Promise.resolve(delivery));
-  const applyMaintenancePolicy = vi.fn(() =>
-    Promise.resolve<'CONTINUE' | 'SUPPRESSED'>('CONTINUE'),
+  const applyMaintenancePolicy = vi.fn<EmailNotificationDeliveryStore['applyMaintenancePolicy']>(
+    () =>
+      Promise.resolve({
+        state: 'CONTINUE' as const,
+        databaseNow: new Date('2026-11-06T12:00:00.000Z'),
+        leaseExpiresAt: new Date('2026-11-06T12:00:30.000Z'),
+      }),
   );
   const acknowledgeDelivered = vi.fn(() => Promise.resolve(true));
   const releaseForRetry = vi.fn(() => Promise.resolve(true));

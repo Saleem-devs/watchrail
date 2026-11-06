@@ -184,6 +184,19 @@ describe('notification domain outbox', () => {
       recipientEmails: ['alerts@example.com'],
       payload: { eventType: 'INCIDENT_OPENED' },
     });
+    const dispatch = await emailDeliveries.applyMaintenancePolicy(
+      incidentClaim!.id,
+      incidentClaim!.claimToken,
+      organizationId,
+      monitorId,
+    );
+    expect(dispatch).toMatchObject({
+      state: 'CONTINUE',
+      databaseNow: expect.any(Date),
+      leaseExpiresAt: expect.any(Date),
+    });
+    if (dispatch.state !== 'CONTINUE') throw new Error('Expected an active email delivery claim.');
+    expect(dispatch.leaseExpiresAt.getTime()).toBeGreaterThan(dispatch.databaseNow.getTime());
     await connection.db.execute(
       sql`update notification_deliveries set available_at=clock_timestamp() - interval '1 second' where id=${incidentClaim!.id}::uuid`,
     );
