@@ -104,7 +104,10 @@ import {
       provide: NodemailerNotificationEmailSender,
       inject: [WORKER_CONFIG],
       useFactory: (config: WorkerConfig) =>
-        new NodemailerNotificationEmailSender(config.smtp.from, config.smtp),
+        new NodemailerNotificationEmailSender(config.smtp.from, config.smtp, {
+          connectionTimeoutMs: config.emailNotificationConnectionTimeoutMs,
+          socketTimeoutMs: config.emailNotificationSocketTimeoutMs,
+        }),
     },
     {
       provide: EmailNotificationWorker,
@@ -115,7 +118,8 @@ import {
         config: WorkerConfig,
       ) =>
         new EmailNotificationWorker(deliveries, sender, {
-          leaseDurationMs: config.webhookDeliveryLeaseDurationMs,
+          leaseDurationMs: config.emailNotificationLeaseDurationMs,
+          sendTimeoutMs: config.emailNotificationSendTimeoutMs,
           maxAttempts: config.webhookDeliveryMaxAttempts,
           retryDelayMs: createExponentialBackoff(
             config.webhookDeliveryRetryBaseMs,

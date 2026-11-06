@@ -28,26 +28,70 @@ export interface EmailNotificationDeliveryStore {
 }
 
 export interface NotificationEmailSender {
-  send(message: { to: string[]; subject: string; text: string }): Promise<void>;
+  send(
+    message: { to: string[]; subject: string; text: string },
+    options: { signal: AbortSignal },
+  ): Promise<{ accepted: string[]; rejected: string[] }>;
 }
 
 export class NodemailerNotificationEmailSender implements NotificationEmailSender {
-  private readonly transport: ReturnType<typeof nodemailer.createTransport>;
-
   constructor(
     private readonly from: string,
-    smtp: { host: string; port: number; secure: boolean; user?: string; pass?: string },
-  ) {
-    this.transport = nodemailer.createTransport({
-      host: smtp.host,
-      port: smtp.port,
-      secure: smtp.secure,
-      auth: smtp.user && smtp.pass ? { user: smtp.user, pass: smtp.pass } : undefined,
-    });
-  }
+    private readonly smtp: {
+      host: string;
+      port: number;
+      secure: boolean;
+      user?: string;
+      pass?: string;
+    },
+    private readonly timeouts: { connectionTimeoutMs: number; socketTimeoutMs: number },
+  ) {}
 
-  async send(message: { to: string[]; subject: string; text: string }): Promise<void> {
-    await this.transport.sendMail({ from: this.from, ...message });
+  async send(
+    message: { to: string[]; subject: string; text: string },
+    options: { signal: AbortSignal },
+  ): Promise<{ accepted: string[]; rejected: string[] }> {
+    // A per-send one-connection pool gives abort() a concrete socket to close without
+    // interrupting another concurrent delivery using this sender instance.
+    const transport = nodemailer.createTransport({
+      host: this.smtp.host,
+      port: this.smtp.port,
+      secure: this.smtp.secure,
+      pool: true,
+      maxConnections: 1,
+      maxMessages: 1,
+      connectionTimeout: this.timeouts.connectionTimeoutMs,
+      greetingTimeout: this.timeouts.connectionTimeoutMs,
+      socketTimeout: this.timeouts.socketTimeoutMs,
+      auth:
+        this.smtp.user && this.smtp.pass
+          ? { user: this.smtp.user, pass: this.smtp.pass }
+          : undefined,
+    });
+    const abort = () => transport.close();
+    if (options.signal.aborted) {
+      abort();
+      throw new NotificationEmailTimeoutError();
+    }
+    options.signal.addEventListener('abort', abort, { once: true });
+    try {
+      const info = await transport.sendMail({ from: this.from, ...message });
+      if (options.signal.aborted) throw new NotificationEmailTimeoutError();
+      return {
+        accepted: normalizeAddresses(info.accepted),
+        rejected: normalizeAddresses(info.rejected),
+      };
+    } finally {
+      options.signal.removeEventListener('abort', abort);
+      transport.close();
+    }
+  }
+}
+
+export class NotificationEmailTimeoutError extends Error {
+  constructor() {
+    super('Email delivery exceeded its send deadline.');
+    this.name = 'NotificationEmailTimeoutError';
   }
 }
 
@@ -57,10 +101,18 @@ export class EmailNotificationWorker {
     private readonly sender: NotificationEmailSender,
     private readonly options: {
       leaseDurationMs: number;
+      sendTimeoutMs: number;
       maxAttempts: number;
       retryDelayMs: (attemptCount: number) => number;
     },
-  ) {}
+  ) {
+    if (
+      !Number.isSafeInteger(options.leaseDurationMs) ||
+      !Number.isSafeInteger(options.sendTimeoutMs) ||
+      options.leaseDurationMs < options.sendTimeoutMs + 5_000
+    )
+      throw new Error('Email delivery lease must exceed the send timeout by at least 5000 ms.');
+  }
 
   async processNext(): Promise<EmailNotificationCycleResult> {
     const delivery = await this.deliveries.claimNext(this.options.leaseDurationMs);
@@ -91,12 +143,33 @@ export class EmailNotificationWorker {
     if (maintenance !== 'CONTINUE') return maintenance;
 
     try {
-      await this.sender.send(renderEmail(payload, delivery.recipientEmails));
+      const message = renderEmail(payload, delivery.recipientEmails);
+      // Delivery remains at-least-once: SMTP acceptance can be ambiguous if the
+      // connection fails after the server accepts the message. The deadline prevents
+      // an intentionally overlapping live attempt, while claim-token fencing prevents
+      // a stale worker from recording the authoritative terminal state.
+      const result = await withSendDeadline(
+        (signal) => this.sender.send(message, { signal }),
+        this.options.sendTimeoutMs,
+      );
+      const acceptance = recipientAcceptance(message.to, result);
+      if (acceptance === 'PARTIAL')
+        return this.dead(
+          delivery,
+          'PARTIAL_RECIPIENT_ACCEPTANCE',
+          'SMTP_PARTIAL_RECIPIENT_ACCEPTANCE',
+        );
+      if (acceptance === 'NONE') return this.retryOrExhaust(delivery, 'SMTP_RECIPIENTS_REJECTED');
       return (await this.deliveries.acknowledgeDelivered(delivery.id, delivery.claimToken))
         ? 'DELIVERED'
         : 'LOST_CLAIM';
-    } catch {
-      return this.retryOrExhaust(delivery, 'SMTP_DELIVERY_FAILED');
+    } catch (error) {
+      return this.retryOrExhaust(
+        delivery,
+        error instanceof NotificationEmailTimeoutError
+          ? 'SMTP_DELIVERY_TIMEOUT'
+          : 'SMTP_DELIVERY_FAILED',
+      );
     }
   }
 
@@ -125,6 +198,63 @@ export class EmailNotificationWorker {
       ? 'DEAD'
       : 'LOST_CLAIM';
   }
+}
+
+async function withSendDeadline<T>(
+  send: (signal: AbortSignal) => Promise<T>,
+  timeoutMs: number,
+): Promise<T> {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0)
+    throw new Error('Email send timeout must be a positive safe integer.');
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    try {
+      return await Promise.race([
+        send(controller.signal),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => {
+            controller.abort();
+            reject(new NotificationEmailTimeoutError());
+          }, timeoutMs);
+        }),
+      ]);
+    } catch (error) {
+      if (controller.signal.aborted) throw new NotificationEmailTimeoutError();
+      throw error;
+    }
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function recipientAcceptance(
+  recipients: string[],
+  result: { accepted: string[]; rejected: string[] },
+): 'ALL' | 'NONE' | 'PARTIAL' {
+  const expected = new Set(recipients.map(canonicalAddress));
+  const accepted = new Set(result.accepted.map(canonicalAddress));
+  const rejected = new Set(result.rejected.map(canonicalAddress));
+  const acceptedCount = [...expected].filter((address) => accepted.has(address)).length;
+  if (acceptedCount === expected.size && ![...expected].some((address) => rejected.has(address)))
+    return 'ALL';
+  return acceptedCount === 0 ? 'NONE' : 'PARTIAL';
+}
+
+function normalizeAddresses(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return (value as unknown[]).flatMap((entry) => {
+    if (typeof entry === 'string') return [canonicalAddress(entry)];
+    if (typeof entry === 'object' && entry !== null) {
+      const address = (entry as Record<string, unknown>)['address'];
+      if (typeof address === 'string') return [canonicalAddress(address)];
+    }
+    return [];
+  });
+}
+
+function canonicalAddress(value: string): string {
+  return value.trim().toLowerCase();
 }
 
 function renderEmail(

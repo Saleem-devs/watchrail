@@ -184,6 +184,18 @@ describe('notification domain outbox', () => {
       recipientEmails: ['alerts@example.com'],
       payload: { eventType: 'INCIDENT_OPENED' },
     });
+    await connection.db.execute(
+      sql`update notification_deliveries set available_at=clock_timestamp() - interval '1 second' where id=${incidentClaim!.id}::uuid`,
+    );
+    const reclaimedIncident = await emailDeliveries.claimNext();
+    expect(reclaimedIncident).toMatchObject({ id: incidentClaim!.id, attemptCount: 2 });
+    expect(reclaimedIncident!.claimToken).not.toBe(incidentClaim!.claimToken);
+    await expect(
+      emailDeliveries.acknowledgeDelivered(incidentClaim!.id, incidentClaim!.claimToken),
+    ).resolves.toBe(false);
+    await expect(
+      emailDeliveries.acknowledgeDelivered(reclaimedIncident!.id, reclaimedIncident!.claimToken),
+    ).resolves.toBe(true);
 
     await channels.updateConfiguration(organizationId, channel.id, {
       name: channel.name,

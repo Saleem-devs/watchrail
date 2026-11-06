@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ClaimedEmailNotificationDelivery } from '@watchrail/db';
 import {
   EmailNotificationWorker,
@@ -27,14 +27,19 @@ const claim: ClaimedEmailNotificationDelivery = {
 };
 
 describe('EmailNotificationWorker', () => {
+  afterEach(() => vi.useRealTimers());
+
   it('renders and acknowledges a test notification', async () => {
     const fixture = setup();
     await expect(fixture.worker.processNext()).resolves.toBe('DELIVERED');
-    expect(fixture.send).toHaveBeenCalledWith({
-      to: ['alerts@example.com'],
-      subject: 'Watchrail test notification — On-call',
-      text: expect.stringContaining('No incident was created or changed.'),
-    });
+    expect(fixture.send).toHaveBeenCalledWith(
+      {
+        to: ['alerts@example.com'],
+        subject: 'Watchrail test notification — On-call',
+        text: expect.stringContaining('No incident was created or changed.'),
+      },
+      { signal: expect.any(AbortSignal) },
+    );
     expect(fixture.acknowledgeDelivered).toHaveBeenCalledWith(claim.id, 'claim-token');
   });
 
@@ -54,10 +59,70 @@ describe('EmailNotificationWorker', () => {
       'SMTP_DELIVERY_FAILED',
     );
   });
+
+  it('aborts a stalled SMTP attempt before its lease can expire', async () => {
+    vi.useFakeTimers();
+    const fixture = setup();
+    let observedSignal: AbortSignal | undefined;
+    fixture.send.mockImplementation(
+      (_message, { signal }) =>
+        new Promise((_resolve, reject) => {
+          observedSignal = signal;
+          signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+        }),
+    );
+
+    const result = fixture.worker.processNext();
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    await expect(result).resolves.toBe('RETRY_SCHEDULED');
+    expect(observedSignal?.aborted).toBe(true);
+    expect(fixture.releaseForRetry).toHaveBeenCalledWith(
+      claim.id,
+      'claim-token',
+      1_000,
+      'SMTP_DELIVERY_TIMEOUT',
+    );
+    expect(fixture.acknowledgeDelivered).not.toHaveBeenCalled();
+  });
+
+  it('dead-letters partial recipient acceptance without retrying accepted recipients', async () => {
+    const delivery = {
+      ...claim,
+      recipientEmails: ['alerts@example.com', 'oncall@example.com'],
+    };
+    const fixture = setup(delivery);
+    fixture.send.mockResolvedValue({
+      accepted: ['alerts@example.com'],
+      rejected: ['oncall@example.com'],
+    });
+
+    await expect(fixture.worker.processNext()).resolves.toBe('DEAD');
+    expect(fixture.markDead).toHaveBeenCalledWith(
+      claim.id,
+      'claim-token',
+      'PARTIAL_RECIPIENT_ACCEPTANCE',
+      'SMTP_PARTIAL_RECIPIENT_ACCEPTANCE',
+    );
+    expect(fixture.releaseForRetry).not.toHaveBeenCalled();
+    expect(fixture.acknowledgeDelivered).not.toHaveBeenCalled();
+  });
+
+  it('retries safely when the SMTP server rejects every recipient', async () => {
+    const fixture = setup();
+    fixture.send.mockResolvedValue({ accepted: [], rejected: ['alerts@example.com'] });
+    await expect(fixture.worker.processNext()).resolves.toBe('RETRY_SCHEDULED');
+    expect(fixture.releaseForRetry).toHaveBeenCalledWith(
+      claim.id,
+      'claim-token',
+      1_000,
+      'SMTP_RECIPIENTS_REJECTED',
+    );
+  });
 });
 
-function setup() {
-  const claimNext = vi.fn(() => Promise.resolve(claim));
+function setup(delivery = claim) {
+  const claimNext = vi.fn(() => Promise.resolve(delivery));
   const applyMaintenancePolicy = vi.fn(() =>
     Promise.resolve<'CONTINUE' | 'SUPPRESSED'>('CONTINUE'),
   );
@@ -71,13 +136,16 @@ function setup() {
     releaseForRetry,
     markDead,
   };
-  const send = vi.fn<NotificationEmailSender['send']>(() => Promise.resolve());
+  const send = vi.fn<NotificationEmailSender['send']>(() =>
+    Promise.resolve({ accepted: delivery.recipientEmails, rejected: [] }),
+  );
   return {
     worker: new EmailNotificationWorker(
       store,
       { send },
       {
         leaseDurationMs: 30_000,
+        sendTimeoutMs: 10_000,
         maxAttempts: 8,
         retryDelayMs: () => 1_000,
       },
@@ -86,5 +154,6 @@ function setup() {
     applyMaintenancePolicy,
     acknowledgeDelivered,
     releaseForRetry,
+    markDead,
   };
 }

@@ -50,6 +50,10 @@ describe('loadWorkerConfig', () => {
       webhookDeliveryConcurrency: 5,
       webhookDeliveryIdlePollIntervalMs: 500,
       emailNotificationConcurrency: 3,
+      emailNotificationLeaseDurationMs: 30_000,
+      emailNotificationSendTimeoutMs: 10_000,
+      emailNotificationConnectionTimeoutMs: 5_000,
+      emailNotificationSocketTimeoutMs: 8_000,
       authEmailKeyring: { activeKeyId: 'development' },
       smtp: {
         host: 'localhost',
@@ -108,6 +112,30 @@ describe('loadWorkerConfig', () => {
     [
       { ...requiredEnvironment, WEBHOOK_DELIVERY_CONCURRENCY: '101' },
       'WEBHOOK_DELIVERY_CONCURRENCY must be an integer from 1 to 100.',
+    ],
+    [
+      {
+        ...requiredEnvironment,
+        EMAIL_NOTIFICATION_LEASE_DURATION_MS: '12000',
+        EMAIL_NOTIFICATION_SEND_TIMEOUT_MS: '10000',
+      },
+      'EMAIL_NOTIFICATION_LEASE_DURATION_MS must exceed EMAIL_NOTIFICATION_SEND_TIMEOUT_MS by at least 5000.',
+    ],
+    [
+      {
+        ...requiredEnvironment,
+        EMAIL_NOTIFICATION_CONNECTION_TIMEOUT_MS: '11000',
+        EMAIL_NOTIFICATION_SEND_TIMEOUT_MS: '10000',
+      },
+      'EMAIL_NOTIFICATION_CONNECTION_TIMEOUT_MS cannot exceed EMAIL_NOTIFICATION_SEND_TIMEOUT_MS.',
+    ],
+    [
+      {
+        ...requiredEnvironment,
+        EMAIL_NOTIFICATION_SOCKET_TIMEOUT_MS: '11000',
+        EMAIL_NOTIFICATION_SEND_TIMEOUT_MS: '10000',
+      },
+      'EMAIL_NOTIFICATION_SOCKET_TIMEOUT_MS cannot exceed EMAIL_NOTIFICATION_SEND_TIMEOUT_MS.',
     ],
     [
       { ...requiredEnvironment, AVAILABILITY_FLUSH_BATCH_SIZE: '1001' },

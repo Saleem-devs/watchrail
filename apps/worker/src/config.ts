@@ -30,6 +30,10 @@ export interface WorkerConfig {
   webhookDeliveryConcurrency: number;
   webhookDeliveryIdlePollIntervalMs: number;
   emailNotificationConcurrency: number;
+  emailNotificationLeaseDurationMs: number;
+  emailNotificationSendTimeoutMs: number;
+  emailNotificationConnectionTimeoutMs: number;
+  emailNotificationSocketTimeoutMs: number;
   authEmailKeyring: AuthEmailKeyring;
   smtp: { host: string; port: number; secure: boolean; user?: string; pass?: string; from: string };
 }
@@ -73,6 +77,38 @@ export function loadWorkerConfig(environment: NodeJS.ProcessEnv = process.env): 
   );
   if (webhookDeliveryRetryBaseMs > webhookDeliveryRetryMaxMs)
     throw new Error('WEBHOOK_DELIVERY_RETRY_BASE_MS cannot exceed WEBHOOK_DELIVERY_RETRY_MAX_MS.');
+  const emailNotificationLeaseDurationMs = parsePositiveInteger(
+    environment.EMAIL_NOTIFICATION_LEASE_DURATION_MS,
+    'EMAIL_NOTIFICATION_LEASE_DURATION_MS',
+    30_000,
+  );
+  const emailNotificationSendTimeoutMs = parsePositiveInteger(
+    environment.EMAIL_NOTIFICATION_SEND_TIMEOUT_MS,
+    'EMAIL_NOTIFICATION_SEND_TIMEOUT_MS',
+    10_000,
+  );
+  const emailNotificationConnectionTimeoutMs = parsePositiveInteger(
+    environment.EMAIL_NOTIFICATION_CONNECTION_TIMEOUT_MS,
+    'EMAIL_NOTIFICATION_CONNECTION_TIMEOUT_MS',
+    5_000,
+  );
+  const emailNotificationSocketTimeoutMs = parsePositiveInteger(
+    environment.EMAIL_NOTIFICATION_SOCKET_TIMEOUT_MS,
+    'EMAIL_NOTIFICATION_SOCKET_TIMEOUT_MS',
+    8_000,
+  );
+  if (emailNotificationLeaseDurationMs < emailNotificationSendTimeoutMs + 5_000)
+    throw new Error(
+      'EMAIL_NOTIFICATION_LEASE_DURATION_MS must exceed EMAIL_NOTIFICATION_SEND_TIMEOUT_MS by at least 5000.',
+    );
+  if (emailNotificationConnectionTimeoutMs > emailNotificationSendTimeoutMs)
+    throw new Error(
+      'EMAIL_NOTIFICATION_CONNECTION_TIMEOUT_MS cannot exceed EMAIL_NOTIFICATION_SEND_TIMEOUT_MS.',
+    );
+  if (emailNotificationSocketTimeoutMs > emailNotificationSendTimeoutMs)
+    throw new Error(
+      'EMAIL_NOTIFICATION_SOCKET_TIMEOUT_MS cannot exceed EMAIL_NOTIFICATION_SEND_TIMEOUT_MS.',
+    );
 
   return {
     databaseUrl,
@@ -204,6 +240,10 @@ export function loadWorkerConfig(environment: NodeJS.ProcessEnv = process.env): 
       1,
       50,
     ),
+    emailNotificationLeaseDurationMs,
+    emailNotificationSendTimeoutMs,
+    emailNotificationConnectionTimeoutMs,
+    emailNotificationSocketTimeoutMs,
     authEmailKeyring: loadAuthEmailKeyring(
       environment.NODE_ENV === 'production'
         ? environment
