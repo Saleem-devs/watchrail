@@ -1,8 +1,9 @@
 import '@testing-library/jest-dom/vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WorkspaceSecretsPage } from './workspace-secrets-page';
+import { WorkspaceSecretForm } from './workspace-secret-form';
 import type { WorkspaceSecret } from './workspace-secret-types';
 
 const secret: WorkspaceSecret = {
@@ -28,70 +29,51 @@ function requestJson(call: readonly unknown[] | undefined): unknown {
 afterEach(() => vi.restoreAllMocks());
 
 describe('workspace secrets page', () => {
-  it('constructs a secret request without rendering the secret value after saving', async () => {
+  it('constructs a secret request from the reusable create form', async () => {
     const user = userEvent.setup();
+    const created = { ...secret, versionNumber: 1, usageCount: 0 };
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(json({ data: [] }))
-      .mockResolvedValueOnce(json({ data: { ...secret, versionNumber: 1, usageCount: 0 } }, 201))
-      .mockResolvedValueOnce(json({ data: [{ ...secret, versionNumber: 1, usageCount: 0 }] }));
+      .mockResolvedValueOnce(json({ data: created }, 201));
+    const onSaved = vi.fn();
 
-    render(<WorkspaceSecretsPage />);
-    await screen.findByText('No workspace secrets yet');
-    await user.click(screen.getByRole('button', { name: 'Add secret' }));
+    render(<WorkspaceSecretForm formId="secret-form" onSaved={onSaved} />);
     await user.type(screen.getByLabelText(/^Key/), 'STRIPE_API_KEY');
     await user.type(screen.getByLabelText(/^Secret value/), 'sk_launch_sensitive');
     await user.type(screen.getByLabelText(/^Description/), 'Billing health checks');
-    await user.click(screen.getByRole('button', { name: 'Save secret' }));
+    fireEvent.submit(screen.getByRole('form', { name: 'Add workspace secret' }));
 
-    await screen.findByText('STRIPE_API_KEY encrypted and saved.');
-    const [, request] = fetchMock.mock.calls[1]!;
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(created));
+    const [, request] = fetchMock.mock.calls[0]!;
     expect(request).toMatchObject({ method: 'POST' });
-    expect(requestJson(fetchMock.mock.calls[1])).toEqual({
+    expect(requestJson(fetchMock.mock.calls[0])).toEqual({
       key: 'STRIPE_API_KEY',
       description: 'Billing health checks',
       value: 'sk_launch_sensitive',
     });
-    expect(screen.queryByDisplayValue('sk_launch_sensitive')).not.toBeInTheDocument();
-    expect(screen.queryByText('sk_launch_sensitive')).not.toBeInTheDocument();
   });
 
   it('rotates a value while keeping the existing value unavailable', async () => {
     const user = userEvent.setup();
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(json({ data: [secret] }))
-      .mockResolvedValueOnce(json({ data: { ...secret, versionNumber: 3 } }, 201))
-      .mockResolvedValueOnce(json({ data: [{ ...secret, versionNumber: 3 }] }));
+      .mockResolvedValueOnce(json({ data: { ...secret, versionNumber: 3 } }, 201));
 
-    render(<WorkspaceSecretsPage />);
-    await screen.findByText('STRIPE_API_KEY');
-    await user.click(screen.getByRole('button', { name: 'Rotate' }));
-    expect(screen.getByLabelText(/^New secret value/)).toHaveValue('');
-    await user.type(screen.getByLabelText(/^New secret value/), 'sk_rotated_value');
-    await user.click(screen.getByRole('button', { name: 'Rotate secret' }));
+    render(<WorkspaceSecretForm formId="secret-form" secret={secret} onSaved={vi.fn()} />);
+    expect(screen.getByLabelText(/^Replace secret value/)).toHaveValue('');
+    await user.type(screen.getByLabelText(/^Replace secret value/), 'sk_rotated_value');
+    fireEvent.submit(screen.getByRole('form', { name: 'Edit workspace secret' }));
 
-    await screen.findByText('STRIPE_API_KEY rotated to version 3.');
-    expect(fetchMock.mock.calls[1]?.[0]).toBe(`/api/workspace-secrets/${secret.id}/rotations`);
-    expect(requestJson(fetchMock.mock.calls[1])).toEqual({
+    await waitFor(() =>
+      expect(fetchMock.mock.calls[0]?.[0]).toBe(`/api/workspace-secrets/${secret.id}/rotations`),
+    );
+    expect(requestJson(fetchMock.mock.calls[0])).toEqual({
       value: 'sk_rotated_value',
     });
   });
 
-  it('keeps referenced secrets protected from archive and surfaces field validation', async () => {
-    const user = userEvent.setup();
-    vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(json({ data: [secret] }))
-      .mockResolvedValueOnce(
-        json(
-          {
-            code: 'VALIDATION_FAILED',
-            message: 'Workspace secret settings are invalid.',
-            fields: { key: ['Use only letters, numbers, and underscores.'] },
-          },
-          400,
-        ),
-      );
+  it('keeps referenced secrets protected from archive and routes edits to dedicated pages', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(json({ data: [secret] }));
 
     render(<WorkspaceSecretsPage />);
     await screen.findByText('STRIPE_API_KEY');
@@ -100,11 +82,37 @@ describe('workspace secrets page', () => {
       'title',
       'Remove references before archiving',
     );
+    expect(screen.getByRole('link', { name: 'Add secret' })).toHaveAttribute(
+      'href',
+      '/settings/secrets/new',
+    );
+    expect(screen.getByRole('link', { name: 'Edit' })).toHaveAttribute(
+      'href',
+      `/settings/secrets/${secret.id}/edit`,
+    );
+    expect(screen.getByRole('link', { name: 'Rotate' })).toHaveAttribute(
+      'href',
+      `/settings/secrets/${secret.id}/edit#replace-value`,
+    );
+  });
 
-    await user.click(screen.getByRole('button', { name: 'Add secret' }));
+  it('surfaces create validation beside the reusable form', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      json(
+        {
+          code: 'VALIDATION_FAILED',
+          message: 'Workspace secret settings are invalid.',
+          fields: { key: ['Use only letters, numbers, and underscores.'] },
+        },
+        400,
+      ),
+    );
+
+    render(<WorkspaceSecretForm formId="secret-form" onSaved={vi.fn()} />);
     await user.type(screen.getByLabelText(/^Key/), 'VALID_KEY');
     await user.type(screen.getByLabelText(/^Secret value/), 'secret');
-    await user.click(screen.getByRole('button', { name: 'Save secret' }));
+    fireEvent.submit(screen.getByRole('form', { name: 'Add workspace secret' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Use only letters, numbers, and underscores.',
     );

@@ -28,6 +28,8 @@ import type { RequestContext } from '../../auth/request-context.js';
 import type {
   CreateWebhookEndpointInput,
   SetWebhookEndpointEnabledInput,
+  UpdateWebhookEndpointConfigurationInput,
+  UpdateWebhookEndpointRoutingInput,
   UpdateWebhookEndpointSettingsInput,
 } from './dto/webhook-endpoint-input.js';
 
@@ -52,6 +54,8 @@ export class WebhookEndpointsService {
           name: input.name,
           url: input.url,
           ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
+          ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
+          ...(input.routing === undefined ? {} : { routing: input.routing }),
         },
         ({ endpointId, versionNumber }) =>
           encryptWebhookSigningSecret(
@@ -65,8 +69,8 @@ export class WebhookEndpointsService {
     }
   }
 
-  list(context: RequestContext): Promise<WebhookEndpointRecord[]> {
-    return this.endpoints.listForOrganization(context.organizationId);
+  list(context: RequestContext, projectId?: string): Promise<WebhookEndpointRecord[]> {
+    return this.endpoints.listForOrganization(context.organizationId, projectId);
   }
 
   async listDeliveries(
@@ -149,6 +153,47 @@ export class WebhookEndpointsService {
     }
   }
 
+  async updateConfiguration(
+    context: RequestContext,
+    endpointId: string,
+    input: UpdateWebhookEndpointConfigurationInput,
+  ): Promise<WebhookEndpointRecord> {
+    try {
+      return await this.endpoints.updateConfiguration(
+        context.organizationId,
+        endpointId,
+        {
+          name: input.name,
+          url: input.url,
+          rotateSecret: 'value' in input.signingSecret,
+          routing: input.routing,
+        },
+        ({ versionNumber, current }) => {
+          if (!current) throw new Error('Current webhook endpoint version is missing.');
+          const plaintext =
+            'value' in input.signingSecret
+              ? input.signingSecret.value
+              : decryptWebhookSigningSecret(
+                  current.signingSecretEnvelope,
+                  {
+                    organizationId: context.organizationId,
+                    endpointId,
+                    versionNumber: current.versionNumber,
+                  },
+                  this.config.webhookSigningSecretKeyring,
+                );
+          return encryptWebhookSigningSecret(
+            plaintext,
+            { organizationId: context.organizationId, endpointId, versionNumber },
+            this.config.webhookSigningSecretKeyring,
+          );
+        },
+      );
+    } catch (error) {
+      this.translate(error);
+    }
+  }
+
   async setEnabled(
     context: RequestContext,
     endpointId: string,
@@ -156,6 +201,18 @@ export class WebhookEndpointsService {
   ): Promise<WebhookEndpointRecord> {
     try {
       return await this.endpoints.setEnabled(context.organizationId, endpointId, input.enabled);
+    } catch (error) {
+      this.translate(error);
+    }
+  }
+
+  async updateRouting(
+    context: RequestContext,
+    endpointId: string,
+    input: UpdateWebhookEndpointRoutingInput,
+  ): Promise<WebhookEndpointRecord> {
+    try {
+      return await this.endpoints.updateRouting(context.organizationId, endpointId, input);
     } catch (error) {
       this.translate(error);
     }

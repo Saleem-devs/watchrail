@@ -7,6 +7,7 @@ import type {
 export function presentWebhookEndpoint(endpoint: WebhookEndpointRecord) {
   return {
     id: endpoint.id,
+    projectId: endpoint.projectId,
     name: endpoint.name,
     url: endpoint.url,
     enabled: endpoint.enabled,
@@ -14,6 +15,7 @@ export function presentWebhookEndpoint(endpoint: WebhookEndpointRecord) {
     signingSecret: { hasValue: true as const },
     createdAt: endpoint.createdAt.toISOString(),
     updatedAt: endpoint.updatedAt.toISOString(),
+    routing: endpoint.routing,
   };
 }
 

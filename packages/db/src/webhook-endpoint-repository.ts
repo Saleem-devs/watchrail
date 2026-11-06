@@ -1,23 +1,41 @@
 import { randomUUID } from 'node:crypto';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import {
   parseStoredWebhookSigningSecret,
   type EncryptedWebhookSigningSecretV1,
 } from '@watchrail/webhook-security';
 import type { WatchrailDatabase } from './client.js';
-import { webhookEndpoints, webhookEndpointVersions } from './schema.js';
+import {
+  monitors,
+  projects,
+  webhookEndpointMonitorRoutes,
+  webhookEndpoints,
+  webhookEndpointVersions,
+} from './schema.js';
 
 type Transaction = Parameters<Parameters<WatchrailDatabase['transaction']>[0]>[0];
 
 export interface WebhookEndpointRecord {
   id: string;
   organizationId: string;
+  projectId: string | null;
   name: string;
   enabled: boolean;
   versionNumber: number;
   url: string;
   createdAt: Date;
   updatedAt: Date;
+  routing: {
+    monitorIds: string[];
+    notifyOnIncident: boolean;
+    notifyOnRecovery: boolean;
+  };
+}
+
+export interface WebhookEndpointRoutingInput {
+  monitorIds: string[];
+  notifyOnIncident: boolean;
+  notifyOnRecovery: boolean;
 }
 
 export interface WebhookEndpointVersionContext {
@@ -49,12 +67,24 @@ export class WebhookEndpointRepository {
 
   async create(
     organizationId: string,
-    input: { name: string; url: string; enabled?: boolean },
+    input: {
+      name: string;
+      url: string;
+      enabled?: boolean;
+      projectId?: string;
+      routing?: WebhookEndpointRoutingInput;
+    },
     createEnvelope: (context: WebhookEndpointVersionContext) => EncryptedWebhookSigningSecretV1,
   ): Promise<WebhookEndpointRecord> {
     const settings = parseSettings(input.name, input.url);
     const endpointId = randomUUID();
     return this.db.transaction(async (tx) => {
+      const routing = await this.validateRouting(
+        tx,
+        organizationId,
+        input.projectId,
+        input.routing,
+      );
       const envelope = parseStoredWebhookSigningSecret(
         createEnvelope({ endpointId, versionNumber: 1 }),
       );
@@ -63,8 +93,11 @@ export class WebhookEndpointRepository {
         .values({
           id: endpointId,
           organizationId,
+          projectId: input.projectId ?? null,
           name: settings.name,
           enabled: input.enabled ?? true,
+          notifyOnIncident: routing.notifyOnIncident,
+          notifyOnRecovery: routing.notifyOnRecovery,
         })
         .returning();
       if (!endpoint) throw new Error('Webhook endpoint creation returned no record.');
@@ -75,7 +108,8 @@ export class WebhookEndpointRepository {
         url: settings.url,
         signingSecretEnvelope: envelope,
       });
-      return toRecord(endpoint, 1, settings.url);
+      await this.replaceRouting(tx, organizationId, endpointId, routing);
+      return toRecord(endpoint, 1, settings.url, routing);
     });
   }
 
@@ -136,7 +170,90 @@ export class WebhookEndpointRepository {
           )[0]
         : current.endpoint;
       if (!endpoint) throw new Error('Webhook endpoint update returned no record.');
-      return toRecord(endpoint, nextVersionNumber, settings.url);
+      const routing = await this.readRouting(tx, organizationId, endpointId);
+      return toRecord(endpoint, nextVersionNumber, settings.url, routing);
+    });
+  }
+
+  async updateConfiguration(
+    organizationId: string,
+    endpointId: string,
+    input: {
+      name: string;
+      url: string;
+      rotateSecret: boolean;
+      routing: WebhookEndpointRoutingInput;
+    },
+    createEnvelope: (context: WebhookEndpointVersionContext) => EncryptedWebhookSigningSecretV1,
+  ): Promise<WebhookEndpointRecord> {
+    const settings = parseSettings(input.name, input.url);
+    return this.db.transaction(async (tx) => {
+      const current = await this.lockCurrent(tx, organizationId, endpointId);
+      if (!current.endpoint.projectId)
+        throw new WebhookEndpointInputError({
+          projectId: ['Legacy workspace-wide endpoints cannot use project routing.'],
+        });
+      const routing = await this.validateRouting(
+        tx,
+        organizationId,
+        current.endpoint.projectId,
+        input.routing,
+      );
+      const currentRouting = await this.readRouting(tx, organizationId, endpointId);
+      const routingChanged = !sameRouting(currentRouting, routing);
+      const configurationChanged = settings.url !== current.version.url || input.rotateSecret;
+      const nextVersionNumber = configurationChanged
+        ? current.endpoint.currentVersionNumber + 1
+        : current.endpoint.currentVersionNumber;
+      if (configurationChanged) {
+        const envelope = parseStoredWebhookSigningSecret(
+          createEnvelope({
+            endpointId,
+            versionNumber: nextVersionNumber,
+            current: {
+              versionNumber: current.version.versionNumber,
+              url: current.version.url,
+              signingSecretEnvelope: parseStoredWebhookSigningSecret(
+                current.version.signingSecretEnvelope,
+              ),
+            },
+          }),
+        );
+        await tx.insert(webhookEndpointVersions).values({
+          organizationId,
+          endpointId,
+          versionNumber: nextVersionNumber,
+          url: settings.url,
+          signingSecretEnvelope: envelope,
+        });
+      }
+      const endpointChanged =
+        settings.name !== current.endpoint.name ||
+        nextVersionNumber !== current.endpoint.currentVersionNumber ||
+        routingChanged;
+      const endpoint = endpointChanged
+        ? (
+            await tx
+              .update(webhookEndpoints)
+              .set({
+                name: settings.name,
+                currentVersionNumber: nextVersionNumber,
+                notifyOnIncident: routing.notifyOnIncident,
+                notifyOnRecovery: routing.notifyOnRecovery,
+                updatedAt: sql`clock_timestamp()`,
+              })
+              .where(
+                and(
+                  eq(webhookEndpoints.organizationId, organizationId),
+                  eq(webhookEndpoints.id, endpointId),
+                ),
+              )
+              .returning()
+          )[0]
+        : current.endpoint;
+      if (!endpoint) throw new Error('Webhook endpoint update returned no record.');
+      await this.replaceRouting(tx, organizationId, endpointId, routing);
+      return toRecord(endpoint, nextVersionNumber, settings.url, routing);
     });
   }
 
@@ -150,7 +267,12 @@ export class WebhookEndpointRepository {
     return this.db.transaction(async (tx) => {
       const current = await this.lockCurrent(tx, organizationId, endpointId);
       if (current.endpoint.enabled === enabled)
-        return toRecord(current.endpoint, current.version.versionNumber, current.version.url);
+        return toRecord(
+          current.endpoint,
+          current.version.versionNumber,
+          current.version.url,
+          await this.readRouting(tx, organizationId, endpointId),
+        );
       const [endpoint] = await tx
         .update(webhookEndpoints)
         .set({ enabled, updatedAt: sql`clock_timestamp()` })
@@ -162,13 +284,75 @@ export class WebhookEndpointRepository {
         )
         .returning();
       if (!endpoint) throw new WebhookEndpointNotFoundError();
-      return toRecord(endpoint, current.version.versionNumber, current.version.url);
+      return toRecord(
+        endpoint,
+        current.version.versionNumber,
+        current.version.url,
+        await this.readRouting(tx, organizationId, endpointId),
+      );
     });
   }
 
-  async listForOrganization(organizationId: string): Promise<WebhookEndpointRecord[]> {
-    const rows = await this.currentQuery(this.db, organizationId);
-    return rows.map((row) => toRecord(row.endpoint, row.version.versionNumber, row.version.url));
+  async updateRouting(
+    organizationId: string,
+    endpointId: string,
+    input: WebhookEndpointRoutingInput,
+  ): Promise<WebhookEndpointRecord> {
+    return this.db.transaction(async (tx) => {
+      const current = await this.lockCurrent(tx, organizationId, endpointId);
+      if (!current.endpoint.projectId)
+        throw new WebhookEndpointInputError({
+          projectId: ['Legacy workspace-wide endpoints cannot use project routing.'],
+        });
+      const routing = await this.validateRouting(
+        tx,
+        organizationId,
+        current.endpoint.projectId,
+        input,
+      );
+      const currentRouting = await this.readRouting(tx, organizationId, endpointId);
+      if (sameRouting(currentRouting, routing))
+        return toRecord(
+          current.endpoint,
+          current.version.versionNumber,
+          current.version.url,
+          routing,
+        );
+      const [endpoint] = await tx
+        .update(webhookEndpoints)
+        .set({
+          notifyOnIncident: routing.notifyOnIncident,
+          notifyOnRecovery: routing.notifyOnRecovery,
+          updatedAt: sql`clock_timestamp()`,
+        })
+        .where(
+          and(
+            eq(webhookEndpoints.organizationId, organizationId),
+            eq(webhookEndpoints.id, endpointId),
+          ),
+        )
+        .returning();
+      if (!endpoint) throw new WebhookEndpointNotFoundError();
+      await this.replaceRouting(tx, organizationId, endpointId, routing);
+      return toRecord(endpoint, current.version.versionNumber, current.version.url, routing);
+    });
+  }
+
+  async listForOrganization(
+    organizationId: string,
+    projectId?: string,
+  ): Promise<WebhookEndpointRecord[]> {
+    const rows = await this.currentQuery(this.db, organizationId, undefined, projectId);
+    return Promise.all(
+      rows.map(async (row) =>
+        toRecord(
+          row.endpoint,
+          row.version.versionNumber,
+          row.version.url,
+          await this.readRouting(this.db, organizationId, row.endpoint.id),
+        ),
+      ),
+    );
   }
 
   async findForOrganization(
@@ -177,10 +361,22 @@ export class WebhookEndpointRepository {
   ): Promise<WebhookEndpointRecord | null> {
     const rows = await this.currentQuery(this.db, organizationId, endpointId);
     const row = rows[0];
-    return row ? toRecord(row.endpoint, row.version.versionNumber, row.version.url) : null;
+    return row
+      ? toRecord(
+          row.endpoint,
+          row.version.versionNumber,
+          row.version.url,
+          await this.readRouting(this.db, organizationId, row.endpoint.id),
+        )
+      : null;
   }
 
-  private currentQuery(db: WatchrailDatabase, organizationId: string, endpointId?: string) {
+  private currentQuery(
+    db: WatchrailDatabase,
+    organizationId: string,
+    endpointId?: string,
+    projectId?: string,
+  ) {
     return db
       .select({ endpoint: webhookEndpoints, version: webhookEndpointVersions })
       .from(webhookEndpoints)
@@ -196,6 +392,7 @@ export class WebhookEndpointRepository {
         and(
           eq(webhookEndpoints.organizationId, organizationId),
           endpointId === undefined ? undefined : eq(webhookEndpoints.id, endpointId),
+          projectId === undefined ? undefined : eq(webhookEndpoints.projectId, projectId),
         ),
       )
       .orderBy(webhookEndpoints.createdAt, webhookEndpoints.id);
@@ -228,6 +425,136 @@ export class WebhookEndpointRepository {
     if (!version) throw new Error('Webhook endpoint current version is missing.');
     return { endpoint, version };
   }
+
+  private async validateRouting(
+    tx: Transaction,
+    organizationId: string,
+    projectId: string | undefined,
+    input: WebhookEndpointRoutingInput | undefined,
+  ): Promise<WebhookEndpointRoutingInput> {
+    if (!projectId) {
+      if (input && input.monitorIds.length > 0)
+        throw new WebhookEndpointInputError({
+          projectId: ['projectId is required when monitor routing is configured.'],
+        });
+      return input ?? { monitorIds: [], notifyOnIncident: true, notifyOnRecovery: true };
+    }
+    const [project] = await tx
+      .select({ id: projects.id })
+      .from(projects)
+      .where(and(eq(projects.organizationId, organizationId), eq(projects.id, projectId)))
+      .limit(1);
+    if (!project) throw new WebhookEndpointInputError({ projectId: ['Project not found.'] });
+    if (!input)
+      throw new WebhookEndpointInputError({ routing: ['Routing settings are required.'] });
+    if (typeof input.notifyOnIncident !== 'boolean' || typeof input.notifyOnRecovery !== 'boolean')
+      throw new WebhookEndpointInputError({ routing: ['Routing event settings are invalid.'] });
+    if (!input.notifyOnIncident && !input.notifyOnRecovery)
+      throw new WebhookEndpointInputError({
+        routing: ['Choose at least one incident event to deliver.'],
+      });
+    const monitorIds = [...new Set(input.monitorIds.map((id) => id.toLowerCase()))];
+    if (monitorIds.length !== input.monitorIds.length)
+      throw new WebhookEndpointInputError({ monitorIds: ['Monitor IDs must be unique.'] });
+    if (monitorIds.length > 500)
+      throw new WebhookEndpointInputError({ monitorIds: ['At most 500 monitors can be routed.'] });
+    if (monitorIds.length > 0) {
+      const selected = await tx
+        .select({ id: monitors.id })
+        .from(monitors)
+        .where(
+          and(
+            eq(monitors.organizationId, organizationId),
+            eq(monitors.projectId, projectId),
+            inArray(monitors.id, monitorIds),
+          ),
+        );
+      if (selected.length !== monitorIds.length)
+        throw new WebhookEndpointInputError({
+          monitorIds: ['Every monitor must belong to the selected project.'],
+        });
+    }
+    return {
+      monitorIds,
+      notifyOnIncident: input.notifyOnIncident,
+      notifyOnRecovery: input.notifyOnRecovery,
+    };
+  }
+
+  private async replaceRouting(
+    tx: Transaction,
+    organizationId: string,
+    endpointId: string,
+    routing: WebhookEndpointRoutingInput,
+  ): Promise<void> {
+    await tx
+      .delete(webhookEndpointMonitorRoutes)
+      .where(
+        and(
+          eq(webhookEndpointMonitorRoutes.organizationId, organizationId),
+          eq(webhookEndpointMonitorRoutes.endpointId, endpointId),
+        ),
+      );
+    if (routing.monitorIds.length > 0)
+      await tx.insert(webhookEndpointMonitorRoutes).values(
+        routing.monitorIds.map((monitorId) => ({
+          organizationId,
+          endpointId,
+          monitorId,
+        })),
+      );
+  }
+
+  private async readRouting(
+    db: Pick<WatchrailDatabase, 'select'>,
+    organizationId: string,
+    endpointId: string,
+  ): Promise<WebhookEndpointRoutingInput> {
+    const [endpoint] = await db
+      .select({
+        notifyOnIncident: webhookEndpoints.notifyOnIncident,
+        notifyOnRecovery: webhookEndpoints.notifyOnRecovery,
+      })
+      .from(webhookEndpoints)
+      .where(
+        and(
+          eq(webhookEndpoints.organizationId, organizationId),
+          eq(webhookEndpoints.id, endpointId),
+        ),
+      )
+      .limit(1);
+    if (!endpoint) throw new WebhookEndpointNotFoundError();
+    const routes = await db
+      .select({
+        monitorId: webhookEndpointMonitorRoutes.monitorId,
+      })
+      .from(webhookEndpointMonitorRoutes)
+      .where(
+        and(
+          eq(webhookEndpointMonitorRoutes.organizationId, organizationId),
+          eq(webhookEndpointMonitorRoutes.endpointId, endpointId),
+        ),
+      )
+      .orderBy(webhookEndpointMonitorRoutes.monitorId);
+    return {
+      monitorIds: routes.map((route) => route.monitorId),
+      notifyOnIncident: endpoint.notifyOnIncident,
+      notifyOnRecovery: endpoint.notifyOnRecovery,
+    };
+  }
+}
+
+function sameRouting(
+  left: WebhookEndpointRoutingInput,
+  right: WebhookEndpointRoutingInput,
+): boolean {
+  const rightMonitorIds = new Set(right.monitorIds);
+  return (
+    left.notifyOnIncident === right.notifyOnIncident &&
+    left.notifyOnRecovery === right.notifyOnRecovery &&
+    left.monitorIds.length === right.monitorIds.length &&
+    left.monitorIds.every((monitorId) => rightMonitorIds.has(monitorId))
+  );
 }
 
 function parseSettings(nameValue: string, urlValue: string): { name: string; url: string } {
@@ -259,15 +586,18 @@ function toRecord(
   endpoint: typeof webhookEndpoints.$inferSelect,
   versionNumber: number,
   url: string,
+  routing: WebhookEndpointRoutingInput,
 ): WebhookEndpointRecord {
   return {
     id: endpoint.id,
     organizationId: endpoint.organizationId,
+    projectId: endpoint.projectId,
     name: endpoint.name,
     enabled: endpoint.enabled,
     versionNumber,
     url,
     createdAt: endpoint.createdAt,
     updatedAt: endpoint.updatedAt,
+    routing,
   };
 }

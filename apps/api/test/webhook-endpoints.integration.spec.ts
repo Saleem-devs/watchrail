@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { type INestApplication } from '@nestjs/common';
 import { getDrizzleToken } from '@nestjs/drizzle';
@@ -9,6 +10,7 @@ import {
   createDatabaseConnection,
   migrateDatabase,
   MonitorRepository,
+  ProjectRepository,
   notificationDeliveries,
   notificationEvents,
   ScheduledRoundRepository,
@@ -19,7 +21,12 @@ import {
   type AuthoritativeCheckResult,
 } from '@watchrail/db';
 import type { WatchrailDatabase } from '@watchrail/db';
-import { createMonitor, EMPTY_ASSERTION_EVALUATION } from '@watchrail/domain';
+import {
+  createMonitor,
+  EMPTY_ASSERTION_CONFIGURATION,
+  EMPTY_ASSERTION_EVALUATION,
+  parseNewProject,
+} from '@watchrail/domain';
 import {
   decryptWebhookSigningSecret,
   encryptWebhookSigningSecret,
@@ -70,7 +77,7 @@ describe('webhook endpoint API', () => {
   }, 60_000);
 
   beforeEach(async () => {
-    await database.$client.query('truncate webhook_endpoints, monitors cascade');
+    await database.$client.query('truncate webhook_endpoints, projects cascade');
   });
 
   afterAll(async () => {
@@ -372,6 +379,214 @@ describe('webhook endpoint API', () => {
       expect(JSON.stringify(response.body)).not.toContain(sentinel);
     }
     expect(await versions(endpoint.id)).toHaveLength(1);
+  });
+
+  it('scopes new endpoints to a project and routes incident events only to selected monitors', async () => {
+    const projects = new ProjectRepository(database);
+    const primaryProject = await projects.create(
+      DEVELOPMENT_REQUEST_CONTEXT.organizationId,
+      parseNewProject({ name: 'Primary services', slug: 'primary-services' }),
+    );
+    const otherProject = await projects.create(
+      DEVELOPMENT_REQUEST_CONTEXT.organizationId,
+      parseNewProject({ name: 'Other services', slug: 'other-services' }),
+    );
+    const repository = new MonitorRepository(database);
+    const routedMonitor = await repository.create(
+      DEVELOPMENT_REQUEST_CONTEXT.organizationId,
+      randomUUID(),
+      createMonitor({ name: 'Routed API', url: 'https://routed.example.com/health' }),
+      [],
+      EMPTY_ASSERTION_CONFIGURATION,
+      primaryProject.id,
+    );
+    const unroutedMonitor = await repository.create(
+      DEVELOPMENT_REQUEST_CONTEXT.organizationId,
+      randomUUID(),
+      createMonitor({ name: 'Unrouted API', url: 'https://other.example.com/health' }),
+      [],
+      EMPTY_ASSERTION_CONFIGURATION,
+      primaryProject.id,
+    );
+    const foreignProjectMonitor = await repository.create(
+      DEVELOPMENT_REQUEST_CONTEXT.organizationId,
+      randomUUID(),
+      createMonitor({ name: 'Foreign project API', url: 'https://foreign.example.com/health' }),
+      [],
+      EMPTY_ASSERTION_CONFIGURATION,
+      otherProject.id,
+    );
+
+    const invalid = await request(app.getHttpServer())
+      .post('/api/webhook-endpoints')
+      .send({
+        name: 'Invalid routing',
+        url: 'https://hooks.example.com/invalid',
+        signingSecret: sentinel,
+        projectId: primaryProject.id,
+        routing: {
+          monitorIds: [foreignProjectMonitor.id],
+          notifyOnIncident: true,
+          notifyOnRecovery: true,
+        },
+      })
+      .expect(400);
+    expect(invalid.body).toMatchObject({
+      code: 'VALIDATION_FAILED',
+      fields: { monitorIds: [expect.any(String)] },
+    });
+
+    const response = await request(app.getHttpServer())
+      .post('/api/webhook-endpoints')
+      .send({
+        name: 'Primary project alerts',
+        url: 'https://hooks.example.com/primary',
+        signingSecret: sentinel,
+        projectId: primaryProject.id,
+        routing: {
+          monitorIds: [routedMonitor.id],
+          notifyOnIncident: true,
+          notifyOnRecovery: false,
+        },
+      })
+      .expect(201);
+    expect(response.body.data).toMatchObject({
+      projectId: primaryProject.id,
+      routing: {
+        monitorIds: [routedMonitor.id],
+        notifyOnIncident: true,
+        notifyOnRecovery: false,
+      },
+    });
+    const endpointId = response.body.data.id as string;
+    const listed = await request(app.getHttpServer())
+      .get(`/api/webhook-endpoints?projectId=${primaryProject.id}`)
+      .expect(200);
+    expect(listed.body.data).toHaveLength(1);
+    const otherList = await request(app.getHttpServer())
+      .get(`/api/webhook-endpoints?projectId=${otherProject.id}`)
+      .expect(200);
+    expect(otherList.body.data).toEqual([]);
+
+    for (const monitorId of [routedMonitor.id, unroutedMonitor.id]) {
+      await completeScheduled(monitorId, unhealthy());
+      await completeScheduled(monitorId, unhealthy());
+      await completeScheduled(monitorId, unhealthy());
+    }
+    expect(
+      await database
+        .select()
+        .from(notificationDeliveries)
+        .where(eq(notificationDeliveries.endpointId, endpointId)),
+    ).toHaveLength(1);
+    await completeScheduled(routedMonitor.id, healthy());
+    expect(
+      await database
+        .select()
+        .from(notificationDeliveries)
+        .where(eq(notificationDeliveries.endpointId, endpointId)),
+    ).toHaveLength(1);
+
+    const updated = await request(app.getHttpServer())
+      .patch(`/api/webhook-endpoints/${endpointId}/configuration`)
+      .send({
+        name: 'Primary project alerts v2',
+        url: 'https://hooks.example.com/primary-v2',
+        signingSecret: { retain: true },
+        routing: {
+          monitorIds: [unroutedMonitor.id],
+          notifyOnIncident: true,
+          notifyOnRecovery: true,
+        },
+      })
+      .expect(200);
+    expect(updated.body.data).toMatchObject({
+      name: 'Primary project alerts v2',
+      url: 'https://hooks.example.com/primary-v2',
+      versionNumber: 2,
+    });
+    expect(updated.body.data.routing).toEqual({
+      monitorIds: [unroutedMonitor.id],
+      notifyOnIncident: true,
+      notifyOnRecovery: true,
+    });
+    await request(app.getHttpServer())
+      .patch(`/api/webhook-endpoints/${endpointId}/configuration`)
+      .send({
+        name: 'Must roll back',
+        url: 'https://hooks.example.com/must-not-persist',
+        signingSecret: { retain: true },
+        routing: {
+          monitorIds: [foreignProjectMonitor.id],
+          notifyOnIncident: true,
+          notifyOnRecovery: true,
+        },
+      })
+      .expect(400);
+    const unchanged = await request(app.getHttpServer())
+      .get(`/api/webhook-endpoints/${endpointId}`)
+      .expect(200);
+    expect(unchanged.body.data).toMatchObject({
+      name: updated.body.data.name,
+      url: updated.body.data.url,
+      versionNumber: updated.body.data.versionNumber,
+      routing: updated.body.data.routing,
+    });
+  });
+
+  it('preserves event preferences when project routing has no monitors', async () => {
+    const project = await new ProjectRepository(database).create(
+      DEVELOPMENT_REQUEST_CONTEXT.organizationId,
+      parseNewProject({ name: 'Quiet services', slug: 'quiet-services' }),
+    );
+    const created = await request(app.getHttpServer())
+      .post('/api/webhook-endpoints')
+      .send({
+        name: 'Recovery-only channel',
+        url: 'https://hooks.example.com/recovery-only',
+        signingSecret: sentinel,
+        projectId: project.id,
+        routing: {
+          monitorIds: [],
+          notifyOnIncident: false,
+          notifyOnRecovery: true,
+        },
+      })
+      .expect(201);
+    expect(created.body.data.routing).toEqual({
+      monitorIds: [],
+      notifyOnIncident: false,
+      notifyOnRecovery: true,
+    });
+
+    const reloaded = await request(app.getHttpServer())
+      .get(`/api/webhook-endpoints/${created.body.data.id as string}`)
+      .expect(200);
+    expect(reloaded.body.data.routing).toEqual(created.body.data.routing);
+
+    const updated = await request(app.getHttpServer())
+      .patch(`/api/webhook-endpoints/${created.body.data.id as string}/configuration`)
+      .send({
+        name: created.body.data.name,
+        url: created.body.data.url,
+        signingSecret: { retain: true },
+        routing: {
+          monitorIds: [],
+          notifyOnIncident: true,
+          notifyOnRecovery: false,
+        },
+      })
+      .expect(200);
+    expect(updated.body.data.routing).toEqual({
+      monitorIds: [],
+      notifyOnIncident: true,
+      notifyOnRecovery: false,
+    });
+
+    const reloadedAfterEdit = await request(app.getHttpServer())
+      .get(`/api/webhook-endpoints/${created.body.data.id as string}`)
+      .expect(200);
+    expect(reloadedAfterEdit.body.data.routing).toEqual(updated.body.data.routing);
   });
 
   it('reads paginated delivery history with immutable target context and no durable secrets', async () => {

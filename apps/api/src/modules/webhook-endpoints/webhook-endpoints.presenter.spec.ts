@@ -10,15 +10,22 @@ describe('webhook endpoint presenters', () => {
     const endpoint = {
       id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       organizationId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      projectId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
       name: 'Operations',
       url: 'https://hooks.example.com/watchrail',
       enabled: true,
       versionNumber: 2,
       createdAt: new Date('2026-10-19T00:00:00.000Z'),
       updatedAt: new Date('2026-10-19T00:01:00.000Z'),
+      routing: {
+        monitorIds: ['dddddddd-dddd-4ddd-8ddd-dddddddddddd'],
+        notifyOnIncident: true,
+        notifyOnRecovery: false,
+      },
     } satisfies WebhookEndpointRecord;
     expect(presentWebhookEndpoint(endpoint)).toEqual({
       id: endpoint.id,
+      projectId: endpoint.projectId,
       name: endpoint.name,
       url: endpoint.url,
       enabled: true,
@@ -26,6 +33,7 @@ describe('webhook endpoint presenters', () => {
       signingSecret: { hasValue: true },
       createdAt: '2026-10-19T00:00:00.000Z',
       updatedAt: '2026-10-19T00:01:00.000Z',
+      routing: endpoint.routing,
     });
     expect(presentWebhookEndpoint(endpoint)).not.toHaveProperty('organizationId');
   });

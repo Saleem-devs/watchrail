@@ -44,6 +44,10 @@ export function listWorkspaceSecrets(includeArchived = false): Promise<Workspace
   return request(`/api/workspace-secrets${query}`);
 }
 
+export function findWorkspaceSecret(secretId: string): Promise<WorkspaceSecret> {
+  return request(`/api/workspace-secrets/${encodeURIComponent(secretId)}`);
+}
+
 export function createWorkspaceSecret(input: {
   key: string;
   description: string | null;

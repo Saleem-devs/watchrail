@@ -17,9 +17,13 @@ import type { RequestWithContext } from '../../auth/request-context.js';
 import {
   createWebhookEndpointSchema,
   setWebhookEndpointEnabledSchema,
+  updateWebhookEndpointConfigurationSchema,
+  updateWebhookEndpointRoutingSchema,
   updateWebhookEndpointSettingsSchema,
   type CreateWebhookEndpointInput,
   type SetWebhookEndpointEnabledInput,
+  type UpdateWebhookEndpointConfigurationInput,
+  type UpdateWebhookEndpointRoutingInput,
   type UpdateWebhookEndpointSettingsInput,
 } from './dto/webhook-endpoint-input.js';
 import {
@@ -55,9 +59,18 @@ export class WebhookEndpointsController {
 
   @Get()
   @RequirePermission(PERMISSIONS.WEBHOOK_READ)
-  async list(@Req() request: RequestWithContext) {
+  async list(
+    @Req() request: RequestWithContext,
+    @Query(
+      'projectId',
+      new ZodValidationPipe(createWebhookEndpointSchema.shape.projectId, 'projectId'),
+    )
+    projectId?: string,
+  ) {
     return {
-      data: (await this.endpoints.list(request.watchrailContext)).map(presentWebhookEndpoint),
+      data: (await this.endpoints.list(request.watchrailContext, projectId)).map(
+        presentWebhookEndpoint,
+      ),
     };
   }
 
@@ -115,6 +128,21 @@ export class WebhookEndpointsController {
     };
   }
 
+  @Patch(':endpointId/configuration')
+  @RequirePermission(PERMISSIONS.WEBHOOK_MANAGE)
+  async updateConfiguration(
+    @Req() request: RequestWithContext,
+    @Param('endpointId', ParseUUIDPipe) endpointId: string,
+    @Body(new ZodValidationPipe(updateWebhookEndpointConfigurationSchema, 'body'))
+    input: UpdateWebhookEndpointConfigurationInput,
+  ) {
+    return {
+      data: presentWebhookEndpoint(
+        await this.endpoints.updateConfiguration(request.watchrailContext, endpointId, input),
+      ),
+    };
+  }
+
   @Patch(':endpointId/enabled')
   @RequirePermission(PERMISSIONS.WEBHOOK_MANAGE)
   async setEnabled(
@@ -126,6 +154,21 @@ export class WebhookEndpointsController {
     return {
       data: presentWebhookEndpoint(
         await this.endpoints.setEnabled(request.watchrailContext, endpointId, input),
+      ),
+    };
+  }
+
+  @Patch(':endpointId/routing')
+  @RequirePermission(PERMISSIONS.WEBHOOK_MANAGE)
+  async updateRouting(
+    @Req() request: RequestWithContext,
+    @Param('endpointId', ParseUUIDPipe) endpointId: string,
+    @Body(new ZodValidationPipe(updateWebhookEndpointRoutingSchema, 'body'))
+    input: UpdateWebhookEndpointRoutingInput,
+  ) {
+    return {
+      data: presentWebhookEndpoint(
+        await this.endpoints.updateRouting(request.watchrailContext, endpointId, input),
       ),
     };
   }

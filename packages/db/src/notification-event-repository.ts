@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull, or } from 'drizzle-orm';
 import { createWebhookNotification } from '@watchrail/contracts';
 import type { WatchrailDatabase } from './client.js';
 import {
   monitors,
   notificationDeliveries,
   notificationEvents,
+  webhookEndpointMonitorRoutes,
   webhookEndpoints,
   webhookEndpointVersions,
 } from './schema.js';
@@ -33,7 +34,7 @@ export async function stageIncidentNotification(
 ): Promise<void> {
   if (transition.type === 'NONE') return;
   const [monitor] = await tx
-    .select({ name: monitors.name })
+    .select({ name: monitors.name, projectId: monitors.projectId })
     .from(monitors)
     .where(
       and(
@@ -71,6 +72,14 @@ export async function stageIncidentNotification(
     .select({ endpointId: webhookEndpoints.id, endpointVersionId: webhookEndpointVersions.id })
     .from(webhookEndpoints)
     .leftJoin(
+      webhookEndpointMonitorRoutes,
+      and(
+        eq(webhookEndpointMonitorRoutes.organizationId, webhookEndpoints.organizationId),
+        eq(webhookEndpointMonitorRoutes.endpointId, webhookEndpoints.id),
+        eq(webhookEndpointMonitorRoutes.monitorId, transition.monitorId),
+      ),
+    )
+    .leftJoin(
       webhookEndpointVersions,
       and(
         eq(webhookEndpointVersions.organizationId, webhookEndpoints.organizationId),
@@ -82,6 +91,16 @@ export async function stageIncidentNotification(
       and(
         eq(webhookEndpoints.organizationId, transition.organizationId),
         eq(webhookEndpoints.enabled, true),
+        or(
+          isNull(webhookEndpoints.projectId),
+          and(
+            eq(webhookEndpoints.projectId, monitor.projectId),
+            eq(webhookEndpointMonitorRoutes.monitorId, transition.monitorId),
+            transition.type === 'OPENED'
+              ? eq(webhookEndpoints.notifyOnIncident, true)
+              : eq(webhookEndpoints.notifyOnRecovery, true),
+          ),
+        ),
       ),
     );
   if (endpoints.some((endpoint) => endpoint.endpointVersionId === null)) {
