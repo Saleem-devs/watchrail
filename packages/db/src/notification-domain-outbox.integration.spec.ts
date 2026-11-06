@@ -10,6 +10,7 @@ import {
 } from './check-execution-repository.js';
 import { createDatabaseConnection, type DatabaseConnection } from './client.js';
 import { ManualRoundRepository } from './manual-round-repository.js';
+import { MaintenanceWindowRepository } from './maintenance-window-repository.js';
 import { migrateDatabase } from './migration.js';
 import { MonitorRepository } from './monitor-repository.js';
 import { NotificationDeliveryRepository } from './notification-delivery-repository.js';
@@ -42,6 +43,7 @@ describe('notification domain outbox', () => {
   let container: StartedPostgreSqlContainer;
   let connection: DatabaseConnection;
   let monitorId: string;
+  let projectId: string;
 
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:18.0-alpine').start();
@@ -56,6 +58,7 @@ describe('notification domain outbox', () => {
       createMonitor({ name: 'Payments API', url: 'https://example.com/health' }),
     );
     monitorId = monitor.id;
+    projectId = monitor.projectId;
   });
 
   afterAll(async () => {
@@ -289,6 +292,61 @@ describe('notification domain outbox', () => {
       repository.acknowledgeDelivered(resolved!.id, resolved!.claimToken, 204),
     ).resolves.toBe(true);
     await expect(repository.claimNext()).resolves.toBeNull();
+  });
+
+  it('suppresses an already-staged delivery when maintenance is active at dispatch time', async () => {
+    await createTestEndpoint(organizationId, 'Operations', 'https://hooks.example.com/events');
+    await openIncident();
+    const clock = await connection.pool.query<{ at: Date }>('select clock_timestamp() as at');
+    const at = clock.rows[0]!.at;
+    await new MaintenanceWindowRepository(connection.db).create(
+      organizationId,
+      projectId,
+      '11111111-1111-4111-8111-111111111111',
+      {
+        name: 'Planned notification pause',
+        schedule: {
+          type: 'ONE_TIME',
+          startsAt: new Date(at.getTime() - 60_000).toISOString(),
+          endsAt: new Date(at.getTime() + 60 * 60_000).toISOString(),
+        },
+        target: { type: 'MONITORS', monitorIds: [monitorId] },
+        effects: {
+          suppressNotifications: true,
+          suppressIncidentCreation: false,
+          excludeFromUptime: false,
+          publishToStatusPage: false,
+        },
+      },
+    );
+    const repository = new NotificationDeliveryRepository(connection.db);
+    const claimed = await repository.claimNext();
+    expect(claimed).not.toBeNull();
+
+    await expect(
+      repository.applyMaintenancePolicy(
+        claimed!.id,
+        claimed!.claimToken,
+        organizationId,
+        monitorId,
+      ),
+    ).resolves.toBe('SUPPRESSED');
+
+    const [suppressed] = await connection.db
+      .select()
+      .from(notificationDeliveries)
+      .where(eq(notificationDeliveries.id, claimed!.id));
+    expect(suppressed).toMatchObject({
+      claimToken: null,
+      suppressedAt: expect.any(Date),
+      suppressionReason: 'MAINTENANCE_WINDOW',
+      deliveredAt: null,
+      deadAt: null,
+    });
+    await expect(repository.claimNext()).resolves.toBeNull();
+    await expect(
+      repository.acknowledgeDelivered(claimed!.id, claimed!.claimToken, 204),
+    ).resolves.toBe(false);
   });
 
   it('lets concurrent claimers take distinct due deliveries without blocking', async () => {

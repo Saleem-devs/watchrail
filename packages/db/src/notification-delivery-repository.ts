@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import type { WatchrailDatabase } from './client.js';
+import { activeMaintenancePolicyForMonitor } from './maintenance-policy.js';
 
 export interface ClaimedNotificationDelivery {
   id: string;
   organizationId: string;
   eventId: string;
+  monitorId: string;
   endpointId: string;
   endpointVersionId: string;
   endpointVersionNumber: number;
@@ -16,6 +18,8 @@ export interface ClaimedNotificationDelivery {
   attemptCount: number;
   lastAttemptAt: Date;
 }
+
+export type NotificationDeliveryMaintenanceDecision = 'CONTINUE' | 'SUPPRESSED' | 'LOST_CLAIM';
 
 export class NotificationDeliveryRepository {
   constructor(private readonly db: WatchrailDatabase) {}
@@ -28,6 +32,7 @@ export class NotificationDeliveryRepository {
         id: string;
         organizationId: string;
         eventId: string;
+        monitorId: string;
         endpointId: string;
         endpointVersionId: string;
         endpointVersionNumber: number;
@@ -41,7 +46,8 @@ export class NotificationDeliveryRepository {
     >(sql`
       with candidate as (
         select id from notification_deliveries
-        where delivered_at is null and dead_at is null and available_at <= clock_timestamp()
+        where delivered_at is null and dead_at is null and suppressed_at is null
+          and available_at <= clock_timestamp()
         order by available_at, created_at, id for update skip locked limit 1
       ), claimed as (
         update notification_deliveries delivery set
@@ -53,7 +59,8 @@ export class NotificationDeliveryRepository {
         returning delivery.*
       )
       select claimed.id, claimed.organization_id as "organizationId",
-        claimed.event_id as "eventId", claimed.endpoint_id as "endpointId",
+        claimed.event_id as "eventId", event.monitor_id as "monitorId",
+        claimed.endpoint_id as "endpointId",
         claimed.endpoint_version_id as "endpointVersionId",
         version.version_number as "endpointVersionNumber", version.url,
         version.signing_secret_envelope as "signingSecretEnvelope", event.payload,
@@ -72,10 +79,50 @@ export class NotificationDeliveryRepository {
     };
   }
 
+  async applyMaintenancePolicy(
+    id: string,
+    token: string,
+    organizationId: string,
+    monitorId: string,
+  ): Promise<NotificationDeliveryMaintenanceDecision> {
+    return this.db.transaction(async (tx) => {
+      const claimed = await tx.execute<{ dispatchAt: string }>(sql`
+        select date_trunc('milliseconds', clock_timestamp()) as "dispatchAt"
+        from notification_deliveries
+        where id=${id}::uuid and organization_id=${organizationId}::uuid
+          and claim_token=${token}::uuid and delivered_at is null and dead_at is null
+          and suppressed_at is null
+        for update
+      `);
+      const row = claimed.rows[0];
+      if (!row) return 'LOST_CLAIM';
+      const policy = await activeMaintenancePolicyForMonitor(
+        tx,
+        organizationId,
+        monitorId,
+        new Date(row.dispatchAt),
+      );
+      if (!policy.effects.suppressNotifications) return 'CONTINUE';
+      const suppressed = await tx.execute<{ id: string }>(sql`
+        update notification_deliveries set
+          claim_token=null,
+          suppressed_at=${new Date(row.dispatchAt)},
+          suppression_reason='MAINTENANCE_WINDOW',
+          last_error_code=null,
+          last_http_status=null
+        where id=${id}::uuid and organization_id=${organizationId}::uuid
+          and claim_token=${token}::uuid and delivered_at is null and dead_at is null
+          and suppressed_at is null
+        returning id
+      `);
+      return suppressed.rowCount === 1 ? 'SUPPRESSED' : 'LOST_CLAIM';
+    });
+  }
+
   async acknowledgeDelivered(id: string, token: string, httpStatus: number): Promise<boolean> {
     status(httpStatus);
     return this.finish(
-      sql`update notification_deliveries set delivered_at=clock_timestamp(), claim_token=null, last_http_status=${httpStatus}, last_error_code=null where id=${id}::uuid and claim_token=${token}::uuid and delivered_at is null and dead_at is null returning id`,
+      sql`update notification_deliveries set delivered_at=clock_timestamp(), claim_token=null, last_http_status=${httpStatus}, last_error_code=null where id=${id}::uuid and claim_token=${token}::uuid and delivered_at is null and dead_at is null and suppressed_at is null returning id`,
     );
   }
   async releaseForRetry(
@@ -89,7 +136,7 @@ export class NotificationDeliveryRepository {
     code(errorCode);
     if (httpStatus !== undefined) status(httpStatus);
     return this.finish(
-      sql`update notification_deliveries set claim_token=null, available_at=clock_timestamp()+(${retryDelayMs}*interval '1 millisecond'), last_error_code=${errorCode}, last_http_status=${httpStatus ?? null} where id=${id}::uuid and claim_token=${token}::uuid and delivered_at is null and dead_at is null returning id`,
+      sql`update notification_deliveries set claim_token=null, available_at=clock_timestamp()+(${retryDelayMs}*interval '1 millisecond'), last_error_code=${errorCode}, last_http_status=${httpStatus ?? null} where id=${id}::uuid and claim_token=${token}::uuid and delivered_at is null and dead_at is null and suppressed_at is null returning id`,
     );
   }
   async markDead(
@@ -103,7 +150,7 @@ export class NotificationDeliveryRepository {
     code(errorCode);
     if (httpStatus !== undefined) status(httpStatus);
     return this.finish(
-      sql`update notification_deliveries set claim_token=null, dead_at=clock_timestamp(), dead_reason=${reason}, last_error_code=${errorCode}, last_http_status=${httpStatus ?? null} where id=${id}::uuid and claim_token=${token}::uuid and delivered_at is null and dead_at is null returning id`,
+      sql`update notification_deliveries set claim_token=null, dead_at=clock_timestamp(), dead_reason=${reason}, last_error_code=${errorCode}, last_http_status=${httpStatus ?? null} where id=${id}::uuid and claim_token=${token}::uuid and delivered_at is null and dead_at is null and suppressed_at is null returning id`,
     );
   }
   private async finish(query: ReturnType<typeof sql>): Promise<boolean> {

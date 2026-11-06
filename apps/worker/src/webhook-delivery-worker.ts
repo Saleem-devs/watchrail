@@ -11,7 +11,7 @@ import {
 } from '@watchrail/webhook-security';
 
 export type WebhookDeliveryCycleResult =
-  'IDLE' | 'DELIVERED' | 'RETRY_SCHEDULED' | 'DEAD' | 'LOST_CLAIM';
+  'IDLE' | 'DELIVERED' | 'SUPPRESSED' | 'RETRY_SCHEDULED' | 'DEAD' | 'LOST_CLAIM';
 
 export interface WebhookDeliveryWorkerOptions {
   leaseDurationMs: number;
@@ -23,6 +23,12 @@ export interface WebhookDeliveryWorkerOptions {
 
 export interface NotificationDeliveryStore {
   claimNext(leaseDurationMs: number): Promise<ClaimedNotificationDelivery | null>;
+  applyMaintenancePolicy(
+    id: string,
+    token: string,
+    organizationId: string,
+    monitorId: string,
+  ): Promise<'CONTINUE' | 'SUPPRESSED' | 'LOST_CLAIM'>;
   acknowledgeDelivered(id: string, token: string, httpStatus: number): Promise<boolean>;
   releaseForRetry(
     id: string,
@@ -70,7 +76,8 @@ export class WebhookDeliveryWorker {
       payload = parseWebhookNotification(delivery.payload);
       if (
         payload.eventId !== delivery.eventId ||
-        payload.organizationId !== delivery.organizationId
+        payload.organizationId !== delivery.organizationId ||
+        payload.monitor.id !== delivery.monitorId
       )
         throw new InvalidWebhookNotificationError();
     } catch (error) {
@@ -78,6 +85,14 @@ export class WebhookDeliveryWorker {
         return this.retryOrExhaust(delivery, 'INTERNAL_ERROR');
       return this.dead(delivery, 'INVALID_CONTRACT', 'INVALID_CONTRACT');
     }
+
+    const maintenance = await this.deliveries.applyMaintenancePolicy(
+      delivery.id,
+      delivery.claimToken,
+      delivery.organizationId,
+      delivery.monitorId,
+    );
+    if (maintenance !== 'CONTINUE') return maintenance;
 
     let secret: string;
     try {

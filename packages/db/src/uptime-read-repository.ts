@@ -164,6 +164,8 @@ export class UptimeReadRepository {
         const maintenanceByMonitor = new Map<string, MaintenanceExclusionInterval[]>();
         for (const { monitorId: id, projectId, state } of states) {
           if (!state || state.currentState === 'EXCLUDED') continue;
+          // Historical buckets are immutable. Policy versions are evaluated only for
+          // the unaccounted tail, so later edits or archival cannot rewrite uptime.
           const from = new Date(Math.max(start.getTime(), state.accountedThrough.getTime()));
           maintenanceByMonitor.set(
             id,

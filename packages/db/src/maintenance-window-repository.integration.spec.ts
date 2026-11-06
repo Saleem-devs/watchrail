@@ -7,6 +7,7 @@ import {
   createMonitor,
   EMPTY_ASSERTION_CONFIGURATION,
   type MaintenanceWindowEffects,
+  type MaintenanceWindowSchedule,
 } from '@watchrail/domain';
 import { accrueAvailability } from './availability-repository.js';
 import { createDatabaseConnection, type DatabaseConnection } from './client.js';
@@ -23,6 +24,7 @@ import {
   monitorAvailabilityDaily,
   monitorAvailabilityState,
 } from './schema.js';
+import { UptimeReadRepository } from './uptime-read-repository.js';
 
 const organizationA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const organizationB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -182,6 +184,179 @@ describe('maintenance windows', () => {
     expect(daily.reduce((total, row) => total + row.availableMs, 0)).toBe(60 * 60 * 1_000);
   });
 
+  it('keeps accrued uptime immutable across an active edit and archival', async () => {
+    const monitor = await createMonitorFor(organizationA, 'Immutable uptime');
+    const clock = await databaseClock();
+    const origin = new Date(clock.getTime() - 2 * 60_000);
+    const created = await windows.create(
+      organizationA,
+      monitor.projectId,
+      actorId,
+      input({
+        schedule: oneTime(origin, new Date(clock.getTime() + 60 * 60_000)),
+        effects: effects({ excludeFromUptime: true }),
+      }),
+    );
+    await connection.db
+      .update(monitorAvailabilityState)
+      .set({
+        currentState: 'AVAILABLE',
+        stateSince: origin,
+        accountedThrough: origin,
+        trackingStartedAt: origin,
+        enabledSince: origin,
+        updatedAt: origin,
+      })
+      .where(eq(monitorAvailabilityState.monitorId, monitor.id));
+
+    await accrueTo(monitor.id, await databaseClock());
+    const [beforeEdit] = await connection.db
+      .select()
+      .from(monitorAvailabilityDaily)
+      .where(eq(monitorAvailabilityDaily.monitorId, monitor.id));
+    expect(beforeEdit!.excludedMs).toBeGreaterThan(0);
+
+    const updated = await windows.update(
+      organizationA,
+      monitor.projectId,
+      created.id,
+      actorId,
+      input({
+        schedule: created.schedule,
+        effects: effects({ excludeFromUptime: false, suppressNotifications: true }),
+      }),
+    );
+    expect(updated.effectiveAt.getTime()).toBeGreaterThanOrEqual(created.effectiveAt.getTime());
+    await accrueTo(monitor.id, await databaseClock());
+    const [atEditBoundary] = await connection.db
+      .select()
+      .from(monitorAvailabilityDaily)
+      .where(eq(monitorAvailabilityDaily.monitorId, monitor.id));
+    expect(atEditBoundary!.excludedMs).toBeGreaterThanOrEqual(beforeEdit!.excludedMs);
+    const archived = await windows.archive(organizationA, monitor.projectId, created.id, actorId);
+    expect(archived.archivedAt).not.toBeNull();
+    await accrueTo(monitor.id, await databaseClock());
+
+    const [afterArchive] = await connection.db
+      .select()
+      .from(monitorAvailabilityDaily)
+      .where(eq(monitorAvailabilityDaily.monitorId, monitor.id));
+    expect(afterArchive!.excludedMs).toBe(atEditBoundary!.excludedMs);
+    expect(afterArchive!.availableMs).toBeGreaterThanOrEqual(atEditBoundary!.availableMs);
+    const historical = await new UptimeReadRepository(connection.db).currentForMonitor(
+      organizationA,
+      monitor.id,
+      'TODAY',
+    );
+    expect(historical.durations.excludedMs).toBe(atEditBoundary!.excludedMs);
+    expect(
+      historical.durations.availableMs +
+        historical.durations.unavailableMs +
+        historical.durations.unknownMs +
+        historical.durations.excludedMs,
+    ).toBe(new Date(historical.window.end).getTime() - origin.getTime());
+  });
+
+  it('uses identical DST and overlapping-recurrence semantics for lookup and uptime enumeration', async () => {
+    const monitor = await createMonitorFor(organizationA, 'Recurring policy');
+    const spring = await windows.create(
+      organizationA,
+      monitor.projectId,
+      actorId,
+      input({
+        name: 'Spring transition',
+        schedule: recurring('America/New_York', '02:30', [0], 30, '2026-03-01', '2026-03-15'),
+      }),
+    );
+    const fall = await windows.create(
+      organizationA,
+      monitor.projectId,
+      actorId,
+      input({
+        name: 'Fall transition',
+        schedule: recurring('America/New_York', '01:30', [0], 30, '2026-10-25', '2026-11-08'),
+      }),
+    );
+    const overlapping = await windows.create(
+      organizationA,
+      monitor.projectId,
+      actorId,
+      input({
+        name: 'Overlapping recurrence',
+        schedule: recurring('UTC', '00:00', [1, 2], 2 * 24 * 60, '2026-11-01', '2026-11-30'),
+      }),
+    );
+    await connection.db
+      .update(maintenanceWindowVersions)
+      .set({ effectiveAt: new Date('2026-01-01T00:00:00.000Z') });
+    const policies = new MaintenancePolicyRepository(connection.db);
+
+    const springPolicy = await policies.activeForMonitor(
+      organizationA,
+      monitor.projectId,
+      monitor.id,
+      new Date('2026-03-08T07:35:00.000Z'),
+    );
+    expect(springPolicy.windows).toEqual([
+      expect.objectContaining({
+        id: spring.id,
+        occurrence: {
+          startsAt: new Date('2026-03-08T07:30:00.000Z'),
+          endsAt: new Date('2026-03-08T08:00:00.000Z'),
+        },
+      }),
+    ]);
+    expect(
+      await policies.exclusionIntervalsForMonitor(
+        organizationA,
+        monitor.projectId,
+        monitor.id,
+        new Date('2026-03-08T00:00:00.000Z'),
+        new Date('2026-03-09T00:00:00.000Z'),
+      ),
+    ).toEqual([
+      {
+        startsAt: new Date('2026-03-08T07:30:00.000Z'),
+        endsAt: new Date('2026-03-08T08:00:00.000Z'),
+      },
+    ]);
+    expect(
+      (
+        await policies.activeForMonitor(
+          organizationA,
+          monitor.projectId,
+          monitor.id,
+          new Date('2026-11-01T05:35:00.000Z'),
+        )
+      ).windows.map(({ id }) => id),
+    ).toContain(fall.id);
+    expect(
+      (
+        await policies.activeForMonitor(
+          organizationA,
+          monitor.projectId,
+          monitor.id,
+          new Date('2026-11-01T06:35:00.000Z'),
+        )
+      ).windows.map(({ id }) => id),
+    ).not.toContain(fall.id);
+    expect(
+      await policies.exclusionIntervalsForMonitor(
+        organizationA,
+        monitor.projectId,
+        monitor.id,
+        new Date('2026-11-02T00:00:00.000Z'),
+        new Date('2026-11-05T00:00:00.000Z'),
+      ),
+    ).toEqual([
+      {
+        startsAt: new Date('2026-11-02T00:00:00.000Z'),
+        endsAt: new Date('2026-11-05T00:00:00.000Z'),
+      },
+    ]);
+    expect(overlapping.id).not.toBe(spring.id);
+  });
+
   async function createMonitorFor(organizationId: string, name: string) {
     return monitors.create(
       organizationId,
@@ -191,12 +366,28 @@ describe('maintenance windows', () => {
       }),
     );
   }
+
+  async function databaseClock() {
+    const result = await connection.pool.query<{ at: Date }>('select clock_timestamp() as at');
+    return result.rows[0]!.at;
+  }
+
+  async function accrueTo(monitorId: string, at: Date) {
+    await connection.db.transaction(async (tx) => {
+      const [state] = await tx
+        .select()
+        .from(monitorAvailabilityState)
+        .where(eq(monitorAvailabilityState.monitorId, monitorId))
+        .for('update');
+      await accrueAvailability(tx, state!, at);
+    });
+  }
 });
 
 function input(
   overrides: Partial<{
     name: string;
-    schedule: ReturnType<typeof oneTime>;
+    schedule: MaintenanceWindowSchedule;
     target: { type: 'PROJECT' } | { type: 'MONITORS'; monitorIds: string[] };
     effects: ReturnType<typeof effects>;
   }> = {},
@@ -207,6 +398,25 @@ function input(
     schedule: overrides.schedule ?? oneTime(now, new Date(now.getTime() + 30 * 60 * 1_000)),
     target: overrides.target ?? ({ type: 'PROJECT' } as const),
     effects: overrides.effects ?? effects(),
+  };
+}
+
+function recurring(
+  timezone: string,
+  localTime: string,
+  daysOfWeek: number[],
+  durationMinutes: number,
+  startsOn: string,
+  endsOn: string | null,
+): MaintenanceWindowSchedule {
+  return {
+    type: 'RECURRING',
+    timezone,
+    localTime,
+    daysOfWeek,
+    durationMinutes,
+    startsOn,
+    endsOn,
   };
 }
 

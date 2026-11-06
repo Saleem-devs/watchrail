@@ -167,6 +167,9 @@ export async function maintenanceExclusionIntervals(
   to: Date,
 ): Promise<MaintenanceExclusionInterval[]> {
   if (to <= from) return [];
+  // Version effective times and archival boundaries are prospective policy edges.
+  // Materialized availability buckets are never rewritten; callers use these slices
+  // only for the still-unaccounted interval that begins at accountedThrough.
   const rows = await loadPolicyRows(db, organizationId, projectId);
   const intervals = rows.slices.flatMap<MaintenanceExclusionInterval>((slice) => {
     if (!slice.effects.excludeFromUptime || !targetsMonitor(slice, rows, monitorId)) return [];

@@ -61,6 +61,77 @@ describe('maintenance windows', () => {
     });
   });
 
+  it('shifts a nonexistent spring-forward time to the next valid local instant', () => {
+    const occurrences = maintenanceOccurrencesBetween(
+      {
+        type: 'RECURRING',
+        timezone: 'America/New_York',
+        localTime: '02:30',
+        daysOfWeek: [0],
+        durationMinutes: 30,
+        startsOn: '2026-03-01',
+        endsOn: '2026-03-15',
+      },
+      new Date('2026-03-08T00:00:00.000Z'),
+      new Date('2026-03-09T00:00:00.000Z'),
+    );
+    expect(occurrences).toEqual([
+      {
+        startsAt: new Date('2026-03-08T07:30:00.000Z'),
+        endsAt: new Date('2026-03-08T08:00:00.000Z'),
+      },
+    ]);
+    expect(
+      maintenanceOccurrenceAt(occurrencesSchedule('02:30', 30), occurrences[0]!.startsAt),
+    ).toEqual(occurrences[0]);
+  });
+
+  it('emits one earlier-offset occurrence for a repeated fall-back time', () => {
+    const schedule = occurrencesSchedule('01:30', 30, '2026-10-25', '2026-11-08');
+    const occurrences = maintenanceOccurrencesBetween(
+      schedule,
+      new Date('2026-11-01T00:00:00.000Z'),
+      new Date('2026-11-02T00:00:00.000Z'),
+    );
+    expect(occurrences).toEqual([
+      {
+        startsAt: new Date('2026-11-01T05:30:00.000Z'),
+        endsAt: new Date('2026-11-01T06:00:00.000Z'),
+      },
+    ]);
+    expect(maintenanceOccurrenceAt(schedule, new Date('2026-11-01T06:30:00.000Z'))).toBeNull();
+  });
+
+  it('enumerates overlapping multi-day recurrences while lookup selects the latest active start', () => {
+    const schedule = {
+      type: 'RECURRING' as const,
+      timezone: 'UTC',
+      localTime: '00:00',
+      daysOfWeek: [1, 2],
+      durationMinutes: 2 * 24 * 60,
+      startsOn: '2026-11-01',
+      endsOn: '2026-11-30',
+    };
+    const occurrences = maintenanceOccurrencesBetween(
+      schedule,
+      new Date('2026-11-02T00:00:00.000Z'),
+      new Date('2026-11-05T00:00:00.000Z'),
+    );
+    expect(occurrences).toEqual([
+      {
+        startsAt: new Date('2026-11-02T00:00:00.000Z'),
+        endsAt: new Date('2026-11-04T00:00:00.000Z'),
+      },
+      {
+        startsAt: new Date('2026-11-03T00:00:00.000Z'),
+        endsAt: new Date('2026-11-05T00:00:00.000Z'),
+      },
+    ]);
+    expect(maintenanceOccurrenceAt(schedule, new Date('2026-11-03T12:00:00.000Z'))).toEqual(
+      occurrences[1],
+    );
+  });
+
   it('returns every overlapping recurring occurrence for availability accounting', () => {
     const occurrences = maintenanceOccurrencesBetween(
       {
@@ -111,3 +182,20 @@ describe('maintenance windows', () => {
     });
   });
 });
+
+function occurrencesSchedule(
+  localTime: string,
+  durationMinutes: number,
+  startsOn = '2026-03-01',
+  endsOn = '2026-03-15',
+) {
+  return {
+    type: 'RECURRING' as const,
+    timezone: 'America/New_York',
+    localTime,
+    daysOfWeek: [0],
+    durationMinutes,
+    startsOn,
+    endsOn,
+  };
+}

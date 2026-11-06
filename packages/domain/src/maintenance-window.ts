@@ -75,17 +75,17 @@ export function maintenanceOccurrenceAt(
     const occurrence = oneTimeOccurrence(schedule);
     return occurrence.startsAt <= at && at < occurrence.endsAt ? occurrence : null;
   }
-  const iterator = CronExpressionParser.parse(cronExpression(schedule), {
-    currentDate: new Date(at.getTime() + 1),
-    tz: schedule.timezone,
-  });
-  const startsAt = iterator.prev().toDate();
-  if (!recurringDateInRange(schedule, startsAt)) return null;
-  const occurrence = {
-    startsAt,
-    endsAt: new Date(startsAt.getTime() + schedule.durationMinutes * 60_000),
-  };
-  return occurrence.startsAt <= at && at < occurrence.endsAt ? occurrence : null;
+  // cron-parser defines the recurring wall-clock contract used everywhere in Watchrail:
+  // nonexistent spring-forward times move to the next valid local instant, while an
+  // ambiguous fall-back wall time produces one occurrence at its earlier offset.
+  // Point lookup deliberately derives from the same forward enumeration used by
+  // uptime accounting so DST ambiguity cannot produce a second, contradictory event.
+  const occurrences = maintenanceOccurrencesBetween(schedule, at, new Date(at.getTime() + 1));
+  return (
+    occurrences
+      .filter((occurrence) => occurrence.startsAt <= at && at < occurrence.endsAt)
+      .at(-1) ?? null
+  );
 }
 
 export function maintenanceOccurrencesBetween(

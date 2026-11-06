@@ -133,6 +133,8 @@ describe('notifications page', () => {
       deliveredAt: null,
       deadAt: '2026-11-05T10:02:00.000Z',
       deadReason: 'MAX_ATTEMPTS',
+      suppressedAt: null,
+      suppressionReason: null,
       createdAt: '2026-11-05T10:00:00.000Z',
     } as const;
     vi.spyOn(globalThis, 'fetch')
@@ -151,6 +153,48 @@ describe('notifications page', () => {
     expect(within(section!).getByText(/HTTP_503 · HTTP 503/)).toBeInTheDocument();
     expect(section).not.toHaveTextContent('signingSecret');
     expect(section).not.toHaveTextContent('payload');
+  });
+
+  it('presents maintenance suppression as a neutral terminal delivery state', async () => {
+    const user = userEvent.setup();
+    const delivery = {
+      id: '44444444-4444-4444-8444-444444444444',
+      event: {
+        id: '55555555-5555-4555-8555-555555555555',
+        type: 'INCIDENT_OPENED',
+        occurredAt: '2026-11-05T10:00:00.000Z',
+        monitorId: monitor.id,
+        incidentId: '66666666-6666-4666-8666-666666666666',
+      },
+      status: 'SUPPRESSED',
+      attemptCount: 1,
+      lastAttemptAt: '2026-11-05T10:00:02.000Z',
+      lastErrorCode: null,
+      lastHttpStatus: null,
+      nextAttemptAt: null,
+      leaseExpiresAt: null,
+      deliveredAt: null,
+      deadAt: null,
+      deadReason: null,
+      suppressedAt: '2026-11-05T10:00:02.000Z',
+      suppressionReason: 'MAINTENANCE_WINDOW',
+      createdAt: '2026-11-05T10:00:00.000Z',
+    } as const;
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(json({ data: [channel] }))
+      .mockResolvedValueOnce(json({ data: [monitor] }))
+      .mockResolvedValueOnce(json({ data: [delivery] }));
+
+    render(<NotificationsPage projectId={projectId} />);
+    await screen.findByText(channel.name);
+    await user.click(screen.getByRole('button', { name: 'History' }));
+
+    const section = (await screen.findByRole('heading', { name: 'Delivery history' })).closest(
+      'section',
+    );
+    expect(section).not.toBeNull();
+    expect(within(section!).getByText('Suppressed')).toBeInTheDocument();
+    expect(within(section!).queryByText('Failed')).not.toBeInTheDocument();
   });
 
   it('keeps backend routing validation next to the editor', async () => {

@@ -56,9 +56,9 @@ describe('WebhookDeliveryReadRepository', () => {
     await container?.stop();
   });
 
-  it('derives pending, in-flight, expired, retry, delivered, and dead states at one cutoff', async () => {
+  it('derives pending, in-flight, expired, retry, delivered, suppressed, and dead states at one cutoff', async () => {
     const endpoints = await Promise.all(
-      ['pending', 'in-flight', 'expired', 'retry', 'delivered', 'dead'].map((name) =>
+      ['pending', 'in-flight', 'expired', 'retry', 'delivered', 'suppressed', 'dead'].map((name) =>
         createEndpoint(name, `https://${name}.example.com/events`),
       ),
     );
@@ -69,7 +69,16 @@ describe('WebhookDeliveryReadRepository', () => {
     const expired = byEndpoint.get(endpoints[2]!.id)!;
     const retry = byEndpoint.get(endpoints[3]!.id)!;
     const delivered = byEndpoint.get(endpoints[4]!.id)!;
-    const dead = byEndpoint.get(endpoints[5]!.id)!;
+    const suppressed = byEndpoint.get(endpoints[5]!.id)!;
+    const dead = byEndpoint.get(endpoints[6]!.id)!;
+    await connection.db.execute(sql`
+      update notification_deliveries set
+        attempt_count=1,
+        last_attempt_at=clock_timestamp(),
+        suppressed_at=clock_timestamp(),
+        suppression_reason='MAINTENANCE_WINDOW'
+      where id=${suppressed.id}::uuid
+    `);
     await connection.db.execute(sql`
       update notification_deliveries set
         claim_token=${randomUUID()}::uuid,
@@ -127,6 +136,7 @@ describe('WebhookDeliveryReadRepository', () => {
       'PENDING',
       'RETRY_SCHEDULED',
       'DELIVERED',
+      'SUPPRESSED',
       'DEAD',
     ]);
     expect(items[1]).toMatchObject({ nextAttemptAt: null, leaseExpiresAt: expect.any(Date) });
@@ -140,6 +150,11 @@ describe('WebhookDeliveryReadRepository', () => {
       leaseExpiresAt: null,
     });
     expect(items[5]).toMatchObject({
+      suppressedAt: expect.any(Date),
+      suppressionReason: 'MAINTENANCE_WINDOW',
+      deadAt: null,
+    });
+    expect(items[6]).toMatchObject({
       deadReason: 'MAX_ATTEMPTS',
       lastErrorCode: 'HTTP_503',
       lastHttpStatus: 503,

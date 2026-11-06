@@ -58,6 +58,8 @@ describe('webhook endpoint presenters', () => {
       deliveredAt: new Date('2026-10-19T00:00:03.000Z'),
       deadAt: null,
       deadReason: null,
+      suppressedAt: null,
+      suppressionReason: null,
       createdAt: new Date('2026-10-19T00:00:01.000Z'),
       endpointId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
       endpointVersion: {

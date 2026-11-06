@@ -1919,6 +1919,8 @@ export const notificationDeliveries = pgTable(
     deliveredAt: timestamp('delivered_at', { withTimezone: true }),
     deadAt: timestamp('dead_at', { withTimezone: true }),
     deadReason: varchar('dead_reason', { length: 64 }),
+    suppressedAt: timestamp('suppressed_at', { withTimezone: true }),
+    suppressionReason: varchar('suppression_reason', { length: 64 }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -1948,7 +1950,9 @@ export const notificationDeliveries = pgTable(
     }),
     index('notification_deliveries_eligible_idx')
       .on(table.availableAt, table.createdAt, table.id)
-      .where(sql`${table.deliveredAt} is null and ${table.deadAt} is null`),
+      .where(
+        sql`${table.deliveredAt} is null and ${table.deadAt} is null and ${table.suppressedAt} is null`,
+      ),
     index('notification_deliveries_endpoint_history_idx').on(
       table.organizationId,
       table.endpointId,
@@ -1962,15 +1966,19 @@ export const notificationDeliveries = pgTable(
     ),
     check(
       'notification_deliveries_one_terminal_state',
-      sql`not (${table.deliveredAt} is not null and ${table.deadAt} is not null)`,
+      sql`num_nonnulls(${table.deliveredAt}, ${table.deadAt}, ${table.suppressedAt}) <= 1`,
     ),
     check(
       'notification_deliveries_dead_fields_consistent',
       sql`(${table.deadAt} is null) = (${table.deadReason} is null)`,
     ),
     check(
+      'notification_deliveries_suppression_fields_consistent',
+      sql`(${table.suppressedAt} is null) = (${table.suppressionReason} is null)`,
+    ),
+    check(
       'notification_deliveries_terminal_claim_cleared',
-      sql`(${table.deliveredAt} is null and ${table.deadAt} is null) or ${table.claimToken} is null`,
+      sql`(${table.deliveredAt} is null and ${table.deadAt} is null and ${table.suppressedAt} is null) or ${table.claimToken} is null`,
     ),
   ],
 );

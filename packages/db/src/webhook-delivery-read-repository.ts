@@ -4,7 +4,7 @@ import type { WatchrailDatabase } from './client.js';
 import { notificationDeliveries, notificationEvents, webhookEndpointVersions } from './schema.js';
 
 export type WebhookDeliveryStatus =
-  'PENDING' | 'IN_FLIGHT' | 'RETRY_SCHEDULED' | 'DELIVERED' | 'DEAD';
+  'PENDING' | 'IN_FLIGHT' | 'RETRY_SCHEDULED' | 'DELIVERED' | 'SUPPRESSED' | 'DEAD';
 
 export interface WebhookDeliveryListItem {
   id: string;
@@ -25,6 +25,8 @@ export interface WebhookDeliveryListItem {
   deliveredAt: Date | null;
   deadAt: Date | null;
   deadReason: string | null;
+  suppressedAt: Date | null;
+  suppressionReason: string | null;
   createdAt: Date;
 }
 
@@ -67,6 +69,8 @@ interface DeliveryRow {
   deliveredAt: Date | null;
   deadAt: Date | null;
   deadReason: string | null;
+  suppressedAt: Date | null;
+  suppressionReason: string | null;
   createdAt: Date;
   eventId: string;
   eventType: 'INCIDENT_OPENED' | 'INCIDENT_RESOLVED';
@@ -205,6 +209,8 @@ const deliverySelection = {
   deliveredAt: notificationDeliveries.deliveredAt,
   deadAt: notificationDeliveries.deadAt,
   deadReason: notificationDeliveries.deadReason,
+  suppressedAt: notificationDeliveries.suppressedAt,
+  suppressionReason: notificationDeliveries.suppressionReason,
   createdAt: notificationDeliveries.createdAt,
   eventId: notificationEvents.id,
   eventType: notificationEvents.eventType,
@@ -235,15 +241,21 @@ function toListItem(row: DeliveryRow, cutoff: Date): WebhookDeliveryListItem {
     deliveredAt: row.deliveredAt,
     deadAt: row.deadAt,
     deadReason: row.deadReason,
+    suppressedAt: row.suppressedAt,
+    suppressionReason: row.suppressionReason,
     createdAt: row.createdAt,
   };
 }
 
 function deriveStatus(
-  row: Pick<DeliveryRow, 'deliveredAt' | 'deadAt' | 'claimToken' | 'attemptCount' | 'availableAt'>,
+  row: Pick<
+    DeliveryRow,
+    'deliveredAt' | 'deadAt' | 'suppressedAt' | 'claimToken' | 'attemptCount' | 'availableAt'
+  >,
   cutoff: Date,
 ): WebhookDeliveryStatus {
   if (row.deliveredAt !== null) return 'DELIVERED';
+  if (row.suppressedAt !== null) return 'SUPPRESSED';
   if (row.deadAt !== null) return 'DEAD';
   if (row.claimToken !== null && row.availableAt > cutoff) return 'IN_FLIGHT';
   if (row.claimToken === null && row.attemptCount > 0 && row.availableAt > cutoff)

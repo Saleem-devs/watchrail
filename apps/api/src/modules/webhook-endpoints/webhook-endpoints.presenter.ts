@@ -39,6 +39,8 @@ export function presentWebhookDelivery(delivery: WebhookDeliveryListItem) {
     deliveredAt: delivery.deliveredAt?.toISOString() ?? null,
     deadAt: delivery.deadAt?.toISOString() ?? null,
     deadReason: delivery.deadReason,
+    suppressedAt: delivery.suppressedAt?.toISOString() ?? null,
+    suppressionReason: delivery.suppressionReason,
     createdAt: delivery.createdAt.toISOString(),
   };
 }
