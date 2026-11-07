@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
+import { ChevronLeft } from 'lucide-react';
 import { loadPublicStatusPage } from '../../../../../lib/public-status-page';
 import { StatusPageFooter, StatusPageHeader } from '../../status-page-chrome';
 import { StatusPageRefresh } from '../../status-page-refresh';
@@ -144,18 +145,7 @@ export default async function PublicIncidentPage({ params }: Props) {
 }
 
 function BackIcon() {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      className="size-3.5"
-      aria-hidden="true"
-    >
-      <path d="m10 4-4 4 4 4" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
+  return <ChevronLeft className="size-3.5" strokeWidth={1.75} aria-hidden="true" />;
 }
 
 function incidentTitle(

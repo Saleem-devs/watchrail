@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
+import { Plus, X } from 'lucide-react';
 import { AppShell } from '../../components/app-shell';
 import { actionClassName, Button } from '../../components/ui/button';
 import { ConfirmationDialog } from '../../components/ui/confirmation-dialog';
@@ -358,33 +359,11 @@ function ListLoading() {
 }
 
 function PlusIcon() {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      className="size-4"
-      aria-hidden="true"
-    >
-      <path d="M8 3v10M3 8h10" />
-    </svg>
-  );
+  return <Plus className="size-4" strokeWidth={1.75} aria-hidden="true" />;
 }
 
 function CloseIcon() {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      className="size-4"
-      aria-hidden="true"
-    >
-      <path d="m4 4 8 8M12 4l-8 8" />
-    </svg>
-  );
+  return <X className="size-4" strokeWidth={1.75} aria-hidden="true" />;
 }
 
 function messageFor(error: unknown, fallback: string) {

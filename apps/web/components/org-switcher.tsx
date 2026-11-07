@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Boxes, Check, ChevronDown, List, Plus } from 'lucide-react';
 import { authClient } from '../lib/auth-client';
 
 interface Org {
@@ -13,83 +14,28 @@ interface Org {
 
 function ChevronIcon({ open }: { open: boolean }) {
   return (
-    <svg
-      viewBox="0 0 20 20"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.75"
+    <ChevronDown
       className={`size-4 transition-transform ${open ? 'rotate-180' : ''}`}
+      strokeWidth={1.75}
       aria-hidden="true"
-    >
-      <path d="m6 8 4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
+    />
   );
 }
 
 function CheckIcon() {
-  return (
-    <svg
-      viewBox="0 0 20 20"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.75"
-      className="size-4"
-      aria-hidden="true"
-    >
-      <path d="m5 10 3 3 7-7" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
+  return <Check className="size-4" strokeWidth={1.75} aria-hidden="true" />;
 }
 
 function PlusIcon() {
-  return (
-    <svg
-      viewBox="0 0 20 20"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      className="size-4"
-      aria-hidden="true"
-    >
-      <path d="M10 4v12M4 10h12" strokeLinecap="round" />
-    </svg>
-  );
+  return <Plus className="size-4" strokeWidth={1.75} aria-hidden="true" />;
 }
 
 function ListIcon() {
-  return (
-    <svg
-      viewBox="0 0 20 20"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      className="size-4"
-      aria-hidden="true"
-    >
-      <path d="M6.5 5h9M6.5 10h9M6.5 15h9" strokeLinecap="round" />
-      <circle cx="3.5" cy="5" r=".75" fill="currentColor" stroke="none" />
-      <circle cx="3.5" cy="10" r=".75" fill="currentColor" stroke="none" />
-      <circle cx="3.5" cy="15" r=".75" fill="currentColor" stroke="none" />
-    </svg>
-  );
+  return <List className="size-4" strokeWidth={1.75} aria-hidden="true" />;
 }
 
 function OrganizationIcon() {
-  return (
-    <svg
-      viewBox="0 0 20 20"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="size-4"
-      aria-hidden="true"
-    >
-      <path d="M10 2.5 16 6v7l-6 3.5L4 13V6Z" />
-      <path d="m4 6 6 3.5L16 6M10 9.5v7" />
-    </svg>
-  );
+  return <Boxes className="size-4" strokeWidth={1.75} aria-hidden="true" />;
 }
 
 export function OrgSwitcher({

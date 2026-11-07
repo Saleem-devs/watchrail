@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { ListFilter, X } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Input, Select } from '../../components/ui/form-control';
 import { Form } from '../../components/ui/form';
@@ -76,17 +77,7 @@ export function MonitorFiltersDialog({
           setOpen(true);
         }}
       >
-        <svg
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          aria-hidden="true"
-          className="size-4"
-        >
-          <path d="M2.5 4h11M4.5 8h7M6.5 12h3" />
-        </svg>
+        <ListFilter className="size-4" strokeWidth={1.75} aria-hidden="true" />
         Filter
         {activeCount > 0 ? (
           <span className="grid min-w-5 place-items-center rounded-full bg-rail-accent px-1 text-[10px] leading-5 text-rail-on-accent">
@@ -126,16 +117,7 @@ export function MonitorFiltersDialog({
                 className="grid size-8 shrink-0 place-items-center rounded-rail-control border-0 bg-transparent text-rail-muted hover:bg-rail-hover hover:text-rail-text"
                 onClick={() => setOpen(false)}
               >
-                <svg
-                  viewBox="0 0 20 20"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  aria-hidden="true"
-                  className="size-4"
-                >
-                  <path d="m5 5 10 10M15 5 5 15" />
-                </svg>
+                <X className="size-4" strokeWidth={1.75} aria-hidden="true" />
               </button>
             </div>
             <Form onSubmit={submit}>
