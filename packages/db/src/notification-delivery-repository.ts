@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import type { WatchrailDatabase } from './client.js';
+import { suppressClaimedDeliveryForIncidentSilence } from './incident-notification-policy.js';
 import { activeMaintenancePolicyForMonitor } from './maintenance-policy.js';
 
 export interface ClaimedNotificationDelivery {
@@ -103,17 +104,28 @@ export class NotificationDeliveryRepository {
       `);
       const row = claimed.rows[0];
       if (!row) return 'LOST_CLAIM';
+      const dispatchAt = new Date(row.dispatchAt);
+      if (
+        await suppressClaimedDeliveryForIncidentSilence(tx, {
+          deliveryId: id,
+          claimToken: token,
+          organizationId,
+          policyAt: dispatchAt,
+        })
+      ) {
+        return 'SUPPRESSED';
+      }
       const policy = await activeMaintenancePolicyForMonitor(
         tx,
         organizationId,
         monitorId,
-        new Date(row.dispatchAt),
+        dispatchAt,
       );
       if (!policy.effects.suppressNotifications) return 'CONTINUE';
       const suppressed = await tx.execute<{ id: string }>(sql`
         update notification_deliveries set
           claim_token=null,
-          suppressed_at=${new Date(row.dispatchAt)},
+          suppressed_at=${dispatchAt},
           suppression_reason='MAINTENANCE_WINDOW',
           last_error_code=null,
           last_http_status=null

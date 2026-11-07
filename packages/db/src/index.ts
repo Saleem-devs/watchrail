@@ -21,6 +21,7 @@ export * from './slack-channel-repository.js';
 export * from './slack-delivery-repository.js';
 export * from './slack-delivery-read-repository.js';
 export * from './incident-read-repository.js';
+export * from './incident-action-repository.js';
 export * from './manual-round-repository.js';
 export * from './maintenance-window-repository.js';
 export * from './maintenance-policy.js';

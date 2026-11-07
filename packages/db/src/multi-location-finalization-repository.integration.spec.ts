@@ -6,6 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { createMonitor, type ProbeObservationV1 } from '@watchrail/domain';
 import { createDatabaseConnection, type DatabaseConnection } from './client.js';
+import { IncidentActionRepository } from './incident-action-repository.js';
 import { migrateDatabase } from './migration.js';
 import { IncidentReadRepository } from './incident-read-repository.js';
 import { MaintenanceWindowRepository } from './maintenance-window-repository.js';
@@ -238,6 +239,71 @@ describe('authoritative multi-location finalization', () => {
     expect(await connection.db.select().from(notificationEvents)).toHaveLength(2);
   });
 
+  it('ignores pre-resolution regional rounds and opens a clean incident from a fresh failure', async () => {
+    const repository = new MultiLocationRoundFinalizationRepository(connection.db);
+    const failed = await createFixture(2, 'SCHEDULED');
+    await repository.initializeRound(organizationId, failed.roundId);
+    await failAndConfirm(repository, failed, 0);
+    await failAndConfirm(repository, failed, 1);
+    const [opened] = await connection.db.select().from(incidents);
+    if (!opened) throw new Error('Expected open incident.');
+    const delayed = await createNextRound(failed);
+
+    await new IncidentActionRepository(connection.db).resolve(
+      organizationId,
+      opened.id,
+      '11111111-1111-4111-8111-111111111111',
+      null,
+    );
+    await connection.db.execute(sql`
+      update incidents
+      set resolved_at=date_trunc('milliseconds', resolved_at) + interval '900 microseconds'
+      where organization_id=${organizationId}::uuid and id=${opened.id}::uuid
+    `);
+    await connection.db.execute(sql`
+      update monitor_incident_state
+      set tracking_started_at=(
+        select resolved_at from incidents
+        where organization_id=${organizationId}::uuid and id=${opened.id}::uuid
+      )
+      where organization_id=${organizationId}::uuid and monitor_id=${failed.monitorId}::uuid
+    `);
+    await connection.db.execute(sql`
+      update check_rounds
+      set created_at=(
+        select date_trunc('milliseconds', resolved_at) + interval '100 microseconds'
+        from incidents
+        where organization_id=${organizationId}::uuid and id=${opened.id}::uuid
+      )
+      where organization_id=${organizationId}::uuid and id=${delayed.roundId}::uuid
+    `);
+    await repository.initializeRound(organizationId, delayed.roundId);
+    await failAndConfirm(repository, delayed, 0);
+    await failAndConfirm(repository, delayed, 1);
+    expect(
+      (await connection.db.select().from(incidents)).filter(({ status }) => status === 'OPEN'),
+    ).toHaveLength(0);
+
+    const fresh = await createNextRound(delayed);
+    await connection.db.execute(sql`
+      update check_rounds
+      set created_at=clock_timestamp()
+      where organization_id=${organizationId}::uuid and id=${fresh.roundId}::uuid
+    `);
+    await repository.initializeRound(organizationId, fresh.roundId);
+    await failAndConfirm(repository, fresh, 0);
+    await failAndConfirm(repository, fresh, 1);
+    const all = await connection.db.select().from(incidents);
+    expect(all).toHaveLength(2);
+    expect(all.find(({ status }) => status === 'OPEN')).toMatchObject({
+      acknowledgedAt: null,
+      acknowledgedByActorId: null,
+      silencedAt: null,
+      silencedUntil: null,
+      silencedByActorId: null,
+    });
+  });
+
   it('does not open a regional incident during an active suppression window', async () => {
     const fixture = await createFixture(2, 'SCHEDULED');
     const [monitor] = await connection.db
@@ -345,6 +411,10 @@ describe('authoritative multi-location finalization', () => {
       .orderBy(sql`${monitorConfigurationVersions.versionNumber} desc`)
       .limit(1);
     const createdAt = new Date(Date.now() - 10_000);
+    await connection.db
+      .update(monitorIncidentState)
+      .set({ trackingStartedAt: new Date(createdAt.getTime() - 1) })
+      .where(eq(monitorIncidentState.monitorId, monitor.id));
     const roundId = await connection.db.transaction(async (tx) => {
       const [round] = await tx
         .insert(checkRounds)

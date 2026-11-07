@@ -3,6 +3,7 @@ import { and, eq, isNull, or } from 'drizzle-orm';
 import { createWebhookNotification } from '@watchrail/contracts';
 import type { WatchrailDatabase } from './client.js';
 import {
+  incidents,
   monitors,
   notificationDeliveries,
   notificationEvents,
@@ -49,6 +50,20 @@ export async function stageIncidentNotification(
   const occurredAt =
     transition.type === 'OPENED' ? transition.incident.openedAt : transition.incident.resolvedAt;
   if (!occurredAt) throw new Error('Resolved notification is missing its occurrence time.');
+  if (transition.type === 'RESOLVED') {
+    const [incidentPolicy] = await tx
+      .select({ silencedUntil: incidents.silencedUntil })
+      .from(incidents)
+      .where(
+        and(
+          eq(incidents.organizationId, transition.organizationId),
+          eq(incidents.id, transition.incident.id),
+        ),
+      )
+      .limit(1);
+    if (!incidentPolicy) throw new Error('Notification incident is missing.');
+    if (incidentPolicy.silencedUntil && incidentPolicy.silencedUntil > occurredAt) return;
+  }
   const payload = createWebhookNotification({
     eventId,
     eventType,

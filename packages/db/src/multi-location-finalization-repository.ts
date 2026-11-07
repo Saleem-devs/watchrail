@@ -13,6 +13,7 @@ import {
 import type { WatchrailDatabase } from './client.js';
 import { applyAggregateAvailabilityObservation } from './availability-repository.js';
 import { activeMaintenancePolicyForMonitor } from './maintenance-policy.js';
+import { roundIsFencedByManualResolution } from './incident-round-ordering.js';
 import {
   stageIncidentNotification,
   type IncidentTransition,
@@ -302,12 +303,19 @@ async function applyMultiLocationIncident(
     .limit(1)
     .for('update');
   if (!state) throw new Error('Monitor incident state is missing.');
+  const fencedByManualResolution = await roundIsFencedByManualResolution(tx, {
+    organizationId: round.organizationId,
+    monitorId: round.monitorId,
+    roundId: round.id,
+  });
   if (
-    state.lastProcessedRoundCreatedAt &&
-    state.lastProcessedRoundId &&
-    (round.createdAt < state.lastProcessedRoundCreatedAt ||
-      (round.createdAt.getTime() === state.lastProcessedRoundCreatedAt.getTime() &&
-        round.id <= state.lastProcessedRoundId))
+    round.createdAt < state.trackingStartedAt ||
+    fencedByManualResolution ||
+    (state.lastProcessedRoundCreatedAt &&
+      state.lastProcessedRoundId &&
+      (round.createdAt < state.lastProcessedRoundCreatedAt ||
+        (round.createdAt.getTime() === state.lastProcessedRoundCreatedAt.getTime() &&
+          round.id <= state.lastProcessedRoundId)))
   ) {
     return { type: 'NONE' };
   }

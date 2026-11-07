@@ -103,14 +103,26 @@ function incidentColumns(
   ];
 }
 
+function incidentDetailHref(incident: WorkspaceIncident, projectId?: string): string | undefined {
+  return projectId ? `/projects/${projectId}/incidents/${incident.id}` : undefined;
+}
+
 export function IncidentTable({
   incidents,
   origin,
   projectId,
+  onAcknowledge,
+  onSilence,
+  onUnsilence,
+  onResolve,
 }: {
   incidents: WorkspaceIncident[];
   origin: string;
   projectId?: string | undefined;
+  onAcknowledge: (incident: WorkspaceIncident) => void | Promise<void>;
+  onSilence: (incident: WorkspaceIncident) => void;
+  onUnsilence: (incident: WorkspaceIncident) => void | Promise<void>;
+  onResolve: (incident: WorkspaceIncident) => void;
 }) {
   return (
     <DataTable
@@ -118,13 +130,50 @@ export function IncidentTable({
       columns={incidentColumns(origin, projectId)}
       actions={[
         {
+          id: 'view-incident',
+          label: 'View incident',
+          href: (incident) =>
+            incidentDetailHref(incident, projectId) ??
+            monitorDetailHref(incident.monitorId, origin, projectId),
+        },
+        {
+          id: 'acknowledge',
+          label: 'Acknowledge',
+          pendingLabel: 'Acknowledging…',
+          visible: (incident) => incident.status === 'OPEN' && !incident.acknowledgedAt,
+          onSelect: onAcknowledge,
+        },
+        {
+          id: 'silence',
+          label: 'Silence this incident',
+          visible: (incident) => incident.status === 'OPEN' && !incident.notificationsSilenced,
+          onSelect: onSilence,
+        },
+        {
+          id: 'unsilence',
+          label: 'Resume notifications',
+          pendingLabel: 'Resuming…',
+          visible: (incident) => incident.status === 'OPEN' && incident.notificationsSilenced,
+          onSelect: onUnsilence,
+        },
+        {
+          id: 'resolve',
+          label: 'Resolve incident',
+          tone: 'danger',
+          visible: (incident) => incident.status === 'OPEN',
+          onSelect: onResolve,
+        },
+        {
           id: 'view-monitor',
           label: 'View monitor',
           href: (incident) => monitorDetailHref(incident.monitorId, origin, projectId),
         },
       ]}
       getRowKey={(incident) => incident.id}
-      getRowHref={(incident) => monitorDetailHref(incident.monitorId, origin, projectId)}
+      getRowHref={(incident) =>
+        incidentDetailHref(incident, projectId) ??
+        monitorDetailHref(incident.monitorId, origin, projectId)
+      }
       getRowLabel={(incident) => `${incident.monitorName} incident`}
       ariaLabel="Workspace incidents"
       minWidthClassName="min-w-[760px]"

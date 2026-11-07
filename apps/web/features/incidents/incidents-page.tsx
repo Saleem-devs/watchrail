@@ -7,6 +7,14 @@ import { Button, actionClassName } from '../../components/ui/button';
 import { PageHeader } from '../../components/ui/page-header';
 import { TablePagination } from '../../components/ui/table-pagination';
 import { IncidentFiltersDialog } from './incident-filters-dialog';
+import {
+  acknowledgeIncident,
+  IncidentRequestError,
+  resolveIncident,
+  silenceIncident,
+  unsilenceIncident,
+} from './incident-api';
+import { IncidentActionDialog, type IncidentDialogAction } from './incident-action-dialog';
 import { IncidentTable } from './incident-table';
 import type { IncidentStatusFilter, WorkspaceIncident, WorkspaceIncidentPage } from './types';
 
@@ -32,6 +40,11 @@ export function IncidentsPage({
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
+  const [notice, setNotice] = useState<string>();
+  const [actionTarget, setActionTarget] = useState<WorkspaceIncident | null>(null);
+  const [dialogAction, setDialogAction] = useState<IncidentDialogAction | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const pathFor = useCallback(
     (nextStatus: IncidentStatusFilter, number: number, limit: number) => {
@@ -101,6 +114,58 @@ export function IncidentsPage({
   }, [load]);
 
   const origin = pathFor(status, page.number, page.limit);
+  const closeDialog = useCallback(() => {
+    if (actionBusy) return;
+    setActionTarget(null);
+    setDialogAction(null);
+    setActionError(null);
+  }, [actionBusy]);
+
+  async function refreshAfterAction(message: string) {
+    setNotice(message);
+    await load(status, page.number, page.limit);
+  }
+
+  async function acknowledge(incident: WorkspaceIncident) {
+    try {
+      await acknowledgeIncident(incident.id);
+      await refreshAfterAction(`${incident.monitorName} incident acknowledged.`);
+    } catch (actionFailure) {
+      setNotice(actionMessage(actionFailure, 'Could not acknowledge the incident.'));
+    }
+  }
+
+  async function unsilence(incident: WorkspaceIncident) {
+    try {
+      await unsilenceIncident(incident.id);
+      await refreshAfterAction(`Notifications resumed for ${incident.monitorName}.`);
+    } catch (actionFailure) {
+      setNotice(actionMessage(actionFailure, 'Could not resume incident notifications.'));
+    }
+  }
+
+  async function confirmAction(value: { until?: Date; note?: string | null }) {
+    if (!actionTarget || !dialogAction) return;
+    setActionBusy(true);
+    setActionError(null);
+    try {
+      if (dialogAction === 'silence') {
+        if (!value.until) throw new Error('Silence expiry is missing.');
+        await silenceIncident(actionTarget.id, value.until);
+        await refreshAfterAction(`Notifications silenced for ${actionTarget.monitorName}.`);
+      } else {
+        await resolveIncident(actionTarget.id, value.note ?? null);
+        await refreshAfterAction(`${actionTarget.monitorName} incident resolved.`);
+      }
+      setActionTarget(null);
+      setDialogAction(null);
+    } catch (actionFailure) {
+      setActionError(actionMessage(actionFailure, 'Could not update the incident.'));
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
   return (
     <AppShell page="incidents" projectId={projectId}>
       <main id="main-content" data-watchrail-workspace className="w-full min-w-0 pb-16">
@@ -114,6 +179,14 @@ export function IncidentsPage({
             />
           }
         />
+        {notice ? (
+          <div
+            className="mt-5 rounded-rail-control border border-rail-border bg-rail-raised px-4 py-3 text-sm text-rail-subtle"
+            role="status"
+          >
+            {notice}
+          </div>
+        ) : null}
         <section className="mt-6 overflow-hidden rounded-rail-panel border border-rail-border bg-rail-surface">
           {loading ? (
             <div className="grid min-h-52 place-items-center px-5 py-12" role="status">
@@ -148,7 +221,21 @@ export function IncidentsPage({
             </div>
           ) : (
             <>
-              <IncidentTable incidents={page.items} origin={origin} projectId={projectId} />
+              <IncidentTable
+                incidents={page.items}
+                origin={origin}
+                projectId={projectId}
+                onAcknowledge={acknowledge}
+                onSilence={(incident) => {
+                  setActionTarget(incident);
+                  setDialogAction('silence');
+                }}
+                onUnsilence={unsilence}
+                onResolve={(incident) => {
+                  setActionTarget(incident);
+                  setDialogAction('resolve');
+                }}
+              />
               <TablePagination
                 page={page}
                 label="incidents"
@@ -158,7 +245,20 @@ export function IncidentsPage({
             </>
           )}
         </section>
+        <IncidentActionDialog
+          key={`${dialogAction ?? 'closed'}:${actionTarget?.id ?? ''}`}
+          action={dialogAction}
+          incident={actionTarget}
+          busy={actionBusy}
+          error={actionError}
+          onCancel={closeDialog}
+          onConfirm={(value) => void confirmAction(value)}
+        />
       </main>
     </AppShell>
   );
+}
+
+function actionMessage(error: unknown, fallback: string): string {
+  return error instanceof IncidentRequestError ? error.message : fallback;
 }

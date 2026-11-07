@@ -372,6 +372,13 @@
       "when": 1794010383224,
       "tag": "0052_soft_scorpion",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1794016965585,
+      "tag": "0053_violet_whiplash",
+      "breakpoints": true
     }
   ]
 }

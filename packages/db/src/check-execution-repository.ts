@@ -27,6 +27,7 @@ import {
 import type { WatchrailDatabase } from './client.js';
 import { applyAvailabilityObservation } from './availability-repository.js';
 import { activeMaintenancePolicyForMonitor } from './maintenance-policy.js';
+import { roundIsFencedByManualResolution } from './incident-round-ordering.js';
 import {
   stageIncidentNotification,
   type IncidentTransition,
@@ -487,7 +488,16 @@ async function applyIncidentObservation(
     .for('update');
 
   if (!state) throw new Error('Monitor incident state is missing.');
-  if (round.createdAt < state.trackingStartedAt || isStaleRound(round, state))
+  const fencedByManualResolution = await roundIsFencedByManualResolution(tx, {
+    organizationId: round.organizationId,
+    monitorId: round.monitorId,
+    roundId: round.id,
+  });
+  if (
+    round.createdAt < state.trackingStartedAt ||
+    fencedByManualResolution ||
+    isStaleRound(round, state)
+  )
     return { type: 'NONE' };
 
   const observation = classifyIncidentObservation({

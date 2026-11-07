@@ -135,6 +135,12 @@ export const checkResultReasonEnum = pgEnum('check_result_reason', [
 ]);
 
 export const incidentStatusEnum = pgEnum('incident_status', ['OPEN', 'RESOLVED']);
+export const incidentActionEnum = pgEnum('incident_action', [
+  'ACKNOWLEDGED',
+  'SILENCED',
+  'UNSILENCED',
+  'MANUALLY_RESOLVED',
+]);
 export const notificationEventTypeEnum = pgEnum('notification_event_type', [
   'INCIDENT_OPENED',
   'INCIDENT_RESOLVED',
@@ -1589,6 +1595,13 @@ export const incidents = pgTable(
     startedByRoundId: uuid('started_by_round_id').notNull(),
     openedByRoundId: uuid('opened_by_round_id').notNull(),
     resolvedByRoundId: uuid('resolved_by_round_id'),
+    resolvedByActorId: uuid('resolved_by_actor_id'),
+    resolutionNote: varchar('resolution_note', { length: 500 }),
+    acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
+    acknowledgedByActorId: uuid('acknowledged_by_actor_id'),
+    silencedAt: timestamp('silenced_at', { withTimezone: true }),
+    silencedUntil: timestamp('silenced_until', { withTimezone: true }),
+    silencedByActorId: uuid('silenced_by_actor_id'),
     severity: varchar('severity', { length: 16 }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1625,11 +1638,54 @@ export const incidents = pgTable(
     ),
     check(
       'incidents_resolution_consistent',
-      sql`(${table.status} = 'RESOLVED') = (${table.resolvedAt} is not null and ${table.resolvedByRoundId} is not null)`,
+      sql`(${table.status} = 'RESOLVED') = (${table.resolvedAt} is not null and num_nonnulls(${table.resolvedByRoundId}, ${table.resolvedByActorId}) = 1)`,
+    ),
+    check(
+      'incidents_acknowledgement_consistent',
+      sql`(${table.acknowledgedAt} is null) = (${table.acknowledgedByActorId} is null)`,
+    ),
+    check(
+      'incidents_silence_consistent',
+      sql`num_nonnulls(${table.silencedAt}, ${table.silencedUntil}, ${table.silencedByActorId}) in (0, 3) and (${table.silencedAt} is null or ${table.silencedUntil} > ${table.silencedAt})`,
     ),
     check(
       'incidents_severity_valid',
       sql`${table.severity} is null or ${table.severity} in ('DEGRADED', 'DOWN')`,
+    ),
+  ],
+);
+
+export const incidentActionEvents = pgTable(
+  'incident_action_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull(),
+    incidentId: uuid('incident_id').notNull(),
+    actorId: uuid('actor_id').notNull(),
+    action: incidentActionEnum('action').notNull(),
+    silenceUntil: timestamp('silence_until', { withTimezone: true }),
+    note: varchar('note', { length: 500 }),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'incident_action_events_incident_fk',
+      columns: [table.organizationId, table.incidentId],
+      foreignColumns: [incidents.organizationId, incidents.id],
+    }).onDelete('restrict'),
+    index('incident_action_events_history_idx').on(
+      table.organizationId,
+      table.incidentId,
+      table.occurredAt,
+      table.id,
+    ),
+    check(
+      'incident_action_events_payload_consistent',
+      sql`(
+        (${table.action} = 'SILENCED' and ${table.silenceUntil} is not null and ${table.note} is null)
+        or (${table.action} = 'MANUALLY_RESOLVED' and ${table.silenceUntil} is null)
+        or (${table.action} in ('ACKNOWLEDGED', 'UNSILENCED') and ${table.silenceUntil} is null and ${table.note} is null)
+      )`,
     ),
   ],
 );

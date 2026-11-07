@@ -6,7 +6,9 @@ import type {
   CurrentCheck,
   CurrentIncidentState,
   IncidentDetail,
+  IncidentActionEventRecord,
   IncidentHistoryItem,
+  OrganizationIncidentDetail,
   OrganizationIncidentHistoryItem,
   MonitorRecord,
   UptimeMetrics,
@@ -204,6 +206,9 @@ export function toIncidentStateResponse(state: CurrentIncidentState) {
           ...state.currentIncident,
           startedAt: state.currentIncident.startedAt.toISOString(),
           openedAt: state.currentIncident.openedAt.toISOString(),
+          acknowledgedAt: state.currentIncident.acknowledgedAt?.toISOString() ?? null,
+          silencedAt: state.currentIncident.silencedAt?.toISOString() ?? null,
+          silencedUntil: state.currentIncident.silencedUntil?.toISOString() ?? null,
         }
       : null,
     ...(state.multiLocationIncident ? { multiLocationIncident: state.multiLocationIncident } : {}),
@@ -216,6 +221,12 @@ export function toIncidentHistoryResponse(incident: IncidentHistoryItem) {
     startedAt: incident.startedAt.toISOString(),
     openedAt: incident.openedAt.toISOString(),
     resolvedAt: incident.resolvedAt?.toISOString() ?? null,
+    acknowledgedAt: incident.acknowledgedAt?.toISOString() ?? null,
+    silencedAt: incident.silencedAt?.toISOString() ?? null,
+    silencedUntil: incident.silencedUntil?.toISOString() ?? null,
+    notificationsSilenced: Boolean(
+      incident.status === 'OPEN' && incident.silencedUntil && incident.silencedUntil > new Date(),
+    ),
   };
 }
 
@@ -237,6 +248,24 @@ export function toIncidentDetailResponse(incident: IncidentDetail) {
     openedByRoundId: incident.openedByRoundId,
     resolvedByRoundId: incident.resolvedByRoundId,
     createdAt: incident.createdAt.toISOString(),
+  };
+}
+
+export function toOrganizationIncidentDetailResponse(incident: OrganizationIncidentDetail) {
+  return {
+    ...toIncidentDetailResponse(incident),
+    projectId: incident.projectId,
+    monitorName: incident.monitorName,
+    monitorUrl: incident.monitorUrl,
+    severity: incident.severity,
+  };
+}
+
+export function toIncidentActionEventResponse(event: IncidentActionEventRecord) {
+  return {
+    ...event,
+    silenceUntil: event.silenceUntil?.toISOString() ?? null,
+    occurredAt: event.occurredAt.toISOString(),
   };
 }
 

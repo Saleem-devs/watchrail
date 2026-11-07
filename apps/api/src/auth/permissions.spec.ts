@@ -24,6 +24,7 @@ describe('Watchrail organization permissions', () => {
   it('allows editors to operate monitors without administering membership', () => {
     expect(hasPermission('editor', PERMISSIONS.MONITOR_CREATE)).toBe(true);
     expect(hasPermission('editor', PERMISSIONS.MONITOR_EXECUTE)).toBe(true);
+    expect(hasPermission('editor', PERMISSIONS.INCIDENT_MANAGE)).toBe(true);
     expect(hasPermission('editor', PERMISSIONS.MEMBER_UPDATE_ROLE)).toBe(false);
     expect(hasPermission('editor', PERMISSIONS.ORGANIZATION_UPDATE)).toBe(false);
     expect(hasPermission('editor', PERMISSIONS.SECRET_READ)).toBe(true);
@@ -33,6 +34,7 @@ describe('Watchrail organization permissions', () => {
 
   it('keeps workspace secret names away from viewers and management with administrators', () => {
     expect(hasPermission('viewer', PERMISSIONS.SECRET_READ)).toBe(false);
+    expect(hasPermission('viewer', PERMISSIONS.INCIDENT_MANAGE)).toBe(false);
     expect(hasPermission('admin', PERMISSIONS.SECRET_READ)).toBe(true);
     expect(hasPermission('admin', PERMISSIONS.SECRET_USE)).toBe(true);
     expect(hasPermission('admin', PERMISSIONS.SECRET_MANAGE)).toBe(true);
