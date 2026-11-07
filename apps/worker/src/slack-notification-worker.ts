@@ -26,6 +26,7 @@ export interface SlackNotificationWorkerOptions {
   sendTimeoutMs: number;
   maxAttempts: number;
   retryDelayMs: (attemptCount: number) => number;
+  monotonicNowMs?: () => number;
 }
 
 export interface SlackDeliveryStore {
@@ -108,6 +109,7 @@ export class SlackNotificationWorker {
       dispatch.databaseNow.getTime() -
       SLACK_DELIVERY_CLEANUP_MARGIN_MS;
     if (remainingMs <= 0) return this.retryOrExhaust(delivery, 'LEASE_BUDGET_EXHAUSTED');
+    const budgetStartedAtMs = this.monotonicNowMs();
 
     let url: string;
     try {
@@ -133,16 +135,23 @@ export class SlackNotificationWorker {
 
     try {
       const body = Buffer.from(JSON.stringify(renderSlackMessage(payload)), 'utf8');
+      const elapsedBeforeDispatchMs = Math.max(0, this.monotonicNowMs() - budgetStartedAtMs);
+      const dispatchBudgetMs = remainingMs - Math.ceil(elapsedBeforeDispatchMs);
+      if (dispatchBudgetMs <= 0) return this.retryOrExhaust(delivery, 'LEASE_BUDGET_EXHAUSTED');
       const result = await this.engine.deliver({
         url,
         body,
-        timeoutMs: Math.min(this.options.sendTimeoutMs, remainingMs),
+        timeoutMs: Math.min(this.options.sendTimeoutMs, dispatchBudgetMs),
         headers: [{ name: 'content-type', value: 'application/json; charset=utf-8' }],
       });
       return this.finishAttempt(delivery, result);
     } catch {
       return this.retryOrExhaust(delivery, 'INTERNAL_ERROR');
     }
+  }
+
+  private monotonicNowMs(): number {
+    return this.options.monotonicNowMs?.() ?? performance.now();
   }
 
   private async finishAttempt(

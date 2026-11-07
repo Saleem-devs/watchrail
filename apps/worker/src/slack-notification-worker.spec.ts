@@ -96,6 +96,26 @@ describe('SlackNotificationWorker', () => {
     );
   });
 
+  it('subtracts pre-dispatch work from the lease budget and reschedules when it is exhausted', async () => {
+    const monotonicNowMs = vi.fn().mockReturnValueOnce(1_000).mockReturnValueOnce(4_001);
+    const fixture = setup({ monotonicNowMs });
+    fixture.applyMaintenancePolicy.mockResolvedValue({
+      state: 'CONTINUE',
+      databaseNow: new Date('2026-11-07T10:00:22.000Z'),
+      leaseExpiresAt: new Date('2026-11-07T10:00:30.000Z'),
+    });
+
+    await expect(fixture.worker.processNext()).resolves.toBe('RETRY_SCHEDULED');
+    expect(fixture.deliver).not.toHaveBeenCalled();
+    expect(fixture.releaseForRetry).toHaveBeenCalledWith(
+      ids.delivery,
+      'claim-token',
+      1_000,
+      'LEASE_BUDGET_EXHAUSTED',
+      undefined,
+    );
+  });
+
   it('retries transient Slack responses and dead-letters permanent responses', async () => {
     const retry = setup();
     retry.deliver.mockResolvedValue({ type: 'HTTP', statusCode: 429 });
@@ -143,7 +163,7 @@ describe('SlackNotificationWorker', () => {
   });
 });
 
-function setup() {
+function setup({ monotonicNowMs = () => 0 }: { monotonicNowMs?: () => number } = {}) {
   const claimNext = vi.fn(() => Promise.resolve(claim));
   const applyMaintenancePolicy = vi.fn<SlackDeliveryStore['applyMaintenancePolicy']>(() =>
     Promise.resolve({
@@ -163,7 +183,13 @@ function setup() {
       { claimNext, applyMaintenancePolicy, acknowledgeDelivered, releaseForRetry, markDead },
       { deliver },
       keyring,
-      { leaseDurationMs: 30_000, sendTimeoutMs: 10_000, maxAttempts: 8, retryDelayMs: () => 1_000 },
+      {
+        leaseDurationMs: 30_000,
+        sendTimeoutMs: 10_000,
+        maxAttempts: 8,
+        retryDelayMs: () => 1_000,
+        monotonicNowMs,
+      },
     ),
     deliver,
     applyMaintenancePolicy,
