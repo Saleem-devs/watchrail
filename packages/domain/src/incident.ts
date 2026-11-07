@@ -2,6 +2,13 @@ import type { AssertionOutcome } from './assertion.js';
 
 export const INCIDENT_FAILURE_THRESHOLD = 3;
 
+export const INCIDENT_SEVERITIES = ['DEGRADED', 'DOWN'] as const;
+export type IncidentSeverity = (typeof INCIDENT_SEVERITIES)[number];
+
+export function incidentGroupKey(monitorId: string): string {
+  return `availability:${monitorId.toLowerCase()}`;
+}
+
 export const SCHEDULED_OBSERVATIONS = ['HEALTHY', 'UNHEALTHY', 'INDETERMINATE'] as const;
 export type ScheduledObservation = (typeof SCHEDULED_OBSERVATIONS)[number];
 export const INCIDENT_OBSERVATIONS = SCHEDULED_OBSERVATIONS;

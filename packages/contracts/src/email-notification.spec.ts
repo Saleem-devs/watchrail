@@ -38,6 +38,8 @@ describe('email notification contracts', () => {
           monitor: { id: channelId, name: 'API' },
           incident: {
             id: '44444444-4444-4444-8444-444444444444',
+            groupKey: `availability:${channelId}`,
+            severity: 'DOWN',
             status: 'OPEN',
             startedAt: new Date('2026-11-06T11:59:00.000Z'),
             openedAt: new Date('2026-11-06T12:00:00.000Z'),

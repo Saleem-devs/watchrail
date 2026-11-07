@@ -42,6 +42,7 @@ import {
   type IncidentActionEventRecord,
   type IncidentHistoryPage,
   type OrganizationIncidentDetail,
+  type OrganizationIncidentHistoryItem,
   type OrganizationIncidentHistoryPage,
   type MonitorRecord,
   parseCheckHistoryQuery,
@@ -626,6 +627,14 @@ export class MonitorsService {
       throw new NotFoundException({ code: 'INCIDENT_NOT_FOUND', message: 'Incident not found.' });
     }
     return incident;
+  }
+
+  async listRelatedOrganizationIncidents(
+    context: RequestContext,
+    incidentId: string,
+  ): Promise<OrganizationIncidentHistoryItem[]> {
+    await this.getOrganizationIncident(context, incidentId);
+    return this.incidentReads.listRelatedForOrganization(context.organizationId, incidentId);
   }
 
   async listIncidentActionEvents(

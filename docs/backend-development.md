@@ -129,6 +129,60 @@ Every queue, retry, webhook, machine submission, and externally replayable comma
 idempotency key or database uniqueness guarantee. Preserve fencing tokens and database locks in
 distributed workflows.
 
+## Incident severity and notification V2 upgrade
+
+Migrations `0054_numerous_blur.sql` and `0055_lean_joseph.sql` introduce a coordinated deployment
+boundary. This is intentionally a stop-the-world upgrade for Watchrail's pre-launch environment; it
+is not safe to roll through a mixed fleet of old and new processes.
+
+Compatibility is precise:
+
+- `0054` backfills historical incidents, then requires `severity` and `group_key`. Older application
+  versions do not write those columns.
+- `0055` permits retained V1 notification events and new V2 events. Updated workers read both
+  versions; new incident events are always V2.
+- Older workers understand only V1 and can claim and terminally reject a V2 delivery as
+  `INVALID_CONTRACT`.
+- External webhook consumers receive V2 for new incidents. Upgrade strict V1 consumers before
+  notification delivery resumes.
+
+In short: upgraded workers continue processing retained V1 payloads; new incident events use V2.
+
+Deploy this boundary in the following order:
+
+1. Prevent new API traffic, heartbeat ingestion, check scheduling, and remote-result submission.
+2. Allow already-claimed check finalizations and notification deliveries to finish, then stop every
+   old API and worker process. Confirm no old process can write incidents or claim notifications.
+3. Take a database snapshot suitable for full restoration.
+4. Apply migrations with `pnpm db:migrate`.
+5. Start only the application and workers built from this change or a later commit.
+6. Restore API traffic, scheduling, heartbeat ingestion, and remote-result submission.
+7. Verify historical incidents show an impact and group, pending V1 deliveries do not become
+   `INVALID_CONTRACT`, and a new V2 event is processed by email, Slack, and webhook workers.
+
+Do not apply `0054` or `0055` while an old incident writer or notification worker is running.
+
+Before deployment, run:
+
+```sh
+pnpm db:migrate:check
+pnpm --filter @watchrail/contracts test -- webhook-notification.spec.ts
+pnpm --filter @watchrail/worker test
+pnpm --filter @watchrail/db exec vitest run src/notification-domain-outbox.integration.spec.ts
+```
+
+The migration test proves that a legacy incident is backfilled, an old-shape insert is rejected after
+`0054`, a retained V1 delivery remains pending, and a new V2 delivery can be persisted after `0055`.
+
+Restarting the previous application version is not a safe rollback after these migrations. If the
+updated runtime cannot be repaired forward, stop all processes and restore the complete pre-upgrade
+database snapshot together with the previous application version. Do not downgrade only the
+application while retaining the upgraded database.
+
+A future rolling deployment requires an expand-and-contract sequence: add nullable or defaulted
+columns first, deploy dual-compatible writers and readers everywhere, enable V2 production only
+after every eligible consumer understands it, then enforce final constraints in a later release.
+
 ## Testing
 
 - colocate unit tests with pure parsers, presenters, services, and utilities;

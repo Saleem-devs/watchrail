@@ -261,6 +261,14 @@ export function renderSlackMessage(payload: SlackNotificationV1): {
         type: 'section',
         fields: [
           { type: 'mrkdwn', text: `*Status*\n${payload.incident.status}` },
+          ...(payload.contractVersion === 2
+            ? [
+                {
+                  type: 'mrkdwn',
+                  text: `*Impact*\n${payload.incident.severity === 'DOWN' ? 'Unavailable' : 'Degraded'}`,
+                },
+              ]
+            : []),
           { type: 'mrkdwn', text: `*Started*\n${escapeSlack(payload.incident.startedAt)}` },
           ...(payload.incident.resolvedAt
             ? [{ type: 'mrkdwn', text: `*Resolved*\n${escapeSlack(payload.incident.resolvedAt)}` }]
@@ -269,7 +277,15 @@ export function renderSlackMessage(payload: SlackNotificationV1): {
       },
       {
         type: 'context',
-        elements: [{ type: 'mrkdwn', text: `Incident ${escapeSlack(payload.incident.id)}` }],
+        elements: [
+          {
+            type: 'mrkdwn',
+            text:
+              payload.contractVersion === 2
+                ? `Incident ${escapeSlack(payload.incident.id)} · Group ${escapeSlack(payload.incident.groupKey)}`
+                : `Incident ${escapeSlack(payload.incident.id)}`,
+          },
+        ],
       },
     ],
   };

@@ -129,6 +129,7 @@ describe('remaining API route contracts', () => {
       { route: 'GET incidents', permission: 'incident:read' },
       { route: 'GET incidents/:incidentId', permission: 'incident:read' },
       { route: 'GET incidents/:incidentId/audit-events', permission: 'incident:read' },
+      { route: 'GET incidents/:incidentId/related', permission: 'incident:read' },
       { route: 'POST incidents/:incidentId/acknowledge', permission: 'incident:manage' },
       { route: 'POST incidents/:incidentId/silence', permission: 'incident:manage' },
       { route: 'DELETE incidents/:incidentId/silence', permission: 'incident:manage' },

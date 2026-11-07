@@ -1,12 +1,15 @@
 export type IncidentStatusFilter = 'all' | 'open' | 'resolved';
+export type IncidentSeverity = 'DEGRADED' | 'DOWN';
+export type IncidentSeverityFilter = 'all' | 'degraded' | 'down';
 
 export interface WorkspaceIncident {
   id: string;
+  groupKey: string;
   monitorId: string;
   monitorName: string;
   monitorUrl: string;
   status: 'OPEN' | 'RESOLVED';
-  severity: 'DEGRADED' | 'DOWN' | null;
+  severity: IncidentSeverity;
   startedAt: string;
   openedAt: string;
   resolvedAt: string | null;

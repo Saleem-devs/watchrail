@@ -55,6 +55,16 @@ export class IncidentsController {
     };
   }
 
+  @Get(':incidentId/related')
+  @RequirePermission(PERMISSIONS.INCIDENT_READ)
+  async listRelated(@Req() request: RequestWithContext, @Param('incidentId') incidentId: string) {
+    return {
+      data: (
+        await this.monitors.listRelatedOrganizationIncidents(request.watchrailContext, incidentId)
+      ).map(toOrganizationIncidentHistoryResponse),
+    };
+  }
+
   @Post(':incidentId/acknowledge')
   @RequirePermission(PERMISSIONS.INCIDENT_MANAGE)
   async acknowledge(@Req() request: RequestWithContext, @Param('incidentId') incidentId: string) {

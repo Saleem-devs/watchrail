@@ -1,7 +1,7 @@
 import {
   InvalidWebhookNotificationError,
   parseWebhookNotification,
-  type WebhookNotificationV1,
+  type WebhookNotification,
 } from './webhook-notification.js';
 
 export const SLACK_TEST_NOTIFICATION_CONTRACT_VERSION = 1;
@@ -15,7 +15,7 @@ export interface SlackTestNotificationV1 {
   channel: { id: string; name: string };
 }
 
-export type SlackNotificationV1 = WebhookNotificationV1 | SlackTestNotificationV1;
+export type SlackNotificationV1 = WebhookNotification | SlackTestNotificationV1;
 
 export class InvalidSlackNotificationError extends Error {
   constructor() {

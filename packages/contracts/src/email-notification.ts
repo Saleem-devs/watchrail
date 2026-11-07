@@ -1,7 +1,7 @@
 import {
   InvalidWebhookNotificationError,
   parseWebhookNotification,
-  type WebhookNotificationV1,
+  type WebhookNotification,
 } from './webhook-notification.js';
 
 export const EMAIL_TEST_NOTIFICATION_CONTRACT_VERSION = 1;
@@ -15,7 +15,7 @@ export interface EmailTestNotificationV1 {
   channel: { id: string; name: string };
 }
 
-export type EmailNotificationV1 = WebhookNotificationV1 | EmailTestNotificationV1;
+export type EmailNotificationV1 = WebhookNotification | EmailTestNotificationV1;
 
 export class InvalidEmailNotificationError extends Error {
   constructor() {

@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { classifyIncidentObservation } from './incident.js';
+import { classifyIncidentObservation, incidentGroupKey } from './incident.js';
+
+describe('incidentGroupKey', () => {
+  it('creates a stable canonical availability group for a monitor', () => {
+    expect(incidentGroupKey('A0D83FC4-33D7-4ED5-8168-C46389418E74')).toBe(
+      'availability:a0d83fc4-33d7-4ed5-8168-c46389418e74',
+    );
+  });
+});
 
 describe('classifyIncidentObservation', () => {
   it.each([

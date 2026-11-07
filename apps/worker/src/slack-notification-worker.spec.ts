@@ -142,7 +142,7 @@ describe('SlackNotificationWorker', () => {
 
   it('renders incident text without interpreting Slack markup from monitor names', () => {
     const message = renderSlackMessage({
-      contractVersion: 1,
+      contractVersion: 2,
       eventId: ids.event,
       eventType: 'INCIDENT_OPENED',
       occurredAt: '2026-11-07T10:00:00.000Z',
@@ -150,6 +150,8 @@ describe('SlackNotificationWorker', () => {
       monitor: { id: '77777777-7777-4777-8777-777777777777', name: '<!channel> API' },
       incident: {
         id: '88888888-8888-4888-8888-888888888888',
+        groupKey: 'availability:77777777-7777-4777-8777-777777777777',
+        severity: 'DEGRADED',
         status: 'OPEN',
         startedAt: '2026-11-07T10:00:00.000Z',
         openedAt: '2026-11-07T10:00:00.000Z',
@@ -159,6 +161,10 @@ describe('SlackNotificationWorker', () => {
     });
     expect(JSON.stringify(message.blocks)).toContain('&lt;!channel&gt; API');
     expect(JSON.stringify(message.blocks)).not.toContain('<!channel> API');
+    expect(JSON.stringify(message.blocks)).toContain('*Impact*\\nDegraded');
+    expect(JSON.stringify(message.blocks)).toContain(
+      'availability:77777777-7777-4777-8777-777777777777',
+    );
     expect(message.text).toBe('Incident opened: &lt;!channel&gt; API');
   });
 });
