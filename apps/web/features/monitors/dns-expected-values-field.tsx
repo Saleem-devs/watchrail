@@ -1,6 +1,7 @@
 'use client';
 
 import { useId, useState } from 'react';
+import { X } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/form-control';
 
@@ -86,16 +87,7 @@ export function DnsExpectedValuesField({
               onClick={() => removeRow(row.id)}
               className="size-10 px-0"
             >
-              <svg
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                className="size-4"
-                aria-hidden="true"
-              >
-                <path d="M3.5 3.5l9 9m0-9-9 9" strokeLinecap="round" />
-              </svg>
+              <X className="size-4" strokeWidth={1.75} aria-hidden="true" />
             </Button>
           </div>
         ))}

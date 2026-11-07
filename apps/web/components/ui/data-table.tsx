@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createPortal } from 'react-dom';
+import { MoreVertical } from 'lucide-react';
 import {
   useCallback,
   useEffect,
@@ -319,11 +320,7 @@ function ActionMenu<Row>({
         className="inline-flex size-8 cursor-pointer items-center justify-center rounded-rail-control border-0 bg-transparent text-rail-muted hover:bg-rail-hover hover:text-rail-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-rail-accent"
         onClick={onToggle}
       >
-        <svg aria-hidden="true" viewBox="0 0 20 20" className="size-4" fill="currentColor">
-          <circle cx="10" cy="4" r="1.5" />
-          <circle cx="10" cy="10" r="1.5" />
-          <circle cx="10" cy="16" r="1.5" />
-        </svg>
+        <MoreVertical className="size-4" strokeWidth={1.75} aria-hidden="true" />
       </button>
       {menu ? createPortal(menu, document.body) : null}
     </>

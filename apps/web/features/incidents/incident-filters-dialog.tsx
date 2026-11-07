@@ -7,6 +7,7 @@ import {
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
+import { ListFilter } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Select } from '../../components/ui/form-control';
 import { Form } from '../../components/ui/form';
@@ -70,17 +71,7 @@ export function IncidentFiltersDialog({
           setOpen(true);
         }}
       >
-        <svg
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          className="size-4"
-          aria-hidden="true"
-        >
-          <path d="M2.5 4h11M4.5 8h7M6.5 12h3" />
-        </svg>
+        <ListFilter className="size-4" strokeWidth={1.75} aria-hidden="true" />
         Filter
         {status !== 'all' ? (
           <span className="size-1.5 rounded-full bg-rail-accent" aria-hidden="true" />

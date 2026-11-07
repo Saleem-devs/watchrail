@@ -4,6 +4,15 @@ import type {
   PublicStatusState,
 } from '@watchrail/domain';
 import Link from 'next/link';
+import {
+  CalendarDays,
+  ChevronDown,
+  CircleAlert,
+  CircleCheck,
+  CircleX,
+  TriangleAlert,
+  type LucideIcon,
+} from 'lucide-react';
 
 const DAY_COUNT = 30;
 const DAY_MS = 86_400_000;
@@ -368,97 +377,24 @@ function deriveGroupStatus(components: PublicStatusPageComponentV1[]): PublicSta
 
 function StatusIcon({ status }: { status: PublicStatusState }) {
   const className = `size-4 shrink-0 ${statusIconClass(status)}`;
-
-  if (status === 'OPERATIONAL') {
-    return (
-      <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" className={className}>
-        <circle cx="8" cy="8" r="7" fill="currentColor" />
-        <path
-          d="m4.75 8.1 2.05 2.05 4.45-4.45"
-          stroke="var(--color-rail-canvas)"
-          strokeWidth="1.6"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    );
-  }
-
-  if (status === 'PARTIAL_OUTAGE') {
-    return (
-      <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" className={className}>
-        <path
-          d="M7.14 2.5 1.45 12.35A1 1 0 0 0 2.31 13.85h11.38a1 1 0 0 0 .86-1.5L8.86 2.5a1 1 0 0 0-1.72 0Z"
-          stroke="currentColor"
-          strokeWidth="1.35"
-          strokeLinejoin="round"
-        />
-        <path
-          d="M8 5.7v3.5m0 2.05v.05"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-        />
-      </svg>
-    );
-  }
-
-  if (status === 'MAJOR_OUTAGE') {
-    return (
-      <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" className={className}>
-        <circle cx="8" cy="8" r="6.75" stroke="currentColor" strokeWidth="1.5" />
-        <path
-          d="m5.5 5.5 5 5m0-5-5 5"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-        />
-      </svg>
-    );
-  }
-
-  if (status === 'MAINTENANCE') {
-    return (
-      <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" className={className}>
-        <rect
-          x="2"
-          y="3.5"
-          width="12"
-          height="10"
-          rx="2"
-          stroke="currentColor"
-          strokeWidth="1.35"
-        />
-        <path d="M5 2v3M11 2v3M2 7h12" stroke="currentColor" strokeWidth="1.35" />
-      </svg>
-    );
-  }
-
-  return (
-    <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" className={className}>
-      <circle cx="8" cy="8" r="6.75" stroke="currentColor" strokeWidth="1.5" />
-      <path
-        d="M8 4.6v4.2m0 2.5v.05"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
+  const icons: Record<PublicStatusState, LucideIcon> = {
+    OPERATIONAL: CircleCheck,
+    PARTIAL_OUTAGE: TriangleAlert,
+    MAJOR_OUTAGE: CircleX,
+    MAINTENANCE: CalendarDays,
+    MONITORING_IMPAIRED: CircleAlert,
+  };
+  const Icon = icons[status];
+  return <Icon className={className} strokeWidth={1.75} aria-hidden="true" />;
 }
 
 function ChevronIcon() {
   return (
-    <svg
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
+    <ChevronDown
       className="size-3.5 text-rail-muted transition-transform duration-150 group-open/status:rotate-180 motion-reduce:transition-none"
+      strokeWidth={1.75}
       aria-hidden="true"
-    >
-      <path d="m4 6 4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
+    />
   );
 }
 

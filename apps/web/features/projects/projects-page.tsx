@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { ChevronRight, Plus, Search } from 'lucide-react';
 import { AppShell } from '../../components/app-shell';
 import { actionClassName, Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/form-control';
@@ -81,33 +82,14 @@ export function ProjectsPage({ workspaceId }: { workspaceId: string }) {
           description="Keep each product’s monitors, incidents, and public status separate."
           actions={
             <Button variant="primary" onClick={() => setCreating(true)}>
-              <svg
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                className="size-4"
-                aria-hidden="true"
-              >
-                <path d="M8 3v10M3 8h10" strokeLinecap="round" />
-              </svg>
+              <Plus className="size-4" strokeWidth={1.75} aria-hidden="true" />
               New project
             </Button>
           }
         />
 
         <div className="mt-6 flex max-w-md items-center gap-2 rounded-rail-control border border-rail-border bg-rail-surface px-3 focus-within:border-rail-accent">
-          <svg
-            viewBox="0 0 20 20"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            className="size-4 text-rail-muted"
-            aria-hidden="true"
-          >
-            <circle cx="8.5" cy="8.5" r="5.5" />
-            <path d="m13 13 4 4" />
-          </svg>
+          <Search className="size-4 text-rail-muted" strokeWidth={1.75} aria-hidden="true" />
           <label htmlFor="project-search" className="sr-only">
             Search projects
           </label>
@@ -156,16 +138,11 @@ export function ProjectsPage({ workspaceId }: { workspaceId: string }) {
                 >
                   <div className="flex items-start justify-between gap-4">
                     <h2 className="m-0 truncate text-sm font-semibold">{project.name}</h2>
-                    <svg
-                      viewBox="0 0 16 16"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
+                    <ChevronRight
                       className="size-4 text-rail-muted transition-transform group-hover:translate-x-0.5 motion-reduce:transition-none"
+                      strokeWidth={1.75}
                       aria-hidden="true"
-                    >
-                      <path d="m6 3 5 5-5 5" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
+                    />
                   </div>
                   <p className="mt-2 mb-0 text-xs text-rail-muted">
                     {project.monitorCount === 1 ? '1 monitor' : `${project.monitorCount} monitors`}

@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
+import { Plus } from 'lucide-react';
 import { actionClassName } from '../../components/ui/button';
 import { PageHeader } from '../../components/ui/page-header';
 import {
@@ -66,17 +67,7 @@ export function DashboardHeader({
         }
         className={actionClassName({ variant: 'primary', className: 'px-5' })}
       >
-        <svg
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.8"
-          strokeLinecap="round"
-          className="size-4"
-          aria-hidden="true"
-        >
-          <path d="M8 3v10M3 8h10" />
-        </svg>
+        <Plus className="size-4" strokeWidth={1.75} aria-hidden="true" />
         {definition ? `Add ${definition.singular}` : 'Add monitor'}
       </Link>
     ) : null;

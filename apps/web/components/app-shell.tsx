@@ -3,6 +3,26 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import {
+  Activity,
+  Bell,
+  Building2,
+  CalendarDays,
+  ChevronRight,
+  KeyRound,
+  LayoutDashboard,
+  LockKeyhole,
+  Menu,
+  PanelLeft,
+  PanelTop,
+  Plus,
+  Radio,
+  Search,
+  TriangleAlert,
+  Users,
+  X,
+  type LucideIcon,
+} from 'lucide-react';
 import { OrgSwitcher } from './org-switcher';
 import { ProjectSwitcher } from './project-switcher';
 import { MONITOR_TYPES, type MonitorType } from '../features/monitors/monitor-types';
@@ -143,112 +163,26 @@ function navigationGroups(
   );
 }
 
-function ShellIcon({ name, className = 'size-[18px]' }: { name: IconName; className?: string }) {
-  const paths: Record<IconName, ReactNode> = {
-    overview: (
-      <>
-        <rect x="3" y="3" width="7" height="7" rx="1" />
-        <rect x="14" y="3" width="7" height="7" rx="1" />
-        <rect x="3" y="14" width="7" height="7" rx="1" />
-        <rect x="14" y="14" width="7" height="7" rx="1" />
-      </>
-    ),
-    monitors: <path d="M3 12h4l2.5-5 4.5 10 2.5-5H21" />,
-    add: (
-      <>
-        <path d="M12 5v14" />
-        <path d="M5 12h14" />
-      </>
-    ),
-    organization: (
-      <>
-        <circle cx="9" cy="8" r="3" />
-        <circle cx="17" cy="9" r="2.5" />
-        <path d="M3.5 20c.4-4 2.2-6 5.5-6s5.1 2 5.5 6" />
-        <path d="M14 15c.8-.7 1.8-1 3-1 2.5 0 3.8 1.6 4 4.8" />
-      </>
-    ),
-    incidents: (
-      <>
-        <path d="M12 3 3.5 19h17Z" />
-        <path d="M12 9v4" />
-        <path d="M12 16h.01" />
-      </>
-    ),
-    'status-pages': (
-      <>
-        <rect x="3" y="4" width="18" height="16" rx="2" />
-        <path d="M7 9h10M7 13h6" />
-      </>
-    ),
-    probes: (
-      <>
-        <circle cx="12" cy="12" r="2" />
-        <path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4" />
-        <path d="M4.9 4.9a10 10 0 0 0 0 14.2M19.1 4.9a10 10 0 0 1 0 14.2" />
-      </>
-    ),
-    notifications: (
-      <>
-        <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
-        <path d="M10 21h4" />
-      </>
-    ),
-    maintenance: (
-      <>
-        <rect x="4" y="5" width="16" height="15" rx="2" />
-        <path d="M8 3v4M16 3v4M4 10h16" />
-        <path d="M8 14h3M8 17h6" />
-      </>
-    ),
-    members: (
-      <>
-        <circle cx="9" cy="8" r="3" />
-        <circle cx="17" cy="9" r="2.5" />
-        <path d="M3.5 20c.4-4 2.2-6 5.5-6s5.1 2 5.5 6M14 15c.8-.7 1.8-1 3-1 2.5 0 3.8 1.6 4 4.8" />
-      </>
-    ),
-    credentials: (
-      <>
-        <circle cx="8" cy="12" r="4" />
-        <path d="M12 12h9M17 12v3M20 12v2" />
-      </>
-    ),
-    secrets: (
-      <>
-        <rect x="4" y="5" width="16" height="14" rx="2" />
-        <path d="M8 5V3.5h8V5M9 11.5h6M9 15h4" />
-      </>
-    ),
-    menu: (
-      <>
-        <path d="M4 7h16" />
-        <path d="M4 12h16" />
-        <path d="M4 17h16" />
-      </>
-    ),
-    'sidebar-control': (
-      <>
-        <rect x="4" y="3" width="16" height="18" rx="2" />
-        <path d="M9 3v18M6.5 7h.01M6.5 12h.01M6.5 17h.01" />
-      </>
-    ),
-  };
+const shellIcons: Record<IconName, LucideIcon> = {
+  overview: LayoutDashboard,
+  monitors: Activity,
+  add: Plus,
+  incidents: TriangleAlert,
+  'status-pages': PanelTop,
+  probes: Radio,
+  notifications: Bell,
+  maintenance: CalendarDays,
+  organization: Building2,
+  members: Users,
+  credentials: KeyRound,
+  secrets: LockKeyhole,
+  menu: Menu,
+  'sidebar-control': PanelLeft,
+};
 
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.75"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden="true"
-    >
-      {paths[name]}
-    </svg>
-  );
+function ShellIcon({ name, className = 'size-[18px]' }: { name: IconName; className?: string }) {
+  const Icon = shellIcons[name];
+  return <Icon className={className} strokeWidth={1.75} aria-hidden="true" />;
 }
 
 function WatchrailLogo({ compact = false }: { compact?: boolean }) {
@@ -269,20 +203,7 @@ function WatchrailLogo({ compact = false }: { compact?: boolean }) {
 }
 
 function SearchIcon({ className = 'size-4' }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 20 20"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      strokeLinecap="round"
-      className={className}
-      aria-hidden="true"
-    >
-      <circle cx="8.5" cy="8.5" r="5.5" />
-      <path d="m13 13 4 4" />
-    </svg>
-  );
+  return <Search className={className} strokeWidth={1.75} aria-hidden="true" />;
 }
 
 function GlobalSearch() {
@@ -372,16 +293,7 @@ function GlobalSearch() {
                 onClick={() => setOpen(false)}
               >
                 <span className="sr-only">Close search</span>
-                <svg
-                  viewBox="0 0 20 20"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  className="size-4"
-                  aria-hidden="true"
-                >
-                  <path d="m5 5 10 10M15 5 5 15" />
-                </svg>
+                <X className="size-4" strokeWidth={1.75} aria-hidden="true" />
               </button>
             </div>
             <div className="p-4">
@@ -461,16 +373,11 @@ function Navigation({
                     onClick={() => setMonitorsOpen((current) => !current)}
                   >
                     {content}
-                    <svg
-                      viewBox="0 0 16 16"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
+                    <ChevronRight
                       className={`ml-auto size-4 shrink-0 text-rail-muted transition-[transform,opacity] ${collapsed ? 'opacity-0' : 'opacity-100'} ${monitorsOpen ? 'rotate-90' : ''}`}
+                      strokeWidth={1.75}
                       aria-hidden="true"
-                    >
-                      <path d="m6 3.5 4.5 4.5L6 12.5" />
-                    </svg>
+                    />
                   </button>
                   {!collapsed && monitorsOpen ? (
                     <div

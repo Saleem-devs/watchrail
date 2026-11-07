@@ -4,6 +4,7 @@ import type {
   PublicStatusState,
 } from '@watchrail/domain';
 import Link from 'next/link';
+import { CircleAlert, CircleCheck } from 'lucide-react';
 import { StatusHistory } from './status-history';
 import { StatusPageFooter, StatusPageHeader } from './status-page-chrome';
 
@@ -147,18 +148,9 @@ function IncidentSection({
 
 function StatusIcon({ status }: { status: PublicStatusState }) {
   if (status === 'OPERATIONAL') {
-    return (
-      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" className="size-4">
-        <path d="m5.5 10 3 3 6-6" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    );
+    return <CircleCheck className="size-4" strokeWidth={2} aria-hidden="true" />;
   }
-  return (
-    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" className="size-4">
-      <path d="M10 5.5v5" strokeLinecap="round" />
-      <path d="M10 14.5h.01" strokeLinecap="round" />
-    </svg>
-  );
+  return <CircleAlert className="size-4" strokeWidth={1.8} aria-hidden="true" />;
 }
 
 function stateSurfaceClass(status: PublicStatusState): string {

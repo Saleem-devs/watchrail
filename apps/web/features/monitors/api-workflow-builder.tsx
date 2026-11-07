@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Controller, useFieldArray, useForm, useWatch, type Control } from 'react-hook-form';
+import { ChevronDown, ChevronUp, Minus, Trash2 } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Checkbox, Input, Select, Textarea } from '../../components/ui/form-control';
 import { HTTP_METHODS } from './http-method-options';
@@ -356,14 +357,14 @@ function StepEditor({
         </div>
         <div className="flex items-center gap-1">
           <IconButton label="Move step up" disabled={index === 0} onClick={() => onMove(index, -1)}>
-            <path d="m5 10 3-3 3 3" />
+            <ChevronUp className="size-4" strokeWidth={1.75} aria-hidden="true" />
           </IconButton>
           <IconButton
             label="Move step down"
             disabled={index === stepCount - 1}
             onClick={() => onMove(index, 1)}
           >
-            <path d="m5 6 3 3 3-3" />
+            <ChevronDown className="size-4" strokeWidth={1.75} aria-hidden="true" />
           </IconButton>
           <IconButton
             label="Remove step"
@@ -371,7 +372,7 @@ function StepEditor({
             disabled={stepCount <= 2}
             onClick={() => onRemove(index)}
           >
-            <path d="M3 4.5h10M6 4.5V3h4v1.5M5 6l.5 7h5l.5-7" />
+            <Trash2 className="size-4" strokeWidth={1.75} aria-hidden="true" />
           </IconButton>
         </div>
       </header>
@@ -574,7 +575,7 @@ function StepEditor({
                   label={`Remove header ${headerIndex + 1}`}
                   onClick={() => headers.remove(headerIndex)}
                 >
-                  <path d="M3 4.5h10M6 4.5V3h4v1.5M5 6l.5 7h5l.5-7" />
+                  <Trash2 className="size-4" strokeWidth={1.75} aria-hidden="true" />
                 </IconButton>
                 <label
                   className={`flex min-h-8 items-center gap-2 text-xs text-rail-muted sm:col-span-4 ${step.headers[headerIndex]?.source === 'VAULT' ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
@@ -771,7 +772,7 @@ function StepEditor({
                   label={`Remove form field ${fieldIndex + 1}`}
                   onClick={() => bodyFields.remove(fieldIndex)}
                 >
-                  <path d="M4 8h8" />
+                  <Minus className="size-4" strokeWidth={1.75} aria-hidden="true" />
                 </IconButton>
               </div>
             ))}
@@ -912,7 +913,7 @@ function StepEditor({
                   label={`Remove extraction ${extractionIndex + 1}`}
                   onClick={() => extractions.remove(extractionIndex)}
                 >
-                  <path d="M3 4.5h10M6 4.5V3h4v1.5M5 6l.5 7h5l.5-7" />
+                  <Trash2 className="size-4" strokeWidth={1.75} aria-hidden="true" />
                 </IconButton>
                 <label className="flex min-h-8 cursor-pointer items-center gap-2 text-xs text-rail-muted sm:col-span-3">
                   <Controller
@@ -1179,7 +1180,7 @@ function WorkflowAssertionRow({
         </div>
       )}
       <IconButton label={`Remove assertion ${index + 1}`} onClick={onRemove}>
-        <path d="M3 4.5h10M6 4.5V3h4v1.5M5 6l.5 7h5l.5-7" />
+        <Trash2 className="size-4" strokeWidth={1.75} aria-hidden="true" />
       </IconButton>
     </div>
   );
@@ -1207,18 +1208,7 @@ function IconButton({
       onClick={onClick}
       className={`grid size-9 shrink-0 cursor-pointer place-items-center rounded-rail-control border border-rail-border bg-rail-surface transition-colors hover:border-rail-border-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rail-accent disabled:cursor-not-allowed disabled:opacity-40 ${danger ? 'text-rail-muted hover:text-rail-danger' : 'text-rail-subtle hover:text-rail-text'}`}
     >
-      <svg
-        aria-hidden="true"
-        viewBox="0 0 16 16"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className="size-4"
-      >
-        {children}
-      </svg>
+      {children}
     </button>
   );
 }

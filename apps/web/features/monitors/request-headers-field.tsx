@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { X } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Checkbox, Input, Select } from '../../components/ui/form-control';
 import { listWorkspaceSecrets } from '../workspace-secrets/workspace-secret-api';
@@ -207,17 +208,7 @@ export function RequestHeadersField({
                   aria-label={`Remove ${row.name || 'header'}`}
                   onClick={() => setRows((current) => current.filter(({ id }) => id !== row.id))}
                 >
-                  <svg
-                    aria-hidden="true"
-                    className="size-4"
-                    viewBox="0 0 20 20"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.6"
-                    strokeLinecap="round"
-                  >
-                    <path d="M5 5l10 10M15 5 5 15" />
-                  </svg>
+                  <X className="size-4" strokeWidth={1.75} aria-hidden="true" />
                 </button>
                 <input type="hidden" name="requestHeaderId" value={row.id} />
                 <input type="hidden" name="requestHeaderSource" value={row.source} />

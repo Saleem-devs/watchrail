@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Plus, X } from 'lucide-react';
 import { actionClassName, Button } from '../../components/ui/button';
 import { ConfirmationDialog } from '../../components/ui/confirmation-dialog';
 import { Checkbox } from '../../components/ui/form-control';
@@ -399,32 +400,10 @@ function SecretListLoading() {
 }
 
 function PlusIcon() {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.7"
-      className="size-4"
-      aria-hidden="true"
-    >
-      <path d="M8 3v10M3 8h10" strokeLinecap="round" />
-    </svg>
-  );
+  return <Plus className="size-4" strokeWidth={1.75} aria-hidden="true" />;
 }
 function CloseIcon() {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      className="size-4"
-      aria-hidden="true"
-    >
-      <path d="m4 4 8 8m0-8-8 8" strokeLinecap="round" />
-    </svg>
-  );
+  return <X className="size-4" strokeWidth={1.75} aria-hidden="true" />;
 }
 function messageFor(error: unknown, fallback: string): string {
   return error instanceof WorkspaceSecretRequestError ? error.message : fallback;

@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
+import { Plus } from 'lucide-react';
 import { AppShell } from '../../components/app-shell';
 import { actionClassName, Button } from '../../components/ui/button';
 import {
@@ -116,17 +117,7 @@ export function StatusPagesPage({ projectId }: { projectId?: string | undefined 
               href={`${projectBase}/status-pages/new`}
               className={actionClassName({ variant: 'primary' })}
             >
-              <svg
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                aria-hidden="true"
-                className="size-3.5"
-              >
-                <path d="M8 3v10M3 8h10" />
-              </svg>
+              <Plus className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
               Create status page
             </Link>
           }

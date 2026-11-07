@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { Activity, Plus, RefreshCw } from 'lucide-react';
 import { AppShell } from '../components/app-shell';
 import { MonitorOverview } from '../components/monitor-overview';
 import { actionClassName, Button } from '../components/ui/button';
@@ -1094,17 +1095,7 @@ export function Dashboard({
                       }
                       className={actionClassName({ variant: 'primary', className: 'px-5' })}
                     >
-                      <svg
-                        viewBox="0 0 16 16"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.8"
-                        strokeLinecap="round"
-                        aria-hidden="true"
-                        className="size-4"
-                      >
-                        <path d="M8 3v10M3 8h10" />
-                      </svg>
+                      <Plus className="size-4" strokeWidth={1.75} aria-hidden="true" />
                       {monitorType
                         ? `Add ${monitorTypeDefinition(monitorType).singular}`
                         : 'Add monitor'}
@@ -1337,16 +1328,7 @@ export function Dashboard({
               ) : monitors.length === 0 && !(view === 'monitors' && hasActiveMonitorFilters) ? (
                 <div className="flex min-h-56 flex-col items-start justify-center p-6 sm:p-8">
                   <div className="mb-4 grid size-10 place-items-center rounded-lg border border-rail-border bg-rail-surface text-rail-muted">
-                    <svg
-                      viewBox="0 0 20 20"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                      aria-hidden="true"
-                      className="size-5"
-                    >
-                      <path d="M3 10h3l2-5 4 10 2-5h3" />
-                    </svg>
+                    <Activity className="size-5" strokeWidth={1.75} aria-hidden="true" />
                   </div>
                   <h3 className="m-0 text-base font-semibold text-rail-text">No monitors yet</h3>
                   <p className="mt-1 mb-0 max-w-sm text-sm leading-6 text-rail-subtle">
@@ -1752,18 +1734,11 @@ function MonitorDetailView({
           </div>
           {monitor.type !== 'HEARTBEAT' ? (
             <Button variant="secondary" disabled={running} onClick={onRun}>
-              <svg
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
+              <RefreshCw
                 className={`size-4 ${running ? 'motion-safe:animate-spin' : ''}`}
-              >
-                <path d="M13 8a5 5 0 1 1-1.46-3.54M13 3v4H9" />
-              </svg>
+                strokeWidth={1.75}
+                aria-hidden="true"
+              />
               {running ? 'Checking…' : 'Run check'}
             </Button>
           ) : null}

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { AppShell } from '../../components/app-shell';
 import { actionClassName, Button } from '../../components/ui/button';
 import { Checkbox, Input } from '../../components/ui/form-control';
@@ -519,18 +520,6 @@ function slugFromName(value: string): string {
 }
 
 function ArrowIcon({ direction }: { direction: 'up' | 'down' }) {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="size-3.5"
-      aria-hidden="true"
-    >
-      {direction === 'up' ? <path d="m4 10 4-4 4 4" /> : <path d="m4 6 4 4 4-4" />}
-    </svg>
-  );
+  const Icon = direction === 'up' ? ChevronUp : ChevronDown;
+  return <Icon className="size-3.5" strokeWidth={1.75} aria-hidden="true" />;
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import * as SelectPrimitive from '@radix-ui/react-select';
+import { Check, ChevronDown } from 'lucide-react';
 import {
   Children,
   isValidElement,
@@ -147,15 +148,7 @@ export function Select({
         >
           <SelectPrimitive.Value />
           <SelectPrimitive.Icon aria-hidden="true" className="shrink-0 text-rail-muted">
-            <svg
-              viewBox="0 0 16 16"
-              fill="none"
-              className="size-4"
-              stroke="currentColor"
-              strokeWidth="1.5"
-            >
-              <path d="m4 6 4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
+            <ChevronDown className="size-4" strokeWidth={1.75} />
           </SelectPrimitive.Icon>
         </SelectPrimitive.Trigger>
         <SelectPrimitive.Portal>
@@ -176,19 +169,7 @@ export function Select({
                     className="relative flex min-h-9 cursor-pointer select-none items-center rounded-[calc(var(--radius-rail-control)-1px)] py-2 pr-3 pl-8 text-sm text-rail-text outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-45 data-[highlighted]:bg-rail-hover data-[state=checked]:bg-rail-selected"
                   >
                     <SelectPrimitive.ItemIndicator className="absolute left-2 grid size-4 place-items-center text-rail-accent">
-                      <svg
-                        viewBox="0 0 16 16"
-                        fill="none"
-                        className="size-4"
-                        stroke="currentColor"
-                        strokeWidth="1.8"
-                      >
-                        <path
-                          d="m3.5 8.5 2.7 2.7 6.3-6.4"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
+                      <Check className="size-4" strokeWidth={2} />
                     </SelectPrimitive.ItemIndicator>
                     <SelectPrimitive.ItemText>{option.label}</SelectPrimitive.ItemText>
                   </SelectPrimitive.Item>
@@ -220,15 +201,7 @@ export function Checkbox({ className, ref, ...props }: CheckboxProps) {
         aria-hidden="true"
         className="pointer-events-none grid size-4 place-items-center rounded-[4px] border border-rail-border-strong bg-rail-input text-rail-on-accent transition-colors peer-checked:border-rail-accent peer-checked:bg-rail-accent peer-checked:[&>svg]:opacity-100 peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-rail-accent peer-disabled:opacity-50"
       >
-        <svg
-          viewBox="0 0 16 16"
-          fill="none"
-          className="size-3 opacity-0 transition-opacity"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <path d="m3.5 8.5 2.7 2.7 6.3-6.4" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <Check className="size-3 opacity-0 transition-opacity" strokeWidth={2.25} />
       </span>
     </span>
   );

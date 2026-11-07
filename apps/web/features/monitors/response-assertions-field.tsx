@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useId, useRef, useState } from 'react';
+import { Trash2 } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Checkbox, Input, Select } from '../../components/ui/form-control';
 import {
@@ -226,17 +227,7 @@ function AssertionRow({
           title="Remove assertion"
           onClick={onRemove}
         >
-          <svg
-            aria-hidden="true"
-            className="size-4"
-            viewBox="0 0 20 20"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.6"
-            strokeLinecap="round"
-          >
-            <path d="M4 5.5h12M7 5.5V4h6v1.5M6 7.5l.6 8h6.8l.6-8M8.5 8.5v4.5M11.5 8.5v4.5" />
-          </svg>
+          <Trash2 className="size-4" strokeWidth={1.75} aria-hidden="true" />
         </Button>
       </div>
       <div className="grid gap-3 md:grid-cols-[minmax(10rem,1fr)_minmax(10rem,0.8fr)_minmax(12rem,1.2fr)]">

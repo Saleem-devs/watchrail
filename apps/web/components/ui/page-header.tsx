@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
+import { ChevronLeft } from 'lucide-react';
 
 export function PageHeader({
   title,
@@ -20,18 +21,7 @@ export function PageHeader({
             href={backLink.href}
             className="mb-4 inline-flex min-h-8 items-center gap-1.5 rounded-rail-control text-xs font-medium text-rail-subtle no-underline hover:text-rail-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rail-accent"
           >
-            <svg
-              viewBox="0 0 16 16"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-              className="size-3.5"
-            >
-              <path d="m10 3-5 5 5 5" />
-            </svg>
+            <ChevronLeft className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
             {backLink.label}
           </Link>
         ) : null}

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Plus } from 'lucide-react';
 import { AppShell } from '../../components/app-shell';
 import { actionClassName } from '../../components/ui/button';
 import { Input } from '../../components/ui/form-control';
@@ -70,16 +71,7 @@ export function WorkspacesPage() {
           description="Manage the workspaces you belong to and switch between their projects."
           actions={
             <Link href="/workspaces/new" className={actionClassName({ variant: 'primary' })}>
-              <svg
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                className="size-4"
-                aria-hidden="true"
-              >
-                <path d="M8 3v10M3 8h10" strokeLinecap="round" />
-              </svg>
+              <Plus className="size-4" strokeWidth={1.75} aria-hidden="true" />
               Create workspace
             </Link>
           }
