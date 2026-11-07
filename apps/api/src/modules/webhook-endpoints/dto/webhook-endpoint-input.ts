@@ -7,6 +7,7 @@ const signingSecretUpdateSchema = z.union([
 
 export const webhookEndpointRoutingSchema = z
   .object({
+    allMonitors: z.boolean().default(false),
     monitorIds: z.array(z.uuid()).max(500),
     notifyOnIncident: z.boolean(),
     notifyOnRecovery: z.boolean(),

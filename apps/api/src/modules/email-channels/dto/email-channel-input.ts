@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 export const emailChannelRoutingSchema = z
   .object({
+    allMonitors: z.boolean().default(false),
     monitorIds: z.array(z.uuid()).max(500),
     notifyOnIncident: z.boolean(),
     notifyOnRecovery: z.boolean(),

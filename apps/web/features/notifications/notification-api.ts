@@ -3,6 +3,7 @@ import type {
   NotificationDelivery,
   EmailChannel,
   NotificationMonitor,
+  SlackChannel,
   WebhookChannel,
 } from './types';
 
@@ -123,6 +124,57 @@ export function listEmailDeliveries(channelId: string): Promise<NotificationDeli
 
 export function deleteEmailChannel(channelId: string): Promise<{ deleted: true }> {
   return request(`/api/email-channels/${encodeURIComponent(channelId)}`, { method: 'DELETE' });
+}
+
+export function listSlackChannels(projectId: string): Promise<SlackChannel[]> {
+  return request(`/api/slack-channels?projectId=${encodeURIComponent(projectId)}`);
+}
+
+export function findSlackChannel(channelId: string): Promise<SlackChannel> {
+  return request(`/api/slack-channels/${encodeURIComponent(channelId)}`);
+}
+
+export function createSlackChannel(input: {
+  projectId: string;
+  name: string;
+  webhookUrl: string;
+  enabled: boolean;
+  routing: SlackChannel['routing'];
+}): Promise<SlackChannel> {
+  return request('/api/slack-channels', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function updateSlackChannel(
+  channelId: string,
+  input: {
+    name: string;
+    webhookUrl: { retain: true } | { value: string };
+    routing: SlackChannel['routing'];
+  },
+): Promise<SlackChannel> {
+  return request(`/api/slack-channels/${encodeURIComponent(channelId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export function setSlackChannelEnabled(channelId: string, enabled: boolean): Promise<SlackChannel> {
+  return request(`/api/slack-channels/${encodeURIComponent(channelId)}/enabled`, {
+    method: 'PATCH',
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+export function sendSlackChannelTest(channelId: string): Promise<{ deliveryId: string }> {
+  return request(`/api/slack-channels/${encodeURIComponent(channelId)}/test`, { method: 'POST' });
+}
+
+export function listSlackDeliveries(channelId: string): Promise<NotificationDelivery[]> {
+  return request(`/api/slack-channels/${encodeURIComponent(channelId)}/deliveries?limit=25`);
+}
+
+export function deleteSlackChannel(channelId: string): Promise<{ deleted: true }> {
+  return request(`/api/slack-channels/${encodeURIComponent(channelId)}`, { method: 'DELETE' });
 }
 
 export function findWebhookChannel(endpointId: string): Promise<WebhookChannel> {

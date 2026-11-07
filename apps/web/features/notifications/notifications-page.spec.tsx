@@ -8,7 +8,8 @@ import { NotificationChannelDetailPage } from './notification-channel-detail-pag
 import { NotificationChannelsPage } from './notification-channels-page';
 import { WebhookChannelForm } from './webhook-channel-form';
 import { EmailChannelForm } from './email-channel-form';
-import type { EmailChannel, NotificationMonitor, WebhookChannel } from './types';
+import { SlackChannelForm } from './slack-channel-form';
+import type { EmailChannel, NotificationMonitor, SlackChannel, WebhookChannel } from './types';
 
 vi.mock('../../components/app-shell', () => ({
   AppShell: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -53,6 +54,18 @@ const emailChannel: EmailChannel = {
   createdAt: channel.createdAt,
   updatedAt: channel.updatedAt,
 };
+const slackChannel: SlackChannel = {
+  id: '88888888-8888-4888-8888-888888888888',
+  projectId,
+  type: 'SLACK',
+  name: 'Operations Slack',
+  enabled: true,
+  versionNumber: 1,
+  webhookUrl: { hasValue: true },
+  routing: channel.routing,
+  createdAt: channel.createdAt,
+  updatedAt: channel.updatedAt,
+};
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -75,6 +88,7 @@ describe('notifications page', () => {
     await user.type(screen.getByLabelText('Channel name'), channel.name);
     await user.type(screen.getByLabelText('Endpoint URL'), channel.url);
     await user.type(screen.getByLabelText(/^Signing secret/), 'a-strong-webhook-signing-secret');
+    await user.click(screen.getByLabelText(/Selected monitors/));
     await user.click(screen.getByText(monitor.name));
     fireEvent.submit(screen.getByRole('form', { name: 'Add webhook channel' }));
 
@@ -87,6 +101,7 @@ describe('notifications page', () => {
       signingSecret: 'a-strong-webhook-signing-secret',
       enabled: true,
       routing: {
+        allMonitors: false,
         monitorIds: [monitor.id],
         notifyOnIncident: true,
         notifyOnRecovery: true,
@@ -123,6 +138,7 @@ describe('notifications page', () => {
     expect(requestJson(fetchMock.mock.calls[0])).toMatchObject({
       signingSecret: { retain: true },
       routing: {
+        allMonitors: false,
         monitorIds: [monitor.id],
         notifyOnIncident: true,
         notifyOnRecovery: false,
@@ -130,7 +146,7 @@ describe('notifications page', () => {
     });
   });
 
-  it('creates an email channel with normalized recipients and explicit routing', async () => {
+  it('creates an email channel for the entire project by default', async () => {
     const user = userEvent.setup();
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
@@ -149,7 +165,8 @@ describe('notifications page', () => {
       screen.getByLabelText(/^Recipient emails/),
       'Alerts@Example.com\noncall@example.com',
     );
-    await user.click(screen.getByText(monitor.name));
+    expect(screen.getByLabelText(/Entire project/)).toBeChecked();
+    expect(screen.queryByText(monitor.name)).not.toBeInTheDocument();
     fireEvent.submit(document.querySelector('#email-form')!);
 
     await waitFor(() => expect(onSaved).toHaveBeenCalledWith(emailChannel));
@@ -159,11 +176,65 @@ describe('notifications page', () => {
       name: emailChannel.name,
       recipientEmails: ['alerts@example.com', 'oncall@example.com'],
       routing: {
-        monitorIds: [monitor.id],
+        allMonitors: true,
+        monitorIds: [],
         notifyOnIncident: true,
         notifyOnRecovery: true,
       },
     });
+  });
+
+  it('creates a Slack channel and retains its encrypted webhook during edits', async () => {
+    const user = userEvent.setup();
+    const webhookUrl = [
+      'https://hooks.slack.com',
+      'services',
+      'T00000000',
+      'B00000000',
+      'XXXXXXXXXXXXXXXXXXXXXXXX',
+    ].join('/');
+    const createFetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(json({ data: slackChannel }, 201));
+    const createdView = render(
+      <SlackChannelForm
+        formId="slack-form"
+        projectId={projectId}
+        monitors={[monitor]}
+        onSaved={vi.fn()}
+      />,
+    );
+    await user.type(screen.getByLabelText('Channel name'), slackChannel.name);
+    await user.type(screen.getByLabelText(/^Incoming webhook URL/), webhookUrl);
+    await user.click(screen.getByLabelText(/Selected monitors/));
+    await user.click(screen.getByText(monitor.name));
+    fireEvent.submit(screen.getByRole('form', { name: 'Add Slack channel' }));
+    await waitFor(() => expect(createFetch).toHaveBeenCalledTimes(1));
+    expect(requestJson(createFetch.mock.calls[0])).toMatchObject({
+      projectId,
+      name: slackChannel.name,
+      webhookUrl,
+      routing: { allMonitors: false, monitorIds: [monitor.id] },
+    });
+
+    createdView.unmount();
+    createFetch.mockRestore();
+    const updateFetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(json({ data: slackChannel }));
+    render(
+      <SlackChannelForm
+        formId="slack-edit-form"
+        projectId={projectId}
+        monitors={[monitor]}
+        channel={slackChannel}
+        onSaved={vi.fn()}
+      />,
+    );
+    expect(screen.getByLabelText(/^Replace incoming webhook URL/)).toHaveValue('');
+    fireEvent.submit(screen.getByRole('form', { name: 'Edit Slack channel' }));
+    await waitFor(() => expect(updateFetch).toHaveBeenCalledTimes(1));
+    expect(requestJson(updateFetch.mock.calls[0])).toMatchObject({ webhookUrl: { retain: true } });
   });
 
   it('shows failed delivery evidence without exposing a payload or signing secret', async () => {
@@ -288,17 +359,22 @@ describe('notifications page', () => {
     const user = userEvent.setup();
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(json({ data: [channel] }))
+      .mockResolvedValueOnce(json({ data: [] }))
       .mockResolvedValueOnce(json({ data: [] }));
 
     render(<NotificationChannelsPage projectId={projectId} />);
     await screen.findByText(channel.name);
-    expect(screen.getByRole('link', { name: 'Add webhook' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Add another Webhook channel' })).toHaveAttribute(
       'href',
       `/projects/${projectId}/notifications/new`,
     );
-    expect(screen.getByRole('link', { name: 'Add email channel' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Connect Email' })).toHaveAttribute(
       'href',
       `/projects/${projectId}/notifications/email/new`,
+    );
+    expect(screen.getByRole('link', { name: 'Connect Slack' })).toHaveAttribute(
+      'href',
+      `/projects/${projectId}/notifications/slack/new`,
     );
     await user.click(screen.getByRole('button', { name: `Actions for ${channel.name}` }));
     expect(screen.getByRole('menuitem', { name: 'View' })).toHaveAttribute(
@@ -317,6 +393,7 @@ describe('notifications page', () => {
       .spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(json({ data: [channel] }))
       .mockResolvedValueOnce(json({ data: [] }))
+      .mockResolvedValueOnce(json({ data: [] }))
       .mockResolvedValueOnce(json({ data: { deleted: true } }));
 
     render(<NotificationChannelsPage projectId={projectId} />);
@@ -327,8 +404,8 @@ describe('notifications page', () => {
     await user.click(screen.getByRole('button', { name: 'Delete channel' }));
 
     await waitFor(() => expect(screen.queryByText(channel.name)).not.toBeInTheDocument());
-    expect(fetchMock.mock.calls[2]?.[0]).toBe(`/api/webhook-endpoints/${channel.id}`);
-    expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({ method: 'DELETE' });
+    expect(fetchMock.mock.calls[3]?.[0]).toBe(`/api/webhook-endpoints/${channel.id}`);
+    expect(fetchMock.mock.calls[3]?.[1]).toMatchObject({ method: 'DELETE' });
   });
 
   it('loads every monitor page and preserves a selected monitor beyond the first 100', async () => {

@@ -96,7 +96,10 @@ export async function stageIncidentNotification(
           isNull(webhookEndpoints.projectId),
           and(
             eq(webhookEndpoints.projectId, monitor.projectId),
-            eq(webhookEndpointMonitorRoutes.monitorId, transition.monitorId),
+            or(
+              eq(webhookEndpoints.routeAllMonitors, true),
+              eq(webhookEndpointMonitorRoutes.monitorId, transition.monitorId),
+            ),
             transition.type === 'OPENED'
               ? eq(webhookEndpoints.notifyOnIncident, true)
               : eq(webhookEndpoints.notifyOnRecovery, true),

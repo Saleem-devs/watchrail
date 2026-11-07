@@ -42,6 +42,8 @@ import { MaintenanceWindowsController } from './modules/maintenance-windows/main
 import { MaintenanceWindowsModule } from './modules/maintenance-windows/maintenance-windows.module.js';
 import { EmailChannelsController } from './modules/email-channels/email-channels.controller.js';
 import { EmailChannelsModule } from './modules/email-channels/email-channels.module.js';
+import { SlackChannelsController } from './modules/slack-channels/slack-channels.controller.js';
+import { SlackChannelsModule } from './modules/slack-channels/slack-channels.module.js';
 
 @Module({
   imports: [
@@ -61,6 +63,7 @@ import { EmailChannelsModule } from './modules/email-channels/email-channels.mod
     HeartbeatsModule,
     MaintenanceWindowsModule,
     EmailChannelsModule,
+    SlackChannelsModule,
   ],
   providers: [
     DevelopmentIdentityMiddleware,
@@ -107,6 +110,7 @@ export class AppModule implements NestModule {
         WorkspaceSecretsController,
         MaintenanceWindowsController,
         EmailChannelsController,
+        SlackChannelsController,
       );
 
     consumer.apply(ProbeMachineNoStoreMiddleware).forRoutes(ProbeMachineController);

@@ -19,12 +19,16 @@ import type { CheckOutboxRelay } from './check-outbox-relay.js';
 import type { WorkerConfig } from './config.js';
 import type { WebhookDeliveryCycleResult } from './webhook-delivery-worker.js';
 import type { EmailNotificationCycleResult } from './email-notification-worker.js';
+import type { SlackNotificationCycleResult } from './slack-notification-worker.js';
 
 interface WebhookDeliveryProcessor {
   processNext(): Promise<WebhookDeliveryCycleResult>;
 }
 interface EmailNotificationProcessor {
   processNext(): Promise<EmailNotificationCycleResult>;
+}
+interface SlackNotificationProcessor {
+  processNext(): Promise<SlackNotificationCycleResult>;
 }
 
 @Injectable()
@@ -41,6 +45,7 @@ export class WorkerRuntime
   private roundFinalizationRunning: Promise<void> | undefined;
   private webhookRunning: Promise<void>[] = [];
   private emailNotificationRunning: Promise<void>[] = [];
+  private slackNotificationRunning: Promise<void>[] = [];
   private authEmailRunning: Promise<void> | undefined;
   private readonly wakeups = new Set<() => void>();
 
@@ -59,6 +64,7 @@ export class WorkerRuntime
     private readonly authEmailPublisher?: BullMqAuthEmailPublisher,
     private readonly heartbeats?: HeartbeatRepository,
     private readonly emailNotifications?: EmailNotificationProcessor,
+    private readonly slackNotifications?: SlackNotificationProcessor,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -83,6 +89,11 @@ export class WorkerRuntime
           this.runEmailNotifications(),
         )
       : [];
+    this.slackNotificationRunning = this.slackNotifications
+      ? Array.from({ length: this.config.webhookDeliveryConcurrency }, () =>
+          this.runSlackNotifications(),
+        )
+      : [];
   }
 
   async beforeApplicationShutdown(): Promise<void> {
@@ -97,6 +108,7 @@ export class WorkerRuntime
       this.roundFinalizationRunning,
       ...this.webhookRunning,
       ...this.emailNotificationRunning,
+      ...this.slackNotificationRunning,
       this.authEmailRunning,
       this.consumer.close(),
       this.authEmailConsumer?.close(),
@@ -211,6 +223,20 @@ export class WorkerRuntime
           this.logger.warn('An email notification claim expired before its final update.');
       } catch {
         this.logger.error('Email notification delivery dependency failure.');
+        await this.wait(this.config.dependencyErrorDelayMs);
+      }
+    }
+  }
+
+  private async runSlackNotifications(): Promise<void> {
+    while (!this.stopping) {
+      try {
+        const result = await this.slackNotifications!.processNext();
+        if (result === 'IDLE') await this.wait(this.config.webhookDeliveryIdlePollIntervalMs);
+        else if (result === 'LOST_CLAIM')
+          this.logger.warn('A Slack notification claim expired before its final update.');
+      } catch {
+        this.logger.error('Slack notification delivery dependency failure.');
         await this.wait(this.config.dependencyErrorDelayMs);
       }
     }

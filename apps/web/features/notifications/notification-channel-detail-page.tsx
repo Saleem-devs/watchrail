@@ -9,14 +9,19 @@ import { ConfirmationDialog } from '../../components/ui/confirmation-dialog';
 import { PageHeader } from '../../components/ui/page-header';
 import {
   deleteEmailChannel,
+  deleteSlackChannel,
   deleteWebhookChannel,
   findEmailChannel,
+  findSlackChannel,
   findWebhookChannel,
   listEmailDeliveries,
   listNotificationMonitors,
+  listSlackDeliveries,
   listWebhookDeliveries,
   sendEmailChannelTest,
+  sendSlackChannelTest,
   setEmailChannelEnabled,
+  setSlackChannelEnabled,
   setWebhookChannelEnabled,
 } from './notification-api';
 import { NotificationDeliveryHistory } from './notification-delivery-history';
@@ -34,7 +39,7 @@ export function NotificationChannelDetailPage({
 }: {
   projectId: string;
   channelId: string;
-  channelType: 'EMAIL' | 'WEBHOOK';
+  channelType: 'EMAIL' | 'SLACK' | 'WEBHOOK';
 }) {
   const router = useRouter();
   const [channel, setChannel] = useState<NotificationChannel | null>(null);
@@ -52,11 +57,9 @@ export function NotificationChannelDetailPage({
     setHistoryLoading(true);
     setHistoryError(null);
     try {
-      setDeliveries(
-        channelType === 'EMAIL'
-          ? await listEmailDeliveries(channelId)
-          : await listWebhookDeliveries(channelId),
-      );
+      if (channelType === 'EMAIL') setDeliveries(await listEmailDeliveries(channelId));
+      else if (channelType === 'SLACK') setDeliveries(await listSlackDeliveries(channelId));
+      else setDeliveries(await listWebhookDeliveries(channelId));
     } catch (loadError) {
       setHistoryError(messageFor(loadError, 'Could not load delivery history.'));
     } finally {
@@ -69,7 +72,12 @@ export function NotificationChannelDetailPage({
       const [loadedChannel, loadedMonitors] = await Promise.all([
         channelType === 'EMAIL'
           ? findEmailChannel(channelId)
-          : findWebhookChannel(channelId).then((value) => ({ ...value, type: 'WEBHOOK' as const })),
+          : channelType === 'SLACK'
+            ? findSlackChannel(channelId)
+            : findWebhookChannel(channelId).then((value) => ({
+                ...value,
+                type: 'WEBHOOK' as const,
+              })),
         listNotificationMonitors(projectId),
       ]);
       if (loadedChannel.projectId !== projectId) throw new Error('Notification channel not found.');
@@ -86,20 +94,15 @@ export function NotificationChannelDetailPage({
   }, [channelId, channelType, loadHistory, projectId]);
 
   useEffect(() => {
-    void load();
+    const timeoutId = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timeoutId);
   }, [load]);
 
   async function toggleEnabled() {
     if (!channel) return;
     setBusy(true);
     try {
-      const updated =
-        channel.type === 'EMAIL'
-          ? await setEmailChannelEnabled(channel.id, !channel.enabled)
-          : {
-              ...(await setWebhookChannelEnabled(channel.id, !channel.enabled)),
-              type: 'WEBHOOK' as const,
-            };
+      const updated = await setChannelEnabled(channel, !channel.enabled);
       setChannel(updated);
       setNotice(`${updated.name} ${updated.enabled ? 'enabled' : 'paused'}.`);
     } catch (updateError) {
@@ -110,10 +113,11 @@ export function NotificationChannelDetailPage({
   }
 
   async function sendTest() {
-    if (!channel || channel.type !== 'EMAIL') return;
+    if (!channel || channel.type === 'WEBHOOK') return;
     setBusy(true);
     try {
-      await sendEmailChannelTest(channel.id);
+      if (channel.type === 'EMAIL') await sendEmailChannelTest(channel.id);
+      else await sendSlackChannelTest(channel.id);
       setNotice(`Test notification queued for ${channel.name}.`);
       await loadHistory();
     } catch (testError) {
@@ -128,6 +132,7 @@ export function NotificationChannelDetailPage({
     setBusy(true);
     try {
       if (channel.type === 'EMAIL') await deleteEmailChannel(channel.id);
+      else if (channel.type === 'SLACK') await deleteSlackChannel(channel.id);
       else await deleteWebhookChannel(channel.id);
       router.replace(`/projects/${projectId}/notifications`);
     } catch (deleteError) {
@@ -137,11 +142,7 @@ export function NotificationChannelDetailPage({
     }
   }
 
-  const editHref = channel
-    ? channel.type === 'EMAIL'
-      ? `/projects/${projectId}/notifications/email/${channel.id}/edit`
-      : `/projects/${projectId}/notifications/${channel.id}/edit`
-    : '#';
+  const editHref = channel ? channelEditHref(projectId, channel) : '#';
 
   return (
     <AppShell page="notifications" projectId={projectId}>
@@ -150,7 +151,7 @@ export function NotificationChannelDetailPage({
           title={channel?.name ?? 'Notification channel'}
           description={
             channel
-              ? `${channel.type === 'EMAIL' ? 'Email' : 'Webhook'} notification channel`
+              ? `${channel.type === 'EMAIL' ? 'Email' : channel.type === 'SLACK' ? 'Slack' : 'Webhook'} notification channel`
               : 'Loading channel details…'
           }
           backLink={{
@@ -160,7 +161,7 @@ export function NotificationChannelDetailPage({
           actions={
             channel ? (
               <>
-                {channel.type === 'EMAIL' ? (
+                {channel.type !== 'WEBHOOK' ? (
                   <Button variant="secondary" onClick={() => void sendTest()} disabled={busy}>
                     Send test
                   </Button>
@@ -261,9 +262,9 @@ function ChannelOverview({
   monitors: NotificationMonitor[];
 }) {
   const monitorNames = new Map(monitors.map((monitor) => [monitor.id, monitor.name]));
-  const routed = channel.routing.monitorIds.map(
-    (id) => monitorNames.get(id) ?? 'Monitor unavailable',
-  );
+  const routed = channel.routing.allMonitors
+    ? ['Entire project · includes monitors added later']
+    : channel.routing.monitorIds.map((id) => monitorNames.get(id) ?? 'Monitor unavailable');
   return (
     <section
       className="mt-8 overflow-hidden rounded-rail-panel border border-rail-border bg-rail-surface"
@@ -279,7 +280,16 @@ function ChannelOverview({
       </div>
       <dl className="m-0 grid sm:grid-cols-2 lg:grid-cols-4">
         <Definition label="Status" value={channel.enabled ? 'Active' : 'Paused'} />
-        <Definition label="Type" value={channel.type === 'EMAIL' ? 'Email' : 'Signed webhook'} />
+        <Definition
+          label="Type"
+          value={
+            channel.type === 'EMAIL'
+              ? 'Email'
+              : channel.type === 'SLACK'
+                ? 'Slack incoming webhook'
+                : 'Signed webhook'
+          }
+        />
         <Definition label="Version" value={String(channel.versionNumber)} />
         <Definition label="Updated" value={dateFormatter.format(new Date(channel.updatedAt))} />
       </dl>
@@ -294,6 +304,13 @@ function ChannelOverview({
                 </li>
               ))}
             </ul>
+          ) : channel.type === 'SLACK' ? (
+            <p className="mt-3 mb-0 text-sm text-rail-text">
+              Encrypted Slack incoming webhook
+              <span className="mt-1 block text-xs text-rail-muted">
+                The credential is retained and never returned by the API.
+              </span>
+            </p>
           ) : (
             <p className="mt-3 mb-0 break-all font-mono text-xs text-rail-text">{channel.url}</p>
           )}
@@ -328,4 +345,21 @@ function Definition({ label, value }: { label: string; value: string }) {
 
 function messageFor(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
+}
+
+async function setChannelEnabled(channel: NotificationChannel, enabled: boolean) {
+  if (channel.type === 'EMAIL') return setEmailChannelEnabled(channel.id, enabled);
+  if (channel.type === 'SLACK') return setSlackChannelEnabled(channel.id, enabled);
+  return {
+    ...(await setWebhookChannelEnabled(channel.id, enabled)),
+    type: 'WEBHOOK' as const,
+  };
+}
+
+function channelEditHref(projectId: string, channel: NotificationChannel): string {
+  if (channel.type === 'EMAIL')
+    return `/projects/${projectId}/notifications/email/${channel.id}/edit`;
+  if (channel.type === 'SLACK')
+    return `/projects/${projectId}/notifications/slack/${channel.id}/edit`;
+  return `/projects/${projectId}/notifications/${channel.id}/edit`;
 }

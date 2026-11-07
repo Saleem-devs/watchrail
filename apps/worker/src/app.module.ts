@@ -16,6 +16,7 @@ import {
   createWatchrailDatabase,
   NotificationDeliveryRepository,
   EmailDeliveryRepository,
+  SlackDeliveryRepository,
   ProbeCoordinatorRepository,
   MultiLocationRoundFinalizationRepository,
   AuthEmailOutboxRepository,
@@ -34,6 +35,7 @@ import {
   EmailNotificationWorker,
   NodemailerNotificationEmailSender,
 } from './email-notification-worker.js';
+import { SlackNotificationWorker } from './slack-notification-worker.js';
 
 @Module({
   imports: [
@@ -101,6 +103,11 @@ import {
       useFactory: (db: WatchrailDatabase) => new EmailDeliveryRepository(db),
     },
     {
+      provide: SlackDeliveryRepository,
+      inject: [getDrizzleToken()],
+      useFactory: (db: WatchrailDatabase) => new SlackDeliveryRepository(db),
+    },
+    {
       provide: NodemailerNotificationEmailSender,
       inject: [WORKER_CONFIG],
       useFactory: (config: WorkerConfig) =>
@@ -142,6 +149,24 @@ import {
         new WebhookDeliveryWorker(deliveries, engine, config.webhookSigningSecretKeyring, {
           leaseDurationMs: config.webhookDeliveryLeaseDurationMs,
           timeoutMs: config.webhookDeliveryTimeoutMs,
+          maxAttempts: config.webhookDeliveryMaxAttempts,
+          retryDelayMs: createExponentialBackoff(
+            config.webhookDeliveryRetryBaseMs,
+            config.webhookDeliveryRetryMaxMs,
+          ),
+        }),
+    },
+    {
+      provide: SlackNotificationWorker,
+      inject: [SlackDeliveryRepository, WebhookDeliveryEngine, WORKER_CONFIG],
+      useFactory: (
+        deliveries: SlackDeliveryRepository,
+        engine: WebhookDeliveryEngine,
+        config: WorkerConfig,
+      ) =>
+        new SlackNotificationWorker(deliveries, engine, config.webhookSigningSecretKeyring, {
+          leaseDurationMs: config.webhookDeliveryLeaseDurationMs,
+          sendTimeoutMs: config.webhookDeliveryTimeoutMs,
           maxAttempts: config.webhookDeliveryMaxAttempts,
           retryDelayMs: createExponentialBackoff(
             config.webhookDeliveryRetryBaseMs,
@@ -258,6 +283,7 @@ import {
         BullMqAuthEmailConsumer,
         BullMqAuthEmailPublisher,
         EmailNotificationWorker,
+        SlackNotificationWorker,
       ],
       useFactory: (
         relay: CheckOutboxRelay,
@@ -274,6 +300,7 @@ import {
         authEmailConsumer: BullMqAuthEmailConsumer,
         authEmailPublisher: BullMqAuthEmailPublisher,
         emailNotifications: EmailNotificationWorker,
+        slackNotifications: SlackNotificationWorker,
       ) =>
         new WorkerRuntime(
           relay,
@@ -290,6 +317,7 @@ import {
           authEmailPublisher,
           heartbeats,
           emailNotifications,
+          slackNotifications,
         ),
     },
   ],

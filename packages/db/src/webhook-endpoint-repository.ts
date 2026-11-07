@@ -27,6 +27,7 @@ export interface WebhookEndpointRecord {
   createdAt: Date;
   updatedAt: Date;
   routing: {
+    allMonitors?: boolean;
     monitorIds: string[];
     notifyOnIncident: boolean;
     notifyOnRecovery: boolean;
@@ -34,6 +35,7 @@ export interface WebhookEndpointRecord {
 }
 
 export interface WebhookEndpointRoutingInput {
+  allMonitors?: boolean;
   monitorIds: string[];
   notifyOnIncident: boolean;
   notifyOnRecovery: boolean;
@@ -97,6 +99,7 @@ export class WebhookEndpointRepository {
           projectId: input.projectId ?? null,
           name: settings.name,
           enabled: input.enabled ?? true,
+          routeAllMonitors: routing.allMonitors,
           notifyOnIncident: routing.notifyOnIncident,
           notifyOnRecovery: routing.notifyOnRecovery,
         })
@@ -239,6 +242,7 @@ export class WebhookEndpointRepository {
               .set({
                 name: settings.name,
                 currentVersionNumber: nextVersionNumber,
+                routeAllMonitors: routing.allMonitors,
                 notifyOnIncident: routing.notifyOnIncident,
                 notifyOnRecovery: routing.notifyOnRecovery,
                 updatedAt: sql`clock_timestamp()`,
@@ -322,6 +326,7 @@ export class WebhookEndpointRepository {
       const [endpoint] = await tx
         .update(webhookEndpoints)
         .set({
+          routeAllMonitors: routing.allMonitors,
           notifyOnIncident: routing.notifyOnIncident,
           notifyOnRecovery: routing.notifyOnRecovery,
           updatedAt: sql`clock_timestamp()`,
@@ -452,7 +457,14 @@ export class WebhookEndpointRepository {
         throw new WebhookEndpointInputError({
           projectId: ['projectId is required when monitor routing is configured.'],
         });
-      return input ?? { monitorIds: [], notifyOnIncident: true, notifyOnRecovery: true };
+      return (
+        input ?? {
+          allMonitors: true,
+          monitorIds: [],
+          notifyOnIncident: true,
+          notifyOnRecovery: true,
+        }
+      );
     }
     const [project] = await tx
       .select({ id: projects.id })
@@ -468,7 +480,10 @@ export class WebhookEndpointRepository {
       throw new WebhookEndpointInputError({
         routing: ['Choose at least one incident event to deliver.'],
       });
-    const monitorIds = [...new Set(input.monitorIds.map((id) => id.toLowerCase()))];
+    const allMonitors = input.allMonitors ?? false;
+    const monitorIds = allMonitors
+      ? []
+      : [...new Set(input.monitorIds.map((id) => id.toLowerCase()))];
     if (monitorIds.length !== input.monitorIds.length)
       throw new WebhookEndpointInputError({ monitorIds: ['Monitor IDs must be unique.'] });
     if (monitorIds.length > 500)
@@ -490,6 +505,7 @@ export class WebhookEndpointRepository {
         });
     }
     return {
+      allMonitors,
       monitorIds,
       notifyOnIncident: input.notifyOnIncident,
       notifyOnRecovery: input.notifyOnRecovery,
@@ -527,6 +543,7 @@ export class WebhookEndpointRepository {
   ): Promise<WebhookEndpointRoutingInput> {
     const [endpoint] = await db
       .select({
+        allMonitors: webhookEndpoints.routeAllMonitors,
         notifyOnIncident: webhookEndpoints.notifyOnIncident,
         notifyOnRecovery: webhookEndpoints.notifyOnRecovery,
       })
@@ -552,6 +569,7 @@ export class WebhookEndpointRepository {
       )
       .orderBy(webhookEndpointMonitorRoutes.monitorId);
     return {
+      allMonitors: endpoint.allMonitors,
       monitorIds: routes.map((route) => route.monitorId),
       notifyOnIncident: endpoint.notifyOnIncident,
       notifyOnRecovery: endpoint.notifyOnRecovery,
@@ -565,6 +583,7 @@ function sameRouting(
 ): boolean {
   const rightMonitorIds = new Set(right.monitorIds);
   return (
+    (left.allMonitors ?? false) === (right.allMonitors ?? false) &&
     left.notifyOnIncident === right.notifyOnIncident &&
     left.notifyOnRecovery === right.notifyOnRecovery &&
     left.monitorIds.length === right.monitorIds.length &&

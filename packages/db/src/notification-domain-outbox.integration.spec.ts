@@ -3,7 +3,11 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testconta
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseEmailNotification, parseWebhookNotification } from '@watchrail/contracts';
-import { createMonitor, EMPTY_ASSERTION_EVALUATION } from '@watchrail/domain';
+import {
+  createMonitor,
+  EMPTY_ASSERTION_CONFIGURATION,
+  EMPTY_ASSERTION_EVALUATION,
+} from '@watchrail/domain';
 import {
   CheckExecutionRepository,
   type AuthoritativeCheckResult,
@@ -219,6 +223,40 @@ describe('notification domain outbox', () => {
     expect(
       (await channels.findForOrganization(organizationId, channel.id))?.recipientEmails,
     ).toEqual(['new-oncall@example.com']);
+  });
+
+  it('routes project-wide channels to monitors added after the channel is created', async () => {
+    const channel = await new WebhookEndpointRepository(connection.db).create(
+      organizationId,
+      {
+        projectId,
+        name: 'Project operations',
+        url: 'https://hooks.example.com/project',
+        routing: {
+          allMonitors: true,
+          monitorIds: [],
+          notifyOnIncident: true,
+          notifyOnRecovery: true,
+        },
+      },
+      () => signingSecretEnvelope,
+    );
+    expect(channel.routing).toMatchObject({ allMonitors: true, monitorIds: [] });
+
+    const laterMonitorId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    await new MonitorRepository(connection.db).create(
+      organizationId,
+      laterMonitorId,
+      createMonitor({ name: 'Later API', url: 'https://later.example.com/health' }),
+      [],
+      EMPTY_ASSERTION_CONFIGURATION,
+      projectId,
+    );
+    monitorId = laterMonitorId;
+    await openIncident();
+
+    const [delivery] = await connection.db.select().from(notificationDeliveries);
+    expect(delivery?.endpointId).toBe(channel.id);
   });
 
   it('ignores manual and indeterminate observations and deduplicates concurrent threshold work', async () => {
