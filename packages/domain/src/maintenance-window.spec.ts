@@ -84,6 +84,12 @@ describe('maintenance windows', () => {
     expect(
       maintenanceOccurrenceAt(occurrencesSchedule('02:30', 30), occurrences[0]!.startsAt),
     ).toEqual(occurrences[0]);
+    expect(
+      maintenanceOccurrenceAt(
+        occurrencesSchedule('02:30', 30),
+        new Date('2026-03-08T07:35:00.000Z'),
+      ),
+    ).toEqual(occurrences[0]);
   });
 
   it('emits one earlier-offset occurrence for a repeated fall-back time', () => {
