@@ -12,7 +12,9 @@ const MAX_DELAY_MINUTES = 10_080;
 export function IncidentReminderPolicySection({ projectId }: { projectId: string }) {
   const [draft, setDraft] = useState<string[]>([]);
   const [saved, setSaved] = useState<number[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [loadResultProjectId, setLoadResultProjectId] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -23,22 +25,27 @@ export function IncidentReminderPolicySection({ projectId }: { projectId: string
         if (!active) return;
         setSaved(policy.delaysMinutes);
         setDraft(policy.delaysMinutes.map(String));
+        setLoadResultProjectId(projectId);
+        setLoadState('ready');
       })
       .catch(() => {
-        if (active) setMessage('Could not load the reminder policy.');
-      })
-      .finally(() => {
-        if (active) setLoading(false);
+        if (active) {
+          setLoadResultProjectId(projectId);
+          setLoadState('error');
+        }
       });
     return () => {
       active = false;
     };
-  }, [projectId]);
+  }, [loadAttempt, projectId]);
 
   const parsed = useMemo(() => draft.map((value) => Number(value)), [draft]);
   const error = validationMessage(parsed);
   const changed = JSON.stringify(parsed) !== JSON.stringify(saved);
-  const enabled = draft.length > 0;
+  const ready = loadState === 'ready' && loadResultProjectId === projectId;
+  const unavailable = loadState === 'error' && loadResultProjectId === projectId;
+  const loading = !ready && !unavailable;
+  const enabled = ready && draft.length > 0;
 
   async function save() {
     if (error) return;
@@ -61,6 +68,12 @@ export function IncidentReminderPolicySection({ projectId }: { projectId: string
   function setEnabled(nextEnabled: boolean) {
     setMessage(null);
     setDraft(nextEnabled ? [String(DEFAULT_DELAYS[0])] : []);
+  }
+
+  function retryLoad() {
+    setLoadState('loading');
+    setMessage(null);
+    setLoadAttempt((attempt) => attempt + 1);
   }
 
   function addReminder() {
@@ -98,14 +111,26 @@ export function IncidentReminderPolicySection({ projectId }: { projectId: string
               type="checkbox"
               className="size-4 accent-rail-accent"
               checked={enabled}
-              disabled={loading || saving}
+              disabled={!ready || saving}
               onChange={(event) => setEnabled(event.currentTarget.checked)}
             />
             Send reminders
           </label>
         </div>
 
-        {enabled ? (
+        {unavailable ? (
+          <div className="flex flex-col gap-3 border-t border-rail-border px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div role="alert">
+              <p className="m-0 text-sm font-medium text-rail-text">Reminder policy unavailable</p>
+              <p className="mt-1 mb-0 text-xs leading-5 text-rail-muted">
+                The saved schedule could not be loaded. No reminder settings were changed.
+              </p>
+            </div>
+            <Button size="compact" onClick={retryLoad}>
+              Retry
+            </Button>
+          </div>
+        ) : enabled ? (
           <div className="border-t border-rail-border px-5 py-5">
             <div className="grid gap-3 lg:grid-cols-3">
               {draft.map((value, index) => (
@@ -200,7 +225,7 @@ export function IncidentReminderPolicySection({ projectId }: { projectId: string
                   ? 'Loading reminder policy…'
                   : 'Opening alerts are sent once. No reminders are scheduled.'}
               </span>
-              {message ? (
+              {message && ready ? (
                 <p className="mt-1 mb-0 text-xs text-rail-subtle" role="status">
                   {message}
                 </p>

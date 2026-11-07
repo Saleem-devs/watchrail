@@ -240,111 +240,149 @@ describe('notification domain outbox', () => {
     ).toEqual(['new-oncall@example.com']);
   });
 
-  it('snapshots reminder schedules and suppresses due reminders after resolution across every channel', async () => {
-    await new ProjectRepository(connection.db).updateIncidentReminderPolicy(
-      organizationId,
-      projectId,
-      { delaysMinutes: [15, 60] },
-    );
-    await createTestEndpoint(organizationId, 'Operations', 'https://hooks.example.com/events');
-    await new EmailChannelRepository(connection.db).create(organizationId, {
-      projectId,
-      name: 'Primary on-call',
-      recipientEmails: ['alerts@example.com'],
-      routing: {
-        monitorIds: [monitorId],
-        notifyOnIncident: true,
-        notifyOnRecovery: true,
-      },
-    });
-    await new SlackChannelRepository(connection.db).create(
-      organizationId,
-      {
+  it.each(['manual', 'automatic'] as const)(
+    'snapshots reminder schedules and suppresses retried reminders after %s resolution across every channel',
+    async (resolution) => {
+      await new ProjectRepository(connection.db).updateIncidentReminderPolicy(
+        organizationId,
         projectId,
-        name: 'Operations Slack',
+        { delaysMinutes: [15, 60] },
+      );
+      await createTestEndpoint(organizationId, 'Operations', 'https://hooks.example.com/events');
+      await new EmailChannelRepository(connection.db).create(organizationId, {
+        projectId,
+        name: 'Primary on-call',
+        recipientEmails: ['alerts@example.com'],
         routing: {
           monitorIds: [monitorId],
           notifyOnIncident: true,
           notifyOnRecovery: true,
         },
-      },
-      () => slackWebhookUrlEnvelope,
-    );
+      });
+      await new SlackChannelRepository(connection.db).create(
+        organizationId,
+        {
+          projectId,
+          name: 'Operations Slack',
+          routing: {
+            monitorIds: [monitorId],
+            notifyOnIncident: true,
+            notifyOnRecovery: true,
+          },
+        },
+        () => slackWebhookUrlEnvelope,
+      );
 
-    await openIncident();
-    const staged = await connection.db.select().from(notificationDeliveries);
-    expect(staged).toHaveLength(9);
-    expect(staged.map((delivery) => delivery.deliverySequence).sort()).toEqual([
-      0, 0, 0, 1, 1, 1, 2, 2, 2,
-    ]);
-    for (const endpointId of new Set(staged.map((delivery) => delivery.endpointId))) {
-      const endpointDeliveries = staged
-        .filter((delivery) => delivery.endpointId === endpointId)
-        .sort((left, right) => left.deliverySequence - right.deliverySequence);
-      expect(
-        endpointDeliveries[1]!.availableAt.getTime() - endpointDeliveries[0]!.availableAt.getTime(),
-      ).toBe(15 * 60_000);
-      expect(
-        endpointDeliveries[2]!.availableAt.getTime() - endpointDeliveries[0]!.availableAt.getTime(),
-      ).toBe(60 * 60_000);
-    }
+      await openIncident();
+      const [incident] = await connection.db.select().from(incidents);
+      if (!incident) throw new Error('Expected incident.');
+      const staged = await connection.db.select().from(notificationDeliveries);
+      expect(staged).toHaveLength(9);
+      expect(staged.map((delivery) => delivery.deliverySequence).sort()).toEqual([
+        0, 0, 0, 1, 1, 1, 2, 2, 2,
+      ]);
+      for (const endpointId of new Set(staged.map((delivery) => delivery.endpointId))) {
+        const endpointDeliveries = staged
+          .filter((delivery) => delivery.endpointId === endpointId)
+          .sort((left, right) => left.deliverySequence - right.deliverySequence);
+        expect(
+          endpointDeliveries[1]!.availableAt.getTime() -
+            endpointDeliveries[0]!.availableAt.getTime(),
+        ).toBe(15 * 60_000);
+        expect(
+          endpointDeliveries[2]!.availableAt.getTime() -
+            endpointDeliveries[0]!.availableAt.getTime(),
+        ).toBe(60 * 60_000);
+      }
 
-    await new ProjectRepository(connection.db).updateIncidentReminderPolicy(
-      organizationId,
-      projectId,
-      { delaysMinutes: [] },
-    );
-    await connection.db.execute(sql`
+      await new ProjectRepository(connection.db).updateIncidentReminderPolicy(
+        organizationId,
+        projectId,
+        { delaysMinutes: [] },
+      );
+      await connection.db.execute(sql`
       update notification_deliveries
       set delivered_at=clock_timestamp()
       where delivery_sequence=0
     `);
-    await complete((await scheduledRound()).id, healthy());
-    await connection.db.execute(sql`
+      await connection.db.execute(sql`
       update notification_deliveries
       set available_at=clock_timestamp() - interval '1 second'
-      where delivery_sequence > 0
+      where delivery_sequence=1
     `);
 
-    const webhook = new NotificationDeliveryRepository(connection.db);
-    const email = new EmailDeliveryRepository(connection.db);
-    const slack = new SlackDeliveryRepository(connection.db);
-    const webhookClaim = await webhook.claimNext();
-    const emailClaim = await email.claimNext();
-    const slackClaim = await slack.claimNext();
-    expect(webhookClaim).not.toBeNull();
-    expect(emailClaim).not.toBeNull();
-    expect(slackClaim).not.toBeNull();
-    await expect(
-      webhook.applyMaintenancePolicy(
-        webhookClaim!.id,
-        webhookClaim!.claimToken,
-        organizationId,
-        monitorId,
-      ),
-    ).resolves.toBe('SUPPRESSED');
-    await expect(
-      email.applyMaintenancePolicy(
-        emailClaim!.id,
-        emailClaim!.claimToken,
-        organizationId,
-        monitorId,
-      ),
-    ).resolves.toMatchObject({ state: 'SUPPRESSED' });
-    await expect(
-      slack.applyMaintenancePolicy(
-        slackClaim!.id,
-        slackClaim!.claimToken,
-        organizationId,
-        monitorId,
-      ),
-    ).resolves.toMatchObject({ state: 'SUPPRESSED' });
-    expect(
-      (await connection.db.select().from(notificationDeliveries)).filter(
-        (delivery) => delivery.suppressionReason === 'INCIDENT_CLOSED',
-      ),
-    ).toHaveLength(3);
-  });
+      const webhook = new NotificationDeliveryRepository(connection.db);
+      const email = new EmailDeliveryRepository(connection.db);
+      const slack = new SlackDeliveryRepository(connection.db);
+      const retryingWebhook = await webhook.claimNext();
+      expect(retryingWebhook).toMatchObject({ deliverySequence: 1, attemptCount: 1 });
+      await expect(
+        webhook.releaseForRetry(
+          retryingWebhook!.id,
+          retryingWebhook!.claimToken,
+          60_000,
+          'HTTP_503',
+          503,
+        ),
+      ).resolves.toBe(true);
+
+      if (resolution === 'manual') {
+        await new IncidentActionRepository(connection.db).resolve(
+          organizationId,
+          incident.id,
+          '11111111-1111-4111-8111-111111111111',
+          'Resolved during reminder retry.',
+        );
+      } else {
+        await complete((await scheduledRound()).id, healthy());
+      }
+      await connection.db.execute(sql`
+      update notification_deliveries
+      set available_at=clock_timestamp() - interval '1 second'
+      where delivery_sequence=1
+    `);
+
+      const webhookClaim = await webhook.claimNext();
+      const emailClaim = await email.claimNext();
+      const slackClaim = await slack.claimNext();
+      expect(webhookClaim).toMatchObject({
+        id: retryingWebhook!.id,
+        deliverySequence: 1,
+        attemptCount: 2,
+      });
+      expect(emailClaim).toMatchObject({ deliverySequence: 1 });
+      expect(slackClaim).toMatchObject({ deliverySequence: 1 });
+      await expect(
+        webhook.applyMaintenancePolicy(
+          webhookClaim!.id,
+          webhookClaim!.claimToken,
+          organizationId,
+          monitorId,
+        ),
+      ).resolves.toBe('SUPPRESSED');
+      await expect(
+        email.applyMaintenancePolicy(
+          emailClaim!.id,
+          emailClaim!.claimToken,
+          organizationId,
+          monitorId,
+        ),
+      ).resolves.toMatchObject({ state: 'SUPPRESSED' });
+      await expect(
+        slack.applyMaintenancePolicy(
+          slackClaim!.id,
+          slackClaim!.claimToken,
+          organizationId,
+          monitorId,
+        ),
+      ).resolves.toMatchObject({ state: 'SUPPRESSED' });
+      expect(
+        (await connection.db.select().from(notificationDeliveries)).filter(
+          (delivery) => delivery.suppressionReason === 'INCIDENT_CLOSED',
+        ),
+      ).toHaveLength(3);
+    },
+  );
 
   it('routes project-wide channels to monitors added after the channel is created', async () => {
     const channel = await new WebhookEndpointRepository(connection.db).create(
@@ -580,6 +618,81 @@ describe('notification domain outbox', () => {
       repository.acknowledgeDelivered(claimed!.id, claimed!.claimToken, 204),
     ).resolves.toBe(false);
   });
+
+  it.each(['silence', 'maintenance'] as const)(
+    'suppresses a due reminder while incident %s policy is active',
+    async (policy) => {
+      await new ProjectRepository(connection.db).updateIncidentReminderPolicy(
+        organizationId,
+        projectId,
+        { delaysMinutes: [5] },
+      );
+      await createTestEndpoint(organizationId, 'Operations', 'https://hooks.example.com/events');
+      await openIncident();
+      const [incident] = await connection.db.select().from(incidents);
+      if (!incident) throw new Error('Expected incident.');
+      await connection.db.execute(sql`
+        update notification_deliveries
+        set delivered_at=case when delivery_sequence=0 then clock_timestamp() else null end,
+            available_at=case
+              when delivery_sequence=1 then clock_timestamp() - interval '1 second'
+              else available_at
+            end
+      `);
+
+      if (policy === 'silence') {
+        await new IncidentActionRepository(connection.db).silence(
+          organizationId,
+          incident.id,
+          '11111111-1111-4111-8111-111111111111',
+          new Date(Date.now() + 60 * 60_000),
+        );
+      } else {
+        const clock = await connection.pool.query<{ at: Date }>('select clock_timestamp() as at');
+        const at = clock.rows[0]!.at;
+        await new MaintenanceWindowRepository(connection.db).create(
+          organizationId,
+          projectId,
+          '11111111-1111-4111-8111-111111111111',
+          {
+            name: 'Planned reminder pause',
+            schedule: {
+              type: 'ONE_TIME',
+              startsAt: new Date(at.getTime() - 60_000).toISOString(),
+              endsAt: new Date(at.getTime() + 60 * 60_000).toISOString(),
+            },
+            target: { type: 'MONITORS', monitorIds: [monitorId] },
+            effects: {
+              suppressNotifications: true,
+              suppressIncidentCreation: false,
+              excludeFromUptime: false,
+              publishToStatusPage: false,
+            },
+          },
+        );
+      }
+
+      const repository = new NotificationDeliveryRepository(connection.db);
+      const claimed = await repository.claimNext();
+      expect(claimed).toMatchObject({ deliverySequence: 1 });
+      await expect(
+        repository.applyMaintenancePolicy(
+          claimed!.id,
+          claimed!.claimToken,
+          organizationId,
+          monitorId,
+        ),
+      ).resolves.toBe('SUPPRESSED');
+      const [suppressed] = await connection.db
+        .select()
+        .from(notificationDeliveries)
+        .where(eq(notificationDeliveries.id, claimed!.id));
+      expect(suppressed).toMatchObject({
+        suppressionReason: policy === 'silence' ? 'INCIDENT_SILENCED' : 'MAINTENANCE_WINDOW',
+        suppressedAt: expect.any(Date),
+      });
+    },
+  );
 
   it.each(['manual', 'automatic'] as const)(
     'keeps already-staged webhook, email, and Slack deliveries silenced after %s resolution',

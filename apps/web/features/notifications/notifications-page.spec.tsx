@@ -447,6 +447,33 @@ describe('notifications page', () => {
     );
   });
 
+  it('keeps reminder settings unavailable until a failed load is retried successfully', async () => {
+    const user = userEvent.setup();
+    let policyAttempts = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const path = requestPath(input);
+      if (path.includes('incident-reminder-policy')) {
+        policyAttempts += 1;
+        return policyAttempts === 1
+          ? Promise.resolve(json({ message: 'Unavailable' }, 503))
+          : Promise.resolve(json({ data: { delaysMinutes: [15] } }));
+      }
+      return Promise.resolve(json({ data: [] }));
+    });
+
+    render(<NotificationChannelsPage projectId={projectId} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Reminder policy unavailable');
+    expect(
+      screen.queryByText('Opening alerts are sent once. No reminders are scheduled.'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Send reminders')).toBeDisabled();
+
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(screen.getByLabelText('Send reminders')).toBeEnabled());
+    expect(screen.getByLabelText('Reminder 1 delay in minutes')).toHaveValue(15);
+  });
+
   it('loads every monitor page and preserves a selected monitor beyond the first 100', async () => {
     const monitors = Array.from({ length: 101 }, (_, index): NotificationMonitor => ({
       id: `monitor-${index + 1}`,

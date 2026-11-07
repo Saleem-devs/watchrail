@@ -3,7 +3,7 @@ import type { ClaimedNotificationDelivery } from '@watchrail/db';
 import type { WebhookDeliveryAttemptResult } from '@watchrail/webhook-delivery';
 import {
   decryptWebhookSigningSecret,
-  signWebhookBody,
+  signWebhookDelivery,
   StoredWebhookSigningSecretInvariantError,
   StoredWebhookSigningSecretKeyUnavailableError,
   StoredWebhookSigningSecretResolutionError,
@@ -119,7 +119,13 @@ export class WebhookDeliveryWorker {
     try {
       const body = Buffer.from(JSON.stringify(payload), 'utf8');
       const timestamp = Math.floor(this.now().getTime() / 1000);
-      const signature = signWebhookBody(secret, timestamp, body);
+      const signature = signWebhookDelivery(secret, {
+        unixTimestampSeconds: timestamp,
+        eventId: delivery.eventId,
+        deliveryId: delivery.id,
+        deliverySequence: delivery.deliverySequence,
+        body,
+      });
       const result = await this.engine.deliver({
         url: delivery.url,
         body,
