@@ -180,7 +180,7 @@ export class IncidentActionRepository {
       await tx
         .update(monitorIncidentState)
         .set({
-          trackingStartedAt: updated.resolvedAt!,
+          trackingStartedAt: sql`clock_timestamp()`,
           consecutiveFailures: 0,
           failureStreakStartedAt: null,
           failureStreakStartedRoundId: null,

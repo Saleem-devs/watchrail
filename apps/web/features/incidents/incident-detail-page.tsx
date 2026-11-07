@@ -61,6 +61,25 @@ export function IncidentDetailPage({
     return () => window.clearTimeout(timeoutId);
   }, [load]);
 
+  useEffect(() => {
+    const refreshOnFocus = () => void load();
+    window.addEventListener('focus', refreshOnFocus);
+    const silenceExpiry = incident?.notificationsSilenced ? incident.silencedUntil : null;
+    const expiryTimeoutId = silenceExpiry
+      ? window.setTimeout(
+          () => void load(),
+          Math.min(
+            Math.max(new Date(silenceExpiry).getTime() - Date.now() + 100, 0),
+            2_147_483_647,
+          ),
+        )
+      : null;
+    return () => {
+      window.removeEventListener('focus', refreshOnFocus);
+      if (expiryTimeoutId !== null) window.clearTimeout(expiryTimeoutId);
+    };
+  }, [incident?.notificationsSilenced, incident?.silencedUntil, load]);
+
   const closeDialog = useCallback(() => {
     if (actionBusy) return;
     setDialogAction(null);

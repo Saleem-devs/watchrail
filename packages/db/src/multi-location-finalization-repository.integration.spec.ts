@@ -255,6 +255,28 @@ describe('authoritative multi-location finalization', () => {
       '11111111-1111-4111-8111-111111111111',
       null,
     );
+    await connection.db.execute(sql`
+      update incidents
+      set resolved_at=date_trunc('milliseconds', resolved_at) + interval '900 microseconds'
+      where organization_id=${organizationId}::uuid and id=${opened.id}::uuid
+    `);
+    await connection.db.execute(sql`
+      update monitor_incident_state
+      set tracking_started_at=(
+        select resolved_at from incidents
+        where organization_id=${organizationId}::uuid and id=${opened.id}::uuid
+      )
+      where organization_id=${organizationId}::uuid and monitor_id=${failed.monitorId}::uuid
+    `);
+    await connection.db.execute(sql`
+      update check_rounds
+      set created_at=(
+        select date_trunc('milliseconds', resolved_at) + interval '100 microseconds'
+        from incidents
+        where organization_id=${organizationId}::uuid and id=${opened.id}::uuid
+      )
+      where organization_id=${organizationId}::uuid and id=${delayed.roundId}::uuid
+    `);
     await repository.initializeRound(organizationId, delayed.roundId);
     await failAndConfirm(repository, delayed, 0);
     await failAndConfirm(repository, delayed, 1);
@@ -263,10 +285,11 @@ describe('authoritative multi-location finalization', () => {
     ).toHaveLength(0);
 
     const fresh = await createNextRound(delayed);
-    await connection.db
-      .update(checkRounds)
-      .set({ createdAt: sql`clock_timestamp()` })
-      .where(eq(checkRounds.id, fresh.roundId));
+    await connection.db.execute(sql`
+      update check_rounds
+      set created_at=clock_timestamp()
+      where organization_id=${organizationId}::uuid and id=${fresh.roundId}::uuid
+    `);
     await repository.initializeRound(organizationId, fresh.roundId);
     await failAndConfirm(repository, fresh, 0);
     await failAndConfirm(repository, fresh, 1);

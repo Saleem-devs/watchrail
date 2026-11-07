@@ -295,15 +295,44 @@ describe('incident lifecycle', () => {
       (await actions.listEvents(organizationId, opened.id)).map(({ action }) => action),
     ).toEqual(['ACKNOWLEDGED', 'SILENCED', 'UNSILENCED', 'MANUALLY_RESOLVED']);
 
+    await connection.db.execute(sql`
+      update incidents
+      set resolved_at=date_trunc('milliseconds', resolved_at) + interval '900 microseconds'
+      where organization_id=${organizationId}::uuid and id=${opened.id}::uuid
+    `);
+    await connection.db.execute(sql`
+      update monitor_incident_state
+      set tracking_started_at=(
+        select resolved_at from incidents
+        where organization_id=${organizationId}::uuid and id=${opened.id}::uuid
+      )
+      where organization_id=${organizationId}::uuid and monitor_id=${monitorId}::uuid
+    `);
+    await connection.db.execute(sql`
+      update check_rounds
+      set created_at=(
+        select date_trunc('milliseconds', resolved_at) + interval '100 microseconds'
+        from incidents
+        where organization_id=${organizationId}::uuid and id=${opened.id}::uuid
+      )
+      where organization_id=${organizationId}::uuid and id=${delayedPreResolutionRound.id}::uuid
+    `);
+
     await complete(delayedPreResolutionRound.id, unhealthy());
     expect(await state()).toMatchObject({ consecutiveFailures: 0 });
     expect(
       (await connection.db.select().from(incidents)).filter(({ status }) => status === 'OPEN'),
     ).toHaveLength(0);
 
-    await complete((await scheduledRound()).id, unhealthy());
-    await complete((await scheduledRound()).id, unhealthy());
-    await complete((await scheduledRound()).id, unhealthy());
+    for (const offsetSeconds of [1, 2, 3]) {
+      const fresh = await scheduledRound();
+      await connection.db.execute(sql`
+        update check_rounds
+        set created_at=clock_timestamp() + (${offsetSeconds} * interval '1 second')
+        where organization_id=${organizationId}::uuid and id=${fresh.id}::uuid
+      `);
+      await complete(fresh.id, unhealthy());
+    }
     expect(
       (await connection.db.select().from(incidents)).filter(({ status }) => status === 'OPEN'),
     ).toHaveLength(1);

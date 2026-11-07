@@ -33,7 +33,6 @@ export async function suppressClaimedDeliveryForIncidentSilence(
           and incident.id=event.incident_id
         where event.organization_id=delivery.organization_id
           and event.id=delivery.event_id
-          and incident.status='OPEN'
           and incident.silenced_until > ${input.policyAt}
       )
     returning delivery.id
