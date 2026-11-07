@@ -15,12 +15,17 @@ import {
   NotificationRequestError,
   updateWebhookChannel,
 } from './notification-api';
+import {
+  NotificationMonitorScope,
+  type NotificationMonitorScopeValue,
+} from './notification-monitor-scope';
 import type { NotificationMonitor, WebhookChannel } from './types';
 
 interface ChannelFormValues {
   name: string;
   url: string;
   signingSecret: string;
+  monitorScope: NotificationMonitorScopeValue;
   monitorIds: string[];
   notifyOnIncident: boolean;
   notifyOnRecovery: boolean;
@@ -149,6 +154,7 @@ export function WebhookChannelForm({
       name: channel?.name ?? '',
       url: channel?.url ?? '',
       signingSecret: '',
+      monitorScope: channel ? (channel.routing.allMonitors ? 'PROJECT' : 'MONITORS') : 'PROJECT',
       monitorIds: channel?.routing.monitorIds ?? [],
       notifyOnIncident: channel?.routing.notifyOnIncident ?? true,
       notifyOnRecovery: channel?.routing.notifyOnRecovery ?? true,
@@ -157,12 +163,13 @@ export function WebhookChannelForm({
   const notifyOnIncident = useWatch({ control, name: 'notifyOnIncident' });
   const notifyOnRecovery = useWatch({ control, name: 'notifyOnRecovery' });
   const monitorIds = useWatch({ control, name: 'monitorIds' });
+  const monitorScope = useWatch({ control, name: 'monitorScope' });
 
   return (
     <form
       id={formId}
       aria-label={channel ? 'Edit webhook channel' : 'Add webhook channel'}
-      className="mt-6 grid items-start gap-6 !p-0 xl:grid-cols-[minmax(0,1fr)_18rem]"
+      className="mt-6 !p-0"
       noValidate
       aria-busy={isSubmitting}
       onSubmit={handleSubmit(async (values) => {
@@ -170,9 +177,14 @@ export function WebhookChannelForm({
           setError('notifyOnIncident', { message: 'Choose at least one event to deliver.' });
           return;
         }
+        if (values.monitorScope === 'MONITORS' && values.monitorIds.length === 0) {
+          setError('monitorIds', { message: 'Choose at least one monitor.' });
+          return;
+        }
         try {
           const routing = {
-            monitorIds: values.monitorIds,
+            allMonitors: values.monitorScope === 'PROJECT',
+            monitorIds: values.monitorScope === 'PROJECT' ? [] : values.monitorIds,
             notifyOnIncident: values.notifyOnIncident,
             notifyOnRecovery: values.notifyOnRecovery,
           };
@@ -200,7 +212,7 @@ export function WebhookChannelForm({
       })}
     >
       <div className="overflow-hidden rounded-rail-panel border border-rail-border bg-rail-raised">
-        <section className="border-b border-rail-border px-5 py-5 sm:px-6">
+        <section className="px-5 py-5 sm:px-6">
           <h2 className="m-0 text-sm font-semibold text-rail-text">Destination</h2>
           <p className="mt-1 mb-0 text-xs leading-5 text-rail-muted">
             Watchrail signs every incident request before sending it to this endpoint.
@@ -250,25 +262,28 @@ export function WebhookChannelForm({
           </div>
         </section>
 
-        <fieldset className="m-0 border-0 px-5 py-5 sm:px-6">
-          <legend className="p-0 text-sm font-semibold text-rail-text">Events</legend>
+        <section className="border-t border-rail-border px-5 py-5 sm:px-6">
+          <h2 className="m-0 text-sm font-semibold text-rail-text">Events</h2>
           <p className="mt-1 mb-0 text-xs leading-5 text-rail-muted">
             Choose which confirmed incident transitions are delivered to this channel.
           </p>
-          <div className="mt-4 grid gap-2 sm:grid-cols-2">
-            <ChoiceRow
-              label="Incident opened"
-              description="Send after Watchrail confirms that a monitor is down."
-            >
-              <Checkbox {...register('notifyOnIncident')} />
-            </ChoiceRow>
-            <ChoiceRow
-              label="Incident resolved"
-              description="Send when a confirmed incident returns to healthy."
-            >
-              <Checkbox {...register('notifyOnRecovery')} />
-            </ChoiceRow>
-          </div>
+          <fieldset className="m-0 mt-4 border-0 p-0">
+            <legend className="sr-only">Webhook notification events</legend>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <ChoiceRow
+                label="Incident opened"
+                description="Send after Watchrail confirms that a monitor is down."
+              >
+                <Checkbox {...register('notifyOnIncident')} />
+              </ChoiceRow>
+              <ChoiceRow
+                label="Incident resolved"
+                description="Send when a confirmed incident returns to healthy."
+              >
+                <Checkbox {...register('notifyOnRecovery')} />
+              </ChoiceRow>
+            </div>
+          </fieldset>
           {errors.notifyOnIncident?.message ? (
             <p className="mt-2 mb-0 text-xs text-rail-danger" role="alert">
               {errors.notifyOnIncident.message}
@@ -278,7 +293,16 @@ export function WebhookChannelForm({
               Recovery events will arrive without a matching incident-open event on this channel.
             </p>
           ) : null}
-        </fieldset>
+        </section>
+
+        <NotificationMonitorScope
+          monitors={monitors}
+          scope={monitorScope}
+          selectedMonitorIds={monitorIds}
+          scopeRegistration={register('monitorScope')}
+          monitorRegistration={register('monitorIds')}
+          error={errors.monitorIds?.message}
+        />
 
         {errors.root?.message ? (
           <p className="mx-5 mt-0 mb-5 text-sm text-rail-danger sm:mx-6" role="alert">
@@ -286,49 +310,6 @@ export function WebhookChannelForm({
           </p>
         ) : null}
       </div>
-
-      <aside
-        className="overflow-hidden rounded-rail-panel border border-rail-border bg-rail-raised"
-        aria-label="Monitor routing"
-      >
-        <div className="border-b border-rail-border px-5 py-4">
-          <h2 className="m-0 text-sm font-semibold text-rail-text">Monitor routing</h2>
-          <p className="mt-1 mb-0 text-xs leading-5 text-rail-muted">
-            Select the project monitors allowed to use this channel.
-          </p>
-        </div>
-        <fieldset className="m-0 border-0 p-0">
-          <legend className="sr-only">Routed monitors</legend>
-          {monitors.length === 0 ? (
-            <p className="m-0 px-5 py-5 text-sm leading-6 text-rail-muted">
-              This project has no monitors yet.
-            </p>
-          ) : (
-            <div className="max-h-80 overflow-y-auto">
-              {monitors.map((monitor) => (
-                <label
-                  key={monitor.id}
-                  className="flex min-h-14 cursor-pointer items-center gap-3 border-b border-rail-border px-5 py-2.5 last:border-b-0 hover:bg-rail-hover"
-                >
-                  <Checkbox value={monitor.id} {...register('monitorIds')} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium text-rail-text">
-                      {monitor.name}
-                    </span>
-                    <span className="block text-xs leading-5 text-rail-muted">
-                      {monitor.type === 'API_WORKFLOW' ? 'API workflow' : monitor.type} ·{' '}
-                      {monitor.lifecycleState === 'ENABLED' ? 'Active' : 'Paused'}
-                    </span>
-                  </span>
-                </label>
-              ))}
-            </div>
-          )}
-        </fieldset>
-        <p className="m-0 border-t border-rail-border px-5 py-3 text-xs text-rail-muted">
-          {monitorIds.length} selected
-        </p>
-      </aside>
     </form>
   );
 }

@@ -1,0 +1,1 @@
+ALTER TABLE "webhook_endpoints" ADD COLUMN "route_all_monitors" boolean DEFAULT false NOT NULL;

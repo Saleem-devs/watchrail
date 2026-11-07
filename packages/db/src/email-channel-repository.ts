@@ -16,6 +16,7 @@ import {
 type Transaction = Parameters<Parameters<WatchrailDatabase['transaction']>[0]>[0];
 
 export interface EmailChannelRoutingInput {
+  allMonitors?: boolean;
   monitorIds: string[];
   notifyOnIncident: boolean;
   notifyOnRecovery: boolean;
@@ -82,6 +83,7 @@ export class EmailChannelRepository {
           channelType: 'EMAIL',
           name,
           enabled: input.enabled ?? true,
+          routeAllMonitors: routing.allMonitors,
           notifyOnIncident: routing.notifyOnIncident,
           notifyOnRecovery: routing.notifyOnRecovery,
         })
@@ -136,6 +138,7 @@ export class EmailChannelRepository {
         .set({
           name,
           currentVersionNumber: nextVersionNumber,
+          routeAllMonitors: routing.allMonitors,
           notifyOnIncident: routing.notifyOnIncident,
           notifyOnRecovery: routing.notifyOnRecovery,
           updatedAt: sql`clock_timestamp()`,
@@ -336,7 +339,10 @@ async function validateRouting(
   if (!project) throw new EmailChannelInputError({ projectId: ['Project not found.'] });
   if (!input.notifyOnIncident && !input.notifyOnRecovery)
     throw new EmailChannelInputError({ routing: ['Choose at least one incident event.'] });
-  const monitorIds = [...new Set(input.monitorIds.map((id) => id.toLowerCase()))];
+  const allMonitors = input.allMonitors ?? false;
+  const monitorIds = allMonitors
+    ? []
+    : [...new Set(input.monitorIds.map((id) => id.toLowerCase()))];
   if (monitorIds.length !== input.monitorIds.length)
     throw new EmailChannelInputError({ monitorIds: ['Monitor IDs must be unique.'] });
   if (monitorIds.length > 500)
@@ -357,7 +363,7 @@ async function validateRouting(
         monitorIds: ['Every monitor must belong to the selected project.'],
       });
   }
-  return { ...input, monitorIds };
+  return { ...input, allMonitors, monitorIds };
 }
 
 async function replaceRouting(
@@ -391,6 +397,7 @@ async function readRouting(
 ): Promise<EmailChannelRoutingInput> {
   const [channel] = await db
     .select({
+      allMonitors: webhookEndpoints.routeAllMonitors,
       notifyOnIncident: webhookEndpoints.notifyOnIncident,
       notifyOnRecovery: webhookEndpoints.notifyOnRecovery,
     })

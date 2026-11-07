@@ -23,6 +23,8 @@ import {
   MaintenanceWindowRepository,
   EmailChannelRepository,
   EmailDeliveryReadRepository,
+  SlackChannelRepository,
+  SlackDeliveryReadRepository,
 } from '@watchrail/db';
 import type { WatchrailDatabase } from '@watchrail/db';
 import { ConfigModule } from '../../config/config.module.js';
@@ -48,6 +50,16 @@ import { APP_CONFIG, type AppConfig } from '../../config/config.js';
       provide: EmailDeliveryReadRepository,
       inject: [getDrizzleToken()],
       useFactory: (db: WatchrailDatabase) => new EmailDeliveryReadRepository(db),
+    },
+    {
+      provide: SlackChannelRepository,
+      inject: [getDrizzleToken()],
+      useFactory: (db: WatchrailDatabase) => new SlackChannelRepository(db),
+    },
+    {
+      provide: SlackDeliveryReadRepository,
+      inject: [getDrizzleToken()],
+      useFactory: (db: WatchrailDatabase) => new SlackDeliveryReadRepository(db),
     },
     {
       provide: AuthEmailOutboxRepository,
@@ -169,6 +181,8 @@ import { APP_CONFIG, type AppConfig } from '../../config/config.js';
     MaintenanceWindowRepository,
     EmailChannelRepository,
     EmailDeliveryReadRepository,
+    SlackChannelRepository,
+    SlackDeliveryReadRepository,
   ],
 })
 export class DatabaseModule {}

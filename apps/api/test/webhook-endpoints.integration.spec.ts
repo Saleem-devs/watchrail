@@ -29,6 +29,7 @@ import {
   parseNewProject,
 } from '@watchrail/domain';
 import {
+  decryptSlackWebhookUrl,
   decryptWebhookSigningSecret,
   encryptWebhookSigningSecret,
   type EncryptedWebhookSigningSecretV1,
@@ -516,6 +517,7 @@ describe('webhook endpoint API', () => {
       versionNumber: 2,
     });
     expect(updated.body.data.routing).toEqual({
+      allMonitors: false,
       monitorIds: [unroutedMonitor.id],
       notifyOnIncident: true,
       notifyOnRecovery: true,
@@ -564,6 +566,7 @@ describe('webhook endpoint API', () => {
       })
       .expect(201);
     expect(created.body.data.routing).toEqual({
+      allMonitors: false,
       monitorIds: [],
       notifyOnIncident: false,
       notifyOnRecovery: true,
@@ -588,6 +591,7 @@ describe('webhook endpoint API', () => {
       })
       .expect(200);
     expect(updated.body.data.routing).toEqual({
+      allMonitors: false,
       monitorIds: [],
       notifyOnIncident: true,
       notifyOnRecovery: false,
@@ -701,6 +705,115 @@ describe('webhook endpoint API', () => {
       suppressedAt: expect.any(Date),
       suppressionReason: 'CHANNEL_DELETED',
     });
+  });
+
+  it('creates, rotates, tests, and deletes a Slack channel without disclosing its webhook', async () => {
+    const project = await new ProjectRepository(database).create(
+      DEVELOPMENT_REQUEST_CONTEXT.organizationId,
+      parseNewProject({ name: 'Slack services', slug: 'slack-services' }),
+    );
+    const webhookUrl = [
+      'https://hooks.slack.com',
+      'services',
+      'T00000000',
+      'B00000000',
+      'XXXXXXXXXXXXXXXXXXXXXXXX',
+    ].join('/');
+    const createdResponse = await request(app.getHttpServer())
+      .post('/api/slack-channels')
+      .send({
+        projectId: project.id,
+        name: 'Operations Slack',
+        webhookUrl,
+        routing: { monitorIds: [], notifyOnIncident: true, notifyOnRecovery: true },
+      })
+      .expect(201);
+    const created = createdResponse.body.data as {
+      id: string;
+      projectId: string;
+      type: string;
+      webhookUrl: { hasValue: true };
+      versionNumber: number;
+    };
+    expect(created).toMatchObject({
+      projectId: project.id,
+      type: 'SLACK',
+      webhookUrl: { hasValue: true },
+      versionNumber: 1,
+    });
+    expect(JSON.stringify(createdResponse.body)).not.toContain(webhookUrl);
+
+    const stored = await database.execute<{
+      versionNumber: number;
+      envelope: unknown;
+    }>(sql`
+      select version_number as "versionNumber",
+        slack_webhook_url_envelope as envelope
+      from webhook_endpoint_versions
+      where endpoint_id=${created.id}::uuid
+    `);
+    expect(JSON.stringify(stored.rows[0]?.envelope)).not.toContain(webhookUrl);
+    expect(
+      decryptSlackWebhookUrl(
+        stored.rows[0]!.envelope,
+        {
+          organizationId: DEVELOPMENT_REQUEST_CONTEXT.organizationId,
+          channelId: created.id,
+          versionNumber: stored.rows[0]!.versionNumber,
+        },
+        config.webhookSigningSecretKeyring,
+      ),
+    ).toBe(webhookUrl);
+
+    const invalidHosts = [
+      'https://example.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX',
+      'https://hooks.slack.com.evil.test/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX',
+      'http://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX',
+    ];
+    for (const invalidWebhookUrl of invalidHosts)
+      await request(app.getHttpServer())
+        .post('/api/slack-channels')
+        .send({
+          projectId: project.id,
+          name: 'Invalid Slack',
+          webhookUrl: invalidWebhookUrl,
+          routing: { monitorIds: [], notifyOnIncident: true, notifyOnRecovery: false },
+        })
+        .expect(400);
+
+    const updated = await request(app.getHttpServer())
+      .patch(`/api/slack-channels/${created.id}`)
+      .send({
+        name: 'Operations Slack',
+        webhookUrl: { retain: true },
+        routing: { monitorIds: [], notifyOnIncident: false, notifyOnRecovery: true },
+      })
+      .expect(200);
+    expect(updated.body.data).toMatchObject({
+      webhookUrl: { hasValue: true },
+      versionNumber: 1,
+      routing: { notifyOnIncident: false, notifyOnRecovery: true },
+    });
+
+    const testResponse = await request(app.getHttpServer())
+      .post(`/api/slack-channels/${created.id}/test`)
+      .expect(201);
+    expect(testResponse.body.data.deliveryId).toEqual(expect.any(String));
+    const deliveries = await request(app.getHttpServer())
+      .get(`/api/slack-channels/${created.id}/deliveries?limit=25`)
+      .expect(200);
+    expect(deliveries.body.data).toEqual([
+      expect.objectContaining({
+        id: testResponse.body.data.deliveryId,
+        status: 'PENDING',
+        event: expect.objectContaining({ type: 'TEST' }),
+      }),
+    ]);
+
+    await request(app.getHttpServer())
+      .delete(`/api/slack-channels/${created.id}`)
+      .expect(200, { data: { deleted: true } });
+    await request(app.getHttpServer()).get(`/api/slack-channels/${created.id}`).expect(404);
   });
 
   it('reads paginated delivery history with immutable target context and no durable secrets', async () => {

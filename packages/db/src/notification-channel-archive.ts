@@ -6,7 +6,7 @@ import {
   webhookEndpoints,
 } from './schema.js';
 
-export type NotificationChannelType = 'EMAIL' | 'WEBHOOK';
+export type NotificationChannelType = 'EMAIL' | 'SLACK' | 'WEBHOOK';
 
 /**
  * Archives a notification channel while retaining immutable configuration and

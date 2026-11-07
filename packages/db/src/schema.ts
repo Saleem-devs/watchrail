@@ -18,8 +18,15 @@ import {
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
-import type { EmailNotificationV1, ExecuteCheckRoundJobV1 } from '@watchrail/contracts';
-import type { EncryptedWebhookSigningSecretV1 } from '@watchrail/webhook-security';
+import type {
+  EmailNotificationV1,
+  ExecuteCheckRoundJobV1,
+  SlackNotificationV1,
+} from '@watchrail/contracts';
+import type {
+  EncryptedSlackWebhookUrlV1,
+  EncryptedWebhookSigningSecretV1,
+} from '@watchrail/webhook-security';
 import type { EncryptedWorkspaceSecretV1 } from '@watchrail/secret-vault-security';
 import type { SerializedApiWorkflowResult } from '@watchrail/check-engine';
 import {
@@ -136,6 +143,7 @@ export const notificationEventTypeEnum = pgEnum('notification_event_type', [
 export const notificationChannelTypeEnum = pgEnum('notification_channel_type', [
   'WEBHOOK',
   'EMAIL',
+  'SLACK',
 ]);
 export const workspaceSecretAuditActionEnum = pgEnum('workspace_secret_audit_action', [
   'CREATED',
@@ -1773,6 +1781,7 @@ export const webhookEndpoints = pgTable(
     channelType: notificationChannelTypeEnum('channel_type').notNull().default('WEBHOOK'),
     name: varchar('name', { length: 120 }).notNull(),
     enabled: boolean('enabled').notNull().default(true),
+    routeAllMonitors: boolean('route_all_monitors').notNull().default(false),
     notifyOnIncident: boolean('notify_on_incident').notNull().default(true),
     notifyOnRecovery: boolean('notify_on_recovery').notNull().default(true),
     currentVersionNumber: integer('current_version_number').notNull().default(1),
@@ -1815,6 +1824,9 @@ export const webhookEndpointVersions = pgTable(
     signingSecretEnvelope:
       jsonb('signing_secret_envelope').$type<EncryptedWebhookSigningSecretV1>(),
     recipientEmails: jsonb('recipient_emails').$type<string[]>(),
+    slackWebhookUrlEnvelope: jsonb(
+      'slack_webhook_url_envelope',
+    ).$type<EncryptedSlackWebhookUrlV1>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -1841,16 +1853,24 @@ export const webhookEndpointVersions = pgTable(
     check(
       'webhook_endpoint_versions_configuration',
       sql`(
-        ${table.channelType} = 'WEBHOOK'
+        ${table.channelType}::text = 'WEBHOOK'
         and length(${table.url}) between 1 and 2048
         and jsonb_typeof(${table.signingSecretEnvelope}) = 'object'
         and ${table.recipientEmails} is null
+        and ${table.slackWebhookUrlEnvelope} is null
       ) or (
-        ${table.channelType} = 'EMAIL'
+        ${table.channelType}::text = 'EMAIL'
         and ${table.url} is null
         and ${table.signingSecretEnvelope} is null
         and jsonb_typeof(${table.recipientEmails}) = 'array'
         and jsonb_array_length(${table.recipientEmails}) between 1 and 20
+        and ${table.slackWebhookUrlEnvelope} is null
+      ) or (
+        ${table.channelType}::text = 'SLACK'
+        and ${table.url} is null
+        and ${table.signingSecretEnvelope} is null
+        and ${table.recipientEmails} is null
+        and jsonb_typeof(${table.slackWebhookUrlEnvelope}) = 'object'
       )`,
     ),
   ],
@@ -1897,7 +1917,7 @@ export const notificationEvents = pgTable(
     eventType: notificationEventTypeEnum('event_type').notNull(),
     occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
     triggeringRoundId: uuid('triggering_round_id'),
-    payload: jsonb('payload').$type<EmailNotificationV1>().notNull(),
+    payload: jsonb('payload').$type<EmailNotificationV1 | SlackNotificationV1>().notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

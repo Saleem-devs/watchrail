@@ -15,6 +15,7 @@ export interface WebhookChannel {
   versionNumber: number;
   signingSecret: { hasValue: true };
   routing: {
+    allMonitors?: boolean;
     monitorIds: string[];
     notifyOnIncident: boolean;
     notifyOnRecovery: boolean;
@@ -36,7 +37,21 @@ export interface EmailChannel {
   updatedAt: string;
 }
 
-export type NotificationChannel = (WebhookChannel & { type: 'WEBHOOK' }) | EmailChannel;
+export interface SlackChannel {
+  id: string;
+  projectId: string;
+  type: 'SLACK';
+  name: string;
+  enabled: boolean;
+  versionNumber: number;
+  webhookUrl: { hasValue: true };
+  routing: WebhookChannel['routing'];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type NotificationChannel =
+  (WebhookChannel & { type: 'WEBHOOK' }) | EmailChannel | SlackChannel;
 
 export type NotificationDeliveryStatus =
   'PENDING' | 'IN_FLIGHT' | 'RETRY_SCHEDULED' | 'DELIVERED' | 'SUPPRESSED' | 'DEAD';

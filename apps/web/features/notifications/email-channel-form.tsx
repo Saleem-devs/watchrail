@@ -15,11 +15,16 @@ import {
   NotificationRequestError,
   updateEmailChannel,
 } from './notification-api';
+import {
+  NotificationMonitorScope,
+  type NotificationMonitorScopeValue,
+} from './notification-monitor-scope';
 import type { EmailChannel, NotificationMonitor } from './types';
 
 interface EmailChannelFormValues {
   name: string;
   recipients: string;
+  monitorScope: NotificationMonitorScopeValue;
   monitorIds: string[];
   notifyOnIncident: boolean;
   notifyOnRecovery: boolean;
@@ -144,24 +149,30 @@ export function EmailChannelForm({
     defaultValues: {
       name: channel?.name ?? '',
       recipients: channel?.recipientEmails.join('\n') ?? '',
+      monitorScope: channel ? (channel.routing.allMonitors ? 'PROJECT' : 'MONITORS') : 'PROJECT',
       monitorIds: channel?.routing.monitorIds ?? [],
       notifyOnIncident: channel?.routing.notifyOnIncident ?? true,
       notifyOnRecovery: channel?.routing.notifyOnRecovery ?? true,
     },
   });
   const monitorIds = useWatch({ control, name: 'monitorIds' });
+  const monitorScope = useWatch({ control, name: 'monitorScope' });
   const notifyOnIncident = useWatch({ control, name: 'notifyOnIncident' });
   const notifyOnRecovery = useWatch({ control, name: 'notifyOnRecovery' });
 
   return (
     <form
       id={formId}
-      className="mt-6 grid items-start gap-6 !p-0 xl:grid-cols-[minmax(0,1fr)_18rem]"
+      className="mt-6 !p-0"
       noValidate
       aria-busy={isSubmitting}
       onSubmit={handleSubmit(async (values) => {
         if (!values.notifyOnIncident && !values.notifyOnRecovery) {
           setError('notifyOnIncident', { message: 'Choose at least one event to deliver.' });
+          return;
+        }
+        if (values.monitorScope === 'MONITORS' && values.monitorIds.length === 0) {
+          setError('monitorIds', { message: 'Choose at least one monitor.' });
           return;
         }
         const recipientEmails = parseRecipientLines(values.recipients);
@@ -174,7 +185,8 @@ export function EmailChannelForm({
             name: values.name,
             recipientEmails,
             routing: {
-              monitorIds: values.monitorIds,
+              allMonitors: values.monitorScope === 'PROJECT',
+              monitorIds: values.monitorScope === 'PROJECT' ? [] : values.monitorIds,
               notifyOnIncident: values.notifyOnIncident,
               notifyOnRecovery: values.notifyOnRecovery,
             },
@@ -226,19 +238,25 @@ export function EmailChannelForm({
           </div>
         </section>
 
-        <fieldset className="m-0 border-0 border-t border-rail-border px-5 py-5 sm:px-6">
-          <legend className="p-0 text-sm font-semibold text-rail-text">Events</legend>
+        <section className="border-t border-rail-border px-5 py-5 sm:px-6">
+          <h2 className="m-0 text-sm font-semibold text-rail-text">Events</h2>
           <p className="mt-1 mb-0 text-xs leading-5 text-rail-muted">
             Choose which confirmed incident transitions are emailed.
           </p>
-          <div className="mt-4 grid gap-2 sm:grid-cols-2">
-            <Choice label="Incident opened" description="Send after Watchrail confirms a failure.">
-              <Checkbox {...register('notifyOnIncident')} />
-            </Choice>
-            <Choice label="Incident resolved" description="Send when the monitor recovers.">
-              <Checkbox {...register('notifyOnRecovery')} />
-            </Choice>
-          </div>
+          <fieldset className="m-0 mt-4 border-0 p-0">
+            <legend className="sr-only">Email notification events</legend>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Choice
+                label="Incident opened"
+                description="Send after Watchrail confirms a failure."
+              >
+                <Checkbox {...register('notifyOnIncident')} />
+              </Choice>
+              <Choice label="Incident resolved" description="Send when the monitor recovers.">
+                <Checkbox {...register('notifyOnRecovery')} />
+              </Choice>
+            </div>
+          </fieldset>
           {errors.notifyOnIncident?.message ? (
             <p className="mt-2 mb-0 text-xs text-rail-danger" role="alert">
               {errors.notifyOnIncident.message}
@@ -248,56 +266,21 @@ export function EmailChannelForm({
               Recovery emails will arrive without a matching incident-open email.
             </p>
           ) : null}
-        </fieldset>
+        </section>
+        <NotificationMonitorScope
+          monitors={monitors}
+          scope={monitorScope}
+          selectedMonitorIds={monitorIds}
+          scopeRegistration={register('monitorScope')}
+          monitorRegistration={register('monitorIds')}
+          error={errors.monitorIds?.message}
+        />
         {errors.root?.message ? (
           <p className="mx-5 mt-0 mb-5 text-sm text-rail-danger sm:mx-6" role="alert">
             {errors.root.message}
           </p>
         ) : null}
       </div>
-
-      <aside
-        className="overflow-hidden rounded-rail-panel border border-rail-border bg-rail-raised"
-        aria-label="Monitor routing"
-      >
-        <div className="border-b border-rail-border px-5 py-4">
-          <h2 className="m-0 text-sm font-semibold text-rail-text">Monitor routing</h2>
-          <p className="mt-1 mb-0 text-xs leading-5 text-rail-muted">
-            Select the monitors allowed to email this channel.
-          </p>
-        </div>
-        <fieldset className="m-0 border-0 p-0">
-          <legend className="sr-only">Routed monitors</legend>
-          {monitors.length === 0 ? (
-            <p className="m-0 px-5 py-5 text-sm text-rail-muted">
-              This project has no monitors yet.
-            </p>
-          ) : (
-            <div className="max-h-80 overflow-y-auto">
-              {monitors.map((monitor) => (
-                <label
-                  key={monitor.id}
-                  className="flex min-h-14 cursor-pointer items-center gap-3 border-b border-rail-border px-5 py-2.5 last:border-b-0 hover:bg-rail-hover"
-                >
-                  <Checkbox value={monitor.id} {...register('monitorIds')} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium text-rail-text">
-                      {monitor.name}
-                    </span>
-                    <span className="block text-xs text-rail-muted">
-                      {monitor.type === 'API_WORKFLOW' ? 'API workflow' : monitor.type} ·{' '}
-                      {monitor.lifecycleState === 'ENABLED' ? 'Active' : 'Paused'}
-                    </span>
-                  </span>
-                </label>
-              ))}
-            </div>
-          )}
-        </fieldset>
-        <p className="m-0 border-t border-rail-border px-5 py-3 text-xs text-rail-muted">
-          {monitorIds.length} selected
-        </p>
-      </aside>
     </form>
   );
 }
