@@ -2,6 +2,7 @@ import { RequestMethod } from '@nestjs/common';
 import { describe, expect, it } from 'vitest';
 import { PERMISSION_KEY, PUBLIC_KEY } from './auth/auth.guard.js';
 import { MonitorHistoryController } from './modules/monitors/monitor-history.controller.js';
+import { IncidentsController } from './modules/monitors/incidents.controller.js';
 import { MonitorUptimeController } from './modules/monitors/monitor-uptime.controller.js';
 import { MonitorsController } from './modules/monitors/monitors.controller.js';
 import {
@@ -121,6 +122,18 @@ describe('remaining API route contracts', () => {
     expect(operators.every((route) => typeof route.permission === 'string')).toBe(true);
     expect(Reflect.getMetadata(PUBLIC_KEY, ProbeMachineController)).toBe(true);
     expect(routes(ProbeMachineController)).toHaveLength(8);
+  });
+
+  it('separates incident reads from operator actions', () => {
+    expect(routes(IncidentsController)).toEqual([
+      { route: 'GET incidents', permission: 'incident:read' },
+      { route: 'GET incidents/:incidentId', permission: 'incident:read' },
+      { route: 'GET incidents/:incidentId/audit-events', permission: 'incident:read' },
+      { route: 'POST incidents/:incidentId/acknowledge', permission: 'incident:manage' },
+      { route: 'POST incidents/:incidentId/silence', permission: 'incident:manage' },
+      { route: 'DELETE incidents/:incidentId/silence', permission: 'incident:manage' },
+      { route: 'POST incidents/:incidentId/resolve', permission: 'incident:manage' },
+    ]);
   });
 
   it('preserves the public and internal status-page routes as explicitly public', () => {

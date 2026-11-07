@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { createMonitor, EMPTY_ASSERTION_CONFIGURATION } from '@watchrail/domain';
@@ -9,6 +9,7 @@ import { createDatabaseConnection, type DatabaseConnection } from './client.js';
 import { ManualRoundRepository } from './manual-round-repository.js';
 import { CheckHistoryRepository } from './check-history-repository.js';
 import { HeartbeatRepository } from './heartbeat-repository.js';
+import { IncidentActionRepository } from './incident-action-repository.js';
 import { IncidentReadRepository } from './incident-read-repository.js';
 import { migrateDatabase } from './migration.js';
 import { MonitorRepository } from './monitor-repository.js';
@@ -251,6 +252,47 @@ describe('ScheduledRoundRepository', () => {
     await expect(
       new IncidentReadRepository(connection.db).currentForMonitor(organizationId, monitor.id),
     ).resolves.toMatchObject({ currentIncident: { status: 'OPEN' } });
+  });
+
+  it('does not let a stale heartbeat deadline reopen a manually resolved incident', async () => {
+    const monitor = await createHeartbeatMonitorRecord(
+      'Settlement import',
+      heartbeatHash('resolution-token'),
+    );
+    const heartbeats = new HeartbeatRepository(connection.db);
+    const reads = new IncidentReadRepository(connection.db);
+    await makeHeartbeatOverdue(monitor.id);
+    await heartbeats.evaluateDue(1);
+    const open = await reads.currentForMonitor(organizationId, monitor.id);
+    if (!open.currentIncident) throw new Error('Expected open incident.');
+
+    await new IncidentActionRepository(connection.db).resolve(
+      organizationId,
+      open.currentIncident.id,
+      '11111111-1111-4111-8111-111111111111',
+      null,
+    );
+    await makeHeartbeatOverdue(monitor.id);
+    await heartbeats.evaluateDue(1);
+    await expect(reads.currentForMonitor(organizationId, monitor.id)).resolves.toMatchObject({
+      currentIncident: null,
+    });
+
+    await connection.db
+      .update(monitors)
+      .set({ nextCheckAt: sql`clock_timestamp()` })
+      .where(eq(monitors.id, monitor.id));
+    await heartbeats.evaluateDue(1);
+    await expect(reads.currentForMonitor(organizationId, monitor.id)).resolves.toMatchObject({
+      currentIncident: {
+        status: 'OPEN',
+        acknowledgedAt: null,
+        acknowledgedByActorId: null,
+        silencedAt: null,
+        silencedUntil: null,
+        silencedByActorId: null,
+      },
+    });
   });
 
   it('classifies an unfinished started job as a runtime breach', async () => {

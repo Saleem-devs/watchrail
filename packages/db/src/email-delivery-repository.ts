@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import type { EmailNotificationV1 } from '@watchrail/contracts';
 import type { WatchrailDatabase } from './client.js';
+import { suppressClaimedDeliveryForIncidentSilence } from './incident-notification-policy.js';
 import { activeMaintenancePolicyForMonitor } from './maintenance-policy.js';
 
 export interface ClaimedEmailNotificationDelivery {
@@ -90,12 +91,23 @@ export class EmailDeliveryRepository {
       `);
       const row = claimed.rows[0];
       if (!row) return { state: 'LOST_CLAIM' };
+      const policyAt = new Date(row.policyAt);
+      if (
+        await suppressClaimedDeliveryForIncidentSilence(tx, {
+          deliveryId: id,
+          claimToken: token,
+          organizationId,
+          policyAt,
+        })
+      ) {
+        return { state: 'SUPPRESSED' };
+      }
       if (monitorId) {
         const policy = await activeMaintenancePolicyForMonitor(
           tx,
           organizationId,
           monitorId,
-          new Date(row.policyAt),
+          policyAt,
         );
         if (policy.effects.suppressNotifications) {
           const result = await tx.execute<{ id: string }>(sql`

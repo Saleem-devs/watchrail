@@ -17,6 +17,11 @@ import {
   IncidentHistoryQueryError,
   IncidentMonitorNotFoundError,
   IncidentReadRepository,
+  IncidentActionRepository,
+  IncidentActionConflictError,
+  IncidentActionNotFoundError,
+  IncidentResolutionNoteError,
+  IncidentSilenceWindowError,
   MonitorNotFoundError,
   MonitorNotRunnableError,
   MonitorRepository,
@@ -34,7 +39,9 @@ import {
   type CurrentCheck,
   type CurrentIncidentState,
   type IncidentDetail,
+  type IncidentActionEventRecord,
   type IncidentHistoryPage,
+  type OrganizationIncidentDetail,
   type OrganizationIncidentHistoryPage,
   type MonitorRecord,
   parseCheckHistoryQuery,
@@ -88,6 +95,7 @@ export class MonitorsService {
     @Inject(ManualRoundRepository) private readonly manualRounds: ManualRoundRepository,
     @Inject(CheckHistoryRepository) private readonly history: CheckHistoryRepository,
     @Inject(IncidentReadRepository) private readonly incidentReads: IncidentReadRepository,
+    @Inject(IncidentActionRepository) private readonly incidentActions: IncidentActionRepository,
     @Inject(UptimeReadRepository) private readonly uptimeReads: UptimeReadRepository,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
@@ -606,6 +614,97 @@ export class MonitorsService {
     }
   }
 
+  async getOrganizationIncident(
+    context: RequestContext,
+    incidentId: string,
+  ): Promise<OrganizationIncidentDetail> {
+    const incident = await this.incidentReads.findForOrganization(
+      context.organizationId,
+      incidentId,
+    );
+    if (!incident) {
+      throw new NotFoundException({ code: 'INCIDENT_NOT_FOUND', message: 'Incident not found.' });
+    }
+    return incident;
+  }
+
+  async listIncidentActionEvents(
+    context: RequestContext,
+    incidentId: string,
+  ): Promise<IncidentActionEventRecord[]> {
+    try {
+      return await this.incidentActions.listEvents(context.organizationId, incidentId);
+    } catch (error) {
+      this.throwIncidentActionError(error);
+    }
+  }
+
+  async acknowledgeIncident(context: RequestContext, incidentId: string) {
+    try {
+      return await this.incidentActions.acknowledge(
+        context.organizationId,
+        incidentId,
+        context.actorId,
+      );
+    } catch (error) {
+      this.throwIncidentActionError(error);
+    }
+  }
+
+  async silenceIncident(context: RequestContext, incidentId: string, value: unknown) {
+    try {
+      return await this.incidentActions.silence(
+        context.organizationId,
+        incidentId,
+        context.actorId,
+        parseSilenceUntil(value),
+      );
+    } catch (error) {
+      this.throwIncidentActionError(error);
+    }
+  }
+
+  async unsilenceIncident(context: RequestContext, incidentId: string) {
+    try {
+      return await this.incidentActions.unsilence(
+        context.organizationId,
+        incidentId,
+        context.actorId,
+      );
+    } catch (error) {
+      this.throwIncidentActionError(error);
+    }
+  }
+
+  async resolveIncident(context: RequestContext, incidentId: string, value: unknown) {
+    try {
+      return await this.incidentActions.resolve(
+        context.organizationId,
+        incidentId,
+        context.actorId,
+        parseResolutionNote(value),
+      );
+    } catch (error) {
+      this.throwIncidentActionError(error);
+    }
+  }
+
+  private throwIncidentActionError(error: unknown): never {
+    if (error instanceof IncidentActionNotFoundError) {
+      throw new NotFoundException({ code: 'INCIDENT_NOT_FOUND', message: error.message });
+    }
+    if (error instanceof IncidentActionConflictError) {
+      throw new ConflictException({ code: 'INCIDENT_NOT_OPEN', message: error.message });
+    }
+    if (
+      error instanceof IncidentSilenceWindowError ||
+      error instanceof IncidentResolutionNoteError
+    ) {
+      throw new BadRequestException({ code: 'VALIDATION_FAILED', message: error.message });
+    }
+    throw error;
+  }
+
   async updateHttpSettings(
     context: RequestContext,
     monitorId: string,
@@ -1028,6 +1127,38 @@ function containsWorkspaceSecretReference(value: unknown): boolean {
   if (value === null || typeof value !== 'object') return false;
   if (Object.prototype.hasOwnProperty.call(value, 'secretReference')) return true;
   return Object.values(value).some(containsWorkspaceSecretReference);
+}
+
+function parseSilenceUntil(value: unknown): Date {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).length !== 1 ||
+    !('until' in value) ||
+    typeof value.until !== 'string'
+  ) {
+    throw new IncidentSilenceWindowError();
+  }
+  const until = new Date(value.until);
+  if (!Number.isFinite(until.getTime())) throw new IncidentSilenceWindowError();
+  return until;
+}
+
+function parseResolutionNote(value: unknown): string | null {
+  if (value === undefined) return null;
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new IncidentResolutionNoteError();
+  }
+  const keys = Object.keys(value);
+  if (keys.some((key) => key !== 'note')) throw new IncidentResolutionNoteError();
+  if (!('note' in value) || value.note === undefined || value.note === null || value.note === '') {
+    return null;
+  }
+  if (typeof value.note !== 'string' || value.note.trim().length > 500) {
+    throw new IncidentResolutionNoteError();
+  }
+  return value.note;
 }
 
 function monitorListState(

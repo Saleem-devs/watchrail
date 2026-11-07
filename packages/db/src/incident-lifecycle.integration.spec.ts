@@ -11,6 +11,10 @@ import {
 import { createDatabaseConnection, type DatabaseConnection } from './client.js';
 import { ManualRoundRepository } from './manual-round-repository.js';
 import { IncidentReadRepository } from './incident-read-repository.js';
+import {
+  IncidentActionNotFoundError,
+  IncidentActionRepository,
+} from './incident-action-repository.js';
 import { migrateDatabase } from './migration.js';
 import { MaintenanceWindowRepository } from './maintenance-window-repository.js';
 import { MonitorRepository } from './monitor-repository.js';
@@ -20,6 +24,7 @@ import {
   checkExecutionResults,
   checkRounds,
   incidents,
+  incidentActionEvents,
   monitorIncidentState,
   monitors,
   notificationEvents,
@@ -240,6 +245,178 @@ describe('incident lifecycle', () => {
 
     expect((await state()).consecutiveFailures).toBeGreaterThanOrEqual(3);
     expect(await connection.db.select().from(incidents)).toHaveLength(1);
+  });
+
+  it('records operator actions and permits a fresh incident after manual resolution', async () => {
+    await complete((await scheduledRound()).id, unhealthy());
+    await complete((await scheduledRound()).id, unhealthy());
+    await complete((await scheduledRound()).id, unhealthy());
+    const [opened] = await connection.db.select().from(incidents);
+    if (!opened) throw new Error('Expected open incident.');
+    const delayedPreResolutionRound = await scheduledRound();
+    const actorId = '11111111-1111-4111-8111-111111111111';
+    const actions = new IncidentActionRepository(connection.db);
+
+    const acknowledged = await actions.acknowledge(organizationId, opened.id, actorId);
+    expect(acknowledged).toMatchObject({ acknowledgedByActorId: actorId });
+    await expect(actions.acknowledge(organizationId, opened.id, actorId)).resolves.toMatchObject({
+      acknowledgedByActorId: actorId,
+    });
+    const until = new Date(Date.now() + 60 * 60 * 1_000);
+    const silenced = await actions.silence(organizationId, opened.id, actorId, until);
+    expect(silenced).toMatchObject({ silencedByActorId: actorId, silencedUntil: until });
+    await expect(actions.silence(organizationId, opened.id, actorId, until)).resolves.toMatchObject(
+      {
+        silencedUntil: until,
+      },
+    );
+    expect((await actions.unsilence(organizationId, opened.id, actorId)).silencedUntil).toBeNull();
+    await expect(actions.unsilence(organizationId, opened.id, actorId)).resolves.toMatchObject({
+      silencedUntil: null,
+    });
+    const resolved = await actions.resolve(
+      organizationId,
+      opened.id,
+      actorId,
+      'Known deployment issue',
+    );
+    expect(resolved).toMatchObject({
+      status: 'RESOLVED',
+      resolvedByRoundId: null,
+      resolvedByActorId: actorId,
+      resolutionNote: 'Known deployment issue',
+    });
+    expect(await state()).toMatchObject({
+      consecutiveFailures: 0,
+      failureStreakStartedAt: null,
+      multiLocationSeverity: null,
+    });
+    expect(
+      (await actions.listEvents(organizationId, opened.id)).map(({ action }) => action),
+    ).toEqual(['ACKNOWLEDGED', 'SILENCED', 'UNSILENCED', 'MANUALLY_RESOLVED']);
+
+    await complete(delayedPreResolutionRound.id, unhealthy());
+    expect(await state()).toMatchObject({ consecutiveFailures: 0 });
+    expect(
+      (await connection.db.select().from(incidents)).filter(({ status }) => status === 'OPEN'),
+    ).toHaveLength(0);
+
+    await complete((await scheduledRound()).id, unhealthy());
+    await complete((await scheduledRound()).id, unhealthy());
+    await complete((await scheduledRound()).id, unhealthy());
+    expect(
+      (await connection.db.select().from(incidents)).filter(({ status }) => status === 'OPEN'),
+    ).toHaveLength(1);
+  });
+
+  it('suppresses recovery notification staging while an incident is silenced', async () => {
+    await complete((await scheduledRound()).id, unhealthy());
+    await complete((await scheduledRound()).id, unhealthy());
+    await complete((await scheduledRound()).id, unhealthy());
+    const [opened] = await connection.db.select().from(incidents);
+    if (!opened) throw new Error('Expected open incident.');
+    const actions = new IncidentActionRepository(connection.db);
+    await actions.silence(
+      organizationId,
+      opened.id,
+      '11111111-1111-4111-8111-111111111111',
+      new Date(Date.now() + 60 * 60 * 1_000),
+    );
+
+    await complete((await scheduledRound()).id, healthy());
+
+    expect(
+      (await connection.db.select().from(notificationEvents)).map(({ eventType }) => eventType),
+    ).toEqual(['INCIDENT_OPENED']);
+    await expect(
+      actions.acknowledge(
+        'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        opened.id,
+        '11111111-1111-4111-8111-111111111111',
+      ),
+    ).rejects.toBeInstanceOf(IncidentActionNotFoundError);
+    expect(await connection.db.select().from(incidentActionEvents)).toHaveLength(1);
+  });
+
+  it('serializes competing silence and resume actions into a coherent audit trail', async () => {
+    await complete((await scheduledRound()).id, unhealthy());
+    await complete((await scheduledRound()).id, unhealthy());
+    await complete((await scheduledRound()).id, unhealthy());
+    const [opened] = await connection.db.select().from(incidents);
+    if (!opened) throw new Error('Expected open incident.');
+    const actions = new IncidentActionRepository(connection.db);
+    await Promise.all([
+      actions.silence(
+        organizationId,
+        opened.id,
+        '11111111-1111-4111-8111-111111111111',
+        new Date(Date.now() + 60 * 60_000),
+      ),
+      actions.unsilence(organizationId, opened.id, '22222222-2222-4222-8222-222222222222'),
+    ]);
+
+    const [stored] = await connection.db.select().from(incidents);
+    const eventActions = (await actions.listEvents(organizationId, opened.id)).map(
+      ({ action }) => action,
+    );
+    expect(eventActions).toEqual(stored?.silencedUntil ? ['SILENCED'] : ['SILENCED', 'UNSILENCED']);
+  });
+
+  it('serializes competing manual resolutions and records exactly one audit event', async () => {
+    await complete((await scheduledRound()).id, unhealthy());
+    await complete((await scheduledRound()).id, unhealthy());
+    await complete((await scheduledRound()).id, unhealthy());
+    const [opened] = await connection.db.select().from(incidents);
+    if (!opened) throw new Error('Expected open incident.');
+    const actions = new IncidentActionRepository(connection.db);
+    const attempts = await Promise.allSettled([
+      actions.resolve(
+        organizationId,
+        opened.id,
+        '11111111-1111-4111-8111-111111111111',
+        'Primary response',
+      ),
+      actions.resolve(
+        organizationId,
+        opened.id,
+        '22222222-2222-4222-8222-222222222222',
+        'Competing response',
+      ),
+    ]);
+
+    expect(attempts.filter(({ status }) => status === 'fulfilled')).toHaveLength(1);
+    expect(attempts.filter(({ status }) => status === 'rejected')).toHaveLength(1);
+    expect(await connection.db.select().from(incidentActionEvents)).toHaveLength(1);
+  });
+
+  it('serializes manual resolution against authoritative recovery without mixing classifications', async () => {
+    await complete((await scheduledRound()).id, unhealthy());
+    await complete((await scheduledRound()).id, unhealthy());
+    await complete((await scheduledRound()).id, unhealthy());
+    const [opened] = await connection.db.select().from(incidents);
+    if (!opened) throw new Error('Expected open incident.');
+    const recoveryRound = await scheduledRound();
+    const attempts = await Promise.allSettled([
+      new IncidentActionRepository(connection.db).resolve(
+        organizationId,
+        opened.id,
+        '11111111-1111-4111-8111-111111111111',
+        'Operator classification',
+      ),
+      complete(recoveryRound.id, healthy()),
+    ]);
+
+    expect(attempts.some(({ status }) => status === 'fulfilled')).toBe(true);
+    const [resolved] = await connection.db.select().from(incidents);
+    expect(resolved?.status).toBe('RESOLVED');
+    expect(Boolean(resolved?.resolvedByRoundId)).not.toBe(Boolean(resolved?.resolvedByActorId));
+    const actionEvents = await connection.db.select().from(incidentActionEvents);
+    expect(actionEvents).toHaveLength(resolved?.resolvedByActorId ? 1 : 0);
+    expect(
+      (await connection.db.select().from(notificationEvents)).filter(
+        ({ eventType }) => eventType === 'INCIDENT_RESOLVED',
+      ),
+    ).toHaveLength(resolved?.resolvedByRoundId ? 1 : 0);
   });
 
   it('suppresses new incidents and notifications independently during maintenance', async () => {

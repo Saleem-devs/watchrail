@@ -303,11 +303,12 @@ async function applyMultiLocationIncident(
     .for('update');
   if (!state) throw new Error('Monitor incident state is missing.');
   if (
-    state.lastProcessedRoundCreatedAt &&
-    state.lastProcessedRoundId &&
-    (round.createdAt < state.lastProcessedRoundCreatedAt ||
-      (round.createdAt.getTime() === state.lastProcessedRoundCreatedAt.getTime() &&
-        round.id <= state.lastProcessedRoundId))
+    round.createdAt < state.trackingStartedAt ||
+    (state.lastProcessedRoundCreatedAt &&
+      state.lastProcessedRoundId &&
+      (round.createdAt < state.lastProcessedRoundCreatedAt ||
+        (round.createdAt.getTime() === state.lastProcessedRoundCreatedAt.getTime() &&
+          round.id <= state.lastProcessedRoundId)))
   ) {
     return { type: 'NONE' };
   }

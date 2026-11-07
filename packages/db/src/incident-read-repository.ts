@@ -18,6 +18,11 @@ export interface CurrentIncidentState {
     openedAt: Date;
     startedByRoundId: string;
     openedByRoundId: string;
+    acknowledgedAt: Date | null;
+    acknowledgedByActorId: string | null;
+    silencedAt: Date | null;
+    silencedUntil: Date | null;
+    silencedByActorId: string | null;
   } | null;
   multiLocationIncident: {
     severity: 'DEGRADED' | 'DOWN';
@@ -32,6 +37,13 @@ export interface IncidentHistoryItem {
   startedAt: Date;
   openedAt: Date;
   resolvedAt: Date | null;
+  acknowledgedAt: Date | null;
+  acknowledgedByActorId: string | null;
+  silencedAt: Date | null;
+  silencedUntil: Date | null;
+  silencedByActorId: string | null;
+  resolvedByActorId: string | null;
+  resolutionNote: string | null;
 }
 
 export interface IncidentDetail extends IncidentHistoryItem {
@@ -40,6 +52,13 @@ export interface IncidentDetail extends IncidentHistoryItem {
   openedByRoundId: string;
   resolvedByRoundId: string | null;
   createdAt: Date;
+}
+
+export interface OrganizationIncidentDetail extends IncidentDetail {
+  projectId: string;
+  monitorName: string;
+  monitorUrl: string;
+  severity: 'DEGRADED' | 'DOWN' | null;
 }
 
 export interface IncidentHistoryPage {
@@ -240,6 +259,36 @@ export class IncidentReadRepository {
     return incident ?? null;
   }
 
+  async findForOrganization(
+    organizationId: string,
+    incidentId: string,
+  ): Promise<OrganizationIncidentDetail | null> {
+    const [row] = await this.db
+      .select({
+        ...historySelection,
+        monitorId: incidents.monitorId,
+        projectId: monitors.projectId,
+        monitorName: monitors.name,
+        monitorUrl: monitors.url,
+        severity: incidents.severity,
+        startedByRoundId: incidents.startedByRoundId,
+        openedByRoundId: incidents.openedByRoundId,
+        resolvedByRoundId: incidents.resolvedByRoundId,
+        createdAt: incidents.createdAt,
+      })
+      .from(incidents)
+      .innerJoin(
+        monitors,
+        and(
+          eq(monitors.organizationId, incidents.organizationId),
+          eq(monitors.id, incidents.monitorId),
+        ),
+      )
+      .where(and(eq(incidents.organizationId, organizationId), eq(incidents.id, incidentId)))
+      .limit(1);
+    return row ? { ...row, severity: parseIncidentSeverity(row.severity) } : null;
+  }
+
   private async assertMonitorExists(organizationId: string, monitorId: string): Promise<void> {
     const [monitor] = await this.db
       .select({ id: monitors.id })
@@ -262,6 +311,11 @@ const currentSelection = {
   incidentOpenedAt: incidents.openedAt,
   incidentStartedByRoundId: incidents.startedByRoundId,
   incidentOpenedByRoundId: incidents.openedByRoundId,
+  incidentAcknowledgedAt: incidents.acknowledgedAt,
+  incidentAcknowledgedByActorId: incidents.acknowledgedByActorId,
+  incidentSilencedAt: incidents.silencedAt,
+  incidentSilencedUntil: incidents.silencedUntil,
+  incidentSilencedByActorId: incidents.silencedByActorId,
 };
 
 const historySelection = {
@@ -270,6 +324,13 @@ const historySelection = {
   startedAt: incidents.startedAt,
   openedAt: incidents.openedAt,
   resolvedAt: incidents.resolvedAt,
+  acknowledgedAt: incidents.acknowledgedAt,
+  acknowledgedByActorId: incidents.acknowledgedByActorId,
+  silencedAt: incidents.silencedAt,
+  silencedUntil: incidents.silencedUntil,
+  silencedByActorId: incidents.silencedByActorId,
+  resolvedByActorId: incidents.resolvedByActorId,
+  resolutionNote: incidents.resolutionNote,
 };
 
 function toCurrentState(row: {
@@ -283,6 +344,11 @@ function toCurrentState(row: {
   incidentOpenedAt: Date | null;
   incidentStartedByRoundId: string | null;
   incidentOpenedByRoundId: string | null;
+  incidentAcknowledgedAt: Date | null;
+  incidentAcknowledgedByActorId: string | null;
+  incidentSilencedAt: Date | null;
+  incidentSilencedUntil: Date | null;
+  incidentSilencedByActorId: string | null;
 }): CurrentIncidentState {
   return {
     failureStreak:
@@ -302,6 +368,11 @@ function toCurrentState(row: {
           openedAt: required(row.incidentOpenedAt),
           startedByRoundId: required(row.incidentStartedByRoundId),
           openedByRoundId: required(row.incidentOpenedByRoundId),
+          acknowledgedAt: row.incidentAcknowledgedAt,
+          acknowledgedByActorId: row.incidentAcknowledgedByActorId,
+          silencedAt: row.incidentSilencedAt,
+          silencedUntil: row.incidentSilencedUntil,
+          silencedByActorId: row.incidentSilencedByActorId,
         }
       : null,
     multiLocationIncident:

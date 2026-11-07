@@ -4,6 +4,7 @@ import {
   CheckHistoryRepository,
   createWatchrailDatabase,
   IncidentReadRepository,
+  IncidentActionRepository,
   ManualRoundRepository,
   MonitorRepository,
   ProbeIdentityRepository,
@@ -158,6 +159,11 @@ import { APP_CONFIG, type AppConfig } from '../../config/config.js';
       inject: [getDrizzleToken()],
       useFactory: (db: WatchrailDatabase) => new IncidentReadRepository(db),
     },
+    {
+      provide: IncidentActionRepository,
+      inject: [getDrizzleToken()],
+      useFactory: (db: WatchrailDatabase) => new IncidentActionRepository(db),
+    },
   ],
   exports: [
     AuthEmailOutboxRepository,
@@ -167,6 +173,7 @@ import { APP_CONFIG, type AppConfig } from '../../config/config.js';
     UptimeReadRepository,
     CheckHistoryRepository,
     IncidentReadRepository,
+    IncidentActionRepository,
     ManualRoundRepository,
     MonitorRepository,
     ProbeIdentityRepository,
