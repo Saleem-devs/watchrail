@@ -6,25 +6,23 @@ import { Plus, X } from 'lucide-react';
 import { AppShell } from '../../components/app-shell';
 import { actionClassName, Button } from '../../components/ui/button';
 import { ConfirmationDialog } from '../../components/ui/confirmation-dialog';
+import {
+  DataTable,
+  type DataTableAction,
+  type DataTableColumn,
+} from '../../components/ui/data-table';
 import { PageHeader } from '../../components/ui/page-header';
 import {
   archiveMaintenanceWindow,
-  listMaintenanceWindowAuditEvents,
   listMaintenanceWindows,
   MaintenanceWindowRequestError,
 } from './maintenance-window-api';
-import type { MaintenanceWindow, MaintenanceWindowAuditEvent } from './types';
+import type { MaintenanceWindow } from './types';
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: 'medium',
   timeStyle: 'short',
 });
-
-const auditLabels = {
-  CREATED: 'Created',
-  UPDATED: 'Configuration updated',
-  ARCHIVED: 'Archived',
-} as const;
 
 export function MaintenanceWindowsPage({ projectId }: { projectId: string }) {
   const [windows, setWindows] = useState<MaintenanceWindow[]>([]);
@@ -32,9 +30,6 @@ export function MaintenanceWindowsPage({ projectId }: { projectId: string }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<MaintenanceWindow | null>(null);
-  const [auditWindow, setAuditWindow] = useState<MaintenanceWindow | null>(null);
-  const [auditEvents, setAuditEvents] = useState<MaintenanceWindowAuditEvent[]>([]);
-  const [auditLoading, setAuditLoading] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -66,19 +61,24 @@ export function MaintenanceWindowsPage({ projectId }: { projectId: string }) {
     }
   }
 
-  async function showAudit(window: MaintenanceWindow) {
-    setAuditWindow(window);
-    setAuditEvents([]);
-    setAuditLoading(true);
-    try {
-      setAuditEvents(await listMaintenanceWindowAuditEvents(projectId, window.id));
-    } catch (error) {
-      setNotice(messageFor(error, 'Could not load maintenance history.'));
-      setAuditWindow(null);
-    } finally {
-      setAuditLoading(false);
-    }
-  }
+  const actions: Array<DataTableAction<MaintenanceWindow>> = [
+    {
+      id: 'view',
+      label: 'View',
+      href: (window) => maintenanceWindowHref(projectId, window.id),
+    },
+    {
+      id: 'edit',
+      label: 'Edit',
+      href: (window) => `/projects/${projectId}/maintenance/${window.id}/edit`,
+    },
+    {
+      id: 'archive',
+      label: 'Archive',
+      tone: 'danger',
+      onSelect: (window) => setArchiveTarget(window),
+    },
+  ];
 
   return (
     <AppShell page="maintenance" projectId={projectId}>
@@ -145,38 +145,19 @@ export function MaintenanceWindowsPage({ projectId }: { projectId: string }) {
                 </Link>
               </div>
             ) : (
-              <div className="divide-y divide-rail-border">
-                <div className="hidden grid-cols-[minmax(14rem,1.4fr)_minmax(14rem,1.3fr)_minmax(11rem,1fr)_9rem_13rem] gap-4 px-5 py-3 text-xs text-rail-muted 2xl:grid">
-                  <span>Window</span>
-                  <span>Schedule</span>
-                  <span>Behavior</span>
-                  <span>Scope</span>
-                  <span>
-                    <span className="sr-only">Actions</span>
-                  </span>
-                </div>
-                {windows.map((window) => (
-                  <MaintenanceRow
-                    key={window.id}
-                    window={window}
-                    editHref={`/projects/${projectId}/maintenance/${window.id}/edit`}
-                    onAudit={() => void showAudit(window)}
-                    onArchive={() => setArchiveTarget(window)}
-                  />
-                ))}
-              </div>
+              <DataTable
+                rows={windows}
+                columns={maintenanceColumns}
+                actions={actions}
+                getRowKey={(window) => window.id}
+                getRowHref={(window) => maintenanceWindowHref(projectId, window.id)}
+                getRowLabel={(window) => window.name}
+                ariaLabel="Maintenance windows"
+                minWidthClassName="min-w-[940px]"
+              />
             )}
           </div>
         </section>
-
-        {auditWindow ? (
-          <AuditPanel
-            window={auditWindow}
-            events={auditEvents}
-            loading={auditLoading}
-            onClose={() => setAuditWindow(null)}
-          />
-        ) : null}
 
         <ConfirmationDialog
           open={archiveTarget !== null}
@@ -191,108 +172,50 @@ export function MaintenanceWindowsPage({ projectId }: { projectId: string }) {
   );
 }
 
-function MaintenanceRow({
-  window,
-  editHref,
-  onAudit,
-  onArchive,
-}: {
-  window: MaintenanceWindow;
-  editHref: string;
-  onAudit: () => void;
-  onArchive: () => void;
-}) {
-  const state = windowState(window);
-  return (
-    <div className="grid gap-3 px-5 py-4 md:grid-cols-2 2xl:grid-cols-[minmax(14rem,1.4fr)_minmax(14rem,1.3fr)_minmax(11rem,1fr)_9rem_13rem] 2xl:items-center 2xl:gap-4">
+const maintenanceColumns: Array<DataTableColumn<MaintenanceWindow>> = [
+  {
+    id: 'window',
+    header: 'Window',
+    cell: (window) => (
       <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="truncate text-sm font-semibold text-rail-text">{window.name}</span>
-          <StatusBadge state={state} />
+        <div className="flex items-center gap-2">
+          <span className="truncate font-semibold text-rail-text">{window.name}</span>
+          <StatusBadge state={windowState(window)} />
         </div>
-        <p className="mt-1 mb-0 text-xs text-rail-muted">Version {window.versionNumber}</p>
+        <span className="mt-1 block text-xs text-rail-muted">Version {window.versionNumber}</span>
       </div>
+    ),
+  },
+  {
+    id: 'schedule',
+    header: 'Schedule',
+    cell: (window) => (
       <div className="min-w-0">
-        <p className="m-0 text-sm text-rail-subtle">{scheduleLabel(window)}</p>
+        <span className="block text-rail-subtle">{scheduleLabel(window)}</span>
         {window.schedule.type === 'RECURRING' ? (
-          <p className="mt-1 mb-0 truncate text-xs text-rail-muted">{window.schedule.timezone}</p>
+          <span className="mt-1 block truncate text-xs text-rail-muted">
+            {window.schedule.timezone}
+          </span>
         ) : null}
       </div>
-      <p className="m-0 text-sm leading-5 text-rail-subtle">{effectsLabel(window)}</p>
-      <p className="m-0 text-sm text-rail-subtle">
-        {window.target.type === 'PROJECT'
-          ? 'Entire project'
-          : `${window.target.monitorIds.length} ${window.target.monitorIds.length === 1 ? 'monitor' : 'monitors'}`}
-      </p>
-      <div className="flex flex-wrap gap-1 md:col-span-2 2xl:col-span-1 2xl:justify-end">
-        <Button variant="quiet" size="compact" onClick={onAudit}>
-          History
-        </Button>
-        <Link
-          href={editHref}
-          className={actionClassName({ variant: 'secondary', size: 'compact' })}
-        >
-          Edit
-        </Link>
-        <Button variant="quiet" size="compact" onClick={onArchive}>
-          Archive
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function AuditPanel({
-  window,
-  events,
-  loading,
-  onClose,
-}: {
-  window: MaintenanceWindow;
-  events: MaintenanceWindowAuditEvent[];
-  loading: boolean;
-  onClose: () => void;
-}) {
-  return (
-    <section className="mt-8 overflow-hidden rounded-rail-panel border border-rail-border bg-rail-surface">
-      <div className="flex items-start justify-between gap-4 border-b border-rail-border px-5 py-4">
-        <div>
-          <h2 className="m-0 text-base font-semibold text-rail-text">{window.name} history</h2>
-          <p className="mt-1 mb-0 text-sm text-rail-muted">
-            Immutable configuration and archive events.
-          </p>
-        </div>
-        <button
-          type="button"
-          className="grid size-9 cursor-pointer place-items-center rounded-rail-control border-0 bg-transparent text-rail-muted hover:bg-rail-hover hover:text-rail-text"
-          onClick={onClose}
-          aria-label="Close maintenance history"
-        >
-          <CloseIcon />
-        </button>
-      </div>
-      {loading ? (
-        <p className="m-0 px-5 py-5 text-sm text-rail-muted">Loading history…</p>
-      ) : (
-        <div className="divide-y divide-rail-border">
-          {events.map((event) => (
-            <div key={event.id} className="flex items-center justify-between gap-4 px-5 py-3">
-              <div>
-                <p className="m-0 text-sm font-medium text-rail-text">
-                  {auditLabels[event.action]}
-                </p>
-                <p className="mt-0.5 mb-0 text-xs text-rail-muted">Version {event.versionNumber}</p>
-              </div>
-              <time className="text-xs text-rail-muted tabular-nums" dateTime={event.occurredAt}>
-                {dateFormatter.format(new Date(event.occurredAt))}
-              </time>
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
+    ),
+  },
+  {
+    id: 'behavior',
+    header: 'Behavior',
+    className: 'text-rail-subtle',
+    cell: effectsLabel,
+  },
+  {
+    id: 'scope',
+    header: 'Scope',
+    className: 'whitespace-nowrap text-rail-subtle',
+    cell: (window) =>
+      window.target.type === 'PROJECT'
+        ? 'Entire project'
+        : `${window.target.monitorIds.length} ${window.target.monitorIds.length === 1 ? 'monitor' : 'monitors'}`,
+  },
+];
 
 function windowState(window: MaintenanceWindow): 'Active' | 'Scheduled' | 'Recurring' | 'Ended' {
   if (window.schedule.type === 'RECURRING') return 'Recurring';
@@ -364,6 +287,10 @@ function PlusIcon() {
 
 function CloseIcon() {
   return <X className="size-4" strokeWidth={1.75} aria-hidden="true" />;
+}
+
+function maintenanceWindowHref(projectId: string, maintenanceWindowId: string): string {
+  return `/projects/${projectId}/maintenance/${maintenanceWindowId}`;
 }
 
 function messageFor(error: unknown, fallback: string) {
