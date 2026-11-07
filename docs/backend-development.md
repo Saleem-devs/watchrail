@@ -154,7 +154,8 @@ Incident escalation delays are absolute offsets from the database timestamp capt
 opening notification is staged. They are not measured from the incident's recorded `openedAt`, from
 the previous reminder, or from a successful delivery. A delayed observation can therefore record an
 earlier incident opening without making already-overdue reminder steps dispatch in a burst. Retries
-retain the original delivery and availability time.
+preserve the delivery identity and reminder sequence. They update that delivery's next-attempt time
+without restaging or shifting the other escalation steps.
 
 Deploy this boundary in the following order:
 
