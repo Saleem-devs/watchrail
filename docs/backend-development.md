@@ -150,6 +150,12 @@ Compatibility is precise:
 
 In short: upgraded workers continue processing retained V1 payloads; new incident events use V2.
 
+Incident escalation delays are absolute offsets from the database timestamp captured while the
+opening notification is staged. They are not measured from the incident's recorded `openedAt`, from
+the previous reminder, or from a successful delivery. A delayed observation can therefore record an
+earlier incident opening without making already-overdue reminder steps dispatch in a burst. Retries
+retain the original delivery and availability time.
+
 Deploy this boundary in the following order:
 
 1. Prevent new API traffic, heartbeat ingestion, check scheduling, and remote-result submission.

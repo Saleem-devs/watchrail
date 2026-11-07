@@ -757,6 +757,34 @@ describe('notification domain outbox', () => {
     ).toEqual([slack.id]);
   });
 
+  it('measures escalation delays from database staging time rather than recorded opening time', async () => {
+    await createTestEndpoint(organizationId, 'Operations', 'https://hooks.example.com/events');
+    await new ProjectRepository(connection.db).updateIncidentEscalationPolicy(
+      organizationId,
+      projectId,
+      { steps: [{ delayMinutes: 15, channelIds: null }] },
+    );
+    const recordedOpeningTime = new Date('2026-01-15T10:00:00.000Z');
+
+    await complete((await scheduledRound()).id, unhealthy(recordedOpeningTime));
+    await complete((await scheduledRound()).id, unhealthy(recordedOpeningTime));
+    await complete((await scheduledRound()).id, unhealthy(recordedOpeningTime));
+
+    const [incident] = await connection.db.select().from(incidents);
+    const deliveries = await connection.db.select().from(notificationDeliveries);
+    const openingDelivery = deliveries.find((delivery) => delivery.deliverySequence === 0);
+    const reminderDelivery = deliveries.find((delivery) => delivery.deliverySequence === 1);
+
+    expect(incident?.openedAt).toEqual(recordedOpeningTime);
+    expect(openingDelivery?.availableAt.getTime()).toBeGreaterThan(recordedOpeningTime.getTime());
+    expect(reminderDelivery?.availableAt.getTime()).toBe(
+      openingDelivery!.availableAt.getTime() + 15 * 60_000,
+    );
+    expect(reminderDelivery?.availableAt.getTime()).not.toBe(
+      recordedOpeningTime.getTime() + 15 * 60_000,
+    );
+  });
+
   it.each(['manual', 'automatic'] as const)(
     'keeps already-staged webhook, email, and Slack deliveries silenced after %s resolution',
     async (resolution) => {
