@@ -102,8 +102,13 @@ export function maintenanceOccurrencesBetween(
   }
 
   const durationMs = schedule.durationMinutes * 60_000;
+  // Search one complete recurrence cycle before the overlap boundary. Looking back only by
+  // duration misses a spring-forward occurrence after cron-parser shifts its nonexistent wall
+  // time forward: at 03:35 local, a shifted 02:30 occurrence may have started at 03:30 even
+  // though the nominal cron time is already behind the iterator's current local time.
+  const recurrenceCycleMs = 7 * 24 * 60 * 60_000;
   const iterator = CronExpressionParser.parse(cronExpression(schedule), {
-    currentDate: new Date(from.getTime() - durationMs - 1),
+    currentDate: new Date(from.getTime() - durationMs - recurrenceCycleMs - 1),
     endDate: to,
     tz: schedule.timezone,
   });
