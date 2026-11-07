@@ -375,7 +375,9 @@ describe('database migrations', () => {
           ${existingRound.id}
         )
       `),
-    ).rejects.toThrow();
+    ).rejects.toMatchObject({
+      cause: expect.objectContaining({ code: '23502', column: 'severity' }),
+    });
 
     await applyMigration(migrations, notificationV2MigrationIndex);
     for (let index = notificationV2MigrationIndex + 1; index < migrations.length; index += 1) {
