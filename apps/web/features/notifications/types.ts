@@ -87,6 +87,11 @@ export interface NotificationApiError {
   fields?: Record<string, string[]>;
 }
 
-export interface IncidentReminderPolicy {
-  delaysMinutes: number[];
+export interface IncidentEscalationStep {
+  delayMinutes: number;
+  channelIds: string[] | null;
+}
+
+export interface IncidentEscalationPolicy {
+  steps: IncidentEscalationStep[];
 }

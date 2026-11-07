@@ -26,7 +26,7 @@ import {
   setWebhookChannelEnabled,
 } from './notification-api';
 import type { NotificationChannel } from './types';
-import { IncidentReminderPolicySection } from './incident-reminder-policy';
+import { IncidentEscalationPolicySection } from './incident-escalation-policy';
 
 export function NotificationChannelsPage({ projectId }: { projectId: string }) {
   const [channels, setChannels] = useState<NotificationChannel[]>([]);
@@ -189,7 +189,11 @@ export function NotificationChannelsPage({ projectId }: { projectId: string }) {
 
         {notice ? <Notice message={notice} onDismiss={() => setNotice(null)} /> : null}
 
-        <IncidentReminderPolicySection projectId={projectId} />
+        <IncidentEscalationPolicySection
+          projectId={projectId}
+          channels={channels}
+          channelsReady={!loading && !loadError}
+        />
 
         <ChannelProviders projectId={projectId} channels={channels} loading={loading} />
 

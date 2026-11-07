@@ -44,26 +44,26 @@ export class ProjectsController {
     return { data: presentProject(await this.projects.find(request.watchrailContext, projectId)) };
   }
 
-  @Get(':projectId/incident-reminder-policy')
+  @Get(':projectId/incident-escalation-policy')
   @RequirePermission(PERMISSIONS.NOTIFICATION_READ)
-  async getIncidentReminderPolicy(
+  async getIncidentEscalationPolicy(
     @Req() request: RequestWithContext,
     @Param('projectId', ParseUUIDPipe) projectId: string,
   ) {
     return {
-      data: await this.projects.getIncidentReminderPolicy(request.watchrailContext, projectId),
+      data: await this.projects.getIncidentEscalationPolicy(request.watchrailContext, projectId),
     };
   }
 
-  @Put(':projectId/incident-reminder-policy')
+  @Put(':projectId/incident-escalation-policy')
   @RequirePermission(PERMISSIONS.NOTIFICATION_MANAGE)
-  async updateIncidentReminderPolicy(
+  async updateIncidentEscalationPolicy(
     @Req() request: RequestWithContext,
     @Param('projectId', ParseUUIDPipe) projectId: string,
     @Body() input: unknown,
   ) {
     return {
-      data: await this.projects.updateIncidentReminderPolicy(
+      data: await this.projects.updateIncidentEscalationPolicy(
         request.watchrailContext,
         projectId,
         input,

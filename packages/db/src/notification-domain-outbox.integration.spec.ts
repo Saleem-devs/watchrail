@@ -243,10 +243,15 @@ describe('notification domain outbox', () => {
   it.each(['manual', 'automatic'] as const)(
     'snapshots reminder schedules and suppresses retried reminders after %s resolution across every channel',
     async (resolution) => {
-      await new ProjectRepository(connection.db).updateIncidentReminderPolicy(
+      await new ProjectRepository(connection.db).updateIncidentEscalationPolicy(
         organizationId,
         projectId,
-        { delaysMinutes: [15, 60] },
+        {
+          steps: [
+            { delayMinutes: 15, channelIds: null },
+            { delayMinutes: 60, channelIds: null },
+          ],
+        },
       );
       await createTestEndpoint(organizationId, 'Operations', 'https://hooks.example.com/events');
       await new EmailChannelRepository(connection.db).create(organizationId, {
@@ -295,10 +300,10 @@ describe('notification domain outbox', () => {
         ).toBe(60 * 60_000);
       }
 
-      await new ProjectRepository(connection.db).updateIncidentReminderPolicy(
+      await new ProjectRepository(connection.db).updateIncidentEscalationPolicy(
         organizationId,
         projectId,
-        { delaysMinutes: [] },
+        { steps: [] },
       );
       await connection.db.execute(sql`
       update notification_deliveries
@@ -622,10 +627,10 @@ describe('notification domain outbox', () => {
   it.each(['silence', 'maintenance'] as const)(
     'suppresses a due reminder while incident %s policy is active',
     async (policy) => {
-      await new ProjectRepository(connection.db).updateIncidentReminderPolicy(
+      await new ProjectRepository(connection.db).updateIncidentEscalationPolicy(
         organizationId,
         projectId,
-        { delaysMinutes: [5] },
+        { steps: [{ delayMinutes: 5, channelIds: null }] },
       );
       await createTestEndpoint(organizationId, 'Operations', 'https://hooks.example.com/events');
       await openIncident();
@@ -693,6 +698,64 @@ describe('notification domain outbox', () => {
       });
     },
   );
+
+  it('routes each escalation step only through its selected incident channels', async () => {
+    const email = await new EmailChannelRepository(connection.db).create(organizationId, {
+      projectId,
+      name: 'Primary on-call',
+      recipientEmails: ['alerts@example.com'],
+      routing: {
+        monitorIds: [monitorId],
+        notifyOnIncident: true,
+        notifyOnRecovery: true,
+      },
+    });
+    const slack = await new SlackChannelRepository(connection.db).create(
+      organizationId,
+      {
+        projectId,
+        name: 'Escalation room',
+        routing: {
+          monitorIds: [monitorId],
+          notifyOnIncident: true,
+          notifyOnRecovery: true,
+        },
+      },
+      () => slackWebhookUrlEnvelope,
+    );
+    await new ProjectRepository(connection.db).updateIncidentEscalationPolicy(
+      organizationId,
+      projectId,
+      {
+        steps: [
+          { delayMinutes: 15, channelIds: null },
+          { delayMinutes: 60, channelIds: [slack.id] },
+        ],
+      },
+    );
+
+    await openIncident();
+    const deliveries = await connection.db.select().from(notificationDeliveries);
+
+    expect(deliveries).toHaveLength(5);
+    expect(
+      deliveries
+        .filter((delivery) => delivery.deliverySequence === 0)
+        .map((delivery) => delivery.endpointId)
+        .sort(),
+    ).toEqual([email.id, slack.id].sort());
+    expect(
+      deliveries
+        .filter((delivery) => delivery.deliverySequence === 1)
+        .map((delivery) => delivery.endpointId)
+        .sort(),
+    ).toEqual([email.id, slack.id].sort());
+    expect(
+      deliveries
+        .filter((delivery) => delivery.deliverySequence === 2)
+        .map((delivery) => delivery.endpointId),
+    ).toEqual([slack.id]);
+  });
 
   it.each(['manual', 'automatic'] as const)(
     'keeps already-staged webhook, email, and Slack deliveries silenced after %s resolution',

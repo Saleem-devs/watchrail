@@ -129,11 +129,11 @@ Every queue, retry, webhook, machine submission, and externally replayable comma
 idempotency key or database uniqueness guarantee. Preserve fencing tokens and database locks in
 distributed workflows.
 
-## Incident severity and notification V2 upgrade
+## Incident and notification policy upgrades
 
-Migrations `0054_numerous_blur.sql` and `0055_lean_joseph.sql` introduce a coordinated deployment
-boundary. This is intentionally a stop-the-world upgrade for Watchrail's pre-launch environment; it
-is not safe to roll through a mixed fleet of old and new processes.
+Migrations `0054_numerous_blur.sql`, `0055_lean_joseph.sql`, and `0057_long_stature.sql` introduce
+coordinated deployment boundaries. These are intentionally stop-the-world upgrades for Watchrail's
+pre-launch environment; they are not safe to roll through a mixed fleet of old and new processes.
 
 Compatibility is precise:
 
@@ -145,6 +145,8 @@ Compatibility is precise:
   `INVALID_CONTRACT`.
 - External webhook consumers receive V2 for new incidents. Upgrade strict V1 consumers before
   notification delivery resumes.
+- `0057` transforms each project's numeric reminder schedule into ordered escalation steps with
+  explicit channel routing. Older incident writers cannot interpret the new policy shape.
 
 In short: upgraded workers continue processing retained V1 payloads; new incident events use V2.
 
@@ -160,7 +162,8 @@ Deploy this boundary in the following order:
 7. Verify historical incidents show an impact and group, pending V1 deliveries do not become
    `INVALID_CONTRACT`, and a new V2 event is processed by email, Slack, and webhook workers.
 
-Do not apply `0054` or `0055` while an old incident writer or notification worker is running.
+Do not apply `0054`, `0055`, or `0057` while an old incident writer or notification worker is
+running.
 
 Before deployment, run:
 
@@ -172,7 +175,8 @@ pnpm --filter @watchrail/db exec vitest run src/notification-domain-outbox.integ
 ```
 
 The migration test proves that a legacy incident is backfilled, an old-shape insert is rejected after
-`0054`, a retained V1 delivery remains pending, and a new V2 delivery can be persisted after `0055`.
+`0054`, a retained V1 delivery remains pending, a new V2 delivery can be persisted after `0055`, and
+existing numeric reminder schedules become all-channel escalation steps after `0057`.
 
 Restarting the previous application version is not a safe rollback after these migrations. If the
 updated runtime cannot be repaired forward, stop all processes and restore the complete pre-upgrade

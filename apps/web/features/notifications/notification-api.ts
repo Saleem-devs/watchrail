@@ -5,7 +5,7 @@ import type {
   NotificationMonitor,
   SlackChannel,
   WebhookChannel,
-  IncidentReminderPolicy,
+  IncidentEscalationPolicy,
 } from './types';
 
 export class NotificationRequestError extends Error {
@@ -72,17 +72,17 @@ export async function listNotificationMonitors(projectId: string): Promise<Notif
   return [...monitors.values()];
 }
 
-export function getIncidentReminderPolicy(projectId: string): Promise<IncidentReminderPolicy> {
-  return request(`/api/projects/${encodeURIComponent(projectId)}/incident-reminder-policy`);
+export function getIncidentEscalationPolicy(projectId: string): Promise<IncidentEscalationPolicy> {
+  return request(`/api/projects/${encodeURIComponent(projectId)}/incident-escalation-policy`);
 }
 
-export function updateIncidentReminderPolicy(
+export function updateIncidentEscalationPolicy(
   projectId: string,
-  delaysMinutes: number[],
-): Promise<IncidentReminderPolicy> {
-  return request(`/api/projects/${encodeURIComponent(projectId)}/incident-reminder-policy`, {
+  policy: IncidentEscalationPolicy,
+): Promise<IncidentEscalationPolicy> {
+  return request(`/api/projects/${encodeURIComponent(projectId)}/incident-escalation-policy`, {
     method: 'PUT',
-    body: JSON.stringify({ delaysMinutes }),
+    body: JSON.stringify(policy),
   });
 }
 

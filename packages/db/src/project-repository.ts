@@ -1,7 +1,14 @@
-import { and, asc, count, eq, ne, sql } from 'drizzle-orm';
-import type { IncidentReminderPolicy, NewProject } from '@watchrail/domain';
+import { and, asc, count, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
+import type { IncidentEscalationPolicy, NewProject } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
-import { monitors, projects, type ProjectRecord } from './schema.js';
+import { monitors, projects, webhookEndpoints, type ProjectRecord } from './schema.js';
+
+export class IncidentEscalationChannelError extends Error {
+  constructor() {
+    super('One or more escalation channels are unavailable.');
+    this.name = 'IncidentEscalationChannelError';
+  }
+}
 
 export interface ProjectListItem extends ProjectRecord {
   monitorCount: number;
@@ -61,32 +68,54 @@ export class ProjectRepository {
     return project ?? null;
   }
 
-  async getIncidentReminderPolicy(
+  async getIncidentEscalationPolicy(
     organizationId: string,
     projectId: string,
-  ): Promise<IncidentReminderPolicy | null> {
+  ): Promise<IncidentEscalationPolicy | null> {
     const [project] = await this.db
-      .select({ delaysMinutes: projects.incidentReminderDelaysMinutes })
+      .select({ steps: projects.incidentEscalationSteps })
       .from(projects)
       .where(and(eq(projects.organizationId, organizationId), eq(projects.id, projectId)))
       .limit(1);
     return project ?? null;
   }
 
-  async updateIncidentReminderPolicy(
+  async updateIncidentEscalationPolicy(
     organizationId: string,
     projectId: string,
-    policy: IncidentReminderPolicy,
-  ): Promise<IncidentReminderPolicy | null> {
-    const [updated] = await this.db
-      .update(projects)
-      .set({
-        incidentReminderDelaysMinutes: policy.delaysMinutes,
-        updatedAt: sql`clock_timestamp()`,
-      })
-      .where(and(eq(projects.organizationId, organizationId), eq(projects.id, projectId)))
-      .returning({ delaysMinutes: projects.incidentReminderDelaysMinutes });
-    return updated ?? null;
+    policy: IncidentEscalationPolicy,
+  ): Promise<IncidentEscalationPolicy | null> {
+    return this.db.transaction(async (tx) => {
+      const [project] = await tx
+        .select({ id: projects.id })
+        .from(projects)
+        .where(and(eq(projects.organizationId, organizationId), eq(projects.id, projectId)))
+        .limit(1)
+        .for('update');
+      if (!project) return null;
+      const channelIds = [...new Set(policy.steps.flatMap((step) => step.channelIds ?? []))];
+      if (channelIds.length > 0) {
+        const channels = await tx
+          .select({ id: webhookEndpoints.id })
+          .from(webhookEndpoints)
+          .where(
+            and(
+              eq(webhookEndpoints.organizationId, organizationId),
+              eq(webhookEndpoints.projectId, projectId),
+              eq(webhookEndpoints.notifyOnIncident, true),
+              isNull(webhookEndpoints.archivedAt),
+              inArray(webhookEndpoints.id, channelIds),
+            ),
+          );
+        if (channels.length !== channelIds.length) throw new IncidentEscalationChannelError();
+      }
+      const [updated] = await tx
+        .update(projects)
+        .set({ incidentEscalationSteps: policy.steps, updatedAt: sql`clock_timestamp()` })
+        .where(and(eq(projects.organizationId, organizationId), eq(projects.id, projectId)))
+        .returning({ steps: projects.incidentEscalationSteps });
+      return updated ?? null;
+    });
   }
 }
 
