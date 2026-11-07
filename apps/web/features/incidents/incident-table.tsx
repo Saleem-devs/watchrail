@@ -76,12 +76,7 @@ function incidentColumns(
       id: 'impact',
       header: 'Impact',
       className: 'text-rail-subtle',
-      cell: (incident) =>
-        incident.severity === 'DOWN'
-          ? 'Unavailable'
-          : incident.severity === 'DEGRADED'
-            ? 'Degraded'
-            : 'Availability failure',
+      cell: (incident) => (incident.severity === 'DOWN' ? 'Unavailable' : 'Degraded'),
     },
     {
       id: 'started',

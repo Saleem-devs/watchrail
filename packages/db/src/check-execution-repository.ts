@@ -7,6 +7,7 @@ import {
 import {
   classifyIncidentObservation,
   INCIDENT_FAILURE_THRESHOLD,
+  incidentGroupKey,
   parseHttpRedirectHops,
   parseStoredAssertionEvaluation,
   parseTlsCertificateEvidenceList,
@@ -601,6 +602,8 @@ async function applyIncidentObservation(
         organizationId: round.organizationId,
         monitorId: round.monitorId,
         status: 'OPEN',
+        groupKey: incidentGroupKey(round.monitorId),
+        severity: 'DOWN',
         startedAt: failureStreakStartedAt,
         openedAt,
         startedByRoundId: failureStreakStartedRoundId,

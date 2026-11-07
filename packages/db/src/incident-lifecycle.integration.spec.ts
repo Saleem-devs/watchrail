@@ -92,6 +92,8 @@ describe('incident lifecycle', () => {
     });
     expect(opened).toMatchObject({
       status: 'OPEN',
+      groupKey: `availability:${monitorId}`,
+      severity: 'DOWN',
       startedByRoundId: first.id,
       openedByRoundId: third.id,
       resolvedAt: null,
@@ -137,6 +139,11 @@ describe('incident lifecycle', () => {
     expect(allIncidents.filter((incident) => incident.status === 'OPEN')).toHaveLength(1);
 
     const reads = new IncidentReadRepository(connection.db);
+    const openIncident = allIncidents.find((incident) => incident.status === 'OPEN');
+    if (!openIncident) throw new Error('Expected a later open incident.');
+    await expect(
+      reads.listRelatedForOrganization(organizationId, openIncident.id),
+    ).resolves.toMatchObject([{ id: resolved!.id, groupKey: `availability:${monitorId}` }]);
     const firstPage = await reads.listForMonitor(organizationId, monitorId, { limit: 1 });
     expect(firstPage.items).toHaveLength(1);
     expect(firstPage.nextCursor).not.toBeNull();

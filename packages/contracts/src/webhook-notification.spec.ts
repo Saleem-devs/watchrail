@@ -20,6 +20,8 @@ const opened = {
   monitor: { id: ids.monitorId, name: 'Public API' },
   incident: {
     id: ids.incidentId,
+    groupKey: `availability:${ids.monitorId}`,
+    severity: 'DOWN' as const,
     status: 'OPEN' as const,
     startedAt: new Date('2026-10-05T11:58:00.000Z'),
     openedAt: new Date('2026-10-05T12:00:00.123Z'),
@@ -28,12 +30,12 @@ const opened = {
   triggeringRoundId: ids.roundId,
 };
 
-describe('webhook notification V1', () => {
+describe('webhook notification V2', () => {
   it('creates an exact immutable OPENED payload without URL or diagnostics', () => {
     const value = createWebhookNotification(opened);
     expect(parseWebhookNotification(value)).toEqual(value);
     expect(value).toEqual({
-      contractVersion: 1,
+      contractVersion: 2,
       eventId: ids.eventId,
       eventType: 'INCIDENT_OPENED',
       occurredAt: '2026-10-05T12:00:00.123Z',
@@ -41,6 +43,8 @@ describe('webhook notification V1', () => {
       monitor: { id: ids.monitorId, name: 'Public API' },
       incident: {
         id: ids.incidentId,
+        groupKey: `availability:${ids.monitorId}`,
+        severity: 'DOWN',
         status: 'OPEN',
         startedAt: '2026-10-05T11:58:00.000Z',
         openedAt: '2026-10-05T12:00:00.123Z',
@@ -49,6 +53,21 @@ describe('webhook notification V1', () => {
       triggeringRoundId: ids.roundId,
     });
     expect(JSON.stringify(value)).not.toMatch(/url|response|uptime|failure/i);
+  });
+  it('continues to parse stored V1 payloads', () => {
+    const value = createWebhookNotification(opened);
+    const legacy = {
+      ...value,
+      contractVersion: 1,
+      incident: {
+        id: value.incident.id,
+        status: value.incident.status,
+        startedAt: value.incident.startedAt,
+        openedAt: value.incident.openedAt,
+        resolvedAt: value.incident.resolvedAt,
+      },
+    };
+    expect(parseWebhookNotification(legacy)).toEqual(legacy);
   });
   it('creates a consistent RESOLVED payload', () => {
     const resolvedAt = new Date('2026-10-05T12:05:00.000Z');
@@ -70,7 +89,11 @@ describe('webhook notification V1', () => {
     [],
     {},
     { ...createWebhookNotification(opened), unexpected: true },
-    { ...createWebhookNotification(opened), contractVersion: 2 },
+    { ...createWebhookNotification(opened), contractVersion: 3 },
+    {
+      ...createWebhookNotification(opened),
+      incident: { ...createWebhookNotification(opened).incident, groupKey: 'availability:invalid' },
+    },
     { ...createWebhookNotification(opened), occurredAt: '2026-10-05T12:00:00.123+00:00' },
     {
       ...createWebhookNotification(opened),

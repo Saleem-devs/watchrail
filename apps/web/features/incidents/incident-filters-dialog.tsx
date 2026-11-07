@@ -11,17 +11,20 @@ import { ListFilter } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Select } from '../../components/ui/form-control';
 import { Form } from '../../components/ui/form';
-import type { IncidentStatusFilter } from './types';
+import type { IncidentSeverityFilter, IncidentStatusFilter } from './types';
 
 export function IncidentFiltersDialog({
   status,
+  severity,
   onApply,
 }: {
   status: IncidentStatusFilter;
-  onApply: (status: IncidentStatusFilter) => void;
+  severity: IncidentSeverityFilter;
+  onApply: (filters: { status: IncidentStatusFilter; severity: IncidentSeverityFilter }) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(status);
+  const [draftSeverity, setDraftSeverity] = useState(severity);
   const dialogRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -42,7 +45,7 @@ export function IncidentFiltersDialog({
   }, [open]);
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    onApply(draft);
+    onApply({ status: draft, severity: draftSeverity });
     setOpen(false);
   }
   function trapFocus(event: ReactKeyboardEvent<HTMLDivElement>) {
@@ -68,12 +71,13 @@ export function IncidentFiltersDialog({
         aria-expanded={open}
         onClick={() => {
           setDraft(status);
+          setDraftSeverity(severity);
           setOpen(true);
         }}
       >
         <ListFilter className="size-4" strokeWidth={1.75} aria-hidden="true" />
         Filter
-        {status !== 'all' ? (
+        {status !== 'all' || severity !== 'all' ? (
           <span className="size-1.5 rounded-full bg-rail-accent" aria-hidden="true" />
         ) : null}
       </Button>
@@ -98,11 +102,11 @@ export function IncidentFiltersDialog({
                 Filter incidents
               </h2>
               <p className="mt-1 mb-0 text-xs text-rail-muted">
-                Choose which incident state is shown.
+                Narrow incidents by state and impact.
               </p>
             </div>
             <Form onSubmit={submit}>
-              <div className="p-5">
+              <div className="grid gap-4 p-5">
                 <label className="grid gap-1.5 text-xs text-rail-subtle">
                   State
                   <Select
@@ -113,6 +117,20 @@ export function IncidentFiltersDialog({
                     <option value="all">All incidents</option>
                     <option value="open">Open</option>
                     <option value="resolved">Resolved</option>
+                  </Select>
+                </label>
+                <label className="grid gap-1.5 text-xs text-rail-subtle">
+                  Impact
+                  <Select
+                    value={draftSeverity}
+                    controlSize="compact"
+                    onChange={(event) =>
+                      setDraftSeverity(event.target.value as IncidentSeverityFilter)
+                    }
+                  >
+                    <option value="all">All impacts</option>
+                    <option value="down">Unavailable</option>
+                    <option value="degraded">Degraded</option>
                   </Select>
                 </label>
               </div>

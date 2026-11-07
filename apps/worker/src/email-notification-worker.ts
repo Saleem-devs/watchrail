@@ -294,6 +294,12 @@ function renderEmail(
       `${payload.monitor.name} ${opened ? 'is failing its monitoring policy.' : 'has recovered.'}`,
       '',
       `Status: ${payload.incident.status}`,
+      ...(payload.contractVersion === 2
+        ? [
+            `Impact: ${payload.incident.severity === 'DOWN' ? 'Unavailable' : 'Degraded'}`,
+            `Alert group: ${payload.incident.groupKey}`,
+          ]
+        : []),
       `Started: ${payload.incident.startedAt}`,
       `Opened: ${payload.incident.openedAt}`,
       ...(payload.incident.resolvedAt ? [`Resolved: ${payload.incident.resolvedAt}`] : []),

@@ -1602,7 +1602,8 @@ export const incidents = pgTable(
     silencedAt: timestamp('silenced_at', { withTimezone: true }),
     silencedUntil: timestamp('silenced_until', { withTimezone: true }),
     silencedByActorId: uuid('silenced_by_actor_id'),
-    severity: varchar('severity', { length: 16 }),
+    groupKey: varchar('group_key', { length: 64 }).notNull(),
+    severity: varchar('severity', { length: 16 }).$type<'DEGRADED' | 'DOWN'>().notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -1636,6 +1637,12 @@ export const incidents = pgTable(
       table.openedAt,
       table.id,
     ),
+    index('incidents_group_opened_idx').on(
+      table.organizationId,
+      table.groupKey,
+      table.openedAt,
+      table.id,
+    ),
     check(
       'incidents_resolution_consistent',
       sql`(${table.status} = 'RESOLVED') = (${table.resolvedAt} is not null and num_nonnulls(${table.resolvedByRoundId}, ${table.resolvedByActorId}) = 1)`,
@@ -1648,10 +1655,7 @@ export const incidents = pgTable(
       'incidents_silence_consistent',
       sql`num_nonnulls(${table.silencedAt}, ${table.silencedUntil}, ${table.silencedByActorId}) in (0, 3) and (${table.silencedAt} is null or ${table.silencedUntil} > ${table.silencedAt})`,
     ),
-    check(
-      'incidents_severity_valid',
-      sql`${table.severity} is null or ${table.severity} in ('DEGRADED', 'DOWN')`,
-    ),
+    check('incidents_severity_valid', sql`${table.severity} in ('DEGRADED', 'DOWN')`),
   ],
 );
 
@@ -2001,17 +2005,26 @@ export const notificationEvents = pgTable(
     check(
       'notification_events_payload_contract',
       sql`jsonb_typeof(${table.payload}) = 'object'
-        and ${table.payload}->>'contractVersion' = '1'
+        and ${table.payload}->>'contractVersion' in ('1', '2')
         and ${table.payload}->>'eventId' = ${table.id}::text
         and ${table.payload}->>'organizationId' = ${table.organizationId}::text
         and ${table.payload}->>'eventType' = ${table.eventType}::text
         and (
-          (${table.eventType}::text = 'TEST' and ${table.monitorId} is null and ${table.incidentId} is null
+          (${table.eventType}::text = 'TEST' and ${table.payload}->>'contractVersion' = '1'
+            and ${table.monitorId} is null and ${table.incidentId} is null
             and ${table.triggeringRoundId} is null and ${table.payload}->'channel' is not null)
           or
           (${table.eventType}::text <> 'TEST' and ${table.monitorId} is not null and ${table.incidentId} is not null
             and ${table.triggeringRoundId} is not null
-            and ${table.payload}->>'triggeringRoundId' = ${table.triggeringRoundId}::text)
+            and ${table.payload}->>'triggeringRoundId' = ${table.triggeringRoundId}::text
+            and (
+              ${table.payload}->>'contractVersion' = '1'
+              or (
+                ${table.payload}->>'contractVersion' = '2'
+                and ${table.payload}->'incident'->>'groupKey' is not null
+                and ${table.payload}->'incident'->>'severity' in ('DEGRADED', 'DOWN')
+              )
+            ))
         )`,
     ),
   ],

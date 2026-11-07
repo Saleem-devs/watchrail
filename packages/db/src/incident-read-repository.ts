@@ -1,6 +1,7 @@
 import { Buffer } from 'node:buffer';
-import { and, asc, count, desc, eq, lt, or } from 'drizzle-orm';
+import { and, asc, count, desc, eq, lt, ne, or } from 'drizzle-orm';
 import { INCIDENT_FAILURE_THRESHOLD } from '@watchrail/domain';
+import type { IncidentSeverity } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
 import { incidents, monitorIncidentState, monitors } from './schema.js';
 
@@ -33,6 +34,8 @@ export interface CurrentIncidentState {
 
 export interface IncidentHistoryItem {
   id: string;
+  groupKey: string;
+  severity: IncidentSeverity;
   status: 'OPEN' | 'RESOLVED';
   startedAt: Date;
   openedAt: Date;
@@ -58,7 +61,6 @@ export interface OrganizationIncidentDetail extends IncidentDetail {
   projectId: string;
   monitorName: string;
   monitorUrl: string;
-  severity: 'DEGRADED' | 'DOWN' | null;
 }
 
 export interface IncidentHistoryPage {
@@ -70,7 +72,6 @@ export interface OrganizationIncidentHistoryItem extends IncidentHistoryItem {
   monitorId: string;
   monitorName: string;
   monitorUrl: string;
-  severity: 'DEGRADED' | 'DOWN' | null;
 }
 
 export interface OrganizationIncidentHistoryPage {
@@ -91,6 +92,7 @@ export interface OrganizationIncidentHistoryQuery {
   limit: number;
   projectId?: string;
   status?: 'OPEN' | 'RESOLVED';
+  severity?: IncidentSeverity;
 }
 
 interface IncidentCursorV1 {
@@ -175,7 +177,7 @@ export class IncidentReadRepository {
     const pageRows = hasNext ? rows.slice(0, query.limit) : rows;
     const last = pageRows.at(-1);
     return {
-      items: pageRows,
+      items: pageRows.map((row) => ({ ...row, severity: parseIncidentSeverity(row.severity) })),
       nextCursor:
         hasNext && last
           ? encodeCursor({
@@ -195,6 +197,7 @@ export class IncidentReadRepository {
       eq(incidents.organizationId, organizationId),
       query.projectId ? eq(monitors.projectId, query.projectId) : undefined,
       query.status ? eq(incidents.status, query.status) : undefined,
+      query.severity ? eq(incidents.severity, query.severity) : undefined,
     );
     const [countRow] = await this.db
       .select({ total: count() })
@@ -214,7 +217,6 @@ export class IncidentReadRepository {
         monitorId: incidents.monitorId,
         monitorName: monitors.name,
         monitorUrl: monitors.url,
-        severity: incidents.severity,
       })
       .from(incidents)
       .innerJoin(
@@ -229,10 +231,7 @@ export class IncidentReadRepository {
       .limit(query.limit)
       .offset((query.page - 1) * query.limit);
     return {
-      items: rows.map((row) => ({
-        ...row,
-        severity: parseIncidentSeverity(row.severity),
-      })),
+      items: rows.map((row) => ({ ...row, severity: parseIncidentSeverity(row.severity) })),
       page: query.page,
       limit: query.limit,
       total,
@@ -256,7 +255,7 @@ export class IncidentReadRepository {
         ),
       )
       .limit(1);
-    return incident ?? null;
+    return incident ? { ...incident, severity: parseIncidentSeverity(incident.severity) } : null;
   }
 
   async findForOrganization(
@@ -270,7 +269,6 @@ export class IncidentReadRepository {
         projectId: monitors.projectId,
         monitorName: monitors.name,
         monitorUrl: monitors.url,
-        severity: incidents.severity,
         startedByRoundId: incidents.startedByRoundId,
         openedByRoundId: incidents.openedByRoundId,
         resolvedByRoundId: incidents.resolvedByRoundId,
@@ -287,6 +285,44 @@ export class IncidentReadRepository {
       .where(and(eq(incidents.organizationId, organizationId), eq(incidents.id, incidentId)))
       .limit(1);
     return row ? { ...row, severity: parseIncidentSeverity(row.severity) } : null;
+  }
+
+  async listRelatedForOrganization(
+    organizationId: string,
+    incidentId: string,
+    limit = 5,
+  ): Promise<OrganizationIncidentHistoryItem[]> {
+    const [source] = await this.db
+      .select({ groupKey: incidents.groupKey })
+      .from(incidents)
+      .where(and(eq(incidents.organizationId, organizationId), eq(incidents.id, incidentId)))
+      .limit(1);
+    if (!source) return [];
+    const rows = await this.db
+      .select({
+        ...historySelection,
+        monitorId: incidents.monitorId,
+        monitorName: monitors.name,
+        monitorUrl: monitors.url,
+      })
+      .from(incidents)
+      .innerJoin(
+        monitors,
+        and(
+          eq(monitors.organizationId, incidents.organizationId),
+          eq(monitors.id, incidents.monitorId),
+        ),
+      )
+      .where(
+        and(
+          eq(incidents.organizationId, organizationId),
+          eq(incidents.groupKey, source.groupKey),
+          ne(incidents.id, incidentId),
+        ),
+      )
+      .orderBy(desc(incidents.openedAt), desc(incidents.id))
+      .limit(limit);
+    return rows.map((row) => ({ ...row, severity: parseIncidentSeverity(row.severity) }));
   }
 
   private async assertMonitorExists(organizationId: string, monitorId: string): Promise<void> {
@@ -320,6 +356,8 @@ const currentSelection = {
 
 const historySelection = {
   id: incidents.id,
+  groupKey: incidents.groupKey,
+  severity: incidents.severity,
   status: incidents.status,
   startedAt: incidents.startedAt,
   openedAt: incidents.openedAt,
@@ -436,11 +474,18 @@ export function parseIncidentHistoryQuery(value: Record<string, unknown>): Incid
 export function parseOrganizationIncidentHistoryQuery(
   value: Record<string, unknown>,
 ): OrganizationIncidentHistoryQuery {
-  if (Object.keys(value).some((key) => !['page', 'limit', 'projectId', 'status'].includes(key))) {
+  if (
+    Object.keys(value).some(
+      (key) => !['page', 'limit', 'projectId', 'status', 'severity'].includes(key),
+    )
+  ) {
     throw new IncidentHistoryQueryError('Incident history query contains unsupported parameters.');
   }
   if (value.status !== undefined && value.status !== 'OPEN' && value.status !== 'RESOLVED') {
     throw new IncidentHistoryQueryError('Incident status must be OPEN or RESOLVED.');
+  }
+  if (value.severity !== undefined && value.severity !== 'DEGRADED' && value.severity !== 'DOWN') {
+    throw new IncidentHistoryQueryError('Incident severity must be DEGRADED or DOWN.');
   }
   const page = parseIntegerParameter(value.page, 1, 1, Number.MAX_SAFE_INTEGER, 'page');
   const limit = parseIntegerParameter(value.limit, 25, 1, 100, 'limit');
@@ -458,6 +503,9 @@ export function parseOrganizationIncidentHistoryQuery(
     limit,
     ...(typeof value.projectId === 'string' ? { projectId: value.projectId } : {}),
     ...(value.status === 'OPEN' || value.status === 'RESOLVED' ? { status: value.status } : {}),
+    ...(value.severity === 'DEGRADED' || value.severity === 'DOWN'
+      ? { severity: value.severity }
+      : {}),
   };
 }
 
@@ -484,8 +532,8 @@ function parseIntegerParameter(
   return value;
 }
 
-function parseIncidentSeverity(value: string | null): 'DEGRADED' | 'DOWN' | null {
-  if (value === null || value === 'DEGRADED' || value === 'DOWN') return value;
+function parseIncidentSeverity(value: string): IncidentSeverity {
+  if (value === 'DEGRADED' || value === 'DOWN') return value;
   throw new IncidentStateInvariantError();
 }
 

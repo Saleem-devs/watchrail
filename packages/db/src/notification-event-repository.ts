@@ -45,6 +45,17 @@ export async function stageIncidentNotification(
     )
     .limit(1);
   if (!monitor) throw new Error('Notification monitor is missing.');
+  const [incidentMetadata] = await tx
+    .select({ groupKey: incidents.groupKey, severity: incidents.severity })
+    .from(incidents)
+    .where(
+      and(
+        eq(incidents.organizationId, transition.organizationId),
+        eq(incidents.id, transition.incident.id),
+      ),
+    )
+    .limit(1);
+  if (!incidentMetadata) throw new Error('Notification incident is missing.');
   const eventId = randomUUID();
   const eventType = transition.type === 'OPENED' ? 'INCIDENT_OPENED' : 'INCIDENT_RESOLVED';
   const occurredAt =
@@ -70,7 +81,7 @@ export async function stageIncidentNotification(
     occurredAt,
     organizationId: transition.organizationId,
     monitor: { id: transition.monitorId, name: monitor.name },
-    incident: transition.incident,
+    incident: { ...transition.incident, ...incidentMetadata },
     triggeringRoundId: transition.triggeringRoundId,
   });
   await tx.insert(notificationEvents).values({

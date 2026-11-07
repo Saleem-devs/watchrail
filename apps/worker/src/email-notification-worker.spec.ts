@@ -43,6 +43,43 @@ describe('EmailNotificationWorker', () => {
     expect(fixture.acknowledgeDelivered).toHaveBeenCalledWith(claim.id, 'claim-token');
   });
 
+  it('renders incident impact and stable alert group from V2 payloads', async () => {
+    const delivery: ClaimedEmailNotificationDelivery = {
+      ...claim,
+      monitorId: '66666666-6666-4666-8666-666666666666',
+      payload: {
+        contractVersion: 2,
+        eventId: claim.eventId,
+        eventType: 'INCIDENT_OPENED',
+        occurredAt: '2026-11-06T12:00:00.000Z',
+        organizationId: claim.organizationId,
+        monitor: { id: '66666666-6666-4666-8666-666666666666', name: 'Payments API' },
+        incident: {
+          id: '77777777-7777-4777-8777-777777777777',
+          groupKey: 'availability:66666666-6666-4666-8666-666666666666',
+          severity: 'DOWN',
+          status: 'OPEN',
+          startedAt: '2026-11-06T11:59:00.000Z',
+          openedAt: '2026-11-06T12:00:00.000Z',
+          resolvedAt: null,
+        },
+        triggeringRoundId: '88888888-8888-4888-8888-888888888888',
+      },
+    };
+    const fixture = setup(delivery);
+
+    await expect(fixture.worker.processNext()).resolves.toBe('DELIVERED');
+    expect(fixture.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining(
+          'Alert group: availability:66666666-6666-4666-8666-666666666666',
+        ),
+      }),
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(fixture.send.mock.calls[0]?.[0].text).toContain('Impact: Unavailable');
+  });
+
   it('suppresses incident mail before SMTP and retries transient SMTP failures', async () => {
     const suppressed = setup();
     suppressed.applyMaintenancePolicy.mockResolvedValue({ state: 'SUPPRESSED' });

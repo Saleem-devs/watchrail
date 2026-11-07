@@ -107,12 +107,18 @@ describe('notification domain outbox', () => {
     const [openedEvent] = await connection.db.select().from(notificationEvents);
     const [openedDelivery] = await connection.db.select().from(notificationDeliveries);
     expect(parseWebhookNotification(openedEvent!.payload)).toMatchObject({
-      contractVersion: 1,
+      contractVersion: 2,
       eventId: openedEvent!.id,
       eventType: 'INCIDENT_OPENED',
       organizationId,
       monitor: { id: monitorId, name: 'Payments API' },
-      incident: { status: 'OPEN', startedAt: expect.any(String), openedAt: expect.any(String) },
+      incident: {
+        groupKey: `availability:${monitorId}`,
+        severity: 'DOWN',
+        status: 'OPEN',
+        startedAt: expect.any(String),
+        openedAt: expect.any(String),
+      },
       triggeringRoundId: openingRound.id,
     });
     expect(JSON.stringify(openedEvent!.payload)).not.toContain('hooks.example.com');
@@ -652,7 +658,7 @@ describe('notification domain outbox', () => {
       eventId: event!.id,
       organizationId,
       endpointVersionNumber: 1,
-      payload: { contractVersion: 1, poison: true },
+      payload: { contractVersion: 2, poison: true },
     });
   });
 

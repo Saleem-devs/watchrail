@@ -16,21 +16,29 @@ import {
 } from './incident-api';
 import { IncidentActionDialog, type IncidentDialogAction } from './incident-action-dialog';
 import { IncidentTable } from './incident-table';
-import type { IncidentStatusFilter, WorkspaceIncident, WorkspaceIncidentPage } from './types';
+import type {
+  IncidentSeverityFilter,
+  IncidentStatusFilter,
+  WorkspaceIncident,
+  WorkspaceIncidentPage,
+} from './types';
 
 export function IncidentsPage({
   projectId,
   initialStatus,
+  initialSeverity,
   initialPage,
   initialLimit,
 }: {
   projectId?: string | undefined;
   initialStatus: IncidentStatusFilter;
+  initialSeverity: IncidentSeverityFilter;
   initialPage: number;
   initialLimit: number;
 }) {
   const projectBase = projectId ? `/projects/${projectId}` : '';
   const [status, setStatus] = useState(initialStatus);
+  const [severity, setSeverity] = useState(initialSeverity);
   const [page, setPage] = useState<WorkspaceIncidentPage>({
     items: [],
     number: initialPage,
@@ -47,9 +55,15 @@ export function IncidentsPage({
   const [actionError, setActionError] = useState<string | null>(null);
 
   const pathFor = useCallback(
-    (nextStatus: IncidentStatusFilter, number: number, limit: number) => {
+    (
+      nextStatus: IncidentStatusFilter,
+      nextSeverity: IncidentSeverityFilter,
+      number: number,
+      limit: number,
+    ) => {
       const query = new URLSearchParams({
         status: nextStatus,
+        severity: nextSeverity,
         page: String(number),
         limit: String(limit),
       });
@@ -59,13 +73,19 @@ export function IncidentsPage({
   );
 
   const load = useCallback(
-    async (nextStatus: IncidentStatusFilter, number: number, limit: number) => {
+    async (
+      nextStatus: IncidentStatusFilter,
+      nextSeverity: IncidentSeverityFilter,
+      number: number,
+      limit: number,
+    ) => {
       setLoading(true);
       setError(undefined);
       try {
         const query = new URLSearchParams({ page: String(number), limit: String(limit) });
         if (projectId) query.set('projectId', projectId);
         if (nextStatus !== 'all') query.set('status', nextStatus.toUpperCase());
+        if (nextSeverity !== 'all') query.set('severity', nextSeverity.toUpperCase());
         const response = await fetch(`/api/incidents?${query}`, {
           headers: { Accept: 'application/json' },
         });
@@ -87,14 +107,23 @@ export function IncidentsPage({
   );
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void load(initialStatus, initialPage, initialLimit), 0);
+    const timer = window.setTimeout(
+      () => void load(initialStatus, initialSeverity, initialPage, initialLimit),
+      0,
+    );
     return () => window.clearTimeout(timer);
-  }, [initialLimit, initialPage, initialStatus, load]);
+  }, [initialLimit, initialPage, initialSeverity, initialStatus, load]);
 
-  function navigate(nextStatus: IncidentStatusFilter, number: number, limit: number) {
+  function navigate(
+    nextStatus: IncidentStatusFilter,
+    nextSeverity: IncidentSeverityFilter,
+    number: number,
+    limit: number,
+  ) {
     setStatus(nextStatus);
-    window.history.pushState(null, '', pathFor(nextStatus, number, limit));
-    void load(nextStatus, number, limit);
+    setSeverity(nextSeverity);
+    window.history.pushState(null, '', pathFor(nextStatus, nextSeverity, number, limit));
+    void load(nextStatus, nextSeverity, number, limit);
   }
 
   useEffect(() => {
@@ -103,17 +132,21 @@ export function IncidentsPage({
       const restoredStatus = query.get('status');
       const nextStatus: IncidentStatusFilter =
         restoredStatus === 'open' || restoredStatus === 'resolved' ? restoredStatus : 'all';
+      const restoredSeverity = query.get('severity');
+      const nextSeverity: IncidentSeverityFilter =
+        restoredSeverity === 'degraded' || restoredSeverity === 'down' ? restoredSeverity : 'all';
       const number = Math.max(1, Number(query.get('page')) || 1);
       const requestedLimit = Number(query.get('limit'));
       const limit = [10, 25, 50, 100].includes(requestedLimit) ? requestedLimit : 25;
       setStatus(nextStatus);
-      void load(nextStatus, number, limit);
+      setSeverity(nextSeverity);
+      void load(nextStatus, nextSeverity, number, limit);
     };
     window.addEventListener('popstate', restore);
     return () => window.removeEventListener('popstate', restore);
   }, [load]);
 
-  const origin = pathFor(status, page.number, page.limit);
+  const origin = pathFor(status, severity, page.number, page.limit);
   const closeDialog = useCallback(() => {
     if (actionBusy) return;
     setActionTarget(null);
@@ -123,7 +156,7 @@ export function IncidentsPage({
 
   async function refreshAfterAction(message: string) {
     setNotice(message);
-    await load(status, page.number, page.limit);
+    await load(status, severity, page.number, page.limit);
   }
 
   async function acknowledge(incident: WorkspaceIncident) {
@@ -175,7 +208,8 @@ export function IncidentsPage({
           actions={
             <IncidentFiltersDialog
               status={status}
-              onApply={(next) => navigate(next, 1, page.limit)}
+              severity={severity}
+              onApply={(next) => navigate(next.status, next.severity, 1, page.limit)}
             />
           }
         />
@@ -200,7 +234,9 @@ export function IncidentsPage({
               <p className="mx-auto mt-2 mb-4 max-w-md text-sm leading-6 text-rail-subtle">
                 {error}
               </p>
-              <Button onClick={() => void load(status, page.number, page.limit)}>Try again</Button>
+              <Button onClick={() => void load(status, severity, page.number, page.limit)}>
+                Try again
+              </Button>
             </div>
           ) : page.items.length === 0 ? (
             <div className="px-5 py-12 text-center">
@@ -239,8 +275,8 @@ export function IncidentsPage({
               <TablePagination
                 page={page}
                 label="incidents"
-                onPageChange={(number) => navigate(status, number, page.limit)}
-                onLimitChange={(limit) => navigate(status, 1, limit)}
+                onPageChange={(number) => navigate(status, severity, number, page.limit)}
+                onLimitChange={(limit) => navigate(status, severity, 1, limit)}
               />
             </>
           )}

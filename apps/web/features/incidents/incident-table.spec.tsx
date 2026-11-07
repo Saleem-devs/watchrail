@@ -10,6 +10,7 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
 
 const incident: WorkspaceIncident = {
   id: 'incident-1',
+  groupKey: 'availability:monitor-1',
   monitorId: 'monitor-1',
   monitorName: 'Parqo',
   monitorUrl: 'https://parqo.xyz',

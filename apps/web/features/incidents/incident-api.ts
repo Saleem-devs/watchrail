@@ -42,6 +42,10 @@ export function listIncidentActions(incidentId: string): Promise<IncidentActionE
   return request(`/api/incidents/${encodeURIComponent(incidentId)}/audit-events`);
 }
 
+export function listRelatedIncidents(incidentId: string): Promise<WorkspaceIncident[]> {
+  return request(`/api/incidents/${encodeURIComponent(incidentId)}/related`);
+}
+
 export function acknowledgeIncident(incidentId: string): Promise<WorkspaceIncident> {
   return request(`/api/incidents/${encodeURIComponent(incidentId)}/acknowledge`, {
     method: 'POST',

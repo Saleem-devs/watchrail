@@ -12,11 +12,12 @@ import {
   findIncident,
   IncidentRequestError,
   listIncidentActions,
+  listRelatedIncidents,
   resolveIncident,
   silenceIncident,
   unsilenceIncident,
 } from './incident-api';
-import type { IncidentActionEvent, WorkspaceIncidentDetail } from './types';
+import type { IncidentActionEvent, WorkspaceIncident, WorkspaceIncidentDetail } from './types';
 
 const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: 'medium',
@@ -32,6 +33,7 @@ export function IncidentDetailPage({
 }) {
   const [incident, setIncident] = useState<WorkspaceIncidentDetail | null>(null);
   const [events, setEvents] = useState<IncidentActionEvent[]>([]);
+  const [relatedIncidents, setRelatedIncidents] = useState<WorkspaceIncident[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -41,13 +43,15 @@ export function IncidentDetailPage({
 
   const load = useCallback(async () => {
     try {
-      const [loadedIncident, loadedEvents] = await Promise.all([
+      const [loadedIncident, loadedEvents, loadedRelatedIncidents] = await Promise.all([
         findIncident(incidentId),
         listIncidentActions(incidentId),
+        listRelatedIncidents(incidentId),
       ]);
       if (loadedIncident.projectId !== projectId) throw new Error('Incident not found.');
       setIncident(loadedIncident);
       setEvents(loadedEvents);
+      setRelatedIncidents(loadedRelatedIncidents);
       setError(null);
     } catch (loadError) {
       setError(actionMessage(loadError, 'Could not load this incident.'));
@@ -217,6 +221,11 @@ export function IncidentDetailPage({
           <>
             <IncidentOverview incident={incident} />
             <IncidentTimeline incident={incident} events={events} />
+            <RelatedIncidents
+              projectId={projectId}
+              currentIncident={incident}
+              incidents={relatedIncidents}
+            />
           </>
         )}
 
@@ -284,7 +293,10 @@ function IncidentOverview({ incident }: { incident: WorkspaceIncidentDetail }) {
                 : 'Awaiting recovery'
           }
         />
+      </dl>
+      <dl className="m-0 grid border-t border-rail-border sm:grid-cols-2">
         <Detail label="Incident ID" value={incident.id} mono />
+        <Detail label="Alert group" value="Monitor availability" title={incident.groupKey} />
       </dl>
       {incident.resolutionNote ? (
         <div className="border-t border-rail-border px-5 py-4">
@@ -301,22 +313,81 @@ function Detail({
   value,
   tone,
   mono = false,
+  title,
 }: {
   label: string;
   value: string;
   tone?: 'danger';
   mono?: boolean;
+  title?: string;
 }) {
   return (
     <div className="border-b border-rail-border px-5 py-4 sm:border-r sm:[&:nth-child(2n)]:border-r-0 xl:border-r xl:border-b-0 xl:[&:nth-child(4n)]:border-r-0">
       <dt className="text-xs text-rail-muted">{label}</dt>
       <dd
         className={`mt-1.5 mb-0 truncate text-sm font-medium ${tone === 'danger' ? 'text-rail-danger' : 'text-rail-text'} ${mono ? 'font-mono text-xs' : ''}`}
-        title={value}
+        title={title ?? value}
       >
         {value}
       </dd>
     </div>
+  );
+}
+
+function RelatedIncidents({
+  projectId,
+  currentIncident,
+  incidents,
+}: {
+  projectId: string;
+  currentIncident: WorkspaceIncidentDetail;
+  incidents: WorkspaceIncident[];
+}) {
+  return (
+    <section className="mt-8" aria-labelledby="related-incidents-title">
+      <div className="pb-4">
+        <h2 id="related-incidents-title" className="m-0 text-base font-semibold text-rail-text">
+          Related occurrences
+        </h2>
+        <p className="mt-1 mb-0 text-sm text-rail-muted">
+          Other availability incidents grouped under this monitor.
+        </p>
+      </div>
+      <div className="overflow-hidden rounded-rail-panel border border-rail-border bg-rail-surface">
+        {incidents.length === 0 ? (
+          <p className="m-0 px-5 py-5 text-sm text-rail-muted">
+            This is the first recorded occurrence in this alert group.
+          </p>
+        ) : (
+          <ul className="m-0 list-none p-0">
+            {incidents.map((incident) => (
+              <li key={incident.id} className="border-b border-rail-border last:border-b-0">
+                <Link
+                  href={`/projects/${projectId}/incidents/${incident.id}`}
+                  className="grid min-h-14 items-center gap-2 px-5 py-3 text-sm no-underline hover:bg-rail-raised focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-rail-accent sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:gap-6"
+                  aria-label={`View ${currentIncident.monitorName} incident from ${formatDateTime(incident.startedAt)}`}
+                >
+                  <span className="min-w-0">
+                    <span className="block font-medium text-rail-text">
+                      {impactLabel(incident)}
+                    </span>
+                    <span className="mt-0.5 block text-xs text-rail-muted">
+                      Started {formatDateTime(incident.startedAt)}
+                    </span>
+                  </span>
+                  <span className="text-rail-subtle tabular-nums">
+                    {formatDuration(incident.startedAt, incident.resolvedAt)}
+                  </span>
+                  <span className="text-rail-subtle">
+                    {incident.status === 'OPEN' ? 'Open' : 'Resolved'}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -401,10 +472,8 @@ function actionDetail(event: IncidentActionEvent): string {
   return `${actor} ${event.action === 'ACKNOWLEDGED' ? 'took ownership of the response.' : 'restored notification delivery.'}`;
 }
 
-function impactLabel(incident: WorkspaceIncidentDetail): string {
-  if (incident.severity === 'DOWN') return 'Unavailable';
-  if (incident.severity === 'DEGRADED') return 'Degraded';
-  return 'Availability failure';
+function impactLabel(incident: Pick<WorkspaceIncident, 'severity'>): string {
+  return incident.severity === 'DOWN' ? 'Unavailable' : 'Degraded';
 }
 
 function formatDateTime(value: string): string {

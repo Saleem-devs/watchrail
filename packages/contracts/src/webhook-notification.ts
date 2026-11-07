@@ -1,14 +1,19 @@
-export const WEBHOOK_NOTIFICATION_CONTRACT_VERSION = 1;
+export const WEBHOOK_NOTIFICATION_CONTRACT_VERSION = 2;
 export const NOTIFICATION_EVENT_TYPES = ['INCIDENT_OPENED', 'INCIDENT_RESOLVED'] as const;
 export type NotificationEventType = (typeof NOTIFICATION_EVENT_TYPES)[number];
+export type NotificationIncidentSeverity = 'DEGRADED' | 'DOWN';
 
-export interface WebhookNotificationV1 {
-  contractVersion: typeof WEBHOOK_NOTIFICATION_CONTRACT_VERSION;
+interface WebhookNotificationBase {
   eventId: string;
   eventType: NotificationEventType;
   occurredAt: string;
   organizationId: string;
   monitor: { id: string; name: string };
+  triggeringRoundId: string;
+}
+
+export interface WebhookNotificationV1 extends WebhookNotificationBase {
+  contractVersion: 1;
   incident: {
     id: string;
     status: 'OPEN' | 'RESOLVED';
@@ -16,10 +21,19 @@ export interface WebhookNotificationV1 {
     openedAt: string;
     resolvedAt: string | null;
   };
-  triggeringRoundId: string;
 }
 
-export interface CreateWebhookNotificationV1 {
+export interface WebhookNotificationV2 extends WebhookNotificationBase {
+  contractVersion: typeof WEBHOOK_NOTIFICATION_CONTRACT_VERSION;
+  incident: WebhookNotificationV1['incident'] & {
+    groupKey: string;
+    severity: NotificationIncidentSeverity;
+  };
+}
+
+export type WebhookNotification = WebhookNotificationV1 | WebhookNotificationV2;
+
+export interface CreateWebhookNotificationV2 {
   eventId: string;
   eventType: NotificationEventType;
   occurredAt: Date;
@@ -27,6 +41,8 @@ export interface CreateWebhookNotificationV1 {
   monitor: { id: string; name: string };
   incident: {
     id: string;
+    groupKey: string;
+    severity: NotificationIncidentSeverity;
     status: 'OPEN' | 'RESOLVED';
     startedAt: Date;
     openedAt: Date;
@@ -43,8 +59,8 @@ export class InvalidWebhookNotificationError extends Error {
 }
 
 export function createWebhookNotification(
-  input: CreateWebhookNotificationV1,
-): WebhookNotificationV1 {
+  input: CreateWebhookNotificationV2,
+): WebhookNotificationV2 {
   return parseWebhookNotification({
     contractVersion: WEBHOOK_NOTIFICATION_CONTRACT_VERSION,
     ...input,
@@ -55,10 +71,10 @@ export function createWebhookNotification(
       openedAt: serializeDate(input.incident.openedAt),
       resolvedAt: input.incident.resolvedAt ? serializeDate(input.incident.resolvedAt) : null,
     },
-  });
+  }) as WebhookNotificationV2;
 }
 
-export function parseWebhookNotification(value: unknown): WebhookNotificationV1 {
+export function parseWebhookNotification(value: unknown): WebhookNotification {
   if (
     !isExactRecord(value, [
       'contractVersion',
@@ -69,11 +85,9 @@ export function parseWebhookNotification(value: unknown): WebhookNotificationV1 
       'monitor',
       'incident',
       'triggeringRoundId',
-    ])
-  )
-    invalid();
-  if (
-    value.contractVersion !== WEBHOOK_NOTIFICATION_CONTRACT_VERSION ||
+    ]) ||
+    (value.contractVersion !== 1 &&
+      value.contractVersion !== WEBHOOK_NOTIFICATION_CONTRACT_VERSION) ||
     !isUuid(value.eventId) ||
     !isEventType(value.eventType) ||
     !isCanonicalTimestamp(value.occurredAt) ||
@@ -83,19 +97,11 @@ export function parseWebhookNotification(value: unknown): WebhookNotificationV1 
     typeof value.monitor.name !== 'string' ||
     value.monitor.name.length === 0 ||
     value.monitor.name.length > 120 ||
-    !isExactRecord(value.incident, ['id', 'status', 'startedAt', 'openedAt', 'resolvedAt']) ||
-    !isUuid(value.incident.id) ||
-    !isCanonicalTimestamp(value.incident.startedAt) ||
-    !isCanonicalTimestamp(value.incident.openedAt) ||
-    !isUuid(value.triggeringRoundId)
+    !isUuid(value.triggeringRoundId) ||
+    !isIncident(value.incident, value.contractVersion)
   )
     invalid();
-  const incident = value.incident as {
-    status: 'OPEN' | 'RESOLVED';
-    startedAt: string;
-    openedAt: string;
-    resolvedAt: string | null;
-  };
+  const incident = value.incident;
   const opened = value.eventType === 'INCIDENT_OPENED';
   if (
     (opened && (incident.status !== 'OPEN' || incident.resolvedAt !== null)) ||
@@ -106,10 +112,38 @@ export function parseWebhookNotification(value: unknown): WebhookNotificationV1 
     value.occurredAt !== (opened ? incident.openedAt : incident.resolvedAt)
   )
     invalid();
-  return value as unknown as WebhookNotificationV1;
+  return value as unknown as WebhookNotification;
 }
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+function isIncident(
+  value: unknown,
+  contractVersion: 1 | 2,
+): value is WebhookNotification['incident'] {
+  const keys =
+    contractVersion === 1
+      ? ['id', 'status', 'startedAt', 'openedAt', 'resolvedAt']
+      : ['id', 'groupKey', 'severity', 'status', 'startedAt', 'openedAt', 'resolvedAt'];
+  if (
+    !isExactRecord(value, keys) ||
+    !isUuid(value.id) ||
+    (value.status !== 'OPEN' && value.status !== 'RESOLVED') ||
+    !isCanonicalTimestamp(value.startedAt) ||
+    !isCanonicalTimestamp(value.openedAt) ||
+    (value.resolvedAt !== null && !isCanonicalTimestamp(value.resolvedAt))
+  )
+    return false;
+  return contractVersion === 1 || isV2Incident(value);
+}
+
+function isV2Incident(value: Record<string, unknown>): value is WebhookNotificationV2['incident'] {
+  return (
+    typeof value.groupKey === 'string' &&
+    /^availability:[0-9a-f-]{36}$/u.test(value.groupKey) &&
+    (value.severity === 'DEGRADED' || value.severity === 'DOWN')
+  );
+}
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 function isUuid(value: unknown): value is string {
   return typeof value === 'string' && UUID_PATTERN.test(value);
 }
