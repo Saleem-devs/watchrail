@@ -13,6 +13,7 @@ const claim: ClaimedEmailNotificationDelivery = {
   monitorId: null,
   channelId: '44444444-4444-4444-8444-444444444444',
   channelVersionId: '55555555-5555-4555-8555-555555555555',
+  deliverySequence: 0,
   recipientEmails: ['alerts@example.com'],
   payload: {
     contractVersion: 1,
@@ -46,6 +47,7 @@ describe('EmailNotificationWorker', () => {
   it('renders incident impact and stable alert group from V2 payloads', async () => {
     const delivery: ClaimedEmailNotificationDelivery = {
       ...claim,
+      deliverySequence: 1,
       monitorId: '66666666-6666-4666-8666-666666666666',
       payload: {
         contractVersion: 2,
@@ -71,6 +73,7 @@ describe('EmailNotificationWorker', () => {
     await expect(fixture.worker.processNext()).resolves.toBe('DELIVERED');
     expect(fixture.send).toHaveBeenCalledWith(
       expect.objectContaining({
+        subject: 'Incident reminder 1 — Payments API',
         text: expect.stringContaining(
           'Alert group: availability:66666666-6666-4666-8666-666666666666',
         ),
@@ -78,6 +81,7 @@ describe('EmailNotificationWorker', () => {
       { signal: expect.any(AbortSignal) },
     );
     expect(fixture.send.mock.calls[0]?.[0].text).toContain('Impact: Unavailable');
+    expect(fixture.send.mock.calls[0]?.[0].text).toContain('is still failing');
   });
 
   it('suppresses incident mail before SMTP and retries transient SMTP failures', async () => {

@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Inject, Param, ParseUUIDPipe, Post, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Inject,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Put,
+  Req,
+} from '@nestjs/common';
 import { RequirePermission } from '../../auth/auth.guard.js';
 import { PERMISSIONS } from '../../auth/permissions.js';
 import type { RequestWithContext } from '../../auth/request-context.js';
@@ -32,5 +42,32 @@ export class ProjectsController {
     @Param('projectId', ParseUUIDPipe) projectId: string,
   ) {
     return { data: presentProject(await this.projects.find(request.watchrailContext, projectId)) };
+  }
+
+  @Get(':projectId/incident-reminder-policy')
+  @RequirePermission(PERMISSIONS.NOTIFICATION_READ)
+  async getIncidentReminderPolicy(
+    @Req() request: RequestWithContext,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+  ) {
+    return {
+      data: await this.projects.getIncidentReminderPolicy(request.watchrailContext, projectId),
+    };
+  }
+
+  @Put(':projectId/incident-reminder-policy')
+  @RequirePermission(PERMISSIONS.NOTIFICATION_MANAGE)
+  async updateIncidentReminderPolicy(
+    @Req() request: RequestWithContext,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Body() input: unknown,
+  ) {
+    return {
+      data: await this.projects.updateIncidentReminderPolicy(
+        request.watchrailContext,
+        projectId,
+        input,
+      ),
+    };
   }
 }

@@ -75,7 +75,7 @@ export function NotificationDeliveryHistory({
               >
                 <div>
                   <span className="font-medium text-rail-text">
-                    {eventLabel(delivery.event.type)}
+                    {eventLabel(delivery.event.type, delivery.deliverySequence)}
                   </span>
                   {delivery.lastErrorCode ? (
                     <span className="mt-1 block text-xs text-rail-muted">
@@ -109,7 +109,9 @@ export function NotificationDeliveryHistory({
   );
 }
 
-function eventLabel(type: NotificationDelivery['event']['type']): string {
+function eventLabel(type: NotificationDelivery['event']['type'], deliverySequence: number): string {
+  if (type === 'INCIDENT_OPENED' && deliverySequence > 0)
+    return `Incident reminder ${deliverySequence}`;
   return type === 'INCIDENT_OPENED'
     ? 'Incident opened'
     : type === 'INCIDENT_RESOLVED'

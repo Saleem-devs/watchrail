@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ClaimedNotificationDelivery } from '@watchrail/db';
 import {
   encryptWebhookSigningSecret,
-  signWebhookBody,
+  signWebhookDelivery,
+  verifyWebhookDeliverySignature,
   type WebhookSigningSecretKeyring,
 } from '@watchrail/webhook-security';
 import {
@@ -31,9 +32,16 @@ describe('WebhookDeliveryWorker', () => {
         const headers = new Map(input.headers.map((header) => [header.name, header.value]));
         expect(headers.get('x-watchrail-event-id')).toBe(eventId);
         expect(headers.get('x-watchrail-delivery-id')).toBe(deliveryId);
+        expect(headers.get('x-watchrail-delivery-sequence')).toBe('0');
         expect(headers.get('x-watchrail-timestamp')).toBe('1800000000');
         expect(headers.get('x-watchrail-signature')).toBe(
-          signWebhookBody(signingSecret, 1_800_000_000, input.body),
+          signWebhookDelivery(signingSecret, {
+            unixTimestampSeconds: 1_800_000_000,
+            eventId,
+            deliveryId,
+            deliverySequence: 0,
+            body: input.body,
+          }),
         );
         return Promise.resolve({ type: 'HTTP', statusCode: 204 });
       },
@@ -84,11 +92,67 @@ describe('WebhookDeliveryWorker', () => {
     await expect(worker.processNext()).resolves.toBe('RETRY_SCHEDULED');
     await expect(worker.processNext()).resolves.toBe('DELIVERED');
 
-    for (const [input] of deliver.mock.calls) {
+    const signatures = deliver.mock.calls.map(([input]) => {
       const headers = new Map(input.headers.map((header) => [header.name, header.value]));
       expect(headers.get('x-watchrail-event-id')).toBe(eventId);
       expect(headers.get('x-watchrail-delivery-id')).toBe(deliveryId);
-    }
+      expect(headers.get('x-watchrail-delivery-sequence')).toBe('0');
+      return headers.get('x-watchrail-signature');
+    });
+    expect(signatures[0]).toBe(signatures[1]);
+  });
+
+  it('authenticates opening and reminder identities independently', async () => {
+    const reminderId = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+    const fixture = storeReturning(claim());
+    fixture.claimNext
+      .mockResolvedValueOnce(claim())
+      .mockResolvedValueOnce({ ...claim(), id: reminderId, deliverySequence: 1 });
+    const deliver = vi
+      .fn<WebhookDeliveryAttemptExecutor['deliver']>()
+      .mockResolvedValue({ type: 'HTTP', statusCode: 204 });
+    const worker = createWorker(fixture.store, { deliver });
+
+    await expect(worker.processNext()).resolves.toBe('DELIVERED');
+    await expect(worker.processNext()).resolves.toBe('DELIVERED');
+
+    const [openingInput] = deliver.mock.calls[0]!;
+    const [reminderInput] = deliver.mock.calls[1]!;
+    const openingHeaders = new Map(
+      openingInput.headers.map((header) => [header.name, header.value]),
+    );
+    const reminderHeaders = new Map(
+      reminderInput.headers.map((header) => [header.name, header.value]),
+    );
+    expect(openingHeaders.get('x-watchrail-signature')).not.toBe(
+      reminderHeaders.get('x-watchrail-signature'),
+    );
+    expect(
+      verifyWebhookDeliverySignature(
+        signingSecret,
+        {
+          unixTimestampSeconds: 1_800_000_000,
+          eventId,
+          deliveryId: reminderId,
+          deliverySequence: 1,
+          body: reminderInput.body,
+        },
+        reminderHeaders.get('x-watchrail-signature')!,
+      ),
+    ).toBe(true);
+    expect(
+      verifyWebhookDeliverySignature(
+        signingSecret,
+        {
+          unixTimestampSeconds: 1_800_000_000,
+          eventId,
+          deliveryId: reminderId,
+          deliverySequence: 0,
+          body: reminderInput.body,
+        },
+        reminderHeaders.get('x-watchrail-signature')!,
+      ),
+    ).toBe(false);
   });
 
   it('dead-letters malformed payloads and malformed or unauthentic secret envelopes', async () => {
@@ -221,6 +285,7 @@ function claim(): ClaimedNotificationDelivery {
     monitorId: '11111111-1111-4111-8111-111111111111',
     endpointId,
     endpointVersionId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+    deliverySequence: 0,
     endpointVersionNumber: 1,
     url: 'https://hooks.example.com/events',
     payload: {

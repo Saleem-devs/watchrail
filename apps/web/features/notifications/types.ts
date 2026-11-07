@@ -58,6 +58,7 @@ export type NotificationDeliveryStatus =
 
 export interface NotificationDelivery {
   id: string;
+  deliverySequence: number;
   event: {
     id: string;
     type: 'INCIDENT_OPENED' | 'INCIDENT_RESOLVED' | 'TEST';
@@ -84,4 +85,8 @@ export interface NotificationApiError {
   code?: string;
   message?: string;
   fields?: Record<string, string[]>;
+}
+
+export interface IncidentReminderPolicy {
+  delaysMinutes: number[];
 }

@@ -2127,9 +2127,16 @@ describe('monitor API', () => {
     await database.$client.query(
       `insert into incidents (
          id, organization_id, monitor_id, status, started_at, opened_at,
-         started_by_round_id, opened_by_round_id
-       ) values ($1, $2, $3, 'OPEN', $4, $4, $5, $5)`,
-      [incidentId, '00000000-0000-4000-8000-000000000002', monitorId, checkedAt, roundId],
+         started_by_round_id, opened_by_round_id, severity, group_key
+       ) values ($1, $2, $3, 'OPEN', $4, $4, $5, $5, 'DOWN', $6)`,
+      [
+        incidentId,
+        '00000000-0000-4000-8000-000000000002',
+        monitorId,
+        checkedAt,
+        roundId,
+        `availability:${monitorId}`,
+      ],
     );
     const incidentList = await request(app.getHttpServer())
       .get(`/api/monitors/${monitorId}/incidents?limit=1`)

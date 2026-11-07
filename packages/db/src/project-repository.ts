@@ -1,5 +1,5 @@
-import { and, asc, count, eq, ne } from 'drizzle-orm';
-import type { NewProject } from '@watchrail/domain';
+import { and, asc, count, eq, ne, sql } from 'drizzle-orm';
+import type { IncidentReminderPolicy, NewProject } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
 import { monitors, projects, type ProjectRecord } from './schema.js';
 
@@ -59,6 +59,34 @@ export class ProjectRepository {
       .where(and(eq(projects.organizationId, organizationId), eq(projects.slug, slug)))
       .limit(1);
     return project ?? null;
+  }
+
+  async getIncidentReminderPolicy(
+    organizationId: string,
+    projectId: string,
+  ): Promise<IncidentReminderPolicy | null> {
+    const [project] = await this.db
+      .select({ delaysMinutes: projects.incidentReminderDelaysMinutes })
+      .from(projects)
+      .where(and(eq(projects.organizationId, organizationId), eq(projects.id, projectId)))
+      .limit(1);
+    return project ?? null;
+  }
+
+  async updateIncidentReminderPolicy(
+    organizationId: string,
+    projectId: string,
+    policy: IncidentReminderPolicy,
+  ): Promise<IncidentReminderPolicy | null> {
+    const [updated] = await this.db
+      .update(projects)
+      .set({
+        incidentReminderDelaysMinutes: policy.delaysMinutes,
+        updatedAt: sql`clock_timestamp()`,
+      })
+      .where(and(eq(projects.organizationId, organizationId), eq(projects.id, projectId)))
+      .returning({ delaysMinutes: projects.incidentReminderDelaysMinutes });
+    return updated ?? null;
   }
 }
 

@@ -1,4 +1,10 @@
-import { createCipheriv, createDecipheriv, createHmac, randomBytes } from 'node:crypto';
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHmac,
+  randomBytes,
+  timingSafeEqual,
+} from 'node:crypto';
 
 export const WEBHOOK_SIGNING_SECRET_LIMITS = { minBytes: 32, maxBytes: 512 } as const;
 
@@ -20,6 +26,14 @@ export interface WebhookSigningSecretContext {
   organizationId: string;
   endpointId: string;
   versionNumber: number;
+}
+
+export interface WebhookDeliverySignatureV2Input {
+  unixTimestampSeconds: number;
+  eventId: string;
+  deliveryId: string;
+  deliverySequence: number;
+  body: Uint8Array;
 }
 
 export class WebhookSigningSecretInputError extends Error {
@@ -155,6 +169,42 @@ export function signWebhookBody(
   return `v1=${hmac.digest('hex')}`;
 }
 
+export function signWebhookDelivery(
+  signingSecret: string,
+  input: WebhookDeliverySignatureV2Input,
+): string {
+  assertDeliverySignatureInput(input);
+  const hmac = createHmac('sha256', signingSecret);
+  hmac.update(
+    [
+      'watchrail:webhook-delivery:v2',
+      String(input.unixTimestampSeconds),
+      input.eventId.toLowerCase(),
+      input.deliveryId.toLowerCase(),
+      String(input.deliverySequence),
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+  hmac.update(input.body);
+  return `v2=${hmac.digest('hex')}`;
+}
+
+export function verifyWebhookDeliverySignature(
+  signingSecret: string,
+  input: WebhookDeliverySignatureV2Input,
+  signature: string,
+): boolean {
+  if (!/^v2=[0-9a-f]{64}$/u.test(signature)) return false;
+  let expected: string;
+  try {
+    expected = signWebhookDelivery(signingSecret, input);
+  } catch {
+    return false;
+  }
+  return timingSafeEqual(Buffer.from(signature, 'utf8'), Buffer.from(expected, 'utf8'));
+}
+
 export function parseStoredWebhookSigningSecret(value: unknown): EncryptedWebhookSigningSecretV1 {
   if (!hasExactKeys(value, ['version', 'algorithm', 'keyId', 'iv', 'ciphertext', 'authTag']))
     throw new StoredWebhookSigningSecretInvariantError();
@@ -199,6 +249,19 @@ function assertContext(context: WebhookSigningSecretContext): void {
     context.versionNumber < 1
   )
     throw new RangeError('Webhook signing-secret context is invalid.');
+}
+
+function assertDeliverySignatureInput(input: WebhookDeliverySignatureV2Input): void {
+  if (
+    !Number.isSafeInteger(input.unixTimestampSeconds) ||
+    input.unixTimestampSeconds < 0 ||
+    !UUID_PATTERN.test(input.eventId) ||
+    !UUID_PATTERN.test(input.deliveryId) ||
+    !Number.isSafeInteger(input.deliverySequence) ||
+    input.deliverySequence < 0
+  ) {
+    throw new RangeError('Webhook delivery signature input is invalid.');
+  }
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;

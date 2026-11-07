@@ -5,6 +5,8 @@ import {
   loadWebhookSigningSecretKeyring,
   parseStoredWebhookSigningSecret,
   signWebhookBody,
+  signWebhookDelivery,
+  verifyWebhookDeliverySignature,
   StoredWebhookSigningSecretInvariantError,
   StoredWebhookSigningSecretResolutionError,
   WebhookSigningSecretInputError,
@@ -112,5 +114,43 @@ describe('webhook signing-secret security', () => {
     changed[changed.length - 2] = 'X'.charCodeAt(0);
     expect(signWebhookBody(secret, timestamp, changed)).not.toBe(signature);
     expect(signWebhookBody(secret, timestamp + 1, body)).not.toBe(signature);
+  });
+
+  it('authenticates a V2 logical delivery identity as well as the exact body', () => {
+    const input = {
+      unixTimestampSeconds: 1_800_000_000,
+      eventId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      deliveryId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      deliverySequence: 1,
+      body: Buffer.from('{"event":"opened"}', 'utf8'),
+    };
+    const signature = signWebhookDelivery(secret, input);
+
+    expect(signature).toMatch(/^v2=[0-9a-f]{64}$/u);
+    expect(verifyWebhookDeliverySignature(secret, input, signature)).toBe(true);
+    expect(
+      verifyWebhookDeliverySignature(
+        secret,
+        { ...input, eventId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' },
+        signature,
+      ),
+    ).toBe(false);
+    expect(
+      verifyWebhookDeliverySignature(
+        secret,
+        { ...input, deliveryId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' },
+        signature,
+      ),
+    ).toBe(false);
+    expect(
+      verifyWebhookDeliverySignature(secret, { ...input, deliverySequence: 2 }, signature),
+    ).toBe(false);
+    expect(
+      verifyWebhookDeliverySignature(
+        secret,
+        { ...input, body: Buffer.from('{"event":"resolved"}', 'utf8') },
+        signature,
+      ),
+    ).toBe(false);
   });
 });

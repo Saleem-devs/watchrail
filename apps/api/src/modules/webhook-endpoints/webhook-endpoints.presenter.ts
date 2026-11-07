@@ -22,6 +22,7 @@ export function presentWebhookEndpoint(endpoint: WebhookEndpointRecord) {
 export function presentWebhookDelivery(delivery: WebhookDeliveryListItem) {
   return {
     id: delivery.id,
+    deliverySequence: delivery.deliverySequence,
     event: {
       id: delivery.event.id,
       type: delivery.event.type,

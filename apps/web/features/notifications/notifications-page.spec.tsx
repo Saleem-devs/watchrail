@@ -357,10 +357,14 @@ describe('notifications page', () => {
 
   it('keeps list actions as dedicated create and edit routes', async () => {
     const user = userEvent.setup();
-    vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(json({ data: [channel] }))
-      .mockResolvedValueOnce(json({ data: [] }))
-      .mockResolvedValueOnce(json({ data: [] }));
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const path = requestPath(input);
+      if (path.includes('incident-reminder-policy'))
+        return Promise.resolve(json({ data: { delaysMinutes: [] } }));
+      if (path.startsWith('/api/webhook-endpoints'))
+        return Promise.resolve(json({ data: [channel] }));
+      return Promise.resolve(json({ data: [] }));
+    });
 
     render(<NotificationChannelsPage projectId={projectId} />);
     await screen.findByText(channel.name);
@@ -389,12 +393,15 @@ describe('notifications page', () => {
 
   it('confirms channel deletion from the row action menu', async () => {
     const user = userEvent.setup();
-    const fetchMock = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(json({ data: [channel] }))
-      .mockResolvedValueOnce(json({ data: [] }))
-      .mockResolvedValueOnce(json({ data: [] }))
-      .mockResolvedValueOnce(json({ data: { deleted: true } }));
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const path = requestPath(input);
+      if (init?.method === 'DELETE') return Promise.resolve(json({ data: { deleted: true } }));
+      if (path.includes('incident-reminder-policy'))
+        return Promise.resolve(json({ data: { delaysMinutes: [] } }));
+      if (path.startsWith('/api/webhook-endpoints'))
+        return Promise.resolve(json({ data: [channel] }));
+      return Promise.resolve(json({ data: [] }));
+    });
 
     render(<NotificationChannelsPage projectId={projectId} />);
     await screen.findByText(channel.name);
@@ -404,8 +411,67 @@ describe('notifications page', () => {
     await user.click(screen.getByRole('button', { name: 'Delete channel' }));
 
     await waitFor(() => expect(screen.queryByText(channel.name)).not.toBeInTheDocument());
-    expect(fetchMock.mock.calls[3]?.[0]).toBe(`/api/webhook-endpoints/${channel.id}`);
-    expect(fetchMock.mock.calls[3]?.[1]).toMatchObject({ method: 'DELETE' });
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/webhook-endpoints/${channel.id}`,
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+  });
+
+  it('configures an ordered incident reminder schedule', async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const path = requestPath(input);
+      if (path.includes('incident-reminder-policy')) {
+        if (init?.method === 'PUT')
+          return Promise.resolve(json({ data: { delaysMinutes: [15, 60] } }));
+        return Promise.resolve(json({ data: { delaysMinutes: [] } }));
+      }
+      return Promise.resolve(json({ data: [] }));
+    });
+
+    render(<NotificationChannelsPage projectId={projectId} />);
+    await user.click(await screen.findByLabelText('Send reminders'));
+    expect(screen.getByLabelText('Reminder 1 delay in minutes')).toHaveValue(15);
+    await user.click(screen.getByRole('button', { name: 'Add reminder' }));
+    expect(screen.getByLabelText('Reminder 2 delay in minutes')).toHaveValue(60);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/projects/${projectId}/incident-reminder-policy`,
+        expect.objectContaining({
+          method: 'PUT',
+          body: JSON.stringify({ delaysMinutes: [15, 60] }),
+        }),
+      ),
+    );
+  });
+
+  it('keeps reminder settings unavailable until a failed load is retried successfully', async () => {
+    const user = userEvent.setup();
+    let policyAttempts = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const path = requestPath(input);
+      if (path.includes('incident-reminder-policy')) {
+        policyAttempts += 1;
+        return policyAttempts === 1
+          ? Promise.resolve(json({ message: 'Unavailable' }, 503))
+          : Promise.resolve(json({ data: { delaysMinutes: [15] } }));
+      }
+      return Promise.resolve(json({ data: [] }));
+    });
+
+    render(<NotificationChannelsPage projectId={projectId} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Reminder policy unavailable');
+    expect(
+      screen.queryByText('Opening alerts are sent once. No reminders are scheduled.'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Send reminders')).toBeDisabled();
+
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(screen.getByLabelText('Send reminders')).toBeEnabled());
+    expect(screen.getByLabelText('Reminder 1 delay in minutes')).toHaveValue(15);
   });
 
   it('loads every monitor page and preserves a selected monitor beyond the first 100', async () => {
@@ -459,6 +525,12 @@ function requestJson(call: readonly unknown[] | undefined): unknown {
   const body = typeof init === 'object' && init !== null && 'body' in init ? init.body : undefined;
   if (typeof body !== 'string') throw new TypeError('Expected a JSON request body.');
   return JSON.parse(body) as unknown;
+}
+
+function requestPath(input: RequestInfo | URL): string {
+  if (typeof input === 'string') return input;
+  if (input instanceof URL) return input.toString();
+  return input.url;
 }
 
 function json(body: unknown, status = 200): Response {

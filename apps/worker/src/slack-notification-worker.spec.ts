@@ -33,6 +33,7 @@ const claim: ClaimedSlackNotificationDelivery = {
   monitorId: null,
   channelId: ids.channel,
   channelVersionId: ids.version,
+  deliverySequence: 0,
   channelVersionNumber: 1,
   webhookUrlEnvelope: encryptSlackWebhookUrl(
     webhookUrl,
@@ -141,31 +142,34 @@ describe('SlackNotificationWorker', () => {
   });
 
   it('renders incident text without interpreting Slack markup from monitor names', () => {
-    const message = renderSlackMessage({
-      contractVersion: 2,
-      eventId: ids.event,
-      eventType: 'INCIDENT_OPENED',
-      occurredAt: '2026-11-07T10:00:00.000Z',
-      organizationId: ids.organization,
-      monitor: { id: '77777777-7777-4777-8777-777777777777', name: '<!channel> API' },
-      incident: {
-        id: '88888888-8888-4888-8888-888888888888',
-        groupKey: 'availability:77777777-7777-4777-8777-777777777777',
-        severity: 'DEGRADED',
-        status: 'OPEN',
-        startedAt: '2026-11-07T10:00:00.000Z',
-        openedAt: '2026-11-07T10:00:00.000Z',
-        resolvedAt: null,
+    const message = renderSlackMessage(
+      {
+        contractVersion: 2,
+        eventId: ids.event,
+        eventType: 'INCIDENT_OPENED',
+        occurredAt: '2026-11-07T10:00:00.000Z',
+        organizationId: ids.organization,
+        monitor: { id: '77777777-7777-4777-8777-777777777777', name: '<!channel> API' },
+        incident: {
+          id: '88888888-8888-4888-8888-888888888888',
+          groupKey: 'availability:77777777-7777-4777-8777-777777777777',
+          severity: 'DEGRADED',
+          status: 'OPEN',
+          startedAt: '2026-11-07T10:00:00.000Z',
+          openedAt: '2026-11-07T10:00:00.000Z',
+          resolvedAt: null,
+        },
+        triggeringRoundId: '99999999-9999-4999-8999-999999999999',
       },
-      triggeringRoundId: '99999999-9999-4999-8999-999999999999',
-    });
+      2,
+    );
     expect(JSON.stringify(message.blocks)).toContain('&lt;!channel&gt; API');
     expect(JSON.stringify(message.blocks)).not.toContain('<!channel> API');
     expect(JSON.stringify(message.blocks)).toContain('*Impact*\\nDegraded');
     expect(JSON.stringify(message.blocks)).toContain(
       'availability:77777777-7777-4777-8777-777777777777',
     );
-    expect(message.text).toBe('Incident opened: &lt;!channel&gt; API');
+    expect(message.text).toBe('Incident reminder 2: &lt;!channel&gt; API');
   });
 });
 

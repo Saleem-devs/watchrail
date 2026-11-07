@@ -155,7 +155,7 @@ export class EmailNotificationWorker {
     if (sendTimeoutMs <= 0) return this.retryOrExhaust(delivery, 'INSUFFICIENT_LEASE_BUDGET');
 
     try {
-      const message = renderEmail(payload, delivery.recipientEmails);
+      const message = renderEmail(payload, delivery.recipientEmails, delivery.deliverySequence);
       // Delivery remains at-least-once: SMTP acceptance can be ambiguous if the
       // connection fails after the server accepts the message. The deadline prevents
       // an intentionally overlapping live attempt, while claim-token fencing prevents
@@ -272,6 +272,7 @@ function canonicalAddress(value: string): string {
 function renderEmail(
   payload: EmailNotificationV1,
   recipients: string[],
+  deliverySequence: number,
 ): { to: string[]; subject: string; text: string } {
   if (payload.eventType === 'TEST')
     return {
@@ -287,11 +288,12 @@ function renderEmail(
       ].join('\n'),
     };
   const opened = payload.eventType === 'INCIDENT_OPENED';
+  const reminder = opened && deliverySequence > 0;
   return {
     to: recipients,
-    subject: `${opened ? 'Incident opened' : 'Incident resolved'} — ${payload.monitor.name}`,
+    subject: `${reminder ? `Incident reminder ${deliverySequence}` : opened ? 'Incident opened' : 'Incident resolved'} — ${payload.monitor.name}`,
     text: [
-      `${payload.monitor.name} ${opened ? 'is failing its monitoring policy.' : 'has recovered.'}`,
+      `${payload.monitor.name} ${reminder ? 'is still failing its monitoring policy.' : opened ? 'is failing its monitoring policy.' : 'has recovered.'}`,
       '',
       `Status: ${payload.incident.status}`,
       ...(payload.contractVersion === 2
