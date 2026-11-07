@@ -546,6 +546,70 @@ describe('webhook endpoint API', () => {
     });
   });
 
+  it('reads and updates a project escalation policy with tenant-scoped incident channels', async () => {
+    const projects = new ProjectRepository(database);
+    const primaryProject = await projects.create(
+      DEVELOPMENT_REQUEST_CONTEXT.organizationId,
+      parseNewProject({ name: 'Primary services', slug: 'primary-escalation' }),
+    );
+    const otherProject = await projects.create(
+      DEVELOPMENT_REQUEST_CONTEXT.organizationId,
+      parseNewProject({ name: 'Other services', slug: 'other-escalation' }),
+    );
+    const createProjectChannel = async (projectId: string, name: string) =>
+      (
+        await request(app.getHttpServer())
+          .post('/api/webhook-endpoints')
+          .send({
+            projectId,
+            name,
+            url: `https://hooks.example.com/${projectId}`,
+            signingSecret: sentinel,
+            routing: {
+              allMonitors: true,
+              monitorIds: [],
+              notifyOnIncident: true,
+              notifyOnRecovery: true,
+            },
+          })
+          .expect(201)
+      ).body.data as { id: string };
+    const primaryChannel = await createProjectChannel(primaryProject.id, 'Primary alerts');
+    const otherChannel = await createProjectChannel(otherProject.id, 'Other alerts');
+    const policy = {
+      steps: [
+        { delayMinutes: 15, channelIds: null },
+        { delayMinutes: 60, channelIds: [primaryChannel.id] },
+      ],
+    };
+
+    await request(app.getHttpServer())
+      .put(`/api/projects/${primaryProject.id}/incident-escalation-policy`)
+      .send(policy)
+      .expect(200, { data: policy });
+    await request(app.getHttpServer())
+      .get(`/api/projects/${primaryProject.id}/incident-escalation-policy`)
+      .expect(200, { data: policy });
+
+    const foreign = await request(app.getHttpServer())
+      .put(`/api/projects/${primaryProject.id}/incident-escalation-policy`)
+      .send({ steps: [{ delayMinutes: 15, channelIds: [otherChannel.id] }] })
+      .expect(400);
+    expect(foreign.body).toMatchObject({
+      code: 'ESCALATION_CHANNEL_UNAVAILABLE',
+      fields: { steps: [expect.any(String)] },
+    });
+
+    const emptySelection = await request(app.getHttpServer())
+      .put(`/api/projects/${primaryProject.id}/incident-escalation-policy`)
+      .send({ steps: [{ delayMinutes: 15, channelIds: [] }] })
+      .expect(400);
+    expect(emptySelection.body).toMatchObject({
+      code: 'VALIDATION_FAILED',
+      fields: { steps: [expect.any(String)] },
+    });
+  });
+
   it('preserves event preferences when project routing has no monitors', async () => {
     const project = await new ProjectRepository(database).create(
       DEVELOPMENT_REQUEST_CONTEXT.organizationId,

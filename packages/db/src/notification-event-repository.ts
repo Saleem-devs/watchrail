@@ -39,7 +39,7 @@ export async function stageIncidentNotification(
     .select({
       name: monitors.name,
       projectId: monitors.projectId,
-      reminderDelaysMinutes: projects.incidentReminderDelaysMinutes,
+      escalationSteps: projects.incidentEscalationSteps,
     })
     .from(monitors)
     .innerJoin(
@@ -149,7 +149,7 @@ export async function stageIncidentNotification(
     throw new Error('Enabled webhook endpoint is missing its current immutable version.');
   }
   if (endpoints.length > 0) {
-    const reminderDelaysMinutes = transition.type === 'OPENED' ? monitor.reminderDelaysMinutes : [];
+    const escalationSteps = transition.type === 'OPENED' ? monitor.escalationSteps : [];
     const staged = await tx.execute<{ stagedAt: Date | string }>(sql`
       select date_trunc('milliseconds', clock_timestamp()) as "stagedAt"
     `);
@@ -158,14 +158,22 @@ export async function stageIncidentNotification(
     const stagedAt = stagedAtValue instanceof Date ? stagedAtValue : new Date(stagedAtValue);
     await tx.insert(notificationDeliveries).values(
       endpoints.flatMap((endpoint) =>
-        [0, ...reminderDelaysMinutes].map((delayMinutes, deliverySequence) => ({
-          organizationId: transition.organizationId,
-          eventId,
-          endpointId: endpoint.endpointId,
-          endpointVersionId: endpoint.endpointVersionId!,
-          deliverySequence,
-          availableAt: new Date(stagedAt.getTime() + delayMinutes * 60_000),
-        })),
+        [{ delayMinutes: 0, channelIds: null }, ...escalationSteps]
+          .map((step, deliverySequence) => ({ step, deliverySequence }))
+          .filter(
+            ({ step, deliverySequence }) =>
+              deliverySequence === 0 ||
+              step.channelIds === null ||
+              step.channelIds.includes(endpoint.endpointId),
+          )
+          .map(({ step, deliverySequence }) => ({
+            organizationId: transition.organizationId,
+            eventId,
+            endpointId: endpoint.endpointId,
+            endpointVersionId: endpoint.endpointVersionId!,
+            deliverySequence,
+            availableAt: new Date(stagedAt.getTime() + step.delayMinutes * 60_000),
+          })),
       ),
     );
   }

@@ -406,8 +406,8 @@ export const projects = pgTable(
     organizationId: uuid('organization_id').notNull(),
     name: varchar('name', { length: 120 }).notNull(),
     slug: varchar('slug', { length: 63 }).notNull(),
-    incidentReminderDelaysMinutes: jsonb('incident_reminder_delays_minutes')
-      .$type<number[]>()
+    incidentEscalationSteps: jsonb('incident_escalation_steps')
+      .$type<Array<{ delayMinutes: number; channelIds: string[] | null }>>()
       .notNull()
       .default([]),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -423,20 +423,20 @@ export const projects = pgTable(
       sql`${table.slug} ~ '^[a-z0-9]+(-[a-z0-9]+)*$' and length(${table.slug}) between 2 and 63`,
     ),
     check(
-      'projects_incident_reminder_delays_valid',
-      sql`jsonb_typeof(${table.incidentReminderDelaysMinutes}) = 'array'
-        and jsonb_array_length(${table.incidentReminderDelaysMinutes}) <= 3
+      'projects_incident_escalation_steps_valid',
+      sql`jsonb_typeof(${table.incidentEscalationSteps}) = 'array'
+        and jsonb_array_length(${table.incidentEscalationSteps}) <= 3
         and not jsonb_path_exists(
-          ${table.incidentReminderDelaysMinutes},
-          '$[*] ? (@.type() != "number" || @ < 5 || @ > 10080 || @ != @.floor())'
+          ${table.incidentEscalationSteps},
+          '$[*] ? (@.type() != "object" || @.delayMinutes.type() != "number" || @.delayMinutes < 5 || @.delayMinutes > 10080 || @.delayMinutes != @.delayMinutes.floor() || (@.channelIds != null && @.channelIds.type() != "array"))'
         )
         and (
-          jsonb_array_length(${table.incidentReminderDelaysMinutes}) < 2
-          or jsonb_path_match(${table.incidentReminderDelaysMinutes}, '$[0] < $[1]')
+          jsonb_array_length(${table.incidentEscalationSteps}) < 2
+          or jsonb_path_match(${table.incidentEscalationSteps}, '$[0].delayMinutes < $[1].delayMinutes')
         )
         and (
-          jsonb_array_length(${table.incidentReminderDelaysMinutes}) < 3
-          or jsonb_path_match(${table.incidentReminderDelaysMinutes}, '$[1] < $[2]')
+          jsonb_array_length(${table.incidentEscalationSteps}) < 3
+          or jsonb_path_match(${table.incidentEscalationSteps}, '$[1].delayMinutes < $[2].delayMinutes')
         )`,
     ),
   ],

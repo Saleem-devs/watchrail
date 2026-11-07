@@ -5,12 +5,17 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ProjectRepository, type ProjectListItem, type ProjectRecord } from '@watchrail/db';
+import {
+  IncidentEscalationChannelError,
+  ProjectRepository,
+  type ProjectListItem,
+  type ProjectRecord,
+} from '@watchrail/db';
 import { parseNewProject, ProjectInputError } from '@watchrail/domain';
 import {
-  IncidentReminderPolicyInputError,
-  parseIncidentReminderPolicy,
-  type IncidentReminderPolicy,
+  IncidentEscalationPolicyInputError,
+  parseIncidentEscalationPolicy,
+  type IncidentEscalationPolicy,
 } from '@watchrail/domain';
 import type { RequestContext } from '../../auth/request-context.js';
 
@@ -54,34 +59,44 @@ export class ProjectsService {
     return project;
   }
 
-  async getIncidentReminderPolicy(
+  async getIncidentEscalationPolicy(
     context: RequestContext,
     projectId: string,
-  ): Promise<IncidentReminderPolicy> {
-    const policy = await this.projects.getIncidentReminderPolicy(context.organizationId, projectId);
+  ): Promise<IncidentEscalationPolicy> {
+    const policy = await this.projects.getIncidentEscalationPolicy(
+      context.organizationId,
+      projectId,
+    );
     if (!policy) this.projectNotFound();
     return policy;
   }
 
-  async updateIncidentReminderPolicy(
+  async updateIncidentEscalationPolicy(
     context: RequestContext,
     projectId: string,
     input: unknown,
-  ): Promise<IncidentReminderPolicy> {
+  ): Promise<IncidentEscalationPolicy> {
     try {
-      const updated = await this.projects.updateIncidentReminderPolicy(
+      const updated = await this.projects.updateIncidentEscalationPolicy(
         context.organizationId,
         projectId,
-        parseIncidentReminderPolicy(input),
+        parseIncidentEscalationPolicy(input),
       );
       if (!updated) this.projectNotFound();
       return updated;
     } catch (error) {
-      if (error instanceof IncidentReminderPolicyInputError) {
+      if (error instanceof IncidentEscalationPolicyInputError) {
         throw new BadRequestException({
           code: 'VALIDATION_FAILED',
           message: error.message,
           fields: error.fields,
+        });
+      }
+      if (error instanceof IncidentEscalationChannelError) {
+        throw new BadRequestException({
+          code: 'ESCALATION_CHANNEL_UNAVAILABLE',
+          message: error.message,
+          fields: { steps: ['Choose configured incident channels from this project.'] },
         });
       }
       throw error;

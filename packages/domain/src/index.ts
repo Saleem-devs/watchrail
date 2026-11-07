@@ -8,7 +8,7 @@ export * from './http-redirect.js';
 export * from './heartbeat.js';
 export * from './maintenance-window.js';
 export * from './incident.js';
-export * from './incident-reminder-policy.js';
+export * from './incident-escalation-policy.js';
 export * from './monitor.js';
 export * from './multi-location.js';
 export * from './probe.js';

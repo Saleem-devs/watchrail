@@ -380,9 +380,38 @@ describe('database migrations', () => {
     });
 
     await applyMigration(migrations, notificationV2MigrationIndex);
-    for (let index = notificationV2MigrationIndex + 1; index < migrations.length; index += 1) {
+    const escalationPolicyMigrationIndex = migrations.findIndex((migration) =>
+      migration.sql.some((statement) => statement.includes('incident_escalation_steps')),
+    );
+    expect(escalationPolicyMigrationIndex).toBeGreaterThan(notificationV2MigrationIndex);
+    for (
+      let index = notificationV2MigrationIndex + 1;
+      index < escalationPolicyMigrationIndex;
+      index += 1
+    ) {
       await applyMigration(migrations, index);
     }
+    await connection.db.execute(sql`
+      update projects
+      set incident_reminder_delays_minutes = '[15, 60]'::jsonb
+      where organization_id = ${existingMonitor.organizationId}
+    `);
+    await applyMigration(migrations, escalationPolicyMigrationIndex);
+    for (let index = escalationPolicyMigrationIndex + 1; index < migrations.length; index += 1) {
+      await applyMigration(migrations, index);
+    }
+
+    const migratedEscalationPolicy = await connection.db.execute<{
+      incident_escalation_steps: Array<{ delayMinutes: number; channelIds: null }>;
+    }>(sql`
+      select incident_escalation_steps
+      from projects
+      where organization_id = ${existingMonitor.organizationId}
+    `);
+    expect(migratedEscalationPolicy.rows[0]?.incident_escalation_steps).toEqual([
+      { delayMinutes: 15, channelIds: null },
+      { delayMinutes: 60, channelIds: null },
+    ]);
 
     const migratedIncident = await connection.db.execute<{
       group_key: string;

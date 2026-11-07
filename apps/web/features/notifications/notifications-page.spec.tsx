@@ -359,8 +359,8 @@ describe('notifications page', () => {
     const user = userEvent.setup();
     vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
       const path = requestPath(input);
-      if (path.includes('incident-reminder-policy'))
-        return Promise.resolve(json({ data: { delaysMinutes: [] } }));
+      if (path.includes('incident-escalation-policy'))
+        return Promise.resolve(json({ data: { steps: [] } }));
       if (path.startsWith('/api/webhook-endpoints'))
         return Promise.resolve(json({ data: [channel] }));
       return Promise.resolve(json({ data: [] }));
@@ -396,8 +396,8 @@ describe('notifications page', () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
       const path = requestPath(input);
       if (init?.method === 'DELETE') return Promise.resolve(json({ data: { deleted: true } }));
-      if (path.includes('incident-reminder-policy'))
-        return Promise.resolve(json({ data: { delaysMinutes: [] } }));
+      if (path.includes('incident-escalation-policy'))
+        return Promise.resolve(json({ data: { steps: [] } }));
       if (path.startsWith('/api/webhook-endpoints'))
         return Promise.resolve(json({ data: [channel] }));
       return Promise.resolve(json({ data: [] }));
@@ -417,14 +417,23 @@ describe('notifications page', () => {
     );
   });
 
-  it('configures an ordered incident reminder schedule', async () => {
+  it('configures an ordered incident escalation schedule', async () => {
     const user = userEvent.setup();
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
       const path = requestPath(input);
-      if (path.includes('incident-reminder-policy')) {
+      if (path.includes('incident-escalation-policy')) {
         if (init?.method === 'PUT')
-          return Promise.resolve(json({ data: { delaysMinutes: [15, 60] } }));
-        return Promise.resolve(json({ data: { delaysMinutes: [] } }));
+          return Promise.resolve(
+            json({
+              data: {
+                steps: [
+                  { delayMinutes: 15, channelIds: null },
+                  { delayMinutes: 60, channelIds: null },
+                ],
+              },
+            }),
+          );
+        return Promise.resolve(json({ data: { steps: [] } }));
       }
       return Promise.resolve(json({ data: [] }));
     });
@@ -438,32 +447,79 @@ describe('notifications page', () => {
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        `/api/projects/${projectId}/incident-reminder-policy`,
+        `/api/projects/${projectId}/incident-escalation-policy`,
         expect.objectContaining({
           method: 'PUT',
-          body: JSON.stringify({ delaysMinutes: [15, 60] }),
+          body: JSON.stringify({
+            steps: [
+              { delayMinutes: 15, channelIds: null },
+              { delayMinutes: 60, channelIds: null },
+            ],
+          }),
         }),
       ),
     );
   });
 
-  it('keeps reminder settings unavailable until a failed load is retried successfully', async () => {
+  it('targets a later reminder to selected incident channels', async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const path = requestPath(input);
+      if (path.includes('incident-escalation-policy')) {
+        if (init?.method === 'PUT') {
+          return Promise.resolve(
+            json({
+              data: {
+                steps: [{ delayMinutes: 15, channelIds: [emailChannel.id] }],
+              },
+            }),
+          );
+        }
+        return Promise.resolve(json({ data: { steps: [] } }));
+      }
+      if (path.startsWith('/api/email-channels')) {
+        return Promise.resolve(json({ data: [emailChannel] }));
+      }
+      return Promise.resolve(json({ data: [] }));
+    });
+
+    render(<NotificationChannelsPage projectId={projectId} />);
+    await screen.findByText(emailChannel.name);
+    await user.click(await screen.findByLabelText('Send reminders'));
+    await user.click(screen.getByLabelText('Selected channels'));
+    expect(screen.getByLabelText(emailChannel.name)).toBeChecked();
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/projects/${projectId}/incident-escalation-policy`,
+        expect.objectContaining({
+          method: 'PUT',
+          body: JSON.stringify({
+            steps: [{ delayMinutes: 15, channelIds: [emailChannel.id] }],
+          }),
+        }),
+      ),
+    );
+  });
+
+  it('keeps escalation settings unavailable until a failed load is retried successfully', async () => {
     const user = userEvent.setup();
     let policyAttempts = 0;
     vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
       const path = requestPath(input);
-      if (path.includes('incident-reminder-policy')) {
+      if (path.includes('incident-escalation-policy')) {
         policyAttempts += 1;
         return policyAttempts === 1
           ? Promise.resolve(json({ message: 'Unavailable' }, 503))
-          : Promise.resolve(json({ data: { delaysMinutes: [15] } }));
+          : Promise.resolve(json({ data: { steps: [{ delayMinutes: 15, channelIds: null }] } }));
       }
       return Promise.resolve(json({ data: [] }));
     });
 
     render(<NotificationChannelsPage projectId={projectId} />);
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Reminder policy unavailable');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Escalation policy unavailable');
     expect(
       screen.queryByText('Opening alerts are sent once. No reminders are scheduled.'),
     ).not.toBeInTheDocument();
