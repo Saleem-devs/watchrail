@@ -5,6 +5,7 @@ import type { WebhookDeliveryStatus } from './webhook-delivery-read-repository.j
 
 export interface SlackDeliveryListItem {
   id: string;
+  deliverySequence: number;
   event: {
     id: string;
     type: 'INCIDENT_OPENED' | 'INCIDENT_RESOLVED' | 'TEST';
@@ -48,6 +49,7 @@ export class SlackDeliveryReadRepository {
     const rows = await this.db
       .select({
         id: notificationDeliveries.id,
+        deliverySequence: notificationDeliveries.deliverySequence,
         availableAt: notificationDeliveries.availableAt,
         claimToken: notificationDeliveries.claimToken,
         attemptCount: notificationDeliveries.attemptCount,
@@ -94,6 +96,7 @@ export class SlackDeliveryReadRepository {
       const status = deriveStatus(row, cutoff);
       return {
         id: row.id,
+        deliverySequence: row.deliverySequence,
         event: {
           id: row.eventId,
           type: row.eventType,

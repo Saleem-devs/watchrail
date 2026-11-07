@@ -2,7 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import type { SlackNotificationV1 } from '@watchrail/contracts';
 import type { WatchrailDatabase } from './client.js';
-import { suppressClaimedDeliveryForIncidentSilence } from './incident-notification-policy.js';
+import {
+  suppressClaimedDeliveryForIncidentSilence,
+  suppressClaimedReminderForClosedIncident,
+} from './incident-notification-policy.js';
 import { activeMaintenancePolicyForMonitor } from './maintenance-policy.js';
 
 export interface ClaimedSlackNotificationDelivery {
@@ -12,6 +15,7 @@ export interface ClaimedSlackNotificationDelivery {
   monitorId: string | null;
   channelId: string;
   channelVersionId: string;
+  deliverySequence: number;
   channelVersionNumber: number;
   webhookUrlEnvelope: unknown;
   payload: SlackNotificationV1;
@@ -36,6 +40,7 @@ export class SlackDeliveryRepository {
       monitorId: string | null;
       channelId: string;
       channelVersionId: string;
+      deliverySequence: number;
       channelVersionNumber: number;
       webhookUrlEnvelope: unknown;
       payload: SlackNotificationV1;
@@ -65,6 +70,7 @@ export class SlackDeliveryRepository {
         claimed.event_id as "eventId", event.monitor_id as "monitorId",
         claimed.endpoint_id as "channelId",
         claimed.endpoint_version_id as "channelVersionId",
+        claimed.delivery_sequence as "deliverySequence",
         version.version_number as "channelVersionNumber",
         version.slack_webhook_url_envelope as "webhookUrlEnvelope", event.payload,
         claimed.claim_token as "claimToken", claimed.attempt_count as "attemptCount"
@@ -95,6 +101,16 @@ export class SlackDeliveryRepository {
       const row = claimed.rows[0];
       if (!row) return { state: 'LOST_CLAIM' };
       const policyAt = new Date(row.policyAt);
+      if (
+        await suppressClaimedReminderForClosedIncident(tx, {
+          deliveryId: id,
+          claimToken: token,
+          organizationId,
+          policyAt,
+        })
+      ) {
+        return { state: 'SUPPRESSED' };
+      }
       if (
         await suppressClaimedDeliveryForIncidentSilence(tx, {
           deliveryId: id,

@@ -13,6 +13,7 @@ export type WebhookDeliveryStatus =
 
 export interface WebhookDeliveryListItem {
   id: string;
+  deliverySequence: number;
   event: {
     id: string;
     type: 'INCIDENT_OPENED' | 'INCIDENT_RESOLVED';
@@ -63,6 +64,7 @@ interface WebhookDeliveryCursorV1 {
 
 interface DeliveryRow {
   id: string;
+  deliverySequence: number;
   endpointId: string;
   endpointVersionId: string;
   availableAt: Date;
@@ -217,6 +219,7 @@ function requiredUrl(value: string | null): string {
 
 const deliverySelection = {
   id: notificationDeliveries.id,
+  deliverySequence: notificationDeliveries.deliverySequence,
   endpointId: notificationDeliveries.endpointId,
   endpointVersionId: notificationDeliveries.endpointVersionId,
   availableAt: notificationDeliveries.availableAt,
@@ -244,6 +247,7 @@ function toListItem(row: DeliveryRow, cutoff: Date): WebhookDeliveryListItem {
   const status = deriveStatus(row, cutoff);
   return {
     id: row.id,
+    deliverySequence: row.deliverySequence,
     event: {
       id: row.eventId,
       type: row.eventType,

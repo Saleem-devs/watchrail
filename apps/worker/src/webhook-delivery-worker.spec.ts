@@ -31,6 +31,7 @@ describe('WebhookDeliveryWorker', () => {
         const headers = new Map(input.headers.map((header) => [header.name, header.value]));
         expect(headers.get('x-watchrail-event-id')).toBe(eventId);
         expect(headers.get('x-watchrail-delivery-id')).toBe(deliveryId);
+        expect(headers.get('x-watchrail-delivery-sequence')).toBe('0');
         expect(headers.get('x-watchrail-timestamp')).toBe('1800000000');
         expect(headers.get('x-watchrail-signature')).toBe(
           signWebhookBody(signingSecret, 1_800_000_000, input.body),
@@ -221,6 +222,7 @@ function claim(): ClaimedNotificationDelivery {
     monitorId: '11111111-1111-4111-8111-111111111111',
     endpointId,
     endpointVersionId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+    deliverySequence: 0,
     endpointVersionNumber: 1,
     url: 'https://hooks.example.com/events',
     payload: {

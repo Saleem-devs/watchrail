@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import type { WatchrailDatabase } from './client.js';
-import { suppressClaimedDeliveryForIncidentSilence } from './incident-notification-policy.js';
+import {
+  suppressClaimedDeliveryForIncidentSilence,
+  suppressClaimedReminderForClosedIncident,
+} from './incident-notification-policy.js';
 import { activeMaintenancePolicyForMonitor } from './maintenance-policy.js';
 
 export interface ClaimedNotificationDelivery {
@@ -11,6 +14,7 @@ export interface ClaimedNotificationDelivery {
   monitorId: string;
   endpointId: string;
   endpointVersionId: string;
+  deliverySequence: number;
   endpointVersionNumber: number;
   url: string;
   signingSecretEnvelope: unknown;
@@ -36,6 +40,7 @@ export class NotificationDeliveryRepository {
         monitorId: string;
         endpointId: string;
         endpointVersionId: string;
+        deliverySequence: number;
         endpointVersionNumber: number;
         url: string;
         signingSecretEnvelope: unknown;
@@ -69,6 +74,7 @@ export class NotificationDeliveryRepository {
         claimed.event_id as "eventId", event.monitor_id as "monitorId",
         claimed.endpoint_id as "endpointId",
         claimed.endpoint_version_id as "endpointVersionId",
+        claimed.delivery_sequence as "deliverySequence",
         version.version_number as "endpointVersionNumber", version.url,
         version.signing_secret_envelope as "signingSecretEnvelope", event.payload,
         claimed.claim_token as "claimToken", claimed.attempt_count as "attemptCount",
@@ -105,6 +111,16 @@ export class NotificationDeliveryRepository {
       const row = claimed.rows[0];
       if (!row) return 'LOST_CLAIM';
       const dispatchAt = new Date(row.dispatchAt);
+      if (
+        await suppressClaimedReminderForClosedIncident(tx, {
+          deliveryId: id,
+          claimToken: token,
+          organizationId,
+          policyAt: dispatchAt,
+        })
+      ) {
+        return 'SUPPRESSED';
+      }
       if (
         await suppressClaimedDeliveryForIncidentSilence(tx, {
           deliveryId: id,

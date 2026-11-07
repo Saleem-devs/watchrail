@@ -41,6 +41,7 @@ describe('webhook endpoint presenters', () => {
   it('serializes delivery detail with an explicit allow-list', () => {
     const delivery = {
       id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      deliverySequence: 0,
       event: {
         id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
         type: 'INCIDENT_OPENED',

@@ -128,6 +128,7 @@ export class WebhookDeliveryWorker {
           { name: 'content-type', value: 'application/json' },
           { name: 'x-watchrail-event-id', value: delivery.eventId },
           { name: 'x-watchrail-delivery-id', value: delivery.id },
+          { name: 'x-watchrail-delivery-sequence', value: String(delivery.deliverySequence) },
           { name: 'x-watchrail-timestamp', value: String(timestamp) },
           { name: 'x-watchrail-signature', value: signature },
         ],

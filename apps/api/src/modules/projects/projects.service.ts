@@ -7,6 +7,11 @@ import {
 } from '@nestjs/common';
 import { ProjectRepository, type ProjectListItem, type ProjectRecord } from '@watchrail/db';
 import { parseNewProject, ProjectInputError } from '@watchrail/domain';
+import {
+  IncidentReminderPolicyInputError,
+  parseIncidentReminderPolicy,
+  type IncidentReminderPolicy,
+} from '@watchrail/domain';
 import type { RequestContext } from '../../auth/request-context.js';
 
 @Injectable()
@@ -47,6 +52,47 @@ export class ProjectsService {
       });
     }
     return project;
+  }
+
+  async getIncidentReminderPolicy(
+    context: RequestContext,
+    projectId: string,
+  ): Promise<IncidentReminderPolicy> {
+    const policy = await this.projects.getIncidentReminderPolicy(context.organizationId, projectId);
+    if (!policy) this.projectNotFound();
+    return policy;
+  }
+
+  async updateIncidentReminderPolicy(
+    context: RequestContext,
+    projectId: string,
+    input: unknown,
+  ): Promise<IncidentReminderPolicy> {
+    try {
+      const updated = await this.projects.updateIncidentReminderPolicy(
+        context.organizationId,
+        projectId,
+        parseIncidentReminderPolicy(input),
+      );
+      if (!updated) this.projectNotFound();
+      return updated;
+    } catch (error) {
+      if (error instanceof IncidentReminderPolicyInputError) {
+        throw new BadRequestException({
+          code: 'VALIDATION_FAILED',
+          message: error.message,
+          fields: error.fields,
+        });
+      }
+      throw error;
+    }
+  }
+
+  private projectNotFound(): never {
+    throw new NotFoundException({
+      code: 'PROJECT_NOT_FOUND',
+      message: 'Project not found.',
+    });
   }
 }
 

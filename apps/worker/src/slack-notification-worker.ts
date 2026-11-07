@@ -134,7 +134,10 @@ export class SlackNotificationWorker {
     }
 
     try {
-      const body = Buffer.from(JSON.stringify(renderSlackMessage(payload)), 'utf8');
+      const body = Buffer.from(
+        JSON.stringify(renderSlackMessage(payload, delivery.deliverySequence)),
+        'utf8',
+      );
       const elapsedBeforeDispatchMs = Math.max(0, this.monotonicNowMs() - budgetStartedAtMs);
       const dispatchBudgetMs = remainingMs - Math.ceil(elapsedBeforeDispatchMs);
       if (dispatchBudgetMs <= 0) return this.retryOrExhaust(delivery, 'LEASE_BUDGET_EXHAUSTED');
@@ -217,7 +220,10 @@ export class SlackNotificationWorker {
   }
 }
 
-export function renderSlackMessage(payload: SlackNotificationV1): {
+export function renderSlackMessage(
+  payload: SlackNotificationV1,
+  deliverySequence = 0,
+): {
   text: string;
   blocks: Array<Record<string, unknown>>;
 } {
@@ -242,9 +248,14 @@ export function renderSlackMessage(payload: SlackNotificationV1): {
     };
   }
   const opened = payload.eventType === 'INCIDENT_OPENED';
-  const title = opened ? 'Incident opened' : 'Incident resolved';
+  const reminder = opened && deliverySequence > 0;
+  const title = reminder
+    ? `Incident reminder ${deliverySequence}`
+    : opened
+      ? 'Incident opened'
+      : 'Incident resolved';
   const summary = opened
-    ? `${payload.monitor.name} is failing its monitoring policy.`
+    ? `${payload.monitor.name} ${reminder ? 'is still failing' : 'is failing'} its monitoring policy.`
     : `${payload.monitor.name} has recovered.`;
   return {
     text: `${title}: ${escapeSlack(payload.monitor.name)}`,

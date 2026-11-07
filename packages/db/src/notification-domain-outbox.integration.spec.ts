@@ -20,6 +20,7 @@ import { MaintenanceWindowRepository } from './maintenance-window-repository.js'
 import { migrateDatabase } from './migration.js';
 import { MonitorRepository } from './monitor-repository.js';
 import { NotificationDeliveryRepository } from './notification-delivery-repository.js';
+import { ProjectRepository } from './project-repository.js';
 import { ScheduledRoundRepository } from './scheduled-round-repository.js';
 import { SlackChannelRepository } from './slack-channel-repository.js';
 import { SlackDeliveryRepository } from './slack-delivery-repository.js';
@@ -237,6 +238,112 @@ describe('notification domain outbox', () => {
     expect(
       (await channels.findForOrganization(organizationId, channel.id))?.recipientEmails,
     ).toEqual(['new-oncall@example.com']);
+  });
+
+  it('snapshots reminder schedules and suppresses due reminders after resolution across every channel', async () => {
+    await new ProjectRepository(connection.db).updateIncidentReminderPolicy(
+      organizationId,
+      projectId,
+      { delaysMinutes: [15, 60] },
+    );
+    await createTestEndpoint(organizationId, 'Operations', 'https://hooks.example.com/events');
+    await new EmailChannelRepository(connection.db).create(organizationId, {
+      projectId,
+      name: 'Primary on-call',
+      recipientEmails: ['alerts@example.com'],
+      routing: {
+        monitorIds: [monitorId],
+        notifyOnIncident: true,
+        notifyOnRecovery: true,
+      },
+    });
+    await new SlackChannelRepository(connection.db).create(
+      organizationId,
+      {
+        projectId,
+        name: 'Operations Slack',
+        routing: {
+          monitorIds: [monitorId],
+          notifyOnIncident: true,
+          notifyOnRecovery: true,
+        },
+      },
+      () => slackWebhookUrlEnvelope,
+    );
+
+    await openIncident();
+    const staged = await connection.db.select().from(notificationDeliveries);
+    expect(staged).toHaveLength(9);
+    expect(staged.map((delivery) => delivery.deliverySequence).sort()).toEqual([
+      0, 0, 0, 1, 1, 1, 2, 2, 2,
+    ]);
+    for (const endpointId of new Set(staged.map((delivery) => delivery.endpointId))) {
+      const endpointDeliveries = staged
+        .filter((delivery) => delivery.endpointId === endpointId)
+        .sort((left, right) => left.deliverySequence - right.deliverySequence);
+      expect(
+        endpointDeliveries[1]!.availableAt.getTime() - endpointDeliveries[0]!.availableAt.getTime(),
+      ).toBe(15 * 60_000);
+      expect(
+        endpointDeliveries[2]!.availableAt.getTime() - endpointDeliveries[0]!.availableAt.getTime(),
+      ).toBe(60 * 60_000);
+    }
+
+    await new ProjectRepository(connection.db).updateIncidentReminderPolicy(
+      organizationId,
+      projectId,
+      { delaysMinutes: [] },
+    );
+    await connection.db.execute(sql`
+      update notification_deliveries
+      set delivered_at=clock_timestamp()
+      where delivery_sequence=0
+    `);
+    await complete((await scheduledRound()).id, healthy());
+    await connection.db.execute(sql`
+      update notification_deliveries
+      set available_at=clock_timestamp() - interval '1 second'
+      where delivery_sequence > 0
+    `);
+
+    const webhook = new NotificationDeliveryRepository(connection.db);
+    const email = new EmailDeliveryRepository(connection.db);
+    const slack = new SlackDeliveryRepository(connection.db);
+    const webhookClaim = await webhook.claimNext();
+    const emailClaim = await email.claimNext();
+    const slackClaim = await slack.claimNext();
+    expect(webhookClaim).not.toBeNull();
+    expect(emailClaim).not.toBeNull();
+    expect(slackClaim).not.toBeNull();
+    await expect(
+      webhook.applyMaintenancePolicy(
+        webhookClaim!.id,
+        webhookClaim!.claimToken,
+        organizationId,
+        monitorId,
+      ),
+    ).resolves.toBe('SUPPRESSED');
+    await expect(
+      email.applyMaintenancePolicy(
+        emailClaim!.id,
+        emailClaim!.claimToken,
+        organizationId,
+        monitorId,
+      ),
+    ).resolves.toMatchObject({ state: 'SUPPRESSED' });
+    await expect(
+      slack.applyMaintenancePolicy(
+        slackClaim!.id,
+        slackClaim!.claimToken,
+        organizationId,
+        monitorId,
+      ),
+    ).resolves.toMatchObject({ state: 'SUPPRESSED' });
+    expect(
+      (await connection.db.select().from(notificationDeliveries)).filter(
+        (delivery) => delivery.suppressionReason === 'INCIDENT_CLOSED',
+      ),
+    ).toHaveLength(3);
   });
 
   it('routes project-wide channels to monitors added after the channel is created', async () => {

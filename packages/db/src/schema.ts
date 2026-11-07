@@ -406,6 +406,10 @@ export const projects = pgTable(
     organizationId: uuid('organization_id').notNull(),
     name: varchar('name', { length: 120 }).notNull(),
     slug: varchar('slug', { length: 63 }).notNull(),
+    incidentReminderDelaysMinutes: jsonb('incident_reminder_delays_minutes')
+      .$type<number[]>()
+      .notNull()
+      .default([]),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -417,6 +421,23 @@ export const projects = pgTable(
     check(
       'projects_slug_format',
       sql`${table.slug} ~ '^[a-z0-9]+(-[a-z0-9]+)*$' and length(${table.slug}) between 2 and 63`,
+    ),
+    check(
+      'projects_incident_reminder_delays_valid',
+      sql`jsonb_typeof(${table.incidentReminderDelaysMinutes}) = 'array'
+        and jsonb_array_length(${table.incidentReminderDelaysMinutes}) <= 3
+        and not jsonb_path_exists(
+          ${table.incidentReminderDelaysMinutes},
+          '$[*] ? (@.type() != "number" || @ < 5 || @ > 10080 || @ != @.floor())'
+        )
+        and (
+          jsonb_array_length(${table.incidentReminderDelaysMinutes}) < 2
+          or jsonb_path_match(${table.incidentReminderDelaysMinutes}, '$[0] < $[1]')
+        )
+        and (
+          jsonb_array_length(${table.incidentReminderDelaysMinutes}) < 3
+          or jsonb_path_match(${table.incidentReminderDelaysMinutes}, '$[1] < $[2]')
+        )`,
     ),
   ],
 );
@@ -2038,6 +2059,7 @@ export const notificationDeliveries = pgTable(
     eventId: uuid('event_id').notNull(),
     endpointId: uuid('endpoint_id').notNull(),
     endpointVersionId: uuid('endpoint_version_id').notNull(),
+    deliverySequence: integer('delivery_sequence').notNull().default(0),
     availableAt: timestamp('available_at', { withTimezone: true }).notNull().defaultNow(),
     claimToken: uuid('claim_token'),
     attemptCount: integer('attempt_count').notNull().default(0),
@@ -2052,10 +2074,11 @@ export const notificationDeliveries = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    unique('notification_deliveries_event_endpoint_unique').on(
+    unique('notification_deliveries_event_endpoint_sequence_unique').on(
       table.organizationId,
       table.eventId,
       table.endpointId,
+      table.deliverySequence,
     ),
     foreignKey({
       name: 'notification_deliveries_event_fk',
@@ -2088,6 +2111,10 @@ export const notificationDeliveries = pgTable(
       table.id.desc(),
     ),
     check('notification_deliveries_attempt_count_non_negative', sql`${table.attemptCount} >= 0`),
+    check(
+      'notification_deliveries_sequence_non_negative',
+      sql`${table.deliverySequence} between 0 and 3`,
+    ),
     check(
       'notification_deliveries_http_status_range',
       sql`${table.lastHttpStatus} is null or ${table.lastHttpStatus} between 100 and 599`,

@@ -18,6 +18,7 @@ export function presentSlackChannel(channel: SlackChannelRecord) {
 export function presentSlackDelivery(delivery: SlackDeliveryListItem) {
   return {
     id: delivery.id,
+    deliverySequence: delivery.deliverySequence,
     event: { ...delivery.event, occurredAt: delivery.event.occurredAt.toISOString() },
     status: delivery.status,
     attemptCount: delivery.attemptCount,

@@ -18,6 +18,7 @@ export function presentEmailChannel(channel: EmailChannelRecord) {
 export function presentEmailDelivery(delivery: EmailDeliveryListItem) {
   return {
     id: delivery.id,
+    deliverySequence: delivery.deliverySequence,
     event: {
       ...delivery.event,
       occurredAt: delivery.event.occurredAt.toISOString(),

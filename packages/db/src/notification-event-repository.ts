@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, eq, isNull, or } from 'drizzle-orm';
+import { and, eq, isNull, or, sql } from 'drizzle-orm';
 import { createWebhookNotification } from '@watchrail/contracts';
 import type { WatchrailDatabase } from './client.js';
 import {
@@ -7,6 +7,7 @@ import {
   monitors,
   notificationDeliveries,
   notificationEvents,
+  projects,
   webhookEndpointMonitorRoutes,
   webhookEndpoints,
   webhookEndpointVersions,
@@ -35,8 +36,19 @@ export async function stageIncidentNotification(
 ): Promise<void> {
   if (transition.type === 'NONE') return;
   const [monitor] = await tx
-    .select({ name: monitors.name, projectId: monitors.projectId })
+    .select({
+      name: monitors.name,
+      projectId: monitors.projectId,
+      reminderDelaysMinutes: projects.incidentReminderDelaysMinutes,
+    })
     .from(monitors)
+    .innerJoin(
+      projects,
+      and(
+        eq(projects.organizationId, monitors.organizationId),
+        eq(projects.id, monitors.projectId),
+      ),
+    )
     .where(
       and(
         eq(monitors.organizationId, transition.organizationId),
@@ -136,13 +148,25 @@ export async function stageIncidentNotification(
   if (endpoints.some((endpoint) => endpoint.endpointVersionId === null)) {
     throw new Error('Enabled webhook endpoint is missing its current immutable version.');
   }
-  if (endpoints.length > 0)
+  if (endpoints.length > 0) {
+    const reminderDelaysMinutes = transition.type === 'OPENED' ? monitor.reminderDelaysMinutes : [];
+    const staged = await tx.execute<{ stagedAt: Date | string }>(sql`
+      select date_trunc('milliseconds', clock_timestamp()) as "stagedAt"
+    `);
+    const stagedAtValue = staged.rows[0]?.stagedAt;
+    if (!stagedAtValue) throw new Error('Notification staging clock is unavailable.');
+    const stagedAt = stagedAtValue instanceof Date ? stagedAtValue : new Date(stagedAtValue);
     await tx.insert(notificationDeliveries).values(
-      endpoints.map((endpoint) => ({
-        organizationId: transition.organizationId,
-        eventId,
-        endpointId: endpoint.endpointId,
-        endpointVersionId: endpoint.endpointVersionId!,
-      })),
+      endpoints.flatMap((endpoint) =>
+        [0, ...reminderDelaysMinutes].map((delayMinutes, deliverySequence) => ({
+          organizationId: transition.organizationId,
+          eventId,
+          endpointId: endpoint.endpointId,
+          endpointVersionId: endpoint.endpointVersionId!,
+          deliverySequence,
+          availableAt: new Date(stagedAt.getTime() + delayMinutes * 60_000),
+        })),
+      ),
     );
+  }
 }

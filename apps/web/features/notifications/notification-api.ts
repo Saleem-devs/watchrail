@@ -5,6 +5,7 @@ import type {
   NotificationMonitor,
   SlackChannel,
   WebhookChannel,
+  IncidentReminderPolicy,
 } from './types';
 
 export class NotificationRequestError extends Error {
@@ -69,6 +70,20 @@ export async function listNotificationMonitors(projectId: string): Promise<Notif
     page += 1;
   } while (page <= totalPages);
   return [...monitors.values()];
+}
+
+export function getIncidentReminderPolicy(projectId: string): Promise<IncidentReminderPolicy> {
+  return request(`/api/projects/${encodeURIComponent(projectId)}/incident-reminder-policy`);
+}
+
+export function updateIncidentReminderPolicy(
+  projectId: string,
+  delaysMinutes: number[],
+): Promise<IncidentReminderPolicy> {
+  return request(`/api/projects/${encodeURIComponent(projectId)}/incident-reminder-policy`, {
+    method: 'PUT',
+    body: JSON.stringify({ delaysMinutes }),
+  });
 }
 
 export function listWebhookChannels(projectId: string): Promise<WebhookChannel[]> {
