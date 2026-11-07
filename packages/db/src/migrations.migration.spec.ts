@@ -19,6 +19,11 @@ const legacyAuthUserId = '77777777-7777-4777-8777-777777777777';
 const legacyAuthOrganizationId = '88888888-8888-4888-8888-888888888888';
 const legacyAuthApiKeyId = '99999999-9999-4999-8999-999999999999';
 const legacyWebhookEndpointId = '12121212-1212-4121-8121-121212121212';
+const legacyIncidentId = '13131313-1313-4131-8131-131313131313';
+const legacyNotificationEventId = '14141414-1414-4141-8141-141414141414';
+const legacyNotificationDeliveryId = '15151515-1515-4151-8151-151515151515';
+const upgradedNotificationEventId = '16161616-1616-4161-8161-161616161616';
+const upgradedNotificationDeliveryId = '17171717-1717-4171-8171-171717171717';
 
 const existingRound = {
   id: '22222222-2222-4222-8222-222222222222',
@@ -231,9 +236,266 @@ describe('database migrations', () => {
       )
     `);
     await applyMigration(migrations, webhookPolicyMigrationIndex);
-    for (let index = webhookPolicyMigrationIndex + 1; index < migrations.length; index += 1) {
+    const incidentSeverityMigrationIndex = migrations.findIndex((migration) =>
+      migration.sql.some((statement) => statement.includes('ADD COLUMN "group_key"')),
+    );
+    const notificationV2MigrationIndex = migrations.findIndex((migration) =>
+      migration.sql.some((statement) => statement.includes("contractVersion' in ('1', '2')")),
+    );
+    expect(incidentSeverityMigrationIndex).toBeGreaterThan(webhookPolicyMigrationIndex);
+    expect(notificationV2MigrationIndex).toBe(incidentSeverityMigrationIndex + 1);
+    for (
+      let index = webhookPolicyMigrationIndex + 1;
+      index < incidentSeverityMigrationIndex;
+      index += 1
+    ) {
       await applyMigration(migrations, index);
     }
+
+    await connection.db.execute(sql`
+      insert into webhook_endpoint_versions (
+        organization_id,
+        endpoint_id,
+        version_number,
+        url,
+        signing_secret_envelope
+      ) values (
+        ${existingMonitor.organizationId},
+        ${legacyWebhookEndpointId},
+        1,
+        'https://example.test/watchrail',
+        '{}'::jsonb
+      )
+      on conflict do nothing
+    `);
+    const endpointVersion = await connection.db.execute<{ id: string }>(sql`
+      select id
+      from webhook_endpoint_versions
+      where organization_id = ${existingMonitor.organizationId}
+        and endpoint_id = ${legacyWebhookEndpointId}
+        and version_number = 1
+    `);
+    expect(endpointVersion.rows).toHaveLength(1);
+
+    const incidentOpenedAt = new Date('2026-11-07T12:00:00.000Z');
+    const legacyPayload = {
+      contractVersion: 1,
+      eventId: legacyNotificationEventId,
+      eventType: 'INCIDENT_OPENED',
+      occurredAt: incidentOpenedAt.toISOString(),
+      organizationId: existingMonitor.organizationId,
+      monitor: { id: existingMonitor.id, name: 'Existing monitor' },
+      incident: {
+        id: legacyIncidentId,
+        status: 'OPEN',
+        startedAt: incidentOpenedAt.toISOString(),
+        openedAt: incidentOpenedAt.toISOString(),
+        resolvedAt: null,
+      },
+      triggeringRoundId: existingRound.id,
+    };
+    await connection.db.execute(sql`
+      insert into incidents (
+        id,
+        organization_id,
+        monitor_id,
+        status,
+        started_at,
+        opened_at,
+        started_by_round_id,
+        opened_by_round_id,
+        severity
+      ) values (
+        ${legacyIncidentId},
+        ${existingMonitor.organizationId},
+        ${existingMonitor.id},
+        'OPEN',
+        ${incidentOpenedAt},
+        ${incidentOpenedAt},
+        ${existingRound.id},
+        ${existingRound.id},
+        null
+      )
+    `);
+    await connection.db.execute(sql`
+      insert into notification_events (
+        id,
+        organization_id,
+        monitor_id,
+        incident_id,
+        event_type,
+        occurred_at,
+        triggering_round_id,
+        payload
+      ) values (
+        ${legacyNotificationEventId},
+        ${existingMonitor.organizationId},
+        ${existingMonitor.id},
+        ${legacyIncidentId},
+        'INCIDENT_OPENED',
+        ${incidentOpenedAt},
+        ${existingRound.id},
+        ${JSON.stringify(legacyPayload)}::jsonb
+      )
+    `);
+    await connection.db.execute(sql`
+      insert into notification_deliveries (
+        id,
+        organization_id,
+        event_id,
+        endpoint_id,
+        endpoint_version_id
+      ) values (
+        ${legacyNotificationDeliveryId},
+        ${existingMonitor.organizationId},
+        ${legacyNotificationEventId},
+        ${legacyWebhookEndpointId},
+        ${endpointVersion.rows[0]!.id}
+      )
+    `);
+
+    await applyMigration(migrations, incidentSeverityMigrationIndex);
+    await expect(
+      connection.db.execute(sql`
+        insert into incidents (
+          organization_id,
+          monitor_id,
+          status,
+          started_at,
+          opened_at,
+          started_by_round_id,
+          opened_by_round_id
+        ) values (
+          ${existingMonitor.organizationId},
+          ${existingPausedMonitorId},
+          'OPEN',
+          ${incidentOpenedAt},
+          ${incidentOpenedAt},
+          ${existingRound.id},
+          ${existingRound.id}
+        )
+      `),
+    ).rejects.toThrow();
+
+    await applyMigration(migrations, notificationV2MigrationIndex);
+    for (let index = notificationV2MigrationIndex + 1; index < migrations.length; index += 1) {
+      await applyMigration(migrations, index);
+    }
+
+    const migratedIncident = await connection.db.execute<{
+      group_key: string;
+      severity: string;
+    }>(sql`
+      select group_key, severity
+      from incidents
+      where id = ${legacyIncidentId}
+    `);
+    expect(migratedIncident.rows).toEqual([
+      {
+        group_key: `availability:${existingMonitor.id}`,
+        severity: 'DOWN',
+      },
+    ]);
+    const retainedV1Delivery = await connection.db.execute<{
+      contract_version: string;
+      dead_at: Date | null;
+      delivered_at: Date | null;
+    }>(sql`
+      select
+        notification_events.payload->>'contractVersion' as contract_version,
+        notification_deliveries.dead_at,
+        notification_deliveries.delivered_at
+      from notification_deliveries
+      inner join notification_events
+        on notification_events.organization_id = notification_deliveries.organization_id
+       and notification_events.id = notification_deliveries.event_id
+      where notification_deliveries.id = ${legacyNotificationDeliveryId}
+    `);
+    expect(retainedV1Delivery.rows).toEqual([
+      { contract_version: '1', dead_at: null, delivered_at: null },
+    ]);
+
+    const incidentResolvedAt = new Date('2026-11-07T12:05:00.000Z');
+    await connection.db.execute(sql`
+      update incidents
+      set
+        status = 'RESOLVED',
+        resolved_at = ${incidentResolvedAt},
+        resolved_by_round_id = ${existingRound.id}
+      where id = ${legacyIncidentId}
+    `);
+    const upgradedPayload = {
+      contractVersion: 2,
+      eventId: upgradedNotificationEventId,
+      eventType: 'INCIDENT_RESOLVED',
+      occurredAt: incidentResolvedAt.toISOString(),
+      organizationId: existingMonitor.organizationId,
+      monitor: { id: existingMonitor.id, name: 'Existing monitor' },
+      incident: {
+        id: legacyIncidentId,
+        groupKey: `availability:${existingMonitor.id}`,
+        severity: 'DOWN',
+        status: 'RESOLVED',
+        startedAt: incidentOpenedAt.toISOString(),
+        openedAt: incidentOpenedAt.toISOString(),
+        resolvedAt: incidentResolvedAt.toISOString(),
+      },
+      triggeringRoundId: existingRound.id,
+    };
+    await connection.db.execute(sql`
+      insert into notification_events (
+        id,
+        organization_id,
+        monitor_id,
+        incident_id,
+        event_type,
+        occurred_at,
+        triggering_round_id,
+        payload
+      ) values (
+        ${upgradedNotificationEventId},
+        ${existingMonitor.organizationId},
+        ${existingMonitor.id},
+        ${legacyIncidentId},
+        'INCIDENT_RESOLVED',
+        ${incidentResolvedAt},
+        ${existingRound.id},
+        ${JSON.stringify(upgradedPayload)}::jsonb
+      )
+    `);
+    await connection.db.execute(sql`
+      insert into notification_deliveries (
+        id,
+        organization_id,
+        event_id,
+        endpoint_id,
+        endpoint_version_id
+      ) values (
+        ${upgradedNotificationDeliveryId},
+        ${existingMonitor.organizationId},
+        ${upgradedNotificationEventId},
+        ${legacyWebhookEndpointId},
+        ${endpointVersion.rows[0]!.id}
+      )
+    `);
+    const newV2Delivery = await connection.db.execute<{
+      contract_version: string;
+      dead_at: Date | null;
+      delivered_at: Date | null;
+    }>(sql`
+      select
+        notification_events.payload->>'contractVersion' as contract_version,
+        notification_deliveries.dead_at,
+        notification_deliveries.delivered_at
+      from notification_deliveries
+      inner join notification_events
+        on notification_events.organization_id = notification_deliveries.organization_id
+       and notification_events.id = notification_deliveries.event_id
+      where notification_deliveries.id = ${upgradedNotificationDeliveryId}
+    `);
+    expect(newV2Delivery.rows).toEqual([
+      { contract_version: '2', dead_at: null, delivered_at: null },
+    ]);
 
     const migratedWebhookPolicy = await connection.db.execute<{
       notify_on_incident: boolean;
@@ -344,11 +606,14 @@ describe('database migrations', () => {
       expect(Number.isNaN(new Date(state.tracking_started_at).getTime())).toBe(false);
     }
     const migratedIncidents = await connection.db.execute(sql`select id from incidents`);
-    expect(migratedIncidents.rows).toEqual([]);
+    expect(migratedIncidents.rows).toEqual([{ id: legacyIncidentId }]);
     const migratedNotificationEvents = await connection.db.execute(
-      sql`select id from notification_events`,
+      sql`select id from notification_events order by id`,
     );
-    expect(migratedNotificationEvents.rows).toEqual([]);
+    expect(migratedNotificationEvents.rows).toEqual([
+      { id: legacyNotificationEventId },
+      { id: upgradedNotificationEventId },
+    ]);
 
     const availability = await connection.pool.query<{
       monitor_id: string;
