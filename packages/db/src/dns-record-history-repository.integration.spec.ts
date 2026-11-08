@@ -424,16 +424,18 @@ describe('DnsRecordHistoryRepository', () => {
       }),
     );
     const round = await new ManualRoundRepository(connection.db).create(organizationId, monitor.id);
-    await connection.pool.query(
+    const availabilityStartResult = await connection.pool.query<{ accountedThrough: Date }>(
       `update monitor_availability_state
        set tracking_started_at = clock_timestamp() - interval '1 hour',
            state_since = clock_timestamp() - interval '1 hour',
            accounted_through = clock_timestamp() - interval '1 hour',
            enabled_since = clock_timestamp() - interval '1 hour',
            updated_at = clock_timestamp() - interval '1 hour'
-       where monitor_id = $1`,
+       where monitor_id = $1
+       returning accounted_through as "accountedThrough"`,
       [monitor.id],
     );
+    const availabilityStart = availabilityStartResult.rows[0]!.accountedThrough;
 
     let signalLocked!: () => void;
     const locked = new Promise<void>((resolve) => {
@@ -489,15 +491,53 @@ describe('DnsRecordHistoryRepository', () => {
           ),
         ]),
       ).resolves.toBe(1);
+
+      const availabilityEndResult = await connection.pool.query<{ accountedThrough: Date }>(
+        `select accounted_through as "accountedThrough"
+         from monitor_availability_state
+         where monitor_id = $1`,
+        [monitor.id],
+      );
+      const availabilityEnd = availabilityEndResult.rows[0]!.accountedThrough;
+      const daily = await connection.pool.query<{
+        dayUtc: string;
+        accountedMs: string;
+      }>(
+        `select to_char(day_utc, 'YYYY-MM-DD') as "dayUtc",
+                (available_ms + unavailable_ms + unknown_ms + excluded_ms)::text as "accountedMs"
+         from monitor_availability_daily
+         where monitor_id = $1
+         order by day_utc`,
+        [monitor.id],
+      );
+      const expectedDays: string[] = [];
+      const cursor = new Date(
+        Date.UTC(
+          availabilityStart.getUTCFullYear(),
+          availabilityStart.getUTCMonth(),
+          availabilityStart.getUTCDate(),
+        ),
+      );
+      const lastAccruedInstant = new Date(availabilityEnd.getTime() - 1);
+      const finalDay = new Date(
+        Date.UTC(
+          lastAccruedInstant.getUTCFullYear(),
+          lastAccruedInstant.getUTCMonth(),
+          lastAccruedInstant.getUTCDate(),
+        ),
+      );
+      while (cursor <= finalDay) {
+        expectedDays.push(cursor.toISOString().slice(0, 10));
+        cursor.setUTCDate(cursor.getUTCDate() + 1);
+      }
+      expect(daily.rows.map((row) => row.dayUtc)).toEqual(expectedDays);
+      expect(daily.rows.reduce((total, row) => total + Number(row.accountedMs), 0)).toBe(
+        availabilityEnd.getTime() - availabilityStart.getTime(),
+      );
     } finally {
       releaseHistory();
       await historyTransaction;
       await flush;
     }
-    const daily = await connection.pool.query<{ total: string }>(
-      `select count(*)::text as total from monitor_availability_daily where monitor_id = $1`,
-      [monitor.id],
-    );
-    expect(daily.rows[0]?.total).toBe('1');
   });
 });
