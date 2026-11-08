@@ -1453,7 +1453,7 @@ export const dnsRecordHistoryState = pgTable(
     }),
     check(
       'dns_record_history_state_baseline_answers_array',
-      sql`jsonb_typeof(${table.baselineAnswers}) = 'array' and jsonb_array_length(${table.baselineAnswers}) <= 32`,
+      sql`jsonb_typeof(${table.baselineAnswers}) = 'array'`,
     ),
     check(
       'dns_record_history_state_baseline_evidence_array',
@@ -1467,7 +1467,7 @@ export const dnsRecordHistoryState = pgTable(
     ),
     check(
       'dns_record_history_state_candidate_answers_array',
-      sql`${table.candidateAnswers} is null or (jsonb_typeof(${table.candidateAnswers}) = 'array' and jsonb_array_length(${table.candidateAnswers}) <= 32)`,
+      sql`${table.candidateAnswers} is null or jsonb_typeof(${table.candidateAnswers}) = 'array'`,
     ),
     check(
       'dns_record_history_state_candidate_evidence_array',
@@ -1537,8 +1537,8 @@ export const dnsRecordChanges = pgTable(
     ),
     check(
       'dns_record_changes_answers_arrays',
-      sql`jsonb_typeof(${table.beforeAnswers}) = 'array' and jsonb_array_length(${table.beforeAnswers}) <= 32
-        and jsonb_typeof(${table.afterAnswers}) = 'array' and jsonb_array_length(${table.afterAnswers}) <= 32`,
+      sql`jsonb_typeof(${table.beforeAnswers}) = 'array'
+        and jsonb_typeof(${table.afterAnswers}) = 'array'`,
     ),
     check(
       'dns_record_changes_evidence_arrays',

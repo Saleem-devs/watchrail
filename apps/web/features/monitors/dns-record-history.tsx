@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { Button } from '../../components/ui/button';
 import type { DnsRecordHistoryPage } from './types';
 
@@ -9,6 +9,16 @@ export function DnsRecordHistory({ monitorId }: { monitorId: string }) {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string>();
+  const [expandedChanges, setExpandedChanges] = useState<Set<string>>(() => new Set());
+
+  const toggleChange = (changeId: string) => {
+    setExpandedChanges((current) => {
+      const next = new Set(current);
+      if (next.has(changeId)) next.delete(changeId);
+      else next.add(changeId);
+      return next;
+    });
+  };
 
   useEffect(() => {
     let active = true;
@@ -122,28 +132,54 @@ export function DnsRecordHistory({ monitorId }: { monitorId: string }) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-rail-border">
-                  {page.items.map((item) => (
-                    <tr key={item.id}>
-                      <td className="px-4 py-4 align-top text-rail-muted">
-                        <time dateTime={item.confirmedAt} className="block text-rail-text">
-                          {formatDateTime(item.confirmedAt)}
-                        </time>
-                        <span className="mt-1 block">
-                          Detected {formatDateTime(item.detectedAt)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-4 align-top">
-                        <AnswerList answers={item.beforeAnswers} />
-                      </td>
-                      <td className="px-4 py-4 align-top">
-                        <AnswerList answers={item.afterAnswers} />
-                      </td>
-                      <td className="px-4 py-4 text-right align-top text-rail-muted">
-                        {item.afterLocationEvidence.length}{' '}
-                        {item.afterLocationEvidence.length === 1 ? 'location' : 'locations'}
-                      </td>
-                    </tr>
-                  ))}
+                  {page.items.map((item) => {
+                    const expanded = expandedChanges.has(item.id);
+                    return (
+                      <Fragment key={item.id}>
+                        <tr>
+                          <td className="px-4 py-4 align-top text-rail-muted">
+                            <time dateTime={item.confirmedAt} className="block text-rail-text">
+                              {formatDateTime(item.confirmedAt)}
+                            </time>
+                            <span className="mt-1 block">
+                              {item.recordType} {item.dnsName}
+                            </span>
+                            <span className="mt-1 block">
+                              Detected {formatDateTime(item.detectedAt)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-4 align-top">
+                            <AnswerList answers={item.beforeAnswers} />
+                          </td>
+                          <td className="px-4 py-4 align-top">
+                            <AnswerList answers={item.afterAnswers} />
+                          </td>
+                          <td className="px-4 py-4 text-right align-top text-rail-muted">
+                            <button
+                              type="button"
+                              className="min-h-8 text-xs font-medium text-rail-text underline decoration-rail-border underline-offset-4 hover:decoration-rail-text"
+                              aria-expanded={expanded}
+                              aria-controls={`dns-change-locations-${item.id}`}
+                              onClick={() => toggleChange(item.id)}
+                            >
+                              {expanded ? 'Hide' : 'View'} {item.afterLocationEvidence.length}{' '}
+                              {item.afterLocationEvidence.length === 1 ? 'location' : 'locations'}
+                            </button>
+                          </td>
+                        </tr>
+                        {expanded ? (
+                          <tr id={`dns-change-locations-${item.id}`}>
+                            <td colSpan={4} className="bg-rail-surface px-4 py-4">
+                              <LocationEvidenceComparison
+                                before={item.beforeLocationEvidence}
+                                after={item.afterLocationEvidence}
+                              />
+                            </td>
+                          </tr>
+                        ) : null}
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -156,14 +192,35 @@ export function DnsRecordHistory({ monitorId }: { monitorId: string }) {
                   <time dateTime={item.confirmedAt} className="text-xs font-medium text-rail-text">
                     Confirmed {formatDateTime(item.confirmedAt)}
                   </time>
+                  <p className="mt-1 mb-0 text-xs text-rail-muted">
+                    {item.recordType} {item.dnsName}
+                  </p>
                   <dl className="mt-4 grid gap-4">
                     <ChangeAnswers label="Before" answers={item.beforeAnswers} />
                     <ChangeAnswers label="After" answers={item.afterAnswers} />
                   </dl>
-                  <p className="mt-4 mb-0 border-t border-rail-border pt-3 text-xs text-rail-muted">
-                    Detected {formatDateTime(item.detectedAt)} · {item.afterLocationEvidence.length}{' '}
-                    {item.afterLocationEvidence.length === 1 ? 'location' : 'locations'}
-                  </p>
+                  <div className="mt-4 border-t border-rail-border pt-3">
+                    <button
+                      type="button"
+                      className="min-h-8 text-xs font-medium text-rail-text underline decoration-rail-border underline-offset-4"
+                      aria-expanded={expandedChanges.has(item.id)}
+                      aria-controls={`dns-change-mobile-locations-${item.id}`}
+                      onClick={() => toggleChange(item.id)}
+                    >
+                      {expandedChanges.has(item.id) ? 'Hide' : 'View'} per-location evidence
+                    </button>
+                    {expandedChanges.has(item.id) ? (
+                      <div id={`dns-change-mobile-locations-${item.id}`} className="mt-3">
+                        <LocationEvidenceComparison
+                          before={item.beforeLocationEvidence}
+                          after={item.afterLocationEvidence}
+                        />
+                      </div>
+                    ) : null}
+                    <p className="mt-2 mb-0 text-xs text-rail-muted">
+                      Detected {formatDateTime(item.detectedAt)}
+                    </p>
+                  </div>
                 </article>
               ))}
             </div>
@@ -196,6 +253,47 @@ export function DnsRecordHistory({ monitorId }: { monitorId: string }) {
       </div>
     </div>
   );
+}
+
+function LocationEvidenceComparison({
+  before,
+  after,
+}: {
+  before: Array<{ location: string; answers: string[] }>;
+  after: Array<{ location: string; answers: string[] }>;
+}) {
+  const locations = [...new Set([...before, ...after].map((item) => item.location))].sort();
+  const beforeByLocation = new Map(before.map((item) => [item.location, item.answers]));
+  const afterByLocation = new Map(after.map((item) => [item.location, item.answers]));
+  return (
+    <div className="grid gap-4" aria-label="Per-location DNS evidence">
+      {locations.map((location) => (
+        <div
+          key={location}
+          className="grid gap-3 border-b border-rail-border pb-4 last:border-b-0 last:pb-0 sm:grid-cols-[minmax(8rem,0.35fr)_1fr_1fr]"
+        >
+          <p className="m-0 text-xs font-medium text-rail-text">{formatLocation(location)}</p>
+          <div>
+            <p className="m-0 text-xs text-rail-muted">Before</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <AnswerList answers={beforeByLocation.get(location) ?? []} />
+            </div>
+          </div>
+          <div>
+            <p className="m-0 text-xs text-rail-muted">After</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <AnswerList answers={afterByLocation.get(location) ?? []} />
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function formatLocation(location: string): string {
+  if (location === 'local') return 'Local runner';
+  return `Probe ${location.slice(0, 8)}`;
 }
 
 function CurrentMetric({

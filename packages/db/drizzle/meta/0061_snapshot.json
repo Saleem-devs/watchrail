@@ -2500,7 +2500,7 @@
       "checkConstraints": {
         "dns_record_changes_answers_arrays": {
           "name": "dns_record_changes_answers_arrays",
-          "value": "jsonb_typeof(\"dns_record_changes\".\"before_answers\") = 'array' and jsonb_array_length(\"dns_record_changes\".\"before_answers\") <= 32\n        and jsonb_typeof(\"dns_record_changes\".\"after_answers\") = 'array' and jsonb_array_length(\"dns_record_changes\".\"after_answers\") <= 32"
+          "value": "jsonb_typeof(\"dns_record_changes\".\"before_answers\") = 'array'\n        and jsonb_typeof(\"dns_record_changes\".\"after_answers\") = 'array'"
         },
         "dns_record_changes_evidence_arrays": {
           "name": "dns_record_changes_evidence_arrays",
@@ -2656,7 +2656,7 @@
       "checkConstraints": {
         "dns_record_history_state_baseline_answers_array": {
           "name": "dns_record_history_state_baseline_answers_array",
-          "value": "jsonb_typeof(\"dns_record_history_state\".\"baseline_answers\") = 'array' and jsonb_array_length(\"dns_record_history_state\".\"baseline_answers\") <= 32"
+          "value": "jsonb_typeof(\"dns_record_history_state\".\"baseline_answers\") = 'array'"
         },
         "dns_record_history_state_baseline_evidence_array": {
           "name": "dns_record_history_state_baseline_evidence_array",
@@ -2668,7 +2668,7 @@
         },
         "dns_record_history_state_candidate_answers_array": {
           "name": "dns_record_history_state_candidate_answers_array",
-          "value": "\"dns_record_history_state\".\"candidate_answers\" is null or (jsonb_typeof(\"dns_record_history_state\".\"candidate_answers\") = 'array' and jsonb_array_length(\"dns_record_history_state\".\"candidate_answers\") <= 32)"
+          "value": "\"dns_record_history_state\".\"candidate_answers\" is null or jsonb_typeof(\"dns_record_history_state\".\"candidate_answers\") = 'array'"
         },
         "dns_record_history_state_candidate_evidence_array": {
           "name": "dns_record_history_state_candidate_evidence_array",

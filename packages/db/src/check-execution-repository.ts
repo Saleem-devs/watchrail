@@ -440,13 +440,14 @@ export async function finalizeCheckExecution(
     result: AuthoritativeCheckResult;
   },
 ): Promise<void> {
-  const [locationSummary] = await tx
-    .select({ locationCount: sql<number>`count(*)::integer` })
+  const roundLocations = await tx
+    .select({ location: checkRoundLocations.location })
     .from(checkRoundLocations)
     .where(eq(checkRoundLocations.roundId, input.roundId));
-  if ((locationSummary?.locationCount ?? 0) !== 1) {
+  if (roundLocations.length !== 1) {
     throw new Error('Legacy execution finalization requires exactly one round location.');
   }
+  const roundLocation = roundLocations[0]!.location;
   const redirects = parseHttpRedirectHops(input.result.redirects);
   const assertionEvaluation = parseStoredAssertionEvaluation(input.result.assertionEvaluation);
   const tlsCertificates = parseTlsCertificateEvidenceList(input.result.tlsCertificates ?? []);
@@ -517,7 +518,7 @@ export async function finalizeCheckExecution(
           dnsName: round.dnsName,
           recordType: round.dnsRecordType,
           answers: input.result.dnsAnswers ?? [],
-          locations: [{ location: 'local', answers: [...(input.result.dnsAnswers ?? [])] }],
+          locations: [{ location: roundLocation, answers: [...(input.result.dnsAnswers ?? [])] }],
         });
       } else {
         await clearDnsRecordCandidate(tx, {

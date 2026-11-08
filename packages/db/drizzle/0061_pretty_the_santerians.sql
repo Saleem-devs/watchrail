@@ -15,8 +15,8 @@ CREATE TABLE "dns_record_changes" (
 	"confirmed_round_id" uuid NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "dns_record_changes_confirmed_round_unique" UNIQUE("organization_id","monitor_id","confirmed_round_id"),
-	CONSTRAINT "dns_record_changes_answers_arrays" CHECK (jsonb_typeof("dns_record_changes"."before_answers") = 'array' and jsonb_array_length("dns_record_changes"."before_answers") <= 32
-        and jsonb_typeof("dns_record_changes"."after_answers") = 'array' and jsonb_array_length("dns_record_changes"."after_answers") <= 32),
+	CONSTRAINT "dns_record_changes_answers_arrays" CHECK (jsonb_typeof("dns_record_changes"."before_answers") = 'array'
+        and jsonb_typeof("dns_record_changes"."after_answers") = 'array'),
 	CONSTRAINT "dns_record_changes_evidence_arrays" CHECK (jsonb_typeof("dns_record_changes"."before_location_evidence") = 'array'
         and jsonb_typeof("dns_record_changes"."after_location_evidence") = 'array'),
 	CONSTRAINT "dns_record_changes_time_order" CHECK ("dns_record_changes"."detected_at" <= "dns_record_changes"."confirmed_at")
@@ -39,12 +39,12 @@ CREATE TABLE "dns_record_history_state" (
 	"last_processed_round_created_at" timestamp with time zone NOT NULL,
 	"last_processed_round_id" uuid NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "dns_record_history_state_baseline_answers_array" CHECK (jsonb_typeof("dns_record_history_state"."baseline_answers") = 'array' and jsonb_array_length("dns_record_history_state"."baseline_answers") <= 32),
+	CONSTRAINT "dns_record_history_state_baseline_answers_array" CHECK (jsonb_typeof("dns_record_history_state"."baseline_answers") = 'array'),
 	CONSTRAINT "dns_record_history_state_baseline_evidence_array" CHECK (jsonb_typeof("dns_record_history_state"."baseline_location_evidence") = 'array'),
 	CONSTRAINT "dns_record_history_state_candidate_consistent" CHECK (("dns_record_history_state"."candidate_answers" is null) = ("dns_record_history_state"."candidate_location_evidence" is null)
         and ("dns_record_history_state"."candidate_answers" is null) = ("dns_record_history_state"."candidate_first_observed_at" is null)
         and ("dns_record_history_state"."candidate_answers" is null) = ("dns_record_history_state"."candidate_round_id" is null)),
-	CONSTRAINT "dns_record_history_state_candidate_answers_array" CHECK ("dns_record_history_state"."candidate_answers" is null or (jsonb_typeof("dns_record_history_state"."candidate_answers") = 'array' and jsonb_array_length("dns_record_history_state"."candidate_answers") <= 32)),
+	CONSTRAINT "dns_record_history_state_candidate_answers_array" CHECK ("dns_record_history_state"."candidate_answers" is null or jsonb_typeof("dns_record_history_state"."candidate_answers") = 'array'),
 	CONSTRAINT "dns_record_history_state_candidate_evidence_array" CHECK ("dns_record_history_state"."candidate_location_evidence" is null or jsonb_typeof("dns_record_history_state"."candidate_location_evidence") = 'array')
 );
 --> statement-breakpoint

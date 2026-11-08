@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DnsRecordHistory } from './dns-record-history';
 
@@ -28,10 +28,28 @@ describe('DnsRecordHistory', () => {
                 id: '22222222-2222-4222-8222-222222222222',
                 dnsName: 'api.example.com',
                 recordType: 'A',
-                beforeAnswers: ['203.0.113.10'],
-                afterAnswers: ['203.0.113.20'],
-                beforeLocationEvidence: [{ location: 'local', answers: ['203.0.113.10'] }],
-                afterLocationEvidence: [{ location: 'local', answers: ['203.0.113.20'] }],
+                beforeAnswers: ['203.0.113.10', '203.0.113.20'],
+                afterAnswers: ['203.0.113.10', '203.0.113.20'],
+                beforeLocationEvidence: [
+                  {
+                    location: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+                    answers: ['203.0.113.10'],
+                  },
+                  {
+                    location: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+                    answers: ['203.0.113.20'],
+                  },
+                ],
+                afterLocationEvidence: [
+                  {
+                    location: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+                    answers: ['203.0.113.20'],
+                  },
+                  {
+                    location: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+                    answers: ['203.0.113.10'],
+                  },
+                ],
                 detectedAt: '2026-11-08T10:03:00.000Z',
                 confirmedAt: '2026-11-08T10:05:00.000Z',
                 configurationVersionId: '11111111-1111-4111-8111-111111111111',
@@ -46,10 +64,13 @@ describe('DnsRecordHistory', () => {
 
     render(<DnsRecordHistory monitorId="monitor-1" />);
 
-    expect(await screen.findByText('A api.example.com')).toBeInTheDocument();
+    expect((await screen.findAllByText('A api.example.com')).length).toBeGreaterThan(0);
     expect(screen.getByText('Possible change awaiting confirmation')).toBeInTheDocument();
     expect(screen.getAllByText('203.0.113.10').length).toBeGreaterThan(0);
     expect(screen.getAllByText('203.0.113.20').length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('button', { name: 'View 2 locations' }));
+    expect(screen.getAllByText('Probe aaaaaaaa').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Probe bbbbbbbb').length).toBeGreaterThan(0);
   });
 
   it('explains when no scheduled baseline exists', async () => {

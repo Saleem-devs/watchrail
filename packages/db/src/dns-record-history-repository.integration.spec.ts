@@ -1,9 +1,11 @@
 import { resolve } from 'node:path';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
+import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createMonitor, EMPTY_ASSERTION_EVALUATION } from '@watchrail/domain';
-import { CheckExecutionRepository } from './check-execution-repository.js';
+import { applyAvailabilityObservation, AvailabilityRepository } from './availability-repository.js';
+import { CheckExecutionRepository, finalizeCheckExecution } from './check-execution-repository.js';
 import { createDatabaseConnection, type DatabaseConnection } from './client.js';
 import {
   applyDnsRecordObservation,
@@ -15,6 +17,7 @@ import { ManualRoundRepository } from './manual-round-repository.js';
 import { migrateDatabase } from './migration.js';
 import { MonitorRepository } from './monitor-repository.js';
 import { ScheduledRoundRepository } from './scheduled-round-repository.js';
+import { checkExecutionAssignments, probeLocations } from './schema.js';
 
 const organizationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
@@ -37,7 +40,8 @@ describe('DnsRecordHistoryRepository', () => {
         check_round_locations,
         check_rounds,
         monitor_configuration_versions,
-        monitors
+        monitors,
+        probe_locations
       cascade
     `);
   });
@@ -328,5 +332,172 @@ describe('DnsRecordHistoryRepository', () => {
     );
     expect(page.current?.answers).toEqual(['203.0.113.20']);
     expect(page.items).toHaveLength(1);
+  });
+
+  it('records the immutable remote location and resets when the single-location scope changes', async () => {
+    const monitors = new MonitorRepository(connection.db);
+    const monitor = await monitors.create(
+      organizationId,
+      createMonitor({
+        type: 'DNS',
+        name: 'Regional DNS',
+        dnsName: 'regional.example.com',
+        dnsRecordType: 'A',
+      }),
+    );
+    const [lagos, frankfurt] = await connection.db
+      .insert(probeLocations)
+      .values([
+        { organizationId, name: 'Lagos', slug: 'lagos-dns-history' },
+        { organizationId, name: 'Frankfurt', slug: 'frankfurt-dns-history' },
+      ])
+      .returning();
+    const scheduled = new ScheduledRoundRepository(connection.db);
+    const finalizeRemote = async (answer: string) => {
+      await connection.pool.query(
+        `update monitors set next_check_at = clock_timestamp() - interval '1 second' where id = $1`,
+        [monitor.id],
+      );
+      const [round] = await scheduled.dispatchDue(1);
+      if (!round) throw new Error('Expected a remote scheduled DNS round.');
+      const [assignment] = await connection.db
+        .select()
+        .from(checkExecutionAssignments)
+        .where(eq(checkExecutionAssignments.roundId, round.id));
+      if (!assignment) throw new Error('Expected a remote DNS assignment.');
+      await connection.db.transaction((tx) =>
+        finalizeCheckExecution(tx, {
+          assignmentId: assignment.id,
+          organizationId,
+          roundId: round.id,
+          result: {
+            outcome: 'PASS',
+            stage: 'DNS',
+            reason: 'RECORDS_MATCHED',
+            statusCode: null,
+            responseTimeMs: 8,
+            attemptDurationMs: 9,
+            redirects: [],
+            assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
+            dnsAnswers: [answer],
+            checkedAt: new Date(),
+          },
+        }),
+      );
+    };
+
+    await monitors.updateLocations(organizationId, monitor.id, [lagos!.id]);
+    await finalizeRemote('203.0.113.10');
+    let page = await new DnsRecordHistoryRepository(connection.db).listForMonitor(
+      organizationId,
+      monitor.id,
+      { limit: 25 },
+    );
+    expect(page.current?.locationEvidence).toEqual([
+      { location: lagos!.id, answers: ['203.0.113.10'] },
+    ]);
+
+    await monitors.updateLocations(organizationId, monitor.id, [frankfurt!.id]);
+    await finalizeRemote('203.0.113.20');
+    await finalizeRemote('203.0.113.20');
+    page = await new DnsRecordHistoryRepository(connection.db).listForMonitor(
+      organizationId,
+      monitor.id,
+      { limit: 25 },
+    );
+    expect(page.current?.answers).toEqual(['203.0.113.20']);
+    expect(page.current?.locationEvidence).toEqual([
+      { location: frankfurt!.id, answers: ['203.0.113.20'] },
+    ]);
+    expect(page.candidate).toBeNull();
+    expect(page.items).toEqual([]);
+  });
+
+  it('allows availability flushing to insert a daily bucket while DNS history owns its monitor lock', async () => {
+    const monitor = await new MonitorRepository(connection.db).create(
+      organizationId,
+      createMonitor({
+        type: 'DNS',
+        name: 'Lock ordering DNS',
+        dnsName: 'locks.example.com',
+        dnsRecordType: 'A',
+      }),
+    );
+    const round = await new ManualRoundRepository(connection.db).create(organizationId, monitor.id);
+    await connection.pool.query(
+      `update monitor_availability_state
+       set tracking_started_at = clock_timestamp() - interval '1 hour',
+           state_since = clock_timestamp() - interval '1 hour',
+           accounted_through = clock_timestamp() - interval '1 hour',
+           enabled_since = clock_timestamp() - interval '1 hour',
+           updated_at = clock_timestamp() - interval '1 hour'
+       where monitor_id = $1`,
+      [monitor.id],
+    );
+
+    let signalLocked!: () => void;
+    const locked = new Promise<void>((resolve) => {
+      signalLocked = resolve;
+    });
+    let releaseHistory!: () => void;
+    const continueHistory = new Promise<void>((resolve) => {
+      releaseHistory = resolve;
+    });
+    const historyTransaction = connection.db.transaction(async (tx) => {
+      await applyDnsRecordObservation(tx, {
+        organizationId,
+        monitorId: monitor.id,
+        configurationVersionId: round.monitorConfigurationVersionId,
+        roundId: round.id,
+        roundCreatedAt: new Date(),
+        observedAt: new Date(),
+        dnsName: 'locks.example.com',
+        recordType: 'A',
+        answers: ['203.0.113.10'],
+        locations: [{ location: 'local', answers: ['203.0.113.10'] }],
+      });
+      signalLocked();
+      await continueHistory;
+      await applyAvailabilityObservation(
+        tx,
+        {
+          id: round.id,
+          createdAt: new Date(),
+          organizationId,
+          monitorId: monitor.id,
+        },
+        {
+          trigger: 'SCHEDULED',
+          outcome: 'PASS',
+          reason: 'RECORDS_MATCHED',
+          assertionOutcome: 'PASS',
+        },
+      );
+    });
+    await locked;
+
+    const flush = new AvailabilityRepository(connection.db).flushDue(1, 1);
+    try {
+      await expect(
+        Promise.race([
+          flush,
+          new Promise<never>((_, reject) =>
+            setTimeout(
+              () => reject(new Error('Availability flush blocked on DNS history lock.')),
+              2_000,
+            ),
+          ),
+        ]),
+      ).resolves.toBe(1);
+    } finally {
+      releaseHistory();
+      await historyTransaction;
+      await flush;
+    }
+    const daily = await connection.pool.query<{ total: string }>(
+      `select count(*)::text as total from monitor_availability_daily where monitor_id = $1`,
+      [monitor.id],
+    );
+    expect(daily.rows[0]?.total).toBe('1');
   });
 });

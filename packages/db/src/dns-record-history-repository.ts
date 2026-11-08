@@ -439,7 +439,9 @@ async function lockMonitor(
     .from(monitors)
     .where(and(eq(monitors.organizationId, organizationId), eq(monitors.id, monitorId)))
     .limit(1)
-    .for('update');
+    // Serialize history initialization without conflicting with the KEY SHARE lock
+    // acquired when availability flushing inserts a new daily bucket.
+    .for('no key update');
   if (!monitor) throw new Error('DNS history monitor is missing.');
 }
 
