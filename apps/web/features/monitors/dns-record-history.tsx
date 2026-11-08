@@ -157,7 +157,7 @@ export function DnsRecordHistory({ monitorId }: { monitorId: string }) {
                           <td className="px-4 py-4 text-right align-top text-rail-muted">
                             <button
                               type="button"
-                              className="min-h-8 text-xs font-medium text-rail-text underline decoration-rail-border underline-offset-4 hover:decoration-rail-text"
+                              className="min-h-8 whitespace-nowrap text-xs font-medium text-rail-text underline decoration-rail-border underline-offset-4 hover:decoration-rail-text"
                               aria-expanded={expanded}
                               aria-controls={`dns-change-locations-${item.id}`}
                               onClick={() => toggleChange(item.id)}
@@ -332,7 +332,7 @@ function AnswerList({ answers }: { answers: string[] }) {
   return answers.map((answer) => (
     <code
       key={answer}
-      className="max-w-full [overflow-wrap:anywhere] rounded-rail-control border border-rail-border bg-rail-surface px-2 py-1 text-xs text-rail-text"
+      className="inline-block min-w-0 max-w-full wrap-anywhere rounded-rail-control border border-rail-border bg-rail-surface px-2 py-1 text-xs whitespace-normal text-rail-text"
     >
       {answer}
     </code>

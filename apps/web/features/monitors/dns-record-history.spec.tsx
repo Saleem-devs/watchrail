@@ -89,4 +89,43 @@ describe('DnsRecordHistory', () => {
     expect(await screen.findByText('Waiting for a DNS baseline')).toBeInTheDocument();
     expect(screen.getByText('No confirmed DNS changes yet.')).toBeInTheDocument();
   });
+
+  it('keeps short answers intact while allowing long DNS values to wrap', async () => {
+    const shortIpv4 = '203.0.113.20';
+    const longIpv6 = '2001:0db8:85a3:0000:0000:8a2e:0370:7334';
+    const longTxt =
+      'v=spf1 include:_spf.example.com include:_spf.notifications.example.com include:_spf.transactional.example.com -all';
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: {
+            current: {
+              dnsName: 'example.com',
+              recordType: 'TXT',
+              answers: [shortIpv4, longIpv6, longTxt],
+              locationEvidence: [{ location: 'local', answers: [shortIpv4, longIpv6, longTxt] }],
+              observedAt: '2026-11-08T10:05:00.000Z',
+              configurationVersionId: '11111111-1111-4111-8111-111111111111',
+            },
+            candidate: null,
+            items: [],
+          },
+          page: { nextCursor: null },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    render(<DnsRecordHistory monitorId="monitor-1" />);
+
+    const shortAnswer = await screen.findByText(shortIpv4);
+    expect(screen.getByText(longIpv6)).toBeInTheDocument();
+    expect(screen.getByText(longTxt)).toBeInTheDocument();
+
+    for (const answer of [shortAnswer, screen.getByText(longIpv6), screen.getByText(longTxt)]) {
+      expect(answer).toHaveClass('wrap-anywhere', 'whitespace-normal');
+      expect(answer).not.toHaveClass('whitespace-nowrap', 'break-all');
+    }
+  });
 });
