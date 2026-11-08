@@ -17,6 +17,7 @@ import {
 } from '@watchrail/db';
 import {
   createMonitor,
+  EMPTY_ASSERTION_EVALUATION,
   parseNewProject,
   type ApiWorkflowConfigurationInput,
 } from '@watchrail/domain';
@@ -455,6 +456,131 @@ describe('monitor API', () => {
         dns_record_type: 'MX',
         dns_expected_values: ['10 mx.example.com'],
         timeout_ms: 5_000,
+      },
+    ]);
+  });
+
+  it('creates and updates a centrally scheduled domain expiry monitor', async () => {
+    const created = await request(app.getHttpServer())
+      .post(`/api/monitors?projectId=${projectId}`)
+      .send({
+        type: 'DOMAIN_EXPIRY',
+        name: 'Primary domain',
+        domainName: 'Example.COM.',
+        domainWarningDays: 14,
+      })
+      .expect(201);
+    expect(created.body.data).toMatchObject({
+      type: 'DOMAIN_EXPIRY',
+      name: 'Primary domain',
+      configuration: {
+        type: 'DOMAIN_EXPIRY',
+        domainName: 'example.com',
+        warningDays: 14,
+      },
+      intervalSeconds: 86_400,
+      timeoutMs: 10_000,
+      locations: ['local'],
+    });
+    const monitorId = created.body.data.id as string;
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/schedule-settings`)
+      .send({ intervalSeconds: 43_200 })
+      .expect(200);
+    const round = await new ManualRoundRepository(database).create(
+      '00000000-0000-4000-8000-000000000002',
+      monitorId,
+    );
+    const executions = new CheckExecutionRepository(database);
+    const claim = await executions.claim(round.id, 45_000);
+    if (claim.state !== 'CLAIMED' || claim.execution.type !== 'DOMAIN_EXPIRY') {
+      throw new Error('Expected the updated domain monitor to remain executable.');
+    }
+    expect(claim.execution).toMatchObject({ domainName: 'example.com', warningDays: 14 });
+    await expect(
+      executions.complete(claim.execution.assignmentId, claim.execution.claimToken, {
+        outcome: 'PASS',
+        stage: 'DOMAIN',
+        reason: 'DOMAIN_HEALTHY',
+        statusCode: null,
+        responseTimeMs: 25,
+        attemptDurationMs: 30,
+        redirects: [],
+        assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
+        domainExpiryResult: {
+          contractVersion: 1,
+          domainName: 'example.com',
+          expirationDate: '2027-11-08T00:00:00.000Z',
+          daysRemaining: 365,
+          warningDays: 14,
+        },
+        checkedAt: new Date('2026-11-08T00:00:00.000Z'),
+      }),
+    ).resolves.toBe(true);
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/locations`)
+      .send({ locations: ['local'] })
+      .expect(409)
+      .expect(({ body }) => {
+        expect(body.code).toBe('CENTRALIZED_MONITOR_LOCATIONS_IMMUTABLE');
+      });
+    const updated = await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/domain-expiry-settings`)
+      .send({ domainName: 'watchrail.app', warningDays: 45, timeoutMs: 5_000 })
+      .expect(200);
+    expect(updated.body.data).toMatchObject({
+      type: 'DOMAIN_EXPIRY',
+      configuration: {
+        type: 'DOMAIN_EXPIRY',
+        domainName: 'watchrail.app',
+        warningDays: 45,
+      },
+      timeoutMs: 5_000,
+      locations: ['local'],
+    });
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/dns-settings`)
+      .send({ name: 'watchrail.app', recordType: 'A', expectedValues: [], timeoutMs: 5_000 })
+      .expect(409);
+
+    const versions = await database.$client.query<{
+      type: string;
+      domain_name: string;
+      domain_warning_days: number;
+      timeout_ms: number;
+      interval_seconds: number;
+      locations: string[];
+    }>(
+      `select type, domain_name, domain_warning_days, timeout_ms, interval_seconds, locations
+       from monitor_configuration_versions
+       where monitor_id=$1
+       order by version_number`,
+      [monitorId],
+    );
+    expect(versions.rows).toEqual([
+      {
+        type: 'DOMAIN_EXPIRY',
+        domain_name: 'example.com',
+        domain_warning_days: 14,
+        timeout_ms: 10_000,
+        interval_seconds: 86_400,
+        locations: ['local'],
+      },
+      {
+        type: 'DOMAIN_EXPIRY',
+        domain_name: 'example.com',
+        domain_warning_days: 14,
+        timeout_ms: 10_000,
+        interval_seconds: 43_200,
+        locations: ['local'],
+      },
+      {
+        type: 'DOMAIN_EXPIRY',
+        domain_name: 'watchrail.app',
+        domain_warning_days: 45,
+        timeout_ms: 5_000,
+        interval_seconds: 43_200,
+        locations: ['local'],
       },
     ]);
   });

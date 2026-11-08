@@ -47,6 +47,9 @@ function supportingMetric(
     ).length;
     return { label: 'Runtime policies', value: String(runtimePolicies) };
   }
+  if (type === 'DOMAIN_EXPIRY') {
+    return { label: 'Renewal policies', value: String(monitors.length) };
+  }
   return {
     label: 'Active locations',
     value: String(new Set(monitors.flatMap((m) => m.locations)).size),
@@ -82,9 +85,11 @@ export function MonitorTypeOverview({
       ? 'Average connect latency'
       : type === 'DNS'
         ? 'Average lookup latency'
-        : type === 'API_WORKFLOW'
-          ? 'Average workflow duration'
-          : 'Average response latency';
+        : type === 'DOMAIN_EXPIRY'
+          ? 'Average RDAP lookup'
+          : type === 'API_WORKFLOW'
+            ? 'Average workflow duration'
+            : 'Average response latency';
 
   return (
     <section

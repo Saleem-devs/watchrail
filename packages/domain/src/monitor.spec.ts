@@ -99,6 +99,26 @@ describe('heartbeat monitoring contracts', () => {
 });
 
 describe('createMonitor', () => {
+  it('creates centrally scheduled domain-expiry monitors with a daily default', () => {
+    expect(
+      createMonitor({
+        type: 'DOMAIN_EXPIRY',
+        name: 'Primary domain',
+        domainName: 'Example.COM.',
+        domainWarningDays: 45,
+      }),
+    ).toEqual({
+      type: 'DOMAIN_EXPIRY',
+      name: 'Primary domain',
+      domainName: 'example.com',
+      domainWarningDays: 45,
+      timeoutMs: 10_000,
+      lifecycleState: 'ENABLED',
+      intervalSeconds: 86_400,
+      locations: ['local'],
+    });
+  });
+
   it('accepts canonical remote multi-location settings and rejects mixed local routing', () => {
     expect(
       parseMonitorLocationSettings({

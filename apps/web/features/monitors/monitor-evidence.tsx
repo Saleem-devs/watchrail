@@ -3,6 +3,7 @@ import { classifyScheduledObservation } from '@watchrail/domain';
 import type {
   AssertionEvaluation,
   ApiWorkflowResult,
+  DomainExpiryResultEvidence,
   HeartbeatResultEvidence,
   HistoryPage,
   IncidentHistoryPage,
@@ -216,6 +217,18 @@ export function ManualDiagnostic({
       />
     ) : (
       <HeartbeatEvidenceUnavailable label="Latest heartbeat evidence" reason={result.reason} />
+    );
+  }
+  if (protocol === 'DOMAIN_EXPIRY') {
+    return (
+      <DomainExpiryDiagnostic
+        evidence={result.domainExpiryResult}
+        outcome={result.outcome}
+        reason={result.reason}
+        checkedAt={result.checkedAt}
+        lookupTimeMs={result.responseTimeMs}
+        label="Latest domain expiry evidence"
+      />
     );
   }
   const assertionEvaluation = result.assertionEvaluation ?? {
@@ -745,6 +758,66 @@ function DnsAnswerEvidence({ answers }: { answers?: string[] | undefined }) {
   );
 }
 
+function DomainExpiryDiagnostic({
+  evidence,
+  outcome,
+  reason,
+  checkedAt,
+  lookupTimeMs,
+  label,
+}: {
+  evidence?: DomainExpiryResultEvidence | undefined;
+  outcome: 'PASS' | 'FAIL' | 'UNKNOWN';
+  reason: string;
+  checkedAt: string;
+  lookupTimeMs: number | null;
+  label: string;
+}) {
+  const message =
+    reason === 'DOMAIN_HEALTHY'
+      ? 'The registration remains outside the configured renewal warning window.'
+      : reason === 'DOMAIN_EXPIRING'
+        ? 'The registration is inside the configured renewal warning window.'
+        : reason === 'DOMAIN_EXPIRED'
+          ? 'The registry reports that this domain registration has expired.'
+          : reason === 'RDAP_UNSUPPORTED_TLD'
+            ? 'IANA does not publish an authoritative RDAP service for this top-level domain.'
+            : reason === 'DOMAIN_EXPIRATION_UNAVAILABLE'
+              ? 'The authoritative RDAP record did not include a usable expiration event.'
+              : 'Watchrail could not obtain authoritative RDAP data for this check.';
+  return (
+    <section className="mt-3 overflow-hidden rounded-rail-panel border border-rail-border bg-rail-sidebar/45">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rail-border px-4 py-3">
+        <h4 className="m-0 text-sm font-semibold text-rail-text">{label}</h4>
+        <OutcomeBadge outcome={outcome} />
+      </div>
+      <dl className="grid grid-cols-2 gap-px bg-rail-border sm:grid-cols-4">
+        <Metric label="Domain" value={evidence?.domainName ?? 'Unavailable'} />
+        <Metric
+          label="Expires"
+          value={
+            evidence?.expirationDate
+              ? new Date(evidence.expirationDate).toLocaleDateString()
+              : 'Unavailable'
+          }
+        />
+        <Metric
+          label="Remaining"
+          value={
+            evidence?.daysRemaining == null
+              ? '—'
+              : `${evidence.daysRemaining.toLocaleString()} days`
+          }
+        />
+        <Metric label="RDAP lookup" value={formatMilliseconds(lookupTimeMs)} />
+      </dl>
+      <p className="m-0 border-t border-rail-border px-4 py-3 text-xs leading-5 text-rail-subtle">
+        {message} Checked {new Date(checkedAt).toLocaleString()}.
+      </p>
+    </section>
+  );
+}
+
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0 bg-rail-header px-4 py-3">
@@ -1045,6 +1118,18 @@ function HistoricalSingleLocationEvidence({
       />
     ) : (
       <HeartbeatEvidenceUnavailable label="Historical heartbeat evidence" reason={result.reason} />
+    );
+  }
+  if (protocol === 'DOMAIN_EXPIRY') {
+    return (
+      <DomainExpiryDiagnostic
+        evidence={result.domainExpiryResult}
+        outcome={result.outcome}
+        reason={result.reason}
+        checkedAt={result.checkedAt}
+        lookupTimeMs={result.responseTimeMs}
+        label="Historical domain expiry evidence"
+      />
     );
   }
   const assertionEvaluation = result.assertionEvaluation ?? {

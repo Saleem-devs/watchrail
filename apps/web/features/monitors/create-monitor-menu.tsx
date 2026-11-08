@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useId, useRef, useState } from 'react';
 import {
   Activity,
+  CalendarClock,
   ChevronDown,
   Database,
   GitBranch,
@@ -21,6 +22,7 @@ function MonitorTypeIcon({ type }: { type: (typeof MONITOR_TYPES)[number]['type'
     DNS: Database,
     API_WORKFLOW: GitBranch,
     HEARTBEAT: Activity,
+    DOMAIN_EXPIRY: CalendarClock,
   };
   const Icon = icons[type];
   return <Icon className="size-4" strokeWidth={1.75} aria-hidden="true" />;

@@ -112,8 +112,10 @@ export function MonitorForm({
               {mode === 'create' && showTypeSelector ? (
                 <fieldset className="m-0 grid gap-2 border-0 p-0">
                   <legend className="p-0 text-xs font-medium text-rail-subtle">Protocol</legend>
-                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
-                    {(['HTTP', 'TCP', 'DNS', 'API_WORKFLOW', 'HEARTBEAT'] as const).map((type) => (
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                    {(
+                      ['HTTP', 'TCP', 'DNS', 'API_WORKFLOW', 'HEARTBEAT', 'DOMAIN_EXPIRY'] as const
+                    ).map((type) => (
                       <button
                         key={type}
                         type="button"
@@ -143,7 +145,9 @@ export function MonitorForm({
                               ? 'DNS record'
                               : type === 'API_WORKFLOW'
                                 ? 'API workflow'
-                                : 'Heartbeat'}
+                                : type === 'HEARTBEAT'
+                                  ? 'Heartbeat'
+                                  : 'Domain expiry'}
                       </button>
                     ))}
                   </div>
@@ -334,6 +338,77 @@ export function MonitorForm({
                     ) : null}
                   </label>
                 </div>
+              ) : monitorType === 'DOMAIN_EXPIRY' ? (
+                <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_12rem]">
+                  <label
+                    className="grid gap-1.5 text-xs font-medium text-rail-subtle"
+                    htmlFor={`${id}-domain-name`}
+                  >
+                    Registered domain
+                    <Input
+                      id={`${id}-domain-name`}
+                      name="domainName"
+                      type="text"
+                      defaultValue={
+                        initialValues?.configuration?.type === 'DOMAIN_EXPIRY'
+                          ? initialValues.configuration.domainName
+                          : ''
+                      }
+                      placeholder="example.com"
+                      autoComplete="off"
+                      spellCheck={false}
+                      required
+                      aria-describedby={
+                        errors.domainName ? `${id}-domain-name-error` : `${id}-domain-name-help`
+                      }
+                      aria-invalid={Boolean(errors.domainName)}
+                    />
+                    {errors.domainName ? (
+                      <span className="font-normal text-rail-danger" id={`${id}-domain-name-error`}>
+                        {errors.domainName[0]}
+                      </span>
+                    ) : (
+                      <span
+                        className="font-normal leading-5 text-rail-muted"
+                        id={`${id}-domain-name-help`}
+                      >
+                        Enter the registered domain without a protocol or path.
+                      </span>
+                    )}
+                  </label>
+                  <label
+                    className="grid content-start gap-1.5 text-xs font-medium text-rail-subtle"
+                    htmlFor={`${id}-domain-warning-days`}
+                  >
+                    Warn before expiry
+                    <div className="relative">
+                      <Input
+                        id={`${id}-domain-warning-days`}
+                        name="domainWarningDays"
+                        type="number"
+                        min="1"
+                        max="365"
+                        step="1"
+                        defaultValue={
+                          initialValues?.configuration?.type === 'DOMAIN_EXPIRY'
+                            ? initialValues.configuration.warningDays
+                            : 30
+                        }
+                        className="pr-12"
+                        required
+                        aria-invalid={Boolean(errors.domainWarningDays)}
+                      />
+                      <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-rail-muted">
+                        days
+                      </span>
+                    </div>
+                    {errors.domainWarningDays ? (
+                      <span className="font-normal text-rail-danger">
+                        {errors.domainWarningDays[0]}
+                      </span>
+                    ) : null}
+                  </label>
+                </div>
               ) : null}
             </div>
           </section>
@@ -488,6 +563,15 @@ export function MonitorForm({
                 {...(errors.dnsExpectedValues?.[0] ? { error: errors.dnsExpectedValues[0] } : {})}
               />
             </>
+          ) : monitorType === 'DOMAIN_EXPIRY' ? (
+            <section className="px-5 py-5 sm:px-6">
+              <h2 className="m-0 text-sm font-semibold text-rail-text">Registration expiry</h2>
+              <p className="mt-1 mb-0 max-w-2xl text-xs leading-5 text-rail-muted">
+                Watchrail checks the registry&apos;s authoritative RDAP record once a day. Expiring
+                and expired registrations affect monitor health; unavailable or unsupported RDAP
+                data remains indeterminate.
+              </p>
+            </section>
           ) : null}
         </div>
 
@@ -559,6 +643,15 @@ export function MonitorForm({
                 <p className="m-0 text-xs font-medium text-rail-text">Watchrail ingestion</p>
                 <p className="mt-1 mb-0 text-xs leading-5 text-rail-muted">
                   Your job sends signals to a private URL. No probe location is required.
+                </p>
+              </div>
+            ) : monitorType === 'DOMAIN_EXPIRY' ? (
+              <div className="rounded-rail-control border border-rail-border bg-rail-surface px-3 py-3">
+                <p className="m-0 text-xs font-medium text-rail-text">
+                  Authoritative registry data
+                </p>
+                <p className="mt-1 mb-0 text-xs leading-5 text-rail-muted">
+                  RDAP expiry checks run centrally and do not use probe locations.
                 </p>
               </div>
             ) : (

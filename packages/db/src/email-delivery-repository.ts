@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import type { EmailNotificationV1 } from '@watchrail/contracts';
+import type { MonitorType } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
 import {
   suppressClaimedDeliveryForIncidentSilence,
@@ -13,6 +14,7 @@ export interface ClaimedEmailNotificationDelivery {
   organizationId: string;
   eventId: string;
   monitorId: string | null;
+  monitorType: MonitorType | null;
   channelId: string;
   channelVersionId: string;
   deliverySequence: number;
@@ -37,6 +39,7 @@ export class EmailDeliveryRepository {
       organizationId: string;
       eventId: string;
       monitorId: string | null;
+      monitorType: MonitorType | null;
       channelId: string;
       channelVersionId: string;
       deliverySequence: number;
@@ -66,6 +69,7 @@ export class EmailDeliveryRepository {
       )
       select claimed.id, claimed.organization_id as "organizationId",
         claimed.event_id as "eventId", event.monitor_id as "monitorId",
+        monitor.type as "monitorType",
         claimed.endpoint_id as "channelId",
         claimed.endpoint_version_id as "channelVersionId",
         claimed.delivery_sequence as "deliverySequence",
@@ -74,6 +78,8 @@ export class EmailDeliveryRepository {
       from claimed
       join notification_events event on event.organization_id=claimed.organization_id
         and event.id=claimed.event_id
+      left join monitors monitor on monitor.organization_id=event.organization_id
+        and monitor.id=event.monitor_id
       join webhook_endpoint_versions version on version.organization_id=claimed.organization_id
         and version.endpoint_id=claimed.endpoint_id and version.id=claimed.endpoint_version_id
         and version.channel_type='EMAIL'

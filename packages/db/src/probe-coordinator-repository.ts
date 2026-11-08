@@ -181,6 +181,7 @@ export class ProbeCoordinatorRepository {
       if (
         !row ||
         row.type === 'HEARTBEAT' ||
+        row.type === 'DOMAIN_EXPIRY' ||
         row.attemptStatus !== 'LEASED' ||
         !row.attemptUnexpired ||
         row.claimTokenVerifier !== verifier(claimToken) ||

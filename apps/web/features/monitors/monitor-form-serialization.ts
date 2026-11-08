@@ -27,6 +27,23 @@ export function dnsSettingsFromForm(formData: FormData) {
   };
 }
 
+export function domainExpirySettingsFromForm(formData: FormData) {
+  return {
+    domainName: formEntryString(formData.get('domainName') ?? undefined),
+    warningDays: Number(formData.get('domainWarningDays')),
+    timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
+  };
+}
+
+export function domainExpiryCreateSettingsFromForm(formData: FormData) {
+  const settings = domainExpirySettingsFromForm(formData);
+  return {
+    domainName: settings.domainName,
+    domainWarningDays: settings.warningDays,
+    timeoutMs: settings.timeoutMs,
+  };
+}
+
 export function heartbeatSettingsFromForm(formData: FormData) {
   const type = formData.get('heartbeatScheduleType') === 'CRON' ? 'CRON' : 'INTERVAL';
   const graceSeconds = Number(formData.get('heartbeatGraceMinutes')) * 60;

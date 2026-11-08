@@ -20,6 +20,7 @@ function latencyHeader(type?: MonitorType): string {
   if (type === 'TCP') return 'Connect latency';
   if (type === 'DNS') return 'Lookup latency';
   if (type === 'API_WORKFLOW') return 'Workflow duration';
+  if (type === 'DOMAIN_EXPIRY') return 'RDAP lookup';
   return 'Latest latency';
 }
 
@@ -55,6 +56,10 @@ function monitorColumns(
           ) : monitor.configuration?.type === 'HEARTBEAT' ? (
             <span className="mt-0.5 block max-w-xs truncate text-xs text-rail-muted">
               Inbound heartbeat signal
+            </span>
+          ) : monitor.configuration?.type === 'DOMAIN_EXPIRY' ? (
+            <span className="mt-0.5 block max-w-xs truncate text-xs text-rail-muted">
+              {monitor.configuration.domainName} · {monitor.configuration.warningDays}-day warning
             </span>
           ) : (
             <a
@@ -94,7 +99,7 @@ function monitorColumns(
           : `${Math.round(monitor.currentCheck.responseTimeMs)} ms`,
     },
   ];
-  if (type !== 'HEARTBEAT') {
+  if (type !== 'HEARTBEAT' && type !== 'DOMAIN_EXPIRY') {
     columns.push({
       id: 'locations',
       header: 'Locations',

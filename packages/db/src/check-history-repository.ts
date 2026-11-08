@@ -14,7 +14,11 @@ import {
   type HeartbeatResultEvidenceV1,
   parseHeartbeatResultEvidence,
 } from '@watchrail/domain';
-import { parseApiWorkflowResult, type ApiWorkflowResult } from '@watchrail/check-engine';
+import {
+  parseApiWorkflowResult,
+  type ApiWorkflowResult,
+  type DomainExpiryEvidenceV1,
+} from '@watchrail/check-engine';
 import type { WatchrailDatabase } from './client.js';
 import {
   checkExecutionAssignments,
@@ -92,6 +96,7 @@ export interface CheckHistoryDetail extends Omit<CheckHistoryListItem, 'result'>
         dnsAnswers: string[];
         workflowResult: ApiWorkflowResult | null;
         heartbeatResult: HeartbeatResultEvidenceV1 | null;
+        domainExpiryResult: DomainExpiryEvidenceV1 | null;
         checkedAt: Date;
       }
     | {
@@ -202,6 +207,7 @@ interface HistoryRow {
   dnsAnswers: string[] | null;
   workflowResult: CheckExecutionResultRecord['workflowResult'];
   heartbeatResult: CheckExecutionResultRecord['heartbeatResult'];
+  domainExpiryResult: CheckExecutionResultRecord['domainExpiryResult'];
   checkedAt: Date | null;
 }
 
@@ -750,6 +756,7 @@ export class CheckHistoryRepository {
               row.heartbeatResult === null
                 ? null
                 : parseHeartbeatResultEvidence(row.heartbeatResult),
+            domainExpiryResult: row.domainExpiryResult,
             checkedAt: required(row.checkedAt),
           }
         : null,
@@ -795,6 +802,7 @@ const historySelection = {
   dnsAnswers: checkExecutionResults.dnsAnswers,
   workflowResult: checkExecutionResults.workflowResult,
   heartbeatResult: checkExecutionResults.heartbeatResult,
+  domainExpiryResult: checkExecutionResults.domainExpiryResult,
   checkedAt: checkExecutionResults.checkedAt,
 };
 

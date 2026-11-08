@@ -1,6 +1,8 @@
 export { executeHttpCheck } from './http-check.js';
 export { executeTcpCheck } from './tcp-check.js';
 export { executeDnsCheck } from './dns-check.js';
+export { executeDomainExpiryCheck } from './domain-expiry-check.js';
+export { NodeRdapDomainClient } from './node-rdap-client.js';
 export { executeApiWorkflow, validateApiWorkflow } from './api-workflow-check.js';
 export {
   parseApiWorkflowResult,
@@ -95,6 +97,15 @@ export type {
   DnsQueryInput,
   DnsQueryResolver,
 } from './dns-types.js';
+export type {
+  DomainExpiryCheckDependencies,
+  DomainExpiryCheckInput,
+  DomainExpiryCheckResult,
+  DomainExpiryEvidenceV1,
+  RdapDomainClient,
+  RdapDomainRecord,
+} from './domain-expiry-types.js';
+export { RdapUnsupportedTldError } from './domain-expiry-types.js';
 export {
   API_WORKFLOW_LIMITS,
   type ApiWorkflowDependencies,

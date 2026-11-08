@@ -19,6 +19,9 @@ describe('availability semantics', () => {
     ['UNKNOWN', 'INTERNAL_ERROR', 'PASS', 'UNKNOWN'],
     ['UNKNOWN', 'PROHIBITED_DESTINATION', 'PASS', 'UNKNOWN'],
     ['UNKNOWN', 'CERTIFICATE_EVIDENCE_UNAVAILABLE', 'PASS', 'UNKNOWN'],
+    ['UNKNOWN', 'RDAP_UNAVAILABLE', 'PASS', 'UNKNOWN'],
+    ['UNKNOWN', 'RDAP_UNSUPPORTED_TLD', 'PASS', 'UNKNOWN'],
+    ['UNKNOWN', 'DOMAIN_EXPIRATION_UNAVAILABLE', 'PASS', 'UNKNOWN'],
     ['PASS', 'COMPLETED', 'NOT_EVALUATED', 'UNKNOWN'],
   ] as const)(
     'maps scheduled observations to %s',

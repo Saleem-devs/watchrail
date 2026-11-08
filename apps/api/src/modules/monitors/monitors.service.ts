@@ -27,6 +27,7 @@ import {
   MonitorRepository,
   ProjectRepository,
   ArchivedMonitorLifecycleError,
+  CentralizedMonitorLocationError,
   MonitorUpdateNotFoundError,
   MonitorProtocolMismatchError,
   MonitorLocationUnavailableError,
@@ -75,6 +76,8 @@ import {
   RequestHeaderInputError,
   TcpMonitorInputError,
   DnsMonitorInputError,
+  parseDomainExpiryMonitorSettings,
+  DomainExpiryInputError,
 } from '@watchrail/domain';
 import type { CreateMonitorCommand } from '@watchrail/domain';
 import { RequestHeaderStorageError, storeRequestHeaders } from '@watchrail/http-header-security';
@@ -291,6 +294,44 @@ export class MonitorsService {
       return await this.monitors.updateDnsSettings(context.organizationId, monitorId, settings);
     } catch (error) {
       if (error instanceof DnsMonitorInputError) {
+        throw new BadRequestException({
+          code: 'VALIDATION_FAILED',
+          message: error.message,
+          fields: error.fields,
+        });
+      }
+      if (error instanceof MonitorUpdateNotFoundError) {
+        throw new NotFoundException({ code: 'MONITOR_NOT_FOUND', message: error.message });
+      }
+      if (error instanceof MonitorProtocolMismatchError) {
+        throw new ConflictException({ code: 'MONITOR_PROTOCOL_MISMATCH', message: error.message });
+      }
+      throw error;
+    }
+  }
+
+  async updateDomainExpirySettings(
+    context: RequestContext,
+    monitorId: string,
+    value: unknown,
+  ): Promise<MonitorRecord> {
+    try {
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        throw new DomainExpiryInputError({ domainName: ['Enter a registered domain name.'] });
+      }
+      const input = value as Record<string, unknown>;
+      const settings = parseDomainExpiryMonitorSettings({
+        domainName: input.domainName,
+        warningDays: input.warningDays,
+        timeoutMs: input.timeoutMs,
+      });
+      return await this.monitors.updateDomainExpirySettings(
+        context.organizationId,
+        monitorId,
+        settings,
+      );
+    } catch (error) {
+      if (error instanceof DomainExpiryInputError) {
         throw new BadRequestException({
           code: 'VALIDATION_FAILED',
           message: error.message,
@@ -978,6 +1019,12 @@ export class MonitorsService {
       }
       if (error instanceof MonitorLocationUnavailableError) {
         throw new ConflictException({ code: 'PROBE_LOCATION_UNAVAILABLE', message: error.message });
+      }
+      if (error instanceof CentralizedMonitorLocationError) {
+        throw new ConflictException({
+          code: 'CENTRALIZED_MONITOR_LOCATIONS_IMMUTABLE',
+          message: error.message,
+        });
       }
       if (error instanceof WorkspaceSecretUseAuthorizationError) {
         throw workspaceSecretUseForbidden();
