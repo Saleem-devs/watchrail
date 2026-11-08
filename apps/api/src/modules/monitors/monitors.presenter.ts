@@ -27,13 +27,14 @@ import {
 import {
   serializeApiWorkflowResult,
   type SerializedApiWorkflowResult,
+  type DomainExpiryEvidenceV1,
 } from '@watchrail/check-engine';
 
 export interface MonitorResponse {
   id: string;
   projectId: string;
   name: string;
-  type: 'HTTP' | 'TCP' | 'DNS' | 'API_WORKFLOW' | 'HEARTBEAT';
+  type: 'HTTP' | 'TCP' | 'DNS' | 'API_WORKFLOW' | 'HEARTBEAT' | 'DOMAIN_EXPIRY';
   configuration:
     | { type: 'HTTP'; url: string }
     | { type: 'TCP'; host: string; port: number }
@@ -44,7 +45,8 @@ export interface MonitorResponse {
         expectedValues: string[];
       }
     | { type: 'API_WORKFLOW'; workflow: unknown }
-    | { type: 'HEARTBEAT'; heartbeat: unknown };
+    | { type: 'HEARTBEAT'; heartbeat: unknown }
+    | { type: 'DOMAIN_EXPIRY'; domainName: string; warningDays: number };
   url: string;
   method: string;
   lifecycleState: string;
@@ -103,6 +105,7 @@ export interface CheckRoundResponse {
         tlsCertificates?: TlsCertificateEvidenceV1[];
         dnsAnswers?: string[];
         workflowResult?: SerializedApiWorkflowResult;
+        domainExpiryResult?: DomainExpiryEvidenceV1;
         checkedAt: string;
       }
     | {
@@ -143,27 +146,33 @@ export function toResponse(
     name: monitor.name,
     type: monitor.type,
     configuration:
-      monitor.type === 'API_WORKFLOW'
+      monitor.type === 'DOMAIN_EXPIRY'
         ? {
-            type: 'API_WORKFLOW',
-            workflow: redactApiWorkflow(monitor.apiWorkflow),
+            type: 'DOMAIN_EXPIRY',
+            domainName: requireDomainField(monitor.domainName, 'domain name'),
+            warningDays: requireDomainField(monitor.domainWarningDays, 'warning threshold'),
           }
-        : monitor.type === 'HEARTBEAT'
-          ? { type: 'HEARTBEAT', heartbeat: monitor.heartbeat }
-          : monitor.type === 'TCP'
-            ? {
-                type: 'TCP',
-                host: requireTcpField(monitor.tcpHost, 'host'),
-                port: requireTcpField(monitor.tcpPort, 'port'),
-              }
-            : monitor.type === 'DNS'
+        : monitor.type === 'API_WORKFLOW'
+          ? {
+              type: 'API_WORKFLOW',
+              workflow: redactApiWorkflow(monitor.apiWorkflow),
+            }
+          : monitor.type === 'HEARTBEAT'
+            ? { type: 'HEARTBEAT', heartbeat: monitor.heartbeat }
+            : monitor.type === 'TCP'
               ? {
-                  type: 'DNS',
-                  name: requireDnsField(monitor.dnsName, 'name'),
-                  recordType: requireDnsField(monitor.dnsRecordType, 'record type'),
-                  expectedValues: monitor.dnsExpectedValues,
+                  type: 'TCP',
+                  host: requireTcpField(monitor.tcpHost, 'host'),
+                  port: requireTcpField(monitor.tcpPort, 'port'),
                 }
-              : { type: 'HTTP', url: monitor.url },
+              : monitor.type === 'DNS'
+                ? {
+                    type: 'DNS',
+                    name: requireDnsField(monitor.dnsName, 'name'),
+                    recordType: requireDnsField(monitor.dnsRecordType, 'record type'),
+                    expectedValues: monitor.dnsExpectedValues,
+                  }
+                : { type: 'HTTP', url: monitor.url },
     url: monitor.url,
     method: monitor.method,
     lifecycleState: monitor.lifecycleState,
@@ -193,6 +202,11 @@ function requireTcpField<T>(value: T | null, field: string): T {
 
 function requireDnsField<T>(value: T | null, field: string): T {
   if (value === null) throw new Error(`Stored DNS monitor ${field} is missing.`);
+  return value;
+}
+
+function requireDomainField<T>(value: T | null, field: string): T {
+  if (value === null) throw new Error(`Stored domain expiry monitor ${field} is missing.`);
   return value;
 }
 
@@ -431,6 +445,9 @@ function toSingleLocationDetailResponse(
       ? {}
       : { workflowResult: serializeApiWorkflowResult(result.workflowResult) }),
     ...(result.heartbeatResult === null ? {} : { heartbeatResult: result.heartbeatResult }),
+    ...(result.domainExpiryResult === null
+      ? {}
+      : { domainExpiryResult: result.domainExpiryResult }),
     checkedAt: result.checkedAt.toISOString(),
   };
 }

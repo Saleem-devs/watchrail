@@ -47,6 +47,7 @@ import {
   httpConfigurationTestFromForm,
   apiWorkflowFromForm,
   dnsSettingsFromForm,
+  domainExpirySettingsFromForm,
   heartbeatSettingsFromForm,
   requiresStateChangingMethodConfirmation,
   requestBodyFromForm,
@@ -94,6 +95,9 @@ function monitorTargetLabel(monitor: Monitor | undefined): string {
   }
   if (monitor.configuration.type === 'HEARTBEAT') {
     return heartbeatScheduleLabel(monitor.configuration.heartbeat);
+  }
+  if (monitor.configuration.type === 'DOMAIN_EXPIRY') {
+    return `${monitor.configuration.domainName} · ${monitor.configuration.warningDays}-day warning`;
   }
   return monitor.url;
 }
@@ -396,7 +400,8 @@ export function Dashboard({
       requestedType === 'TCP' ||
       requestedType === 'DNS' ||
       requestedType === 'API_WORKFLOW' ||
-      requestedType === 'HEARTBEAT'
+      requestedType === 'HEARTBEAT' ||
+      requestedType === 'DOMAIN_EXPIRY'
         ? requestedType
         : 'HTTP';
 
@@ -407,55 +412,62 @@ export function Dashboard({
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify(
-            monitorType === 'HEARTBEAT'
+            monitorType === 'DOMAIN_EXPIRY'
               ? {
-                  type: 'HEARTBEAT',
+                  type: 'DOMAIN_EXPIRY',
                   name: formData.get('name'),
-                  heartbeat: heartbeatSettingsFromForm(formData),
+                  ...domainExpirySettingsFromForm(formData),
                   lifecycleState: formData.get('lifecycleState'),
                 }
-              : monitorType === 'API_WORKFLOW'
+              : monitorType === 'HEARTBEAT'
                 ? {
-                    type: 'API_WORKFLOW',
+                    type: 'HEARTBEAT',
                     name: formData.get('name'),
-                    workflow: apiWorkflowFromForm(formData),
-                    locations: [formData.get('location')],
+                    heartbeat: heartbeatSettingsFromForm(formData),
                     lifecycleState: formData.get('lifecycleState'),
                   }
-                : monitorType === 'TCP'
+                : monitorType === 'API_WORKFLOW'
                   ? {
-                      type: 'TCP',
+                      type: 'API_WORKFLOW',
                       name: formData.get('name'),
-                      ...tcpSettingsFromForm(formData),
+                      workflow: apiWorkflowFromForm(formData),
                       locations: [formData.get('location')],
                       lifecycleState: formData.get('lifecycleState'),
                     }
-                  : monitorType === 'DNS'
+                  : monitorType === 'TCP'
                     ? {
-                        type: 'DNS',
+                        type: 'TCP',
                         name: formData.get('name'),
-                        dnsName: dnsSettingsFromForm(formData).name,
-                        dnsRecordType: dnsSettingsFromForm(formData).recordType,
-                        dnsExpectedValues: dnsSettingsFromForm(formData).expectedValues,
-                        timeoutMs: dnsSettingsFromForm(formData).timeoutMs,
+                        ...tcpSettingsFromForm(formData),
                         locations: [formData.get('location')],
                         lifecycleState: formData.get('lifecycleState'),
                       }
-                    : {
-                        type: 'HTTP',
-                        name: formData.get('name'),
-                        url: urlFromMonitorForm(formData),
-                        statusPolicy: statusPolicyFromForm(formData),
-                        tlsPolicy: tlsPolicyFromForm(formData),
-                        method: formData.get('method'),
-                        timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
-                        followRedirects: formData.get('followRedirects') === 'on',
-                        locations: [formData.get('location')],
-                        lifecycleState: formData.get('lifecycleState'),
-                        requestHeaders: requestHeadersFromForm(formData),
-                        requestBody: requestBodyFromForm(formData),
-                        assertions: responseAssertionsFromForm(formData),
-                      },
+                    : monitorType === 'DNS'
+                      ? {
+                          type: 'DNS',
+                          name: formData.get('name'),
+                          dnsName: dnsSettingsFromForm(formData).name,
+                          dnsRecordType: dnsSettingsFromForm(formData).recordType,
+                          dnsExpectedValues: dnsSettingsFromForm(formData).expectedValues,
+                          timeoutMs: dnsSettingsFromForm(formData).timeoutMs,
+                          locations: [formData.get('location')],
+                          lifecycleState: formData.get('lifecycleState'),
+                        }
+                      : {
+                          type: 'HTTP',
+                          name: formData.get('name'),
+                          url: urlFromMonitorForm(formData),
+                          statusPolicy: statusPolicyFromForm(formData),
+                          tlsPolicy: tlsPolicyFromForm(formData),
+                          method: formData.get('method'),
+                          timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
+                          followRedirects: formData.get('followRedirects') === 'on',
+                          locations: [formData.get('location')],
+                          lifecycleState: formData.get('lifecycleState'),
+                          requestHeaders: requestHeadersFromForm(formData),
+                          requestBody: requestBodyFromForm(formData),
+                          assertions: responseAssertionsFromForm(formData),
+                        },
           ),
         },
       );
@@ -495,34 +507,36 @@ export function Dashboard({
     const formData = new FormData(event.currentTarget);
     const monitorType = detailMonitor?.type ?? 'HTTP';
     const requests: Array<{ path: string; body: unknown }> = [
-      monitorType === 'HEARTBEAT'
-        ? { path: 'heartbeat-settings', body: heartbeatSettingsFromForm(formData) }
-        : monitorType === 'API_WORKFLOW'
-          ? { path: 'api-workflow', body: apiWorkflowFromForm(formData) }
-          : monitorType === 'TCP'
-            ? { path: 'tcp-settings', body: tcpSettingsFromForm(formData) }
-            : monitorType === 'DNS'
-              ? { path: 'dns-settings', body: dnsSettingsFromForm(formData) }
-              : {
-                  path: 'configuration',
-                  body: {
-                    httpSettings: {
-                      url: urlFromMonitorForm(formData),
-                      method: formData.get('method'),
-                      timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
-                      followRedirects: formData.get('followRedirects') === 'on',
-                      requestBody: requestBodyFromForm(formData),
-                      tlsPolicy: tlsPolicyFromForm(formData),
+      monitorType === 'DOMAIN_EXPIRY'
+        ? { path: 'domain-expiry-settings', body: domainExpirySettingsFromForm(formData) }
+        : monitorType === 'HEARTBEAT'
+          ? { path: 'heartbeat-settings', body: heartbeatSettingsFromForm(formData) }
+          : monitorType === 'API_WORKFLOW'
+            ? { path: 'api-workflow', body: apiWorkflowFromForm(formData) }
+            : monitorType === 'TCP'
+              ? { path: 'tcp-settings', body: tcpSettingsFromForm(formData) }
+              : monitorType === 'DNS'
+                ? { path: 'dns-settings', body: dnsSettingsFromForm(formData) }
+                : {
+                    path: 'configuration',
+                    body: {
+                      httpSettings: {
+                        url: urlFromMonitorForm(formData),
+                        method: formData.get('method'),
+                        timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
+                        followRedirects: formData.get('followRedirects') === 'on',
+                        requestBody: requestBodyFromForm(formData),
+                        tlsPolicy: tlsPolicyFromForm(formData),
+                      },
+                      requestHeaders: requestHeadersFromForm(formData),
+                      assertions: responseAssertionsFromForm(formData),
                     },
-                    requestHeaders: requestHeadersFromForm(formData),
-                    assertions: responseAssertionsFromForm(formData),
                   },
-                },
       { path: 'name', body: { name: formData.get('name') } },
       ...(monitorType === 'HTTP'
         ? [{ path: 'status-policy', body: { statusPolicy: statusPolicyFromForm(formData) } }]
         : []),
-      ...(monitorType === 'HEARTBEAT'
+      ...(monitorType === 'HEARTBEAT' || monitorType === 'DOMAIN_EXPIRY'
         ? []
         : [{ path: 'locations', body: { locations: [formData.get('location')] } }]),
       { path: 'lifecycle', body: { lifecycleState: formData.get('lifecycleState') } },

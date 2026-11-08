@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Logger } from '@nestjs/common';
-import type { HttpExecutor, TcpConnector } from '@watchrail/check-engine';
+import type { HttpExecutor, RdapDomainClient, TcpConnector } from '@watchrail/check-engine';
 import type { CheckExecutionRepository, WorkspaceSecretRepository } from '@watchrail/db';
 import { encryptHeaderValue, type HeaderEncryptionKeyring } from '@watchrail/http-header-security';
 import {
@@ -52,6 +52,7 @@ function createHandler(
   executor: HttpExecutor,
   encryptionKeyring: HeaderEncryptionKeyring = keyring,
   tcpConnector?: TcpConnector,
+  rdapClient?: RdapDomainClient,
 ) {
   return new CheckRoundJobHandler(
     executions,
@@ -62,6 +63,8 @@ function createHandler(
     workspaceSecrets,
     workspaceSecretKeyring,
     tcpConnector,
+    undefined,
+    rdapClient,
   );
 }
 
@@ -85,6 +88,51 @@ function createDependencies() {
 }
 
 describe('CheckRoundJobHandler', () => {
+  it('executes a claimed domain-expiry check and persists bounded evidence', async () => {
+    const { executions, executor, claim, complete } = createDependencies();
+    claim.mockResolvedValue({
+      state: 'CLAIMED',
+      execution: {
+        type: 'DOMAIN_EXPIRY',
+        assignmentId: claimedExecution.assignmentId,
+        claimToken: claimedExecution.claimToken,
+        attemptNumber: 1,
+        timeoutMs: 10_000,
+        organizationId: claimedExecution.organizationId,
+        monitorId: claimedExecution.monitorId,
+        domainName: 'example.com',
+        warningDays: 30,
+      },
+    });
+    complete.mockResolvedValue(true);
+    const lookup = vi.fn<RdapDomainClient['lookup']>().mockResolvedValue({
+        expirationDate: new Date(Date.now() + 10 * 86_400_000),
+        sourceUrl: 'https://rdap.example/domain/example.com',
+      });
+    const rdapClient: RdapDomainClient = {
+      lookup,
+    };
+
+    await createHandler(executions, executor, keyring, undefined, rdapClient).handle(payload);
+
+    expect(lookup).toHaveBeenCalledWith('example.com', expect.any(AbortSignal));
+    expect(complete).toHaveBeenCalledWith(
+      claimedExecution.assignmentId,
+      claimedExecution.claimToken,
+      expect.objectContaining({
+        outcome: 'FAIL',
+        stage: 'DOMAIN',
+        reason: 'DOMAIN_EXPIRING',
+        domainExpiryResult: expect.objectContaining({
+          contractVersion: 1,
+          domainName: 'example.com',
+          daysRemaining: 10,
+          warningDays: 30,
+        }),
+      }),
+    );
+  });
+
   it('executes a claimed API workflow and persists its authoritative step trace', async () => {
     const { executions, executor, claim, complete, execute } = createDependencies();
     claim.mockResolvedValue({

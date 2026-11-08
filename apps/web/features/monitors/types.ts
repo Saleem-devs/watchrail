@@ -24,7 +24,7 @@ export interface TlsCertificateEvidence {
 export interface Monitor {
   id: string;
   projectId?: string;
-  type: 'HTTP' | 'TCP' | 'DNS' | 'API_WORKFLOW' | 'HEARTBEAT';
+  type: 'HTTP' | 'TCP' | 'DNS' | 'API_WORKFLOW' | 'HEARTBEAT' | 'DOMAIN_EXPIRY';
   name: string;
   url: string;
   configuration:
@@ -37,7 +37,8 @@ export interface Monitor {
         expectedValues: string[];
       }
     | { type: 'API_WORKFLOW'; workflow: ApiWorkflowConfiguration }
-    | { type: 'HEARTBEAT'; heartbeat: HeartbeatMonitorSettings };
+    | { type: 'HEARTBEAT'; heartbeat: HeartbeatMonitorSettings }
+    | { type: 'DOMAIN_EXPIRY'; domainName: string; warningDays: number };
   method: string;
   lifecycleState: 'ENABLED' | 'PAUSED';
   timeoutMs: number;
@@ -79,6 +80,14 @@ export interface HeartbeatResultEvidence {
   expectedAt: string | null;
   receivedAt: string | null;
   runtimeMs: number | null;
+}
+
+export interface DomainExpiryResultEvidence {
+  contractVersion: 1;
+  domainName: string;
+  expirationDate: string | null;
+  daysRemaining: number | null;
+  warningDays: number;
 }
 
 export interface ListPage {
@@ -152,6 +161,8 @@ export interface FieldErrors {
   dnsRecordType?: string[];
   dnsExpectedValues?: string[];
   dnsSettings?: string[];
+  domainName?: string[];
+  domainWarningDays?: string[];
   statusPolicy?: string[];
   method?: string[];
   timeoutMs?: string[];
@@ -311,7 +322,7 @@ export interface ManualRound {
     | {
         kind?: 'SINGLE_LOCATION';
         outcome: 'PASS' | 'FAIL' | 'UNKNOWN';
-        stage: 'DNS' | 'CONNECT' | 'TLS' | 'HTTP' | 'PROBE' | 'WORKFLOW' | 'HEARTBEAT';
+        stage: 'DNS' | 'CONNECT' | 'TLS' | 'HTTP' | 'PROBE' | 'WORKFLOW' | 'HEARTBEAT' | 'DOMAIN';
         reason: string;
         statusCode: number | null;
         responseTimeMs: number | null;
@@ -323,6 +334,7 @@ export interface ManualRound {
         dnsAnswers?: string[];
         workflowResult?: ApiWorkflowResult;
         heartbeatResult?: HeartbeatResultEvidence;
+        domainExpiryResult?: DomainExpiryResultEvidence;
         checkedAt: string;
       }
     | {

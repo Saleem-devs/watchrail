@@ -4,8 +4,10 @@ import {
   executeApiWorkflow,
   executeHttpCheck,
   executeTcpCheck,
+  executeDomainExpiryCheck,
   NodeDnsQueryResolver,
   NodeTcpConnector,
+  NodeRdapDomainClient,
 } from '@watchrail/check-engine';
 import { resolveApiWorkflowConfigurationWithWorkspaceSecrets } from '@watchrail/api-workflow-security';
 import type {
@@ -14,6 +16,7 @@ import type {
   HttpCheckResult,
   HttpExecutor,
   TcpConnector,
+  RdapDomainClient,
 } from '@watchrail/check-engine';
 import type { ExecuteCheckRoundJobV1 } from '@watchrail/contracts';
 import {
@@ -71,6 +74,7 @@ export class CheckRoundJobHandler implements CheckJobHandler {
     private readonly workspaceSecretKeyring: WorkspaceSecretKeyring,
     private readonly tcpConnector: TcpConnector = new NodeTcpConnector(),
     private readonly dnsResolver: DnsQueryResolver = new NodeDnsQueryResolver(),
+    private readonly rdapClient: RdapDomainClient = new NodeRdapDomainClient(),
   ) {}
 
   async handle(payload: ExecuteCheckRoundJobV1): Promise<void> {
@@ -139,6 +143,35 @@ export class CheckRoundJobHandler implements CheckJobHandler {
           redirects: [],
           assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
           checkedAt: tcpResult.checkedAt,
+        },
+      );
+      if (!completed) throw new CheckExecutionClaimLostError();
+      return;
+    }
+
+    if (claim.execution.type === 'DOMAIN_EXPIRY') {
+      const domainResult = await executeDomainExpiryCheck(
+        {
+          domainName: claim.execution.domainName,
+          warningDays: claim.execution.warningDays,
+          timeoutMs: claim.execution.timeoutMs,
+        },
+        { client: this.rdapClient },
+      );
+      const completed = await this.executions.complete(
+        claim.execution.assignmentId,
+        claim.execution.claimToken,
+        {
+          outcome: domainResult.outcome,
+          stage: domainResult.stage,
+          reason: domainResult.reason,
+          statusCode: null,
+          responseTimeMs: domainResult.lookupTimeMs,
+          attemptDurationMs: domainResult.attemptDurationMs,
+          redirects: [],
+          assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
+          domainExpiryResult: domainResult.evidence,
+          checkedAt: domainResult.checkedAt,
         },
       );
       if (!completed) throw new CheckExecutionClaimLostError();

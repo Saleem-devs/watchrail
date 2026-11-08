@@ -22,6 +22,7 @@ import {
   type DnsMonitorSettings,
   type StoredApiWorkflowConfigurationV1,
   type HeartbeatMonitorSettings,
+  type DomainExpiryMonitorSettings,
 } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
 import {
@@ -88,6 +89,8 @@ export class MonitorRepository {
           dnsName: monitor.type === 'DNS' ? monitor.dnsName : null,
           dnsRecordType: monitor.type === 'DNS' ? monitor.dnsRecordType : null,
           dnsExpectedValues: monitor.type === 'DNS' ? monitor.dnsExpectedValues : [],
+          domainName: monitor.type === 'DOMAIN_EXPIRY' ? monitor.domainName : null,
+          domainWarningDays: monitor.type === 'DOMAIN_EXPIRY' ? monitor.domainWarningDays : null,
           apiWorkflow,
           heartbeat: monitor.type === 'HEARTBEAT' ? monitor.heartbeat : null,
           heartbeatTokenHash: monitor.type === 'HEARTBEAT' ? heartbeatTokenHash : null,
@@ -127,6 +130,8 @@ export class MonitorRepository {
         dnsName: created.dnsName,
         dnsRecordType: created.dnsRecordType,
         dnsExpectedValues: created.dnsExpectedValues,
+        domainName: created.domainName,
+        domainWarningDays: created.domainWarningDays,
         apiWorkflow: created.apiWorkflow,
         heartbeat: created.heartbeat,
 
@@ -698,6 +703,66 @@ export class MonitorRepository {
         assertions: configuration.assertions,
         tlsPolicy: configuration.tlsPolicy,
         locations: configuration.locations,
+      });
+      return updated;
+    });
+  }
+
+  async updateDomainExpirySettings(
+    organizationId: string,
+    monitorId: string,
+    settings: DomainExpiryMonitorSettings,
+  ): Promise<MonitorRecord> {
+    return this.db.transaction(async (tx) => {
+      const [monitor] = await tx
+        .select()
+        .from(monitors)
+        .where(and(eq(monitors.id, monitorId), eq(monitors.organizationId, organizationId)))
+        .limit(1)
+        .for('update');
+      if (!monitor) throw new MonitorUpdateNotFoundError();
+      if (monitor.type !== 'DOMAIN_EXPIRY') throw new MonitorProtocolMismatchError('DOMAIN_EXPIRY');
+      const [configuration] = await tx
+        .select()
+        .from(monitorConfigurationVersions)
+        .where(
+          and(
+            eq(monitorConfigurationVersions.monitorId, monitorId),
+            eq(monitorConfigurationVersions.organizationId, organizationId),
+          ),
+        )
+        .orderBy(desc(monitorConfigurationVersions.versionNumber))
+        .limit(1);
+      if (!configuration) throw new Error('Monitor has no configuration version.');
+      const [updated] = await tx
+        .update(monitors)
+        .set({
+          domainName: settings.domainName,
+          domainWarningDays: settings.warningDays,
+          timeoutMs: settings.timeoutMs,
+          updatedAt: sql`now()`,
+        })
+        .where(and(eq(monitors.id, monitorId), eq(monitors.organizationId, organizationId)))
+        .returning();
+      if (!updated) throw new Error('The monitor update returned no record.');
+      await tx.insert(monitorConfigurationVersions).values({
+        organizationId,
+        monitorId,
+        versionNumber: configuration.versionNumber + 1,
+        type: 'DOMAIN_EXPIRY',
+        domainName: settings.domainName,
+        domainWarningDays: settings.warningDays,
+        url: configuration.url,
+        method: configuration.method,
+        timeoutMs: settings.timeoutMs,
+        intervalSeconds: configuration.intervalSeconds,
+        followRedirects: configuration.followRedirects,
+        statusPolicy: configuration.statusPolicy,
+        requestHeaders: configuration.requestHeaders,
+        requestBody: configuration.requestBody,
+        assertions: configuration.assertions,
+        tlsPolicy: configuration.tlsPolicy,
+        locations: ['local'],
       });
       return updated;
     });
@@ -1315,7 +1380,7 @@ export class MonitorLocationUnavailableError extends Error {
 }
 
 export class MonitorProtocolMismatchError extends Error {
-  constructor(protocol: 'HTTP' | 'TCP' | 'DNS' | 'API_WORKFLOW' | 'HEARTBEAT') {
+  constructor(protocol: 'HTTP' | 'TCP' | 'DNS' | 'API_WORKFLOW' | 'HEARTBEAT' | 'DOMAIN_EXPIRY') {
     super(`This operation requires a ${protocol} monitor.`);
     this.name = 'MonitorProtocolMismatchError';
   }

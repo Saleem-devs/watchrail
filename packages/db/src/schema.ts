@@ -28,7 +28,7 @@ import type {
   EncryptedWebhookSigningSecretV1,
 } from '@watchrail/webhook-security';
 import type { EncryptedWorkspaceSecretV1 } from '@watchrail/secret-vault-security';
-import type { SerializedApiWorkflowResult } from '@watchrail/check-engine';
+import type { DomainExpiryEvidenceV1, SerializedApiWorkflowResult } from '@watchrail/check-engine';
 import {
   CHECK_ROUND_STATUSES,
   AVAILABILITY_WINDOW_STATES,
@@ -93,6 +93,7 @@ export const checkResultStageEnum = pgEnum('check_result_stage', [
   'PROBE',
   'WORKFLOW',
   'HEARTBEAT',
+  'DOMAIN',
 ]);
 
 export const checkResultReasonEnum = pgEnum('check_result_reason', [
@@ -130,6 +131,12 @@ export const checkResultReasonEnum = pgEnum('check_result_reason', [
   'VARIABLE_UNAVAILABLE',
   'SIGNAL_RECEIVED',
   'HEARTBEAT_FAILED',
+  'DOMAIN_HEALTHY',
+  'DOMAIN_EXPIRING',
+  'DOMAIN_EXPIRED',
+  'RDAP_UNAVAILABLE',
+  'RDAP_UNSUPPORTED_TLD',
+  'DOMAIN_EXPIRATION_UNAVAILABLE',
   'MISSED_HEARTBEAT',
   'RUNTIME_EXCEEDED',
 ]);
@@ -456,6 +463,8 @@ export const monitors = pgTable(
     dnsName: text('dns_name'),
     dnsRecordType: varchar('dns_record_type', { length: 8 }).$type<DnsRecordType>(),
     dnsExpectedValues: jsonb('dns_expected_values').$type<string[]>().notNull().default([]),
+    domainName: text('domain_name'),
+    domainWarningDays: integer('domain_warning_days'),
     apiWorkflow: jsonb('api_workflow').$type<StoredApiWorkflowConfigurationV1>(),
     heartbeat: jsonb('heartbeat').$type<HeartbeatMonitorSettings>(),
     heartbeatTokenHash: varchar('heartbeat_token_hash', { length: 64 }),
@@ -519,15 +528,17 @@ export const monitors = pgTable(
     check(
       'monitors_protocol_configuration',
       sql`(
-        (${table.type}::text = 'HTTP' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.apiWorkflow} is null and ${table.heartbeat} is null and ${table.heartbeatTokenHash} is null)
+        (${table.type}::text = 'HTTP' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.domainName} is null and ${table.domainWarningDays} is null and ${table.apiWorkflow} is null and ${table.heartbeat} is null and ${table.heartbeatTokenHash} is null)
         or
-        (${table.type}::text = 'TCP' and length(btrim(${table.tcpHost})) > 0 and ${table.tcpPort} between 1 and 65535 and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.apiWorkflow} is null and ${table.heartbeat} is null and ${table.heartbeatTokenHash} is null)
+        (${table.type}::text = 'TCP' and length(btrim(${table.tcpHost})) > 0 and ${table.tcpPort} between 1 and 65535 and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.domainName} is null and ${table.domainWarningDays} is null and ${table.apiWorkflow} is null and ${table.heartbeat} is null and ${table.heartbeatTokenHash} is null)
         or
-        (${table.type}::text = 'DNS' and ${table.tcpHost} is null and ${table.tcpPort} is null and length(btrim(${table.dnsName})) > 0 and ${table.dnsRecordType} in ('A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS') and ${table.apiWorkflow} is null and ${table.heartbeat} is null and ${table.heartbeatTokenHash} is null)
+        (${table.type}::text = 'DNS' and ${table.tcpHost} is null and ${table.tcpPort} is null and length(btrim(${table.dnsName})) > 0 and ${table.dnsRecordType} in ('A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS') and ${table.domainName} is null and ${table.domainWarningDays} is null and ${table.apiWorkflow} is null and ${table.heartbeat} is null and ${table.heartbeatTokenHash} is null)
         or
-        (${table.type}::text = 'API_WORKFLOW' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and jsonb_typeof(${table.apiWorkflow}) = 'object' and ${table.heartbeat} is null and ${table.heartbeatTokenHash} is null)
+        (${table.type}::text = 'API_WORKFLOW' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.domainName} is null and ${table.domainWarningDays} is null and jsonb_typeof(${table.apiWorkflow}) = 'object' and ${table.heartbeat} is null and ${table.heartbeatTokenHash} is null)
         or
-        (${table.type}::text = 'HEARTBEAT' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.apiWorkflow} is null and jsonb_typeof(${table.heartbeat}) = 'object' and length(${table.heartbeatTokenHash}) = 64)
+        (${table.type}::text = 'HEARTBEAT' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.domainName} is null and ${table.domainWarningDays} is null and ${table.apiWorkflow} is null and jsonb_typeof(${table.heartbeat}) = 'object' and length(${table.heartbeatTokenHash}) = 64)
+        or
+        (${table.type}::text = 'DOMAIN_EXPIRY' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and length(btrim(${table.domainName})) > 0 and ${table.domainWarningDays} between 1 and 365 and ${table.apiWorkflow} is null and ${table.heartbeat} is null and ${table.heartbeatTokenHash} is null)
       )`,
     ),
 
@@ -832,6 +843,8 @@ export const monitorConfigurationVersions = pgTable(
     dnsName: text('dns_name'),
     dnsRecordType: varchar('dns_record_type', { length: 8 }).$type<DnsRecordType>(),
     dnsExpectedValues: jsonb('dns_expected_values').$type<string[]>().notNull().default([]),
+    domainName: text('domain_name'),
+    domainWarningDays: integer('domain_warning_days'),
     apiWorkflow: jsonb('api_workflow').$type<StoredApiWorkflowConfigurationV1>(),
     heartbeat: jsonb('heartbeat').$type<HeartbeatMonitorSettings>(),
 
@@ -891,15 +904,17 @@ export const monitorConfigurationVersions = pgTable(
     check(
       'monitor_configuration_versions_protocol_configuration',
       sql`(
-        (${table.type}::text = 'HTTP' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.apiWorkflow} is null and ${table.heartbeat} is null)
+        (${table.type}::text = 'HTTP' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.domainName} is null and ${table.domainWarningDays} is null and ${table.apiWorkflow} is null and ${table.heartbeat} is null)
         or
-        (${table.type}::text = 'TCP' and length(btrim(${table.tcpHost})) > 0 and ${table.tcpPort} between 1 and 65535 and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.apiWorkflow} is null and ${table.heartbeat} is null)
+        (${table.type}::text = 'TCP' and length(btrim(${table.tcpHost})) > 0 and ${table.tcpPort} between 1 and 65535 and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.domainName} is null and ${table.domainWarningDays} is null and ${table.apiWorkflow} is null and ${table.heartbeat} is null)
         or
-        (${table.type}::text = 'DNS' and ${table.tcpHost} is null and ${table.tcpPort} is null and length(btrim(${table.dnsName})) > 0 and ${table.dnsRecordType} in ('A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS') and ${table.apiWorkflow} is null and ${table.heartbeat} is null)
+        (${table.type}::text = 'DNS' and ${table.tcpHost} is null and ${table.tcpPort} is null and length(btrim(${table.dnsName})) > 0 and ${table.dnsRecordType} in ('A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS') and ${table.domainName} is null and ${table.domainWarningDays} is null and ${table.apiWorkflow} is null and ${table.heartbeat} is null)
         or
-        (${table.type}::text = 'API_WORKFLOW' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and jsonb_typeof(${table.apiWorkflow}) = 'object' and ${table.heartbeat} is null)
+        (${table.type}::text = 'API_WORKFLOW' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.domainName} is null and ${table.domainWarningDays} is null and jsonb_typeof(${table.apiWorkflow}) = 'object' and ${table.heartbeat} is null)
         or
-        (${table.type}::text = 'HEARTBEAT' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.apiWorkflow} is null and jsonb_typeof(${table.heartbeat}) = 'object')
+        (${table.type}::text = 'HEARTBEAT' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.domainName} is null and ${table.domainWarningDays} is null and ${table.apiWorkflow} is null and jsonb_typeof(${table.heartbeat}) = 'object')
+        or
+        (${table.type}::text = 'DOMAIN_EXPIRY' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and length(btrim(${table.domainName})) > 0 and ${table.domainWarningDays} between 1 and 365 and ${table.apiWorkflow} is null and ${table.heartbeat} is null)
       )`,
     ),
 
@@ -1298,6 +1313,7 @@ export const checkExecutionResults = pgTable(
     dnsAnswers: jsonb('dns_answers').$type<string[]>().notNull().default([]),
     workflowResult: jsonb('workflow_result').$type<SerializedApiWorkflowResult>(),
     heartbeatResult: jsonb('heartbeat_result').$type<HeartbeatResultEvidenceV1>(),
+    domainExpiryResult: jsonb('domain_expiry_result').$type<DomainExpiryEvidenceV1>(),
     checkedAt: timestamp('checked_at', { withTimezone: true }).notNull(),
 
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -1335,6 +1351,8 @@ export const checkExecutionResults = pgTable(
           (${table.stage} = 'CONNECT' and ${table.reason} = 'CONNECTED')
           or
           (${table.stage} = 'DNS' and ${table.reason}::text in ('RECORDS_MATCHED', 'NO_RECORDS', 'RECORD_MISMATCH'))
+          or
+          (${table.stage}::text = 'DOMAIN' and ${table.reason}::text in ('DOMAIN_HEALTHY', 'DOMAIN_EXPIRING', 'DOMAIN_EXPIRED', 'DOMAIN_EXPIRATION_UNAVAILABLE'))
         ))
       )`,
     ),
@@ -1379,6 +1397,10 @@ export const checkExecutionResults = pgTable(
     check(
       'check_execution_results_heartbeat_result_consistent',
       sql`(${table.stage}::text = 'HEARTBEAT') = (${table.heartbeatResult} is not null)`,
+    ),
+    check(
+      'check_execution_results_domain_expiry_result_consistent',
+      sql`(${table.stage}::text = 'DOMAIN') = (${table.domainExpiryResult} is not null)`,
     ),
   ],
 );
@@ -1450,7 +1472,7 @@ export const checkRegionalExecutions = pgTable(
 );
 
 export interface RegionalDiagnosticSummary {
-  stage: 'DNS' | 'CONNECT' | 'TLS' | 'HTTP' | 'PROBE' | 'WORKFLOW';
+  stage: 'DNS' | 'CONNECT' | 'TLS' | 'HTTP' | 'PROBE' | 'WORKFLOW' | 'DOMAIN';
   reason: string;
   statusCode: number | null;
   responseTimeMs: number | null;

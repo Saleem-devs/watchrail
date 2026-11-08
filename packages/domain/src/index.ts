@@ -4,6 +4,7 @@ export * from './api-workflow.js';
 export * from './availability.js';
 export * from './check-round.js';
 export * from './dns.js';
+export * from './domain-expiry.js';
 export * from './http-redirect.js';
 export * from './heartbeat.js';
 export * from './maintenance-window.js';

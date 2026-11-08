@@ -459,6 +459,79 @@ describe('monitor API', () => {
     ]);
   });
 
+  it('creates and updates a centrally scheduled domain expiry monitor', async () => {
+    const created = await request(app.getHttpServer())
+      .post(`/api/monitors?projectId=${projectId}`)
+      .send({
+        type: 'DOMAIN_EXPIRY',
+        name: 'Primary domain',
+        domainName: 'Example.COM.',
+        domainWarningDays: 30,
+      })
+      .expect(201);
+    expect(created.body.data).toMatchObject({
+      type: 'DOMAIN_EXPIRY',
+      name: 'Primary domain',
+      configuration: {
+        type: 'DOMAIN_EXPIRY',
+        domainName: 'example.com',
+        warningDays: 30,
+      },
+      intervalSeconds: 86_400,
+      timeoutMs: 10_000,
+      locations: ['local'],
+    });
+    const monitorId = created.body.data.id as string;
+    const updated = await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/domain-expiry-settings`)
+      .send({ domainName: 'watchrail.app', warningDays: 45, timeoutMs: 5_000 })
+      .expect(200);
+    expect(updated.body.data).toMatchObject({
+      type: 'DOMAIN_EXPIRY',
+      configuration: {
+        type: 'DOMAIN_EXPIRY',
+        domainName: 'watchrail.app',
+        warningDays: 45,
+      },
+      timeoutMs: 5_000,
+      locations: ['local'],
+    });
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/dns-settings`)
+      .send({ name: 'watchrail.app', recordType: 'A', expectedValues: [], timeoutMs: 5_000 })
+      .expect(409);
+
+    const versions = await database.$client.query<{
+      type: string;
+      domain_name: string;
+      domain_warning_days: number;
+      timeout_ms: number;
+      locations: string[];
+    }>(
+      `select type, domain_name, domain_warning_days, timeout_ms, locations
+       from monitor_configuration_versions
+       where monitor_id=$1
+       order by version_number`,
+      [monitorId],
+    );
+    expect(versions.rows).toEqual([
+      {
+        type: 'DOMAIN_EXPIRY',
+        domain_name: 'example.com',
+        domain_warning_days: 30,
+        timeout_ms: 10_000,
+        locations: ['local'],
+      },
+      {
+        type: 'DOMAIN_EXPIRY',
+        domain_name: 'watchrail.app',
+        domain_warning_days: 45,
+        timeout_ms: 5_000,
+        locations: ['local'],
+      },
+    ]);
+  });
+
   it('creates and atomically updates an executable workflow with encrypted secret retention', async () => {
     const created = await request(app.getHttpServer())
       .post(`/api/monitors?projectId=${projectId}`)

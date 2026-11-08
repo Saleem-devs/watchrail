@@ -33,6 +33,12 @@ import {
   HeartbeatInputError,
   type HeartbeatMonitorSettings,
 } from './heartbeat.js';
+import {
+  DOMAIN_EXPIRY_TIMEOUT_LIMITS,
+  DOMAIN_EXPIRY_WARNING_LIMITS,
+  DomainExpiryInputError,
+  parseDomainExpiryMonitorSettings,
+} from './domain-expiry.js';
 
 export const HTTP_METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] as const;
 export const HTTP_MONITOR_METHODS = [
@@ -45,7 +51,14 @@ export const HTTP_MONITOR_METHODS = [
   'OPTIONS',
 ] as const;
 export const MONITOR_LIFECYCLE_STATES = ['ENABLED', 'PAUSED', 'ARCHIVED'] as const;
-export const MONITOR_TYPES = ['HTTP', 'TCP', 'DNS', 'API_WORKFLOW', 'HEARTBEAT'] as const;
+export const MONITOR_TYPES = [
+  'HTTP',
+  'TCP',
+  'DNS',
+  'API_WORKFLOW',
+  'HEARTBEAT',
+  'DOMAIN_EXPIRY',
+] as const;
 export const MONITOR_LOCATIONS = ['local'] as const;
 export const MONITOR_INTERVAL_LIMITS = {
   minimumSeconds: 60,
@@ -94,6 +107,8 @@ export interface CreateMonitorCommand {
   dnsName?: unknown;
   dnsRecordType?: unknown;
   dnsExpectedValues?: unknown;
+  domainName?: unknown;
+  domainWarningDays?: unknown;
   statusPolicy?: unknown;
   tlsPolicy?: unknown;
   method?: unknown;
@@ -152,8 +167,19 @@ export interface NewHeartbeatMonitor extends NewMonitorBase {
   heartbeat: HeartbeatMonitorSettings;
 }
 
+export interface NewDomainExpiryMonitor extends NewMonitorBase {
+  type: 'DOMAIN_EXPIRY';
+  domainName: string;
+  domainWarningDays: number;
+}
+
 export type NewMonitor =
-  NewHttpMonitor | NewTcpMonitor | NewDnsMonitor | NewApiWorkflowMonitor | NewHeartbeatMonitor;
+  | NewHttpMonitor
+  | NewTcpMonitor
+  | NewDnsMonitor
+  | NewApiWorkflowMonitor
+  | NewHeartbeatMonitor
+  | NewDomainExpiryMonitor;
 
 export interface MonitorFieldErrors {
   name?: string[];
@@ -164,6 +190,8 @@ export interface MonitorFieldErrors {
   dnsRecordType?: string[];
   dnsExpectedValues?: string[];
   dnsSettings?: string[];
+  domainName?: string[];
+  domainWarningDays?: string[];
   url?: string[];
   statusPolicy?: string[];
   tlsPolicy?: string[];
@@ -657,6 +685,7 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
   if (type === 'DNS') return createDnsMonitor(command, name, fields);
   if (type === 'API_WORKFLOW') return createApiWorkflowMonitor(command, name, fields);
   if (type === 'HEARTBEAT') return createHeartbeatMonitor(command, name, fields);
+  if (type === 'DOMAIN_EXPIRY') return createDomainExpiryMonitor(command, name, fields);
   const url = normalizeUrl(command.url, fields);
   const statusPolicy = normalizeStatusPolicy(command.statusPolicy, fields);
   const tlsPolicy = normalizeTlsPolicy(command.tlsPolicy, url, fields, true);
@@ -698,6 +727,8 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
       command.dnsExpectedValues,
       command.workflow,
       command.heartbeat,
+      command.domainName,
+      command.domainWarningDays,
     ].some((value) => value !== undefined)
   ) {
     fields.type = ['HTTP monitors cannot include TCP, DNS, or workflow configuration.'];
@@ -720,6 +751,65 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
     requestBody,
     assertions,
     locations,
+  };
+}
+
+function createDomainExpiryMonitor(
+  command: CreateMonitorCommand,
+  name: string,
+  fields: MonitorFieldErrors,
+): NewDomainExpiryMonitor {
+  let settings: { domainName: string; warningDays: number; timeoutMs: number } = {
+    domainName: '',
+    warningDays: DOMAIN_EXPIRY_WARNING_LIMITS.defaultDays,
+    timeoutMs: DOMAIN_EXPIRY_TIMEOUT_LIMITS.defaultMs,
+  };
+  try {
+    settings = parseDomainExpiryMonitorSettings({
+      domainName: command.domainName,
+      warningDays: command.domainWarningDays ?? DOMAIN_EXPIRY_WARNING_LIMITS.defaultDays,
+      timeoutMs: command.timeoutMs ?? DOMAIN_EXPIRY_TIMEOUT_LIMITS.defaultMs,
+    });
+  } catch (error) {
+    if (!(error instanceof DomainExpiryInputError)) throw error;
+    Object.assign(fields, error.fields);
+  }
+  const lifecycleState = normalizeInitialLifecycleState(command.lifecycleState, fields);
+  const intervalSeconds =
+    command.intervalSeconds === undefined
+      ? MONITOR_INTERVAL_LIMITS.maximumSeconds
+      : normalizeIntervalSeconds(command.intervalSeconds, fields, true);
+  const incompatibleFields = [
+    command.url,
+    command.host,
+    command.port,
+    command.dnsName,
+    command.dnsRecordType,
+    command.dnsExpectedValues,
+    command.statusPolicy,
+    command.tlsPolicy,
+    command.method,
+    command.followRedirects,
+    command.requestHeaders,
+    command.requestBody,
+    command.assertions,
+    command.workflow,
+    command.heartbeat,
+    command.locations,
+  ];
+  if (incompatibleFields.some((value) => value !== undefined)) {
+    fields.type = ['Domain expiry monitors cannot include network probe configuration.'];
+  }
+  if (Object.keys(fields).length > 0) throw new MonitorInputError(fields);
+  return {
+    type: 'DOMAIN_EXPIRY',
+    name,
+    domainName: settings.domainName,
+    domainWarningDays: settings.warningDays,
+    timeoutMs: settings.timeoutMs,
+    lifecycleState,
+    intervalSeconds,
+    locations: ['local'],
   };
 }
 
@@ -746,6 +836,8 @@ function createHeartbeatMonitor(
     command.dnsName,
     command.dnsRecordType,
     command.dnsExpectedValues,
+    command.domainName,
+    command.domainWarningDays,
     command.statusPolicy,
     command.tlsPolicy,
     command.method,
@@ -805,6 +897,8 @@ function createApiWorkflowMonitor(
     command.dnsName,
     command.dnsRecordType,
     command.dnsExpectedValues,
+    command.domainName,
+    command.domainWarningDays,
     command.statusPolicy,
     command.tlsPolicy,
     command.method,
@@ -879,6 +973,8 @@ function createDnsMonitor(
     command.requestBody,
     command.assertions,
     command.workflow,
+    command.domainName,
+    command.domainWarningDays,
   ];
   if (incompatibleFields.some((value) => value !== undefined)) {
     fields.type = ['DNS monitors cannot include HTTP, TCP, or workflow configuration.'];
@@ -932,6 +1028,8 @@ function createTcpMonitor(
     command.dnsName,
     command.dnsRecordType,
     command.dnsExpectedValues,
+    command.domainName,
+    command.domainWarningDays,
     command.url,
     command.statusPolicy,
     command.tlsPolicy,
@@ -961,7 +1059,7 @@ function createTcpMonitor(
 function normalizeMonitorType(value: unknown, fields: MonitorFieldErrors): MonitorType {
   if (value === undefined) return 'HTTP';
   if (typeof value !== 'string' || !MONITOR_TYPES.includes(value as MonitorType)) {
-    fields.type = ['Choose HTTP, TCP, DNS, API workflow, or heartbeat.'];
+    fields.type = ['Choose HTTP, TCP, DNS, API workflow, heartbeat, or domain expiry.'];
     return 'HTTP';
   }
   return value as MonitorType;

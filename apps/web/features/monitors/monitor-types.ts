@@ -4,7 +4,7 @@ export type MonitorType = Monitor['type'];
 
 export interface MonitorTypeDefinition {
   type: MonitorType;
-  slug: 'http' | 'tcp' | 'dns' | 'api-workflows' | 'heartbeats';
+  slug: 'http' | 'tcp' | 'dns' | 'api-workflows' | 'heartbeats' | 'domains';
   label: string;
   singular: string;
   description: string;
@@ -56,6 +56,16 @@ export const MONITOR_TYPES: readonly MonitorTypeDefinition[] = [
     singular: 'Heartbeat monitor',
     description: 'Cron jobs, workers, backups, and other inbound scheduled signals.',
     createDescription: 'Receive authenticated signals and alert when a job is late or fails.',
+    supportsConfigurationTest: false,
+  },
+  {
+    type: 'DOMAIN_EXPIRY',
+    slug: 'domains',
+    label: 'Domains',
+    singular: 'Domain expiry monitor',
+    description:
+      'Registration expiry dates and advance renewal warnings through authoritative RDAP data.',
+    createDescription: 'Track a registered domain and alert before its registration expires.',
     supportsConfigurationTest: false,
   },
 ] as const;

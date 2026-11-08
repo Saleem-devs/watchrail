@@ -83,6 +83,19 @@ describe('CheckExecutionRepository', () => {
     return new ManualRoundRepository(connection.db).create(organizationId, monitor.id);
   }
 
+  async function createDomainExpiryRound() {
+    const monitor = await new MonitorRepository(connection.db).create(
+      organizationId,
+      createMonitor({
+        type: 'DOMAIN_EXPIRY',
+        name: 'Primary domain',
+        domainName: 'example.com',
+        domainWarningDays: 30,
+      }),
+    );
+    return new ManualRoundRepository(connection.db).create(organizationId, monitor.id);
+  }
+
   async function createWorkflowRound(stepTimeouts: readonly number[] = [5_000, 5_000]) {
     const workflow = {
       contractVersion: 1 as const,
@@ -375,6 +388,54 @@ describe('CheckExecutionRepository', () => {
       reason: 'RECORDS_MATCHED',
       responseTimeMs: 12,
       dnsAnswers: ['203.0.113.10'],
+      checkedAt,
+    });
+  });
+
+  it('claims immutable domain settings and reloads bounded expiry evidence', async () => {
+    const round = await createDomainExpiryRound();
+    const claim = await repository.claim(round.id, 45_000);
+    if (claim.state !== 'CLAIMED' || claim.execution.type !== 'DOMAIN_EXPIRY') {
+      throw new Error('Expected a domain expiry execution claim.');
+    }
+    expect(claim.execution).toMatchObject({
+      domainName: 'example.com',
+      warningDays: 30,
+      timeoutMs: 10_000,
+    });
+    const checkedAt = new Date('2026-11-08T09:20:00.000Z');
+    const evidence = {
+      contractVersion: 1 as const,
+      domainName: 'example.com',
+      expirationDate: '2026-11-20T00:00:00.000Z',
+      daysRemaining: 12,
+      warningDays: 30,
+    };
+    await expect(
+      repository.complete(claim.execution.assignmentId, claim.execution.claimToken, {
+        outcome: 'FAIL',
+        stage: 'DOMAIN',
+        reason: 'DOMAIN_EXPIRING',
+        statusCode: null,
+        responseTimeMs: 85,
+        attemptDurationMs: 90,
+        redirects: [],
+        assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
+        domainExpiryResult: evidence,
+        checkedAt,
+      }),
+    ).resolves.toBe(true);
+    const stored = await new CheckHistoryRepository(connection.db).findForMonitor(
+      organizationId,
+      round.monitorId,
+      round.id,
+    );
+    expect(stored?.result).toMatchObject({
+      outcome: 'FAIL',
+      stage: 'DOMAIN',
+      reason: 'DOMAIN_EXPIRING',
+      responseTimeMs: 85,
+      domainExpiryResult: evidence,
       checkedAt,
     });
   });

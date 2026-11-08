@@ -25,6 +25,7 @@ import {
   type HeartbeatResultEvidenceV1,
   API_WORKFLOW_LIMITS,
 } from '@watchrail/domain';
+import type { DomainExpiryEvidenceV1 } from '@watchrail/check-engine';
 import type { WatchrailDatabase } from './client.js';
 import { applyAvailabilityObservation } from './availability-repository.js';
 import { activeMaintenancePolicyForMonitor } from './maintenance-policy.js';
@@ -91,11 +92,18 @@ export interface ClaimedApiWorkflowExecution extends ClaimedCheckExecutionBase {
   workflow: StoredApiWorkflowConfigurationV1;
 }
 
+export interface ClaimedDomainExpiryExecution extends ClaimedCheckExecutionBase {
+  type: 'DOMAIN_EXPIRY';
+  domainName: string;
+  warningDays: number;
+}
+
 export type ClaimedCheckExecution =
   | ClaimedHttpCheckExecution
   | ClaimedTcpCheckExecution
   | ClaimedDnsCheckExecution
-  | ClaimedApiWorkflowExecution;
+  | ClaimedApiWorkflowExecution
+  | ClaimedDomainExpiryExecution;
 
 export type CheckExecutionClaimResult =
   | { state: 'CLAIMED'; execution: ClaimedCheckExecution }
@@ -116,6 +124,7 @@ export interface AuthoritativeCheckResult {
   dnsAnswers?: readonly string[];
   workflowResult?: ApiWorkflowResult;
   heartbeatResult?: HeartbeatResultEvidenceV1;
+  domainExpiryResult?: DomainExpiryEvidenceV1;
   checkedAt: Date;
 }
 
@@ -142,6 +151,8 @@ export class CheckExecutionRepository {
           dnsName: monitorConfigurationVersions.dnsName,
           dnsRecordType: monitorConfigurationVersions.dnsRecordType,
           dnsExpectedValues: monitorConfigurationVersions.dnsExpectedValues,
+          domainName: monitorConfigurationVersions.domainName,
+          domainWarningDays: monitorConfigurationVersions.domainWarningDays,
           apiWorkflow: monitorConfigurationVersions.apiWorkflow,
           url: monitorConfigurationVersions.url,
           method: monitorConfigurationVersions.method,
@@ -221,23 +232,29 @@ export class CheckExecutionRepository {
                     claimed.claimToken,
                     claimed.attemptNumber,
                   )
-                : {
-                    type: 'HTTP',
-                    assignmentId: candidate.assignmentId,
-                    claimToken: claimed.claimToken,
-                    attemptNumber: claimed.attemptNumber,
-                    url: candidate.url,
-                    method: candidate.method,
-                    timeoutMs: candidate.timeoutMs,
-                    followRedirects: candidate.followRedirects,
-                    statusPolicy: candidate.statusPolicy,
-                    organizationId: candidate.organizationId,
-                    monitorId: candidate.monitorId,
-                    requestHeaders: candidate.requestHeaders,
-                    requestBody: candidate.requestBody,
-                    assertions: candidate.assertions,
-                    tlsPolicy: candidate.tlsPolicy,
-                  },
+                : candidate.type === 'DOMAIN_EXPIRY'
+                  ? createClaimedDomainExpiryExecution(
+                      candidate,
+                      claimed.claimToken,
+                      claimed.attemptNumber,
+                    )
+                  : {
+                      type: 'HTTP',
+                      assignmentId: candidate.assignmentId,
+                      claimToken: claimed.claimToken,
+                      attemptNumber: claimed.attemptNumber,
+                      url: candidate.url,
+                      method: candidate.method,
+                      timeoutMs: candidate.timeoutMs,
+                      followRedirects: candidate.followRedirects,
+                      statusPolicy: candidate.statusPolicy,
+                      organizationId: candidate.organizationId,
+                      monitorId: candidate.monitorId,
+                      requestHeaders: candidate.requestHeaders,
+                      requestBody: candidate.requestBody,
+                      assertions: candidate.assertions,
+                      tlsPolicy: candidate.tlsPolicy,
+                    },
       };
     });
   }
@@ -316,6 +333,34 @@ function createClaimedApiWorkflowExecution(
     claimToken,
     attemptNumber,
     workflow: candidate.apiWorkflow,
+    timeoutMs: candidate.timeoutMs,
+    organizationId: candidate.organizationId,
+    monitorId: candidate.monitorId,
+  };
+}
+
+function createClaimedDomainExpiryExecution(
+  candidate: {
+    assignmentId: string;
+    domainName: string | null;
+    domainWarningDays: number | null;
+    timeoutMs: number;
+    organizationId: string;
+    monitorId: string;
+  },
+  claimToken: string,
+  attemptNumber: number,
+): ClaimedDomainExpiryExecution {
+  if (candidate.domainName === null || candidate.domainWarningDays === null) {
+    throw new Error('Domain expiry execution configuration is incomplete.');
+  }
+  return {
+    type: 'DOMAIN_EXPIRY',
+    assignmentId: candidate.assignmentId,
+    claimToken,
+    attemptNumber,
+    domainName: candidate.domainName,
+    warningDays: candidate.domainWarningDays,
     timeoutMs: candidate.timeoutMs,
     organizationId: candidate.organizationId,
     monitorId: candidate.monitorId,
@@ -419,6 +464,7 @@ export async function finalizeCheckExecution(
         ? null
         : serializeApiWorkflowResult(input.result.workflowResult),
     heartbeatResult: input.result.heartbeatResult ?? null,
+    domainExpiryResult: input.result.domainExpiryResult ?? null,
     checkedAt: input.result.checkedAt,
   });
 
