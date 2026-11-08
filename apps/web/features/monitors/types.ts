@@ -463,6 +463,40 @@ export interface AvailabilityHistory {
   }>;
 }
 
+export interface DnsLocationEvidence {
+  location: string;
+  answers: string[];
+}
+
+export interface DnsRecordHistoryPage {
+  current: {
+    dnsName: string;
+    recordType: 'A' | 'AAAA' | 'CNAME' | 'MX' | 'TXT' | 'NS';
+    answers: string[];
+    locationEvidence: DnsLocationEvidence[];
+    observedAt: string;
+    configurationVersionId: string;
+  } | null;
+  candidate: {
+    answers: string[];
+    locationEvidence: DnsLocationEvidence[];
+    firstObservedAt: string;
+  } | null;
+  items: Array<{
+    id: string;
+    dnsName: string;
+    recordType: 'A' | 'AAAA' | 'CNAME' | 'MX' | 'TXT' | 'NS';
+    beforeAnswers: string[];
+    afterAnswers: string[];
+    beforeLocationEvidence: DnsLocationEvidence[];
+    afterLocationEvidence: DnsLocationEvidence[];
+    detectedAt: string;
+    confirmedAt: string;
+    configurationVersionId: string;
+  }>;
+  nextCursor: string | null;
+}
+
 export interface IncidentHistoryPage {
   items: Array<{
     id: string;

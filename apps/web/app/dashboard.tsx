@@ -59,6 +59,7 @@ import {
 } from '../features/monitors/monitor-form-serialization';
 import { HTTP_METHODS } from '../features/monitors/http-method-options';
 import { MonitorAvailabilityHistory } from '../features/monitors/monitor-availability-history';
+import { DnsRecordHistory } from '../features/monitors/dns-record-history';
 import { MonitorResponseTimeChart } from '../features/monitors/monitor-response-time-chart';
 import { MonitorTable } from '../features/monitors/monitor-table';
 import { MonitorTypeOverview } from '../features/monitors/monitor-type-overview';
@@ -1828,6 +1829,20 @@ function MonitorDetailView({
                   error={runError}
                   protocol={monitor.type ?? 'HTTP'}
                 />
+              </div>
+            </section>
+          ) : null}
+
+          {monitor.type === 'DNS' ? (
+            <section className="overflow-hidden rounded-rail-panel border border-rail-border bg-rail-raised">
+              <div className="border-b border-rail-border px-5 py-4 sm:px-6">
+                <h2 className="m-0 text-sm font-semibold text-rail-text">DNS records</h2>
+                <p className="mt-1 mb-0 text-xs text-rail-muted">
+                  Current confirmed answers and authoritative change history.
+                </p>
+              </div>
+              <div className="p-5 sm:p-6">
+                <DnsRecordHistory monitorId={monitor.id} />
               </div>
             </section>
           ) : null}

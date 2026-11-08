@@ -13,6 +13,9 @@ import {
   CheckHistoryRepository,
   CheckHistoryMonitorNotFoundError,
   CheckHistoryQueryError,
+  DnsRecordHistoryRepository,
+  DnsRecordHistoryMonitorNotFoundError,
+  DnsRecordHistoryQueryError,
   AvailabilityHistoryQueryError,
   IncidentHistoryQueryError,
   IncidentMonitorNotFoundError,
@@ -36,6 +39,7 @@ import {
   type CheckRoundRecord,
   type CheckHistoryDetail,
   type CheckHistoryPage,
+  type DnsRecordHistoryPage,
   type AvailabilityHistory,
   type CurrentCheck,
   type CurrentIncidentState,
@@ -47,6 +51,7 @@ import {
   type OrganizationIncidentHistoryPage,
   type MonitorRecord,
   parseCheckHistoryQuery,
+  parseDnsRecordHistoryQuery,
   parseAvailabilityHistoryQuery,
   parseIncidentHistoryQuery,
   parseOrganizationIncidentHistoryQuery,
@@ -98,6 +103,8 @@ export class MonitorsService {
     @Inject(ProjectRepository) private readonly projects: ProjectRepository,
     @Inject(ManualRoundRepository) private readonly manualRounds: ManualRoundRepository,
     @Inject(CheckHistoryRepository) private readonly history: CheckHistoryRepository,
+    @Inject(DnsRecordHistoryRepository)
+    private readonly dnsRecordHistory: DnsRecordHistoryRepository,
     @Inject(IncidentReadRepository) private readonly incidentReads: IncidentReadRepository,
     @Inject(IncidentActionRepository) private readonly incidentActions: IncidentActionRepository,
     @Inject(UptimeReadRepository) private readonly uptimeReads: UptimeReadRepository,
@@ -1102,6 +1109,31 @@ export class MonitorsService {
         });
       }
       if (error instanceof CheckHistoryMonitorNotFoundError) {
+        throw new NotFoundException({ code: 'MONITOR_NOT_FOUND', message: error.message });
+      }
+      throw error;
+    }
+  }
+
+  async listDnsRecordHistory(
+    context: RequestContext,
+    monitorId: string,
+    query: Record<string, unknown>,
+  ): Promise<DnsRecordHistoryPage> {
+    try {
+      return await this.dnsRecordHistory.listForMonitor(
+        context.organizationId,
+        monitorId,
+        parseDnsRecordHistoryQuery(query),
+      );
+    } catch (error) {
+      if (error instanceof DnsRecordHistoryQueryError) {
+        throw new BadRequestException({
+          code: 'INVALID_DNS_RECORD_HISTORY_QUERY',
+          message: error.message,
+        });
+      }
+      if (error instanceof DnsRecordHistoryMonitorNotFoundError) {
         throw new NotFoundException({ code: 'MONITOR_NOT_FOUND', message: error.message });
       }
       throw error;

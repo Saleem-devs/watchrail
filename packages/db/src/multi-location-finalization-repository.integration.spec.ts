@@ -6,6 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { createMonitor, type ProbeObservationV1 } from '@watchrail/domain';
 import { createDatabaseConnection, type DatabaseConnection } from './client.js';
+import { DnsRecordHistoryRepository } from './dns-record-history-repository.js';
 import { IncidentActionRepository } from './incident-action-repository.js';
 import { migrateDatabase } from './migration.js';
 import { IncidentReadRepository } from './incident-read-repository.js';
@@ -75,6 +76,66 @@ describe('authoritative multi-location finalization', () => {
     expect(aggregates).toHaveLength(1);
     expect(aggregates[0]).toMatchObject({ outcome: 'UP' });
     expect((await roundStatus(fixture.roundId)).status).toBe('COMPLETED');
+  });
+
+  it('finalizes and confirms DNS evidence whose regional union exceeds 32 answers', async () => {
+    const repository = new MultiLocationRoundFinalizationRepository(connection.db);
+    const baseline = await createFixture(2, 'SCHEDULED', 'DNS');
+    const answers = (generation: number, locationIndex: number) =>
+      Array.from(
+        { length: 20 },
+        (_, answerIndex) => `2001:db8:${generation}:${locationIndex}::${answerIndex + 1}`,
+      );
+    const completeDnsRound = async (
+      fixture: Awaited<ReturnType<typeof createFixture>>,
+      generation: number,
+    ) => {
+      await repository.initializeRound(organizationId, fixture.roundId);
+      for (const [index, location] of fixture.locations.entries()) {
+        await repository.recordExecution({
+          organizationId,
+          roundId: fixture.roundId,
+          assignmentId: fixture.assignments.get(location)!,
+          location,
+          executionId: randomUUID(),
+          agentId: `dns-agent-${index}`,
+          role: 'PRIMARY',
+          observation: {
+            outcome: 'PASS',
+            reason: 'RECORDS_MATCHED',
+            assertionOutcome: 'PASS',
+          },
+          diagnosticSummary: {
+            stage: 'DNS',
+            reason: 'RECORDS_MATCHED',
+            statusCode: null,
+            responseTimeMs: 8,
+            attemptDurationMs: 9,
+            checkedAt: new Date().toISOString(),
+            dnsAnswers: answers(generation, index),
+          },
+        });
+      }
+    };
+
+    await completeDnsRound(baseline, 1);
+    const candidate = await createNextRound(baseline);
+    await completeDnsRound(candidate, 2);
+    const confirmation = await createNextRound(candidate);
+    await completeDnsRound(confirmation, 2);
+
+    const page = await new DnsRecordHistoryRepository(connection.db).listForMonitor(
+      organizationId,
+      baseline.monitorId,
+      { limit: 25 },
+    );
+    expect(page.current?.answers).toHaveLength(40);
+    expect(page.current?.locationEvidence).toHaveLength(2);
+    expect(page.current?.locationEvidence.every((item) => item.answers.length === 20)).toBe(true);
+    expect(page.candidate).toBeNull();
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]?.beforeAnswers).toHaveLength(40);
+    expect(page.items[0]?.afterAnswers).toHaveLength(40);
   });
 
   it('finalizes missing regions as UNKNOWN at the database deadline exactly once', async () => {
@@ -387,11 +448,22 @@ describe('authoritative multi-location finalization', () => {
     expect(await connection.db.select().from(notificationEvents)).toEqual([]);
   });
 
-  async function createFixture(locationCount: number, trigger: 'MANUAL' | 'SCHEDULED') {
+  async function createFixture(
+    locationCount: number,
+    trigger: 'MANUAL' | 'SCHEDULED',
+    type: 'HTTP' | 'DNS' = 'HTTP',
+  ) {
     const monitors = new MonitorRepository(connection.db);
     const monitor = await monitors.create(
       organizationId,
-      createMonitor({ name: `Aggregate ${randomUUID()}`, url: 'https://example.com/health' }),
+      type === 'DNS'
+        ? createMonitor({
+            type: 'DNS',
+            name: `Aggregate DNS ${randomUUID()}`,
+            dnsName: 'aggregate.example.com',
+            dnsRecordType: 'AAAA',
+          })
+        : createMonitor({ name: `Aggregate ${randomUUID()}`, url: 'https://example.com/health' }),
     );
     const locations = await connection.db
       .insert(probeLocations)

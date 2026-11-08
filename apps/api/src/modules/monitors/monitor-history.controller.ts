@@ -63,6 +63,48 @@ export class MonitorHistoryController {
     };
   }
 
+  @Get(':monitorId/dns-record-history')
+  @RequirePermission(PERMISSIONS.CHECK_READ)
+  async getDnsRecordHistory(
+    @Req() request: RequestWithContext,
+    @Param('monitorId') monitorId: string,
+    @Query() query: Record<string, unknown>,
+  ) {
+    const page = await this.monitors.listDnsRecordHistory(
+      request.watchrailContext,
+      monitorId,
+      query,
+    );
+    const locationEvidence = (items: Array<{ location: string; answers: string[] }>) =>
+      items.map((item) => ({ ...item }));
+    return {
+      data: {
+        current: page.current
+          ? {
+              ...page.current,
+              observedAt: page.current.observedAt.toISOString(),
+              locationEvidence: locationEvidence(page.current.locationEvidence),
+            }
+          : null,
+        candidate: page.candidate
+          ? {
+              ...page.candidate,
+              firstObservedAt: page.candidate.firstObservedAt.toISOString(),
+              locationEvidence: locationEvidence(page.candidate.locationEvidence),
+            }
+          : null,
+        items: page.items.map((item) => ({
+          ...item,
+          detectedAt: item.detectedAt.toISOString(),
+          confirmedAt: item.confirmedAt.toISOString(),
+          beforeLocationEvidence: locationEvidence(item.beforeLocationEvidence),
+          afterLocationEvidence: locationEvidence(item.afterLocationEvidence),
+        })),
+      },
+      page: { nextCursor: page.nextCursor },
+    };
+  }
+
   @Get(':monitorId/check-rounds/:roundId')
   @RequirePermission(PERMISSIONS.CHECK_READ)
   async getCheckRound(
