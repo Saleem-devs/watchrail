@@ -25,6 +25,7 @@ import {
   checkRounds,
   incidents,
   incidentActionEvents,
+  monitorAvailabilityState,
   monitorIncidentState,
   monitors,
   notificationEvents,
@@ -182,6 +183,69 @@ describe('incident lifecycle', () => {
       consecutiveFailures: 1,
       failureStreakStartedRoundId: first.id,
     });
+  });
+
+  it('keeps RDAP uncertainty indeterminate and uses one validated domain result per transition', async () => {
+    await connection.db.delete(monitors).where(eq(monitors.id, monitorId));
+    const domainMonitor = await new MonitorRepository(connection.db).create(
+      organizationId,
+      createMonitor({
+        type: 'DOMAIN_EXPIRY',
+        name: 'Primary domain',
+        domainName: 'example.com',
+        domainWarningDays: 30,
+      }),
+    );
+    monitorId = domainMonitor.id;
+
+    for (const reason of [
+      'RDAP_UNAVAILABLE',
+      'RDAP_UNSUPPORTED_TLD',
+      'DOMAIN_EXPIRATION_UNAVAILABLE',
+    ] as const) {
+      await complete((await scheduledRound()).id, domainUnknown(reason));
+    }
+    expect(await state()).toMatchObject({ consecutiveFailures: 0 });
+    expect(await connection.db.select().from(incidents)).toEqual([]);
+    expect(await availabilityState()).toBe('UNKNOWN');
+
+    await complete((await scheduledRound()).id, domainExpiring());
+    expect(await connection.db.select().from(incidents)).toHaveLength(1);
+    expect(await availabilityState()).toBe('UNAVAILABLE');
+
+    await complete((await scheduledRound()).id, domainUnknown('RDAP_UNAVAILABLE'));
+    expect((await connection.db.select().from(incidents))[0]).toMatchObject({ status: 'OPEN' });
+    expect(await availabilityState()).toBe('UNKNOWN');
+
+    await complete((await scheduledRound()).id, domainExpired());
+    expect(await connection.db.select().from(incidents)).toHaveLength(1);
+    await complete((await scheduledRound()).id, domainHealthy());
+    expect((await connection.db.select().from(incidents))[0]).toMatchObject({ status: 'RESOLVED' });
+    expect(await availabilityState()).toBe('AVAILABLE');
+
+    await complete((await scheduledRound()).id, domainExpiring());
+    const open = (await connection.db.select().from(incidents)).find(
+      (incident) => incident.status === 'OPEN',
+    );
+    if (!open) throw new Error('Expected a fresh domain incident.');
+    await new IncidentActionRepository(connection.db).resolve(
+      organizationId,
+      open.id,
+      '11111111-1111-4111-8111-111111111111',
+      'Registration reviewed',
+    );
+    await complete((await scheduledRound()).id, domainUnknown('RDAP_UNAVAILABLE'));
+    expect(
+      (await connection.db.select().from(incidents)).filter(
+        (incident) => incident.status === 'OPEN',
+      ),
+    ).toHaveLength(0);
+    await complete((await scheduledRound()).id, domainExpiring());
+    expect(
+      (await connection.db.select().from(incidents)).filter(
+        (incident) => incident.status === 'OPEN',
+      ),
+    ).toHaveLength(1);
   });
 
   it('ignores pre-tracking rounds and duplicate worker completion', async () => {
@@ -572,6 +636,14 @@ describe('incident lifecycle', () => {
     if (!value) throw new Error('Expected incident state.');
     return value;
   }
+
+  async function availabilityState() {
+    const [value] = await connection.db
+      .select({ state: monitorAvailabilityState.currentState })
+      .from(monitorAvailabilityState)
+      .where(eq(monitorAvailabilityState.monitorId, monitorId));
+    return value?.state;
+  }
 });
 
 function maintenanceInput(effects: {
@@ -669,5 +741,66 @@ function notEvaluated(): AuthoritativeCheckResult {
         },
       ],
     },
+  });
+}
+
+function domainResult(values: {
+  outcome: 'PASS' | 'FAIL' | 'UNKNOWN';
+  reason:
+    | 'DOMAIN_HEALTHY'
+    | 'DOMAIN_EXPIRING'
+    | 'DOMAIN_EXPIRED'
+    | 'RDAP_UNAVAILABLE'
+    | 'RDAP_UNSUPPORTED_TLD'
+    | 'DOMAIN_EXPIRATION_UNAVAILABLE';
+  expirationDate: string | null;
+  daysRemaining: number | null;
+}): AuthoritativeCheckResult {
+  return result({
+    outcome: values.outcome,
+    stage: 'DOMAIN',
+    reason: values.reason,
+    responseTimeMs:
+      values.reason === 'RDAP_UNAVAILABLE' || values.reason === 'RDAP_UNSUPPORTED_TLD' ? null : 20,
+    domainExpiryResult: {
+      contractVersion: 1,
+      domainName: 'example.com',
+      expirationDate: values.expirationDate,
+      daysRemaining: values.daysRemaining,
+      warningDays: 30,
+    },
+  });
+}
+
+function domainUnknown(
+  reason: 'RDAP_UNAVAILABLE' | 'RDAP_UNSUPPORTED_TLD' | 'DOMAIN_EXPIRATION_UNAVAILABLE',
+): AuthoritativeCheckResult {
+  return domainResult({ outcome: 'UNKNOWN', reason, expirationDate: null, daysRemaining: null });
+}
+
+function domainExpiring(): AuthoritativeCheckResult {
+  return domainResult({
+    outcome: 'FAIL',
+    reason: 'DOMAIN_EXPIRING',
+    expirationDate: '2026-11-20T00:00:00.000Z',
+    daysRemaining: 12,
+  });
+}
+
+function domainExpired(): AuthoritativeCheckResult {
+  return domainResult({
+    outcome: 'FAIL',
+    reason: 'DOMAIN_EXPIRED',
+    expirationDate: '2026-11-07T00:00:00.000Z',
+    daysRemaining: -1,
+  });
+}
+
+function domainHealthy(): AuthoritativeCheckResult {
+  return domainResult({
+    outcome: 'PASS',
+    reason: 'DOMAIN_HEALTHY',
+    expirationDate: '2027-11-08T00:00:00.000Z',
+    daysRemaining: 365,
   });
 }

@@ -538,7 +538,7 @@ export const monitors = pgTable(
         or
         (${table.type}::text = 'HEARTBEAT' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.domainName} is null and ${table.domainWarningDays} is null and ${table.apiWorkflow} is null and jsonb_typeof(${table.heartbeat}) = 'object' and length(${table.heartbeatTokenHash}) = 64)
         or
-        (${table.type}::text = 'DOMAIN_EXPIRY' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and length(btrim(${table.domainName})) > 0 and ${table.domainWarningDays} between 1 and 365 and ${table.apiWorkflow} is null and ${table.heartbeat} is null and ${table.heartbeatTokenHash} is null)
+        (${table.type}::text = 'DOMAIN_EXPIRY' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.domainName} is not null and length(btrim(${table.domainName})) > 0 and ${table.domainWarningDays} is not null and ${table.domainWarningDays} between 1 and 365 and ${table.apiWorkflow} is null and ${table.heartbeat} is null and ${table.heartbeatTokenHash} is null)
       )`,
     ),
 
@@ -914,7 +914,7 @@ export const monitorConfigurationVersions = pgTable(
         or
         (${table.type}::text = 'HEARTBEAT' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.domainName} is null and ${table.domainWarningDays} is null and ${table.apiWorkflow} is null and jsonb_typeof(${table.heartbeat}) = 'object')
         or
-        (${table.type}::text = 'DOMAIN_EXPIRY' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and length(btrim(${table.domainName})) > 0 and ${table.domainWarningDays} between 1 and 365 and ${table.apiWorkflow} is null and ${table.heartbeat} is null)
+        (${table.type}::text = 'DOMAIN_EXPIRY' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.domainName} is not null and length(btrim(${table.domainName})) > 0 and ${table.domainWarningDays} is not null and ${table.domainWarningDays} between 1 and 365 and ${table.apiWorkflow} is null and ${table.heartbeat} is null)
       )`,
     ),
 

@@ -11,6 +11,7 @@ const claim: ClaimedEmailNotificationDelivery = {
   organizationId: '22222222-2222-4222-8222-222222222222',
   eventId: '33333333-3333-4333-8333-333333333333',
   monitorId: null,
+  monitorType: null,
   channelId: '44444444-4444-4444-8444-444444444444',
   channelVersionId: '55555555-5555-4555-8555-555555555555',
   deliverySequence: 0,
@@ -99,6 +100,40 @@ describe('EmailNotificationWorker', () => {
       1_000,
       'SMTP_DELIVERY_FAILED',
     );
+  });
+
+  it('describes domain incidents as registration-expiry risk', async () => {
+    const delivery: ClaimedEmailNotificationDelivery = {
+      ...claim,
+      monitorId: '66666666-6666-4666-8666-666666666666',
+      monitorType: 'DOMAIN_EXPIRY',
+      payload: {
+        contractVersion: 2,
+        eventId: claim.eventId,
+        eventType: 'INCIDENT_OPENED',
+        occurredAt: '2026-11-06T12:00:00.000Z',
+        organizationId: claim.organizationId,
+        monitor: { id: '66666666-6666-4666-8666-666666666666', name: 'example.com' },
+        incident: {
+          id: '77777777-7777-4777-8777-777777777777',
+          groupKey: 'availability:66666666-6666-4666-8666-666666666666',
+          severity: 'DOWN',
+          status: 'OPEN',
+          startedAt: '2026-11-06T11:59:00.000Z',
+          openedAt: '2026-11-06T12:00:00.000Z',
+          resolvedAt: null,
+        },
+        triggeringRoundId: '88888888-8888-4888-8888-888888888888',
+      },
+    };
+    const fixture = setup(delivery);
+
+    await expect(fixture.worker.processNext()).resolves.toBe('DELIVERED');
+    expect(fixture.send.mock.calls[0]?.[0]).toMatchObject({
+      subject: 'Domain expiry warning — example.com',
+      text: expect.stringContaining('registration-expiry warning window'),
+    });
+    expect(fixture.send.mock.calls[0]?.[0].text).toContain('Impact: Registration expiry risk');
   });
 
   it('aborts a stalled SMTP attempt before its lease can expire', async () => {

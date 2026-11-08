@@ -31,6 +31,7 @@ const claim: ClaimedSlackNotificationDelivery = {
   organizationId: ids.organization,
   eventId: ids.event,
   monitorId: null,
+  monitorType: null,
   channelId: ids.channel,
   channelVersionId: ids.version,
   deliverySequence: 0,
@@ -170,6 +171,35 @@ describe('SlackNotificationWorker', () => {
       'availability:77777777-7777-4777-8777-777777777777',
     );
     expect(message.text).toBe('Incident reminder 2: &lt;!channel&gt; API');
+  });
+
+  it('describes domain incidents as registration-expiry risk', () => {
+    const message = renderSlackMessage(
+      {
+        contractVersion: 2,
+        eventId: ids.event,
+        eventType: 'INCIDENT_OPENED',
+        occurredAt: '2026-11-07T10:00:00.000Z',
+        organizationId: ids.organization,
+        monitor: { id: '77777777-7777-4777-8777-777777777777', name: 'example.com' },
+        incident: {
+          id: '88888888-8888-4888-8888-888888888888',
+          groupKey: 'availability:77777777-7777-4777-8777-777777777777',
+          severity: 'DOWN',
+          status: 'OPEN',
+          startedAt: '2026-11-07T10:00:00.000Z',
+          openedAt: '2026-11-07T10:00:00.000Z',
+          resolvedAt: null,
+        },
+        triggeringRoundId: '99999999-9999-4999-8999-999999999999',
+      },
+      0,
+      'DOMAIN_EXPIRY',
+    );
+
+    expect(message.text).toBe('Domain expiry warning: example.com');
+    expect(JSON.stringify(message.blocks)).toContain('registration-expiry warning window');
+    expect(JSON.stringify(message.blocks)).toContain('*Impact*\\nRegistration expiry risk');
   });
 });
 

@@ -135,7 +135,9 @@ export class SlackNotificationWorker {
 
     try {
       const body = Buffer.from(
-        JSON.stringify(renderSlackMessage(payload, delivery.deliverySequence)),
+        JSON.stringify(
+          renderSlackMessage(payload, delivery.deliverySequence, delivery.monitorType),
+        ),
         'utf8',
       );
       const elapsedBeforeDispatchMs = Math.max(0, this.monotonicNowMs() - budgetStartedAtMs);
@@ -223,6 +225,7 @@ export class SlackNotificationWorker {
 export function renderSlackMessage(
   payload: SlackNotificationV1,
   deliverySequence = 0,
+  monitorType: ClaimedSlackNotificationDelivery['monitorType'] = null,
 ): {
   text: string;
   blocks: Array<Record<string, unknown>>;
@@ -249,14 +252,25 @@ export function renderSlackMessage(
   }
   const opened = payload.eventType === 'INCIDENT_OPENED';
   const reminder = opened && deliverySequence > 0;
-  const title = reminder
-    ? `Incident reminder ${deliverySequence}`
+  const domainExpiry = monitorType === 'DOMAIN_EXPIRY';
+  const title = domainExpiry
+    ? reminder
+      ? `Domain expiry reminder ${deliverySequence}`
+      : opened
+        ? 'Domain expiry warning'
+        : 'Domain expiry resolved'
+    : reminder
+      ? `Incident reminder ${deliverySequence}`
+      : opened
+        ? 'Incident opened'
+        : 'Incident resolved';
+  const summary = domainExpiry
+    ? opened
+      ? `${payload.monitor.name} ${reminder ? 'still has an active registration-expiry risk.' : 'is within its registration-expiry warning window.'}`
+      : `${payload.monitor.name} is outside its registration-expiry warning window.`
     : opened
-      ? 'Incident opened'
-      : 'Incident resolved';
-  const summary = opened
-    ? `${payload.monitor.name} ${reminder ? 'is still failing' : 'is failing'} its monitoring policy.`
-    : `${payload.monitor.name} has recovered.`;
+      ? `${payload.monitor.name} ${reminder ? 'is still failing' : 'is failing'} its monitoring policy.`
+      : `${payload.monitor.name} has recovered.`;
   return {
     text: `${title}: ${escapeSlack(payload.monitor.name)}`,
     blocks: [
@@ -276,7 +290,7 @@ export function renderSlackMessage(
             ? [
                 {
                   type: 'mrkdwn',
-                  text: `*Impact*\n${payload.incident.severity === 'DOWN' ? 'Unavailable' : 'Degraded'}`,
+                  text: `*Impact*\n${domainExpiry ? 'Registration expiry risk' : payload.incident.severity === 'DOWN' ? 'Unavailable' : 'Degraded'}`,
                 },
               ]
             : []),

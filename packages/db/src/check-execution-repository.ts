@@ -6,6 +6,7 @@ import {
 } from '@watchrail/check-engine';
 import {
   classifyIncidentObservation,
+  DOMAIN_EXPIRY_INCIDENT_FAILURE_THRESHOLD,
   INCIDENT_FAILURE_THRESHOLD,
   incidentGroupKey,
   parseHttpRedirectHops,
@@ -635,11 +636,13 @@ async function applyIncidentObservation(
     .where(eq(monitorIncidentState.monitorId, round.monitorId));
 
   const failureThreshold =
-    result.reason === 'MISSED_HEARTBEAT' ||
-    result.reason === 'HEARTBEAT_FAILED' ||
-    result.reason === 'RUNTIME_EXCEEDED'
-      ? 1
-      : INCIDENT_FAILURE_THRESHOLD;
+    result.reason === 'DOMAIN_EXPIRING' || result.reason === 'DOMAIN_EXPIRED'
+      ? DOMAIN_EXPIRY_INCIDENT_FAILURE_THRESHOLD
+      : result.reason === 'MISSED_HEARTBEAT' ||
+          result.reason === 'HEARTBEAT_FAILED' ||
+          result.reason === 'RUNTIME_EXCEEDED'
+        ? 1
+        : INCIDENT_FAILURE_THRESHOLD;
   if (consecutiveFailures === failureThreshold) {
     const openedAt = laterDate(result.checkedAt, failureStreakStartedAt);
     const [opened] = await tx

@@ -401,6 +401,39 @@ describe('database migrations', () => {
       await applyMigration(migrations, index);
     }
 
+    await expect(
+      connection.db.execute(sql`
+        update monitors
+        set
+          type = 'DOMAIN_EXPIRY',
+          url = '',
+          domain_name = null,
+          domain_warning_days = null
+        where id = ${existingMonitor.id}
+      `),
+    ).rejects.toMatchObject({
+      cause: expect.objectContaining({
+        code: '23514',
+        constraint: 'monitors_protocol_configuration',
+      }),
+    });
+    await expect(
+      connection.db.execute(sql`
+        update monitor_configuration_versions
+        set
+          type = 'DOMAIN_EXPIRY',
+          url = '',
+          domain_name = null,
+          domain_warning_days = null
+        where monitor_id = ${existingMonitor.id}
+      `),
+    ).rejects.toMatchObject({
+      cause: expect.objectContaining({
+        code: '23514',
+        constraint: 'monitor_configuration_versions_protocol_configuration',
+      }),
+    });
+
     const migratedEscalationPolicy = await connection.db.execute<{
       incident_escalation_steps: Array<{ delayMinutes: number; channelIds: null }>;
     }>(sql`

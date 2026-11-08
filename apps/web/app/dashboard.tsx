@@ -47,6 +47,7 @@ import {
   httpConfigurationTestFromForm,
   apiWorkflowFromForm,
   dnsSettingsFromForm,
+  domainExpiryCreateSettingsFromForm,
   domainExpirySettingsFromForm,
   heartbeatSettingsFromForm,
   requiresStateChangingMethodConfirmation,
@@ -416,7 +417,7 @@ export function Dashboard({
               ? {
                   type: 'DOMAIN_EXPIRY',
                   name: formData.get('name'),
-                  ...domainExpirySettingsFromForm(formData),
+                  ...domainExpiryCreateSettingsFromForm(formData),
                   lifecycleState: formData.get('lifecycleState'),
                 }
               : monitorType === 'HEARTBEAT'

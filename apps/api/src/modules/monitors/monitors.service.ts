@@ -27,6 +27,7 @@ import {
   MonitorRepository,
   ProjectRepository,
   ArchivedMonitorLifecycleError,
+  CentralizedMonitorLocationError,
   MonitorUpdateNotFoundError,
   MonitorProtocolMismatchError,
   MonitorLocationUnavailableError,
@@ -1018,6 +1019,12 @@ export class MonitorsService {
       }
       if (error instanceof MonitorLocationUnavailableError) {
         throw new ConflictException({ code: 'PROBE_LOCATION_UNAVAILABLE', message: error.message });
+      }
+      if (error instanceof CentralizedMonitorLocationError) {
+        throw new ConflictException({
+          code: 'CENTRALIZED_MONITOR_LOCATIONS_IMMUTABLE',
+          message: error.message,
+        });
       }
       if (error instanceof WorkspaceSecretUseAuthorizationError) {
         throw workspaceSecretUseForbidden();

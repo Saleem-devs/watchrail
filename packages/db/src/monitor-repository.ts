@@ -987,6 +987,8 @@ export class MonitorRepository {
         dnsName: configuration.dnsName,
         dnsRecordType: configuration.dnsRecordType,
         dnsExpectedValues: configuration.dnsExpectedValues,
+        domainName: configuration.domainName,
+        domainWarningDays: configuration.domainWarningDays,
         apiWorkflow: configuration.apiWorkflow,
         url: configuration.url,
         method: configuration.method,
@@ -1091,6 +1093,7 @@ export class MonitorRepository {
         .limit(1)
         .for('update');
       if (!monitor) throw new MonitorUpdateNotFoundError();
+      if (monitor.type === 'DOMAIN_EXPIRY') throw new CentralizedMonitorLocationError();
       assertWorkspaceSecretUseAuthorized(monitor, workspaceSecretUseAuthorized);
 
       const locations = normalizeLocationSnapshot(requestedLocations);
@@ -1376,6 +1379,13 @@ export class MonitorLocationUnavailableError extends Error {
   constructor() {
     super('Remote probe location is unavailable.');
     this.name = 'MonitorLocationUnavailableError';
+  }
+}
+
+export class CentralizedMonitorLocationError extends Error {
+  constructor() {
+    super('Domain expiry monitors run centrally and cannot use probe locations.');
+    this.name = 'CentralizedMonitorLocationError';
   }
 }
 

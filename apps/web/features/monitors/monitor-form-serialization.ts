@@ -35,6 +35,15 @@ export function domainExpirySettingsFromForm(formData: FormData) {
   };
 }
 
+export function domainExpiryCreateSettingsFromForm(formData: FormData) {
+  const settings = domainExpirySettingsFromForm(formData);
+  return {
+    domainName: settings.domainName,
+    domainWarningDays: settings.warningDays,
+    timeoutMs: settings.timeoutMs,
+  };
+}
+
 export function heartbeatSettingsFromForm(formData: FormData) {
   const type = formData.get('heartbeatScheduleType') === 'CRON' ? 'CRON' : 'INTERVAL';
   const graceSeconds = Number(formData.get('heartbeatGraceMinutes')) * 60;

@@ -155,7 +155,12 @@ export class EmailNotificationWorker {
     if (sendTimeoutMs <= 0) return this.retryOrExhaust(delivery, 'INSUFFICIENT_LEASE_BUDGET');
 
     try {
-      const message = renderEmail(payload, delivery.recipientEmails, delivery.deliverySequence);
+      const message = renderEmail(
+        payload,
+        delivery.recipientEmails,
+        delivery.deliverySequence,
+        delivery.monitorType,
+      );
       // Delivery remains at-least-once: SMTP acceptance can be ambiguous if the
       // connection fails after the server accepts the message. The deadline prevents
       // an intentionally overlapping live attempt, while claim-token fencing prevents
@@ -273,6 +278,7 @@ function renderEmail(
   payload: EmailNotificationV1,
   recipients: string[],
   deliverySequence: number,
+  monitorType: ClaimedEmailNotificationDelivery['monitorType'],
 ): { to: string[]; subject: string; text: string } {
   if (payload.eventType === 'TEST')
     return {
@@ -289,16 +295,33 @@ function renderEmail(
     };
   const opened = payload.eventType === 'INCIDENT_OPENED';
   const reminder = opened && deliverySequence > 0;
+  const domainExpiry = monitorType === 'DOMAIN_EXPIRY';
+  const title = domainExpiry
+    ? reminder
+      ? `Domain expiry reminder ${deliverySequence}`
+      : opened
+        ? 'Domain expiry warning'
+        : 'Domain expiry resolved'
+    : reminder
+      ? `Incident reminder ${deliverySequence}`
+      : opened
+        ? 'Incident opened'
+        : 'Incident resolved';
+  const summary = domainExpiry
+    ? opened
+      ? `${payload.monitor.name} ${reminder ? 'still has an active registration-expiry risk.' : 'is within its registration-expiry warning window.'}`
+      : `${payload.monitor.name} is outside its registration-expiry warning window.`
+    : `${payload.monitor.name} ${reminder ? 'is still failing its monitoring policy.' : opened ? 'is failing its monitoring policy.' : 'has recovered.'}`;
   return {
     to: recipients,
-    subject: `${reminder ? `Incident reminder ${deliverySequence}` : opened ? 'Incident opened' : 'Incident resolved'} — ${payload.monitor.name}`,
+    subject: `${title} — ${payload.monitor.name}`,
     text: [
-      `${payload.monitor.name} ${reminder ? 'is still failing its monitoring policy.' : opened ? 'is failing its monitoring policy.' : 'has recovered.'}`,
+      summary,
       '',
       `Status: ${payload.incident.status}`,
       ...(payload.contractVersion === 2
         ? [
-            `Impact: ${payload.incident.severity === 'DOWN' ? 'Unavailable' : 'Degraded'}`,
+            `Impact: ${domainExpiry ? 'Registration expiry risk' : payload.incident.severity === 'DOWN' ? 'Unavailable' : 'Degraded'}`,
             `Alert group: ${payload.incident.groupKey}`,
           ]
         : []),
