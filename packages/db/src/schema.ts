@@ -1405,6 +1405,150 @@ export const checkExecutionResults = pgTable(
   ],
 );
 
+export interface DnsRecordLocationEvidence {
+  location: string;
+  answers: string[];
+}
+
+export const dnsRecordHistoryState = pgTable(
+  'dns_record_history_state',
+  {
+    organizationId: uuid('organization_id').notNull(),
+    monitorId: uuid('monitor_id').primaryKey(),
+    configurationVersionId: uuid('configuration_version_id').notNull(),
+    dnsName: varchar('dns_name', { length: 253 }).notNull(),
+    recordType: varchar('record_type', { length: 8 }).$type<DnsRecordType>().notNull(),
+    baselineAnswers: jsonb('baseline_answers').$type<string[]>().notNull(),
+    baselineLocationEvidence: jsonb('baseline_location_evidence')
+      .$type<DnsRecordLocationEvidence[]>()
+      .notNull(),
+    baselineObservedAt: timestamp('baseline_observed_at', { withTimezone: true }).notNull(),
+    baselineRoundId: uuid('baseline_round_id').notNull(),
+    candidateAnswers: jsonb('candidate_answers').$type<string[]>(),
+    candidateLocationEvidence: jsonb('candidate_location_evidence').$type<
+      DnsRecordLocationEvidence[]
+    >(),
+    candidateFirstObservedAt: timestamp('candidate_first_observed_at', { withTimezone: true }),
+    candidateRoundId: uuid('candidate_round_id'),
+    lastProcessedRoundCreatedAt: timestamp('last_processed_round_created_at', {
+      withTimezone: true,
+    }).notNull(),
+    lastProcessedRoundId: uuid('last_processed_round_id').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'dns_record_history_state_monitor_fk',
+      columns: [table.monitorId, table.organizationId],
+      foreignColumns: [monitors.id, monitors.organizationId],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'dns_record_history_state_configuration_fk',
+      columns: [table.configurationVersionId, table.organizationId, table.monitorId],
+      foreignColumns: [
+        monitorConfigurationVersions.id,
+        monitorConfigurationVersions.organizationId,
+        monitorConfigurationVersions.monitorId,
+      ],
+    }),
+    check(
+      'dns_record_history_state_baseline_answers_array',
+      sql`jsonb_typeof(${table.baselineAnswers}) = 'array' and jsonb_array_length(${table.baselineAnswers}) <= 32`,
+    ),
+    check(
+      'dns_record_history_state_baseline_evidence_array',
+      sql`jsonb_typeof(${table.baselineLocationEvidence}) = 'array'`,
+    ),
+    check(
+      'dns_record_history_state_candidate_consistent',
+      sql`(${table.candidateAnswers} is null) = (${table.candidateLocationEvidence} is null)
+        and (${table.candidateAnswers} is null) = (${table.candidateFirstObservedAt} is null)
+        and (${table.candidateAnswers} is null) = (${table.candidateRoundId} is null)`,
+    ),
+    check(
+      'dns_record_history_state_candidate_answers_array',
+      sql`${table.candidateAnswers} is null or (jsonb_typeof(${table.candidateAnswers}) = 'array' and jsonb_array_length(${table.candidateAnswers}) <= 32)`,
+    ),
+    check(
+      'dns_record_history_state_candidate_evidence_array',
+      sql`${table.candidateLocationEvidence} is null or jsonb_typeof(${table.candidateLocationEvidence}) = 'array'`,
+    ),
+  ],
+);
+
+export const dnsRecordChanges = pgTable(
+  'dns_record_changes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull(),
+    monitorId: uuid('monitor_id').notNull(),
+    configurationVersionId: uuid('configuration_version_id').notNull(),
+    dnsName: varchar('dns_name', { length: 253 }).notNull(),
+    recordType: varchar('record_type', { length: 8 }).$type<DnsRecordType>().notNull(),
+    beforeAnswers: jsonb('before_answers').$type<string[]>().notNull(),
+    afterAnswers: jsonb('after_answers').$type<string[]>().notNull(),
+    beforeLocationEvidence: jsonb('before_location_evidence')
+      .$type<DnsRecordLocationEvidence[]>()
+      .notNull(),
+    afterLocationEvidence: jsonb('after_location_evidence')
+      .$type<DnsRecordLocationEvidence[]>()
+      .notNull(),
+    detectedAt: timestamp('detected_at', { withTimezone: true }).notNull(),
+    confirmedAt: timestamp('confirmed_at', { withTimezone: true }).notNull(),
+    firstObservedRoundId: uuid('first_observed_round_id').notNull(),
+    confirmedRoundId: uuid('confirmed_round_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'dns_record_changes_monitor_fk',
+      columns: [table.monitorId, table.organizationId],
+      foreignColumns: [monitors.id, monitors.organizationId],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'dns_record_changes_configuration_fk',
+      columns: [table.configurationVersionId, table.organizationId, table.monitorId],
+      foreignColumns: [
+        monitorConfigurationVersions.id,
+        monitorConfigurationVersions.organizationId,
+        monitorConfigurationVersions.monitorId,
+      ],
+    }),
+    foreignKey({
+      name: 'dns_record_changes_first_round_fk',
+      columns: [table.organizationId, table.firstObservedRoundId],
+      foreignColumns: [checkRounds.organizationId, checkRounds.id],
+    }),
+    foreignKey({
+      name: 'dns_record_changes_confirmed_round_fk',
+      columns: [table.organizationId, table.confirmedRoundId],
+      foreignColumns: [checkRounds.organizationId, checkRounds.id],
+    }),
+    unique('dns_record_changes_confirmed_round_unique').on(
+      table.organizationId,
+      table.monitorId,
+      table.confirmedRoundId,
+    ),
+    index('dns_record_changes_monitor_confirmed_idx').on(
+      table.organizationId,
+      table.monitorId,
+      table.confirmedAt,
+      table.id,
+    ),
+    check(
+      'dns_record_changes_answers_arrays',
+      sql`jsonb_typeof(${table.beforeAnswers}) = 'array' and jsonb_array_length(${table.beforeAnswers}) <= 32
+        and jsonb_typeof(${table.afterAnswers}) = 'array' and jsonb_array_length(${table.afterAnswers}) <= 32`,
+    ),
+    check(
+      'dns_record_changes_evidence_arrays',
+      sql`jsonb_typeof(${table.beforeLocationEvidence}) = 'array'
+        and jsonb_typeof(${table.afterLocationEvidence}) = 'array'`,
+    ),
+    check('dns_record_changes_time_order', sql`${table.detectedAt} <= ${table.confirmedAt}`),
+  ],
+);
+
 export const checkRegionalExecutions = pgTable(
   'check_regional_executions',
   {

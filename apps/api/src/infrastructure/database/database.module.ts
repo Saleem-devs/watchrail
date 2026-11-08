@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { DrizzleModule, getDrizzleToken } from '@nestjs/drizzle';
 import {
   CheckHistoryRepository,
+  DnsRecordHistoryRepository,
   createWatchrailDatabase,
   IncidentReadRepository,
   IncidentActionRepository,
@@ -155,6 +156,11 @@ import { APP_CONFIG, type AppConfig } from '../../config/config.js';
       useFactory: (db: WatchrailDatabase) => new CheckHistoryRepository(db),
     },
     {
+      provide: DnsRecordHistoryRepository,
+      inject: [getDrizzleToken()],
+      useFactory: (db: WatchrailDatabase) => new DnsRecordHistoryRepository(db),
+    },
+    {
       provide: IncidentReadRepository,
       inject: [getDrizzleToken()],
       useFactory: (db: WatchrailDatabase) => new IncidentReadRepository(db),
@@ -172,6 +178,7 @@ import { APP_CONFIG, type AppConfig } from '../../config/config.js';
     AuthInvitationRepository,
     UptimeReadRepository,
     CheckHistoryRepository,
+    DnsRecordHistoryRepository,
     IncidentReadRepository,
     IncidentActionRepository,
     ManualRoundRepository,

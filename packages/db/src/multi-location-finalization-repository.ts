@@ -16,6 +16,11 @@ import { applyAggregateAvailabilityObservation } from './availability-repository
 import { activeMaintenancePolicyForMonitor } from './maintenance-policy.js';
 import { roundIsFencedByManualResolution } from './incident-round-ordering.js';
 import {
+  applyDnsRecordObservation,
+  clearDnsRecordCandidate,
+  isComparableDnsEvidence,
+} from './dns-record-history-repository.js';
+import {
   stageIncidentNotification,
   type IncidentTransition,
 } from './notification-event-repository.js';
@@ -28,6 +33,7 @@ import {
   checkRounds,
   incidents,
   monitorIncidentState,
+  monitorConfigurationVersions,
   probeExecutionAttempts,
   type RegionalDiagnosticSummary,
 } from './schema.js';
@@ -230,6 +236,39 @@ async function tryFinalizeLocked(
     finalizedAt: now,
   });
   if (round.trigger === 'SCHEDULED') {
+    const [configuration] = await tx
+      .select({
+        type: monitorConfigurationVersions.type,
+        dnsName: monitorConfigurationVersions.dnsName,
+        dnsRecordType: monitorConfigurationVersions.dnsRecordType,
+      })
+      .from(monitorConfigurationVersions)
+      .where(eq(monitorConfigurationVersions.id, round.monitorConfigurationVersionId))
+      .limit(1);
+    if (configuration?.type === 'DNS') {
+      const locationEvidence = await loadDnsLocationEvidence(tx, round, locations);
+      if (locationEvidence && configuration.dnsName && configuration.dnsRecordType) {
+        await applyDnsRecordObservation(tx, {
+          organizationId: round.organizationId,
+          monitorId: round.monitorId,
+          configurationVersionId: round.monitorConfigurationVersionId,
+          roundId: round.id,
+          roundCreatedAt: round.createdAt,
+          observedAt: now,
+          dnsName: configuration.dnsName,
+          recordType: configuration.dnsRecordType,
+          answers: [...new Set(locationEvidence.flatMap((item) => item.answers))].sort(),
+          locations: locationEvidence,
+        });
+      } else {
+        await clearDnsRecordCandidate(tx, {
+          organizationId: round.organizationId,
+          monitorId: round.monitorId,
+          roundId: round.id,
+          roundCreatedAt: round.createdAt,
+        });
+      }
+    }
     const maintenance = await activeMaintenancePolicyForMonitor(
       tx,
       round.organizationId,
@@ -283,6 +322,65 @@ async function tryFinalizeLocked(
       ),
     );
   return decision;
+}
+
+async function loadDnsLocationEvidence(
+  tx: Transaction,
+  round: Awaited<ReturnType<typeof lockRound>>,
+  locations: readonly string[],
+) {
+  const evaluations = await tx
+    .select({
+      location: checkRegionalEvaluations.location,
+      primaryExecutionId: checkRegionalEvaluations.primaryExecutionId,
+      confirmationExecutionId: checkRegionalEvaluations.confirmationExecutionId,
+      phase: checkRegionalEvaluations.phase,
+    })
+    .from(checkRegionalEvaluations)
+    .where(
+      and(
+        eq(checkRegionalEvaluations.organizationId, round.organizationId),
+        eq(checkRegionalEvaluations.roundId, round.id),
+        inArray(checkRegionalEvaluations.location, locations),
+      ),
+    );
+  if (
+    evaluations.length !== locations.length ||
+    evaluations.some((item) => item.phase !== 'TERMINAL')
+  ) {
+    return null;
+  }
+  const executionIds = evaluations
+    .flatMap((item) => [item.primaryExecutionId, item.confirmationExecutionId])
+    .filter((id): id is string => id !== null);
+  const executions = await tx
+    .select({
+      id: checkRegionalExecutions.id,
+      diagnosticSummary: checkRegionalExecutions.diagnosticSummary,
+    })
+    .from(checkRegionalExecutions)
+    .where(inArray(checkRegionalExecutions.id, executionIds));
+  const byId = new Map(executions.map((item) => [item.id, item.diagnosticSummary]));
+  const evidence = [];
+  for (const evaluation of evaluations) {
+    const summaries = [evaluation.primaryExecutionId, evaluation.confirmationExecutionId]
+      .filter((id): id is string => id !== null)
+      .map((id) => byId.get(id));
+    if (
+      summaries.length === 0 ||
+      summaries.some(
+        (summary) => !summary || !isComparableDnsEvidence(summary.stage, summary.reason),
+      )
+    ) {
+      return null;
+    }
+    const answerSets = summaries.map((summary) => [...new Set(summary!.dnsAnswers ?? [])].sort());
+    if (answerSets.some((answers) => JSON.stringify(answers) !== JSON.stringify(answerSets[0]))) {
+      return null;
+    }
+    evidence.push({ location: evaluation.location, answers: answerSets[0]! });
+  }
+  return evidence.sort((left, right) => left.location.localeCompare(right.location));
 }
 
 async function applyMultiLocationIncident(

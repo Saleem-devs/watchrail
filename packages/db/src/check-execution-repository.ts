@@ -32,6 +32,11 @@ import { applyAvailabilityObservation } from './availability-repository.js';
 import { activeMaintenancePolicyForMonitor } from './maintenance-policy.js';
 import { roundIsFencedByManualResolution } from './incident-round-ordering.js';
 import {
+  applyDnsRecordObservation,
+  clearDnsRecordCandidate,
+  isComparableDnsEvidence,
+} from './dns-record-history-repository.js';
+import {
   stageIncidentNotification,
   type IncidentTransition,
 } from './notification-event-repository.js';
@@ -481,13 +486,48 @@ export async function finalizeCheckExecution(
       monitorId: checkRounds.monitorId,
       trigger: checkRounds.trigger,
       createdAt: checkRounds.createdAt,
+      configurationVersionId: checkRounds.monitorConfigurationVersionId,
+      monitorType: monitorConfigurationVersions.type,
+      dnsName: monitorConfigurationVersions.dnsName,
+      dnsRecordType: monitorConfigurationVersions.dnsRecordType,
     })
     .from(checkRounds)
+    .innerJoin(
+      monitorConfigurationVersions,
+      eq(monitorConfigurationVersions.id, checkRounds.monitorConfigurationVersionId),
+    )
     .where(eq(checkRounds.id, input.roundId))
     .limit(1);
 
   if (!round) throw new Error('Completed check round is missing.');
   if (round.trigger === 'SCHEDULED') {
+    if (round.monitorType === 'DNS') {
+      if (
+        isComparableDnsEvidence(input.result.stage, input.result.reason) &&
+        round.dnsName &&
+        round.dnsRecordType
+      ) {
+        await applyDnsRecordObservation(tx, {
+          organizationId: round.organizationId,
+          monitorId: round.monitorId,
+          configurationVersionId: round.configurationVersionId,
+          roundId: round.id,
+          roundCreatedAt: round.createdAt,
+          observedAt: input.result.checkedAt,
+          dnsName: round.dnsName,
+          recordType: round.dnsRecordType,
+          answers: input.result.dnsAnswers ?? [],
+          locations: [{ location: 'local', answers: [...(input.result.dnsAnswers ?? [])] }],
+        });
+      } else {
+        await clearDnsRecordCandidate(tx, {
+          organizationId: round.organizationId,
+          monitorId: round.monitorId,
+          roundId: round.id,
+          roundCreatedAt: round.createdAt,
+        });
+      }
+    }
     const maintenance = await activeMaintenancePolicyForMonitor(
       tx,
       round.organizationId,
