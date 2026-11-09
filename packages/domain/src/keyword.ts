@@ -79,7 +79,7 @@ function parseKeyword(value: unknown, fields: KeywordMonitorFieldErrors): string
   if (value.length > KEYWORD_LIMITS.maximumLength) {
     fields.keyword = [`Keyword must contain at most ${KEYWORD_LIMITS.maximumLength} characters.`];
   }
-  return value;
+  return value.replace(/\r\n?/g, '\n');
 }
 
 function parseMatch(value: unknown, fields: KeywordMonitorFieldErrors): KeywordMatchMode {

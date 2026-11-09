@@ -1,7 +1,7 @@
 'use client';
 
 import { useId, useState, type FormEvent } from 'react';
-import { Checkbox, Input, Select } from '../../components/ui/form-control';
+import { Checkbox, Input, Select, Textarea } from '../../components/ui/form-control';
 import { Form } from '../../components/ui/form';
 import { RequestHeadersField, type RequestHeaderFormValue } from './request-headers-field';
 import { HTTP_METHODS } from './http-method-options';
@@ -614,9 +614,8 @@ export function MonitorForm({
                 </label>
                 <label className="grid gap-1.5 text-xs font-medium text-rail-subtle">
                   Text to match
-                  <Input
+                  <Textarea
                     name="keyword"
-                    type="text"
                     defaultValue={
                       initialValues?.configuration.type === 'KEYWORD'
                         ? initialValues.configuration.keyword
@@ -627,13 +626,16 @@ export function MonitorForm({
                     autoComplete="off"
                     spellCheck={false}
                     required
+                    rows={3}
+                    className="min-h-24 resize-y py-2.5 leading-5"
                     aria-invalid={Boolean(errors.keyword)}
                   />
                   {errors.keyword ? (
                     <span className="font-normal text-rail-danger">{errors.keyword[0]}</span>
                   ) : (
                     <span className="font-normal leading-5 text-rail-muted">
-                      The value is compared exactly as entered, including capitalization.
+                      Spacing, capitalization, and line breaks are preserved. Windows line endings
+                      are normalized to LF.
                     </span>
                   )}
                 </label>

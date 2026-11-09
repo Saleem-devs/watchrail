@@ -24,11 +24,15 @@ export function icmpSettingsFromForm(formData: FormData) {
 export function keywordSettingsFromForm(formData: FormData) {
   return {
     url: formEntryString(formData.get('url') ?? undefined),
-    keyword: formEntryString(formData.get('keyword') ?? undefined),
+    keyword: normalizeKeywordLineEndings(formEntryString(formData.get('keyword') ?? undefined)),
     match: formEntryString(formData.get('keywordMatch') ?? undefined),
     timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
     followRedirects: formData.get('followRedirects') === 'on',
   };
+}
+
+function normalizeKeywordLineEndings(value: string): string {
+  return value.replace(/\r\n?/g, '\n');
 }
 
 export function keywordConfigurationTestFromForm(formData: FormData) {

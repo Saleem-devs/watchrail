@@ -69,4 +69,26 @@ describe('keyword form serialization', () => {
       },
     });
   });
+
+  it('normalizes CRLF and lone CR line endings before edit and test requests', () => {
+    const formData = new FormData();
+    formData.set('url', 'https://example.com/status');
+    formData.set('keyword', 'maintenance\r\nwindow\rplanned');
+    formData.set('keywordMatch', 'NOT_CONTAINS');
+    formData.set('timeoutSeconds', '8');
+
+    expect(keywordSettingsFromForm(formData).keyword).toBe(
+      'maintenance\nwindow\nplanned',
+    );
+    expect(keywordConfigurationTestFromForm(formData)).toMatchObject({
+      assertions: {
+        textBody: [
+          {
+            operator: 'not_contains',
+            target: { value: 'maintenance\nwindow\nplanned', sensitive: false },
+          },
+        ],
+      },
+    });
+  });
 });

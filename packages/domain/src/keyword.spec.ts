@@ -39,6 +39,21 @@ describe('keyword monitor settings', () => {
     },
   );
 
+  it.each([
+    ['line one\r\nline two', 'line one\nline two'],
+    ['line one\rline two', 'line one\nline two'],
+  ])('normalizes %j line endings to canonical LF', (keyword, expected) => {
+    expect(
+      parseKeywordMonitorSettings({
+        url: 'https://example.com',
+        keyword,
+        match: 'CONTAINS',
+        timeoutMs: 10_000,
+        followRedirects: true,
+      }).keyword,
+    ).toBe(expected);
+  });
+
   it('rejects non-HTTP targets, embedded credentials, and missing rules', () => {
     for (const url of ['file:///etc/passwd', 'https://user:pass@example.com']) {
       expect(() =>

@@ -172,6 +172,70 @@ describe('Dashboard', () => {
     });
   });
 
+  it('round-trips a multiline keyword when an unrelated field is edited', async () => {
+    const keyword = 'maintenance\nwindow';
+    const monitor: Monitor = {
+      id: 'keyword-monitor-multiline',
+      type: 'KEYWORD',
+      name: 'Homepage copy',
+      url: 'https://example.com/',
+      configuration: {
+        type: 'KEYWORD',
+        url: 'https://example.com/',
+        keyword,
+        match: 'NOT_CONTAINS',
+      },
+      method: 'GET',
+      lifecycleState: 'ENABLED',
+      timeoutMs: 8_000,
+      followRedirects: true,
+      statusPolicy: { type: 'ANY_2XX' },
+      locations: ['local'],
+      createdAt: '2026-11-09T12:00:00.000Z',
+      currentCheck: null,
+      incidentState: { failureStreak: null, currentIncident: null },
+      uptime: { uptimePercent: null, coveragePercent: null },
+    };
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = requestUrl(input);
+      if (init?.method === 'PATCH') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ data: { ...monitor, name: 'Homepage wording' } }), {
+            status: 200,
+          }),
+        );
+      }
+      expect(url).toBe('/api/monitors');
+      return Promise.resolve(new Response(JSON.stringify({ data: [monitor] }), { status: 200 }));
+    });
+
+    render(<Dashboard view="edit" monitorId={monitor.id} />);
+
+    await screen.findByRole('heading', { name: 'Edit Homepage copy' });
+    expect(screen.getByRole('textbox', { name: /^Text to match/ })).toHaveValue(keyword);
+    const name = screen.getByRole('textbox', { name: 'Monitor name' });
+    await userEvent.clear(name);
+    await userEvent.type(name, 'Homepage wording');
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/monitors/${monitor.id}/keyword-settings`,
+        expect.objectContaining({ method: 'PATCH' }),
+      ),
+    );
+    const keywordRequest = fetchMock.mock.calls.find(
+      ([url]) => url === `/api/monitors/${monitor.id}/keyword-settings`,
+    )?.[1];
+    if (typeof keywordRequest?.body !== 'string') {
+      throw new Error('Expected a keyword settings request body.');
+    }
+    expect(JSON.parse(keywordRequest.body)).toMatchObject({
+      keyword,
+      match: 'NOT_CONTAINS',
+    });
+  });
+
   it('creates a TCP monitor with protocol-specific fields and no HTTP payload', async () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
