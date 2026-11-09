@@ -1,7 +1,7 @@
 'use client';
 
 import { useId, useState, type FormEvent } from 'react';
-import { Checkbox, Input, Select } from '../../components/ui/form-control';
+import { Checkbox, Input, Select, Textarea } from '../../components/ui/form-control';
 import { Form } from '../../components/ui/form';
 import { RequestHeadersField, type RequestHeaderFormValue } from './request-headers-field';
 import { HTTP_METHODS } from './http-method-options';
@@ -119,6 +119,7 @@ export function MonitorForm({
                         'TCP',
                         'DNS',
                         'ICMP',
+                        'KEYWORD',
                         'API_WORKFLOW',
                         'HEARTBEAT',
                         'DOMAIN_EXPIRY',
@@ -153,11 +154,13 @@ export function MonitorForm({
                               ? 'DNS record'
                               : type === 'ICMP'
                                 ? 'Ping host'
-                                : type === 'API_WORKFLOW'
-                                  ? 'API workflow'
-                                  : type === 'HEARTBEAT'
-                                    ? 'Heartbeat'
-                                    : 'Domain expiry'}
+                                : type === 'KEYWORD'
+                                  ? 'Keyword'
+                                  : type === 'API_WORKFLOW'
+                                    ? 'API workflow'
+                                    : type === 'HEARTBEAT'
+                                      ? 'Heartbeat'
+                                      : 'Domain expiry'}
                       </button>
                     ))}
                   </div>
@@ -190,18 +193,26 @@ export function MonitorForm({
                 ) : null}
               </label>
 
-              {monitorType === 'HTTP' ? (
+              {monitorType === 'HTTP' || monitorType === 'KEYWORD' ? (
                 <label
                   className="grid gap-1.5 text-xs font-medium text-rail-subtle"
                   htmlFor={`${id}-url`}
                 >
-                  HTTP(S) URL
+                  {monitorType === 'KEYWORD' ? 'Page URL' : 'HTTP(S) URL'}
                   <Input
                     id={`${id}-url`}
                     name="url"
                     type="url"
-                    defaultValue={endpointBaseUrl(initialValues?.url)}
-                    placeholder="https://status.watchrail.app/health"
+                    defaultValue={
+                      monitorType === 'KEYWORD' && initialValues?.configuration.type === 'KEYWORD'
+                        ? initialValues.configuration.url
+                        : endpointBaseUrl(initialValues?.url)
+                    }
+                    placeholder={
+                      monitorType === 'KEYWORD'
+                        ? 'https://example.com/pricing'
+                        : 'https://status.watchrail.app/health'
+                    }
                     inputMode="url"
                     autoComplete="url"
                     required
@@ -219,7 +230,9 @@ export function MonitorForm({
                     </span>
                   ) : (
                     <span className="font-normal leading-5 text-rail-muted" id={urlHelpId}>
-                      Use a publicly reachable HTTP or HTTPS endpoint.
+                      {monitorType === 'KEYWORD'
+                        ? 'Watchrail checks the final decoded response from this public page.'
+                        : 'Use a publicly reachable HTTP or HTTPS endpoint.'}
                     </span>
                   )}
                 </label>
@@ -573,6 +586,61 @@ export function MonitorForm({
                 {...(errors.assertions?.[0] ? { error: errors.assertions[0] } : {})}
               />
             </>
+          ) : monitorType === 'KEYWORD' ? (
+            <fieldset className="m-0 border-0 px-5 py-5 sm:px-6">
+              <legend className="p-0 text-sm font-semibold text-rail-text">Text condition</legend>
+              <p className="mt-1 mb-0 max-w-2xl text-xs leading-5 text-rail-muted">
+                Match literal, case-sensitive text in the decoded response body. A successful page
+                that breaks this rule opens an incident like any other failed check.
+              </p>
+              <div className="mt-4 grid gap-4 sm:grid-cols-[12rem_minmax(0,1fr)]">
+                <label className="grid content-start gap-1.5 text-xs font-medium text-rail-subtle">
+                  Response must
+                  <Select
+                    name="keywordMatch"
+                    defaultValue={
+                      initialValues?.configuration.type === 'KEYWORD'
+                        ? initialValues.configuration.match
+                        : 'CONTAINS'
+                    }
+                    aria-invalid={Boolean(errors.keywordMatch)}
+                  >
+                    <option value="CONTAINS">Contain text</option>
+                    <option value="NOT_CONTAINS">Not contain text</option>
+                  </Select>
+                  {errors.keywordMatch ? (
+                    <span className="font-normal text-rail-danger">{errors.keywordMatch[0]}</span>
+                  ) : null}
+                </label>
+                <label className="grid gap-1.5 text-xs font-medium text-rail-subtle">
+                  Text to match
+                  <Textarea
+                    name="keyword"
+                    defaultValue={
+                      initialValues?.configuration.type === 'KEYWORD'
+                        ? initialValues.configuration.keyword
+                        : ''
+                    }
+                    placeholder="Plans for every team"
+                    maxLength={4096}
+                    autoComplete="off"
+                    spellCheck={false}
+                    required
+                    rows={3}
+                    className="min-h-24 resize-y py-2.5 leading-5"
+                    aria-invalid={Boolean(errors.keyword)}
+                  />
+                  {errors.keyword ? (
+                    <span className="font-normal text-rail-danger">{errors.keyword[0]}</span>
+                  ) : (
+                    <span className="font-normal leading-5 text-rail-muted">
+                      Spacing, capitalization, and line breaks are preserved. Windows line endings
+                      are normalized to LF.
+                    </span>
+                  )}
+                </label>
+              </div>
+            </fieldset>
           ) : monitorType === 'TCP' ? (
             <section className="px-5 py-5 sm:px-6">
               <h2 className="m-0 text-sm font-semibold text-rail-text">Connection check</h2>
@@ -740,7 +808,7 @@ export function MonitorForm({
                 <span className="font-normal text-rail-danger">{errors.lifecycleState[0]}</span>
               ) : null}
             </label>
-            {monitorType === 'HTTP' ? (
+            {monitorType === 'HTTP' || monitorType === 'KEYWORD' ? (
               <label className="flex min-h-10 cursor-pointer items-center gap-2.5 rounded-rail-control border border-rail-border px-3 text-xs font-medium text-rail-subtle hover:border-rail-border-strong">
                 <Checkbox
                   name="followRedirects"
@@ -750,7 +818,7 @@ export function MonitorForm({
                 Follow redirects
               </label>
             ) : null}
-            {monitorType === 'HTTP' && errors.followRedirects ? (
+            {(monitorType === 'HTTP' || monitorType === 'KEYWORD') && errors.followRedirects ? (
               <span className="-mt-2 text-xs text-rail-danger">{errors.followRedirects[0]}</span>
             ) : null}
           </div>

@@ -51,6 +51,8 @@ import {
   domainExpirySettingsFromForm,
   icmpSettingsFromForm,
   heartbeatSettingsFromForm,
+  keywordConfigurationTestFromForm,
+  keywordSettingsFromForm,
   requiresStateChangingMethodConfirmation,
   requestBodyFromForm,
   requestHeadersFromForm,
@@ -102,6 +104,10 @@ function monitorTargetLabel(monitor: Monitor | undefined): string {
   }
   if (monitor.configuration.type === 'DOMAIN_EXPIRY') {
     return `${monitor.configuration.domainName} · ${monitor.configuration.warningDays}-day warning`;
+  }
+  if (monitor.configuration.type === 'KEYWORD') {
+    const verb = monitor.configuration.match === 'CONTAINS' ? 'contains' : 'does not contain';
+    return `${monitor.configuration.url} · ${verb} “${monitor.configuration.keyword}”`;
   }
   return monitor.url;
 }
@@ -406,7 +412,8 @@ export function Dashboard({
       requestedType === 'ICMP' ||
       requestedType === 'API_WORKFLOW' ||
       requestedType === 'HEARTBEAT' ||
-      requestedType === 'DOMAIN_EXPIRY'
+      requestedType === 'DOMAIN_EXPIRY' ||
+      requestedType === 'KEYWORD'
         ? requestedType
         : 'HTTP';
 
@@ -466,21 +473,29 @@ export function Dashboard({
                             locations: [formData.get('location')],
                             lifecycleState: formData.get('lifecycleState'),
                           }
-                        : {
-                            type: 'HTTP',
-                            name: formData.get('name'),
-                            url: urlFromMonitorForm(formData),
-                            statusPolicy: statusPolicyFromForm(formData),
-                            tlsPolicy: tlsPolicyFromForm(formData),
-                            method: formData.get('method'),
-                            timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
-                            followRedirects: formData.get('followRedirects') === 'on',
-                            locations: [formData.get('location')],
-                            lifecycleState: formData.get('lifecycleState'),
-                            requestHeaders: requestHeadersFromForm(formData),
-                            requestBody: requestBodyFromForm(formData),
-                            assertions: responseAssertionsFromForm(formData),
-                          },
+                        : monitorType === 'KEYWORD'
+                          ? {
+                              type: 'KEYWORD',
+                              name: formData.get('name'),
+                              ...keywordSettingsFromForm(formData),
+                              locations: [formData.get('location')],
+                              lifecycleState: formData.get('lifecycleState'),
+                            }
+                          : {
+                              type: 'HTTP',
+                              name: formData.get('name'),
+                              url: urlFromMonitorForm(formData),
+                              statusPolicy: statusPolicyFromForm(formData),
+                              tlsPolicy: tlsPolicyFromForm(formData),
+                              method: formData.get('method'),
+                              timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
+                              followRedirects: formData.get('followRedirects') === 'on',
+                              locations: [formData.get('location')],
+                              lifecycleState: formData.get('lifecycleState'),
+                              requestHeaders: requestHeadersFromForm(formData),
+                              requestBody: requestBodyFromForm(formData),
+                              assertions: responseAssertionsFromForm(formData),
+                            },
           ),
         },
       );
@@ -532,21 +547,23 @@ export function Dashboard({
                 ? { path: 'icmp-settings', body: icmpSettingsFromForm(formData) }
                 : monitorType === 'DNS'
                   ? { path: 'dns-settings', body: dnsSettingsFromForm(formData) }
-                  : {
-                      path: 'configuration',
-                      body: {
-                        httpSettings: {
-                          url: urlFromMonitorForm(formData),
-                          method: formData.get('method'),
-                          timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
-                          followRedirects: formData.get('followRedirects') === 'on',
-                          requestBody: requestBodyFromForm(formData),
-                          tlsPolicy: tlsPolicyFromForm(formData),
+                  : monitorType === 'KEYWORD'
+                    ? { path: 'keyword-settings', body: keywordSettingsFromForm(formData) }
+                    : {
+                        path: 'configuration',
+                        body: {
+                          httpSettings: {
+                            url: urlFromMonitorForm(formData),
+                            method: formData.get('method'),
+                            timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
+                            followRedirects: formData.get('followRedirects') === 'on',
+                            requestBody: requestBodyFromForm(formData),
+                            tlsPolicy: tlsPolicyFromForm(formData),
+                          },
+                          requestHeaders: requestHeadersFromForm(formData),
+                          assertions: responseAssertionsFromForm(formData),
                         },
-                        requestHeaders: requestHeadersFromForm(formData),
-                        assertions: responseAssertionsFromForm(formData),
                       },
-                    },
       { path: 'name', body: { name: formData.get('name') } },
       ...(monitorType === 'HTTP'
         ? [{ path: 'status-policy', body: { statusPolicy: statusPolicyFromForm(formData) } }]
@@ -592,7 +609,12 @@ export function Dashboard({
     const form = document.getElementById('monitor-form');
     if (!(form instanceof HTMLFormElement) || !form.reportValidity()) return;
     const methodValue = new FormData(form).get('method');
-    if (new FormData(form).get('monitorType') !== 'HTTP') return;
+    const monitorType = new FormData(form).get('monitorType');
+    if (monitorType !== 'HTTP' && monitorType !== 'KEYWORD') return;
+    if (monitorType === 'KEYWORD') {
+      void testConfiguration(form);
+      return;
+    }
     const method = typeof methodValue === 'string' ? methodValue : 'GET';
     if (requiresStateChangingMethodConfirmation(method)) {
       setStateChangingTestMethod(method);
@@ -633,7 +655,11 @@ export function Dashboard({
       const response = await fetch(`${endpoint}?projectId=${encodeURIComponent(projectId)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify(httpConfigurationTestFromForm(new FormData(monitorForm))),
+        body: JSON.stringify(
+          new FormData(monitorForm).get('monitorType') === 'KEYWORD'
+            ? keywordConfigurationTestFromForm(new FormData(monitorForm))
+            : httpConfigurationTestFromForm(new FormData(monitorForm)),
+        ),
         signal: controller.signal,
       });
       const body = (await response.json()) as { data?: ConfigurationTestResult } & ApiError;
@@ -1175,7 +1201,7 @@ export function Dashboard({
                   >
                     Cancel
                   </Link>
-                  {createMonitorType === 'HTTP' ? (
+                  {createMonitorType === 'HTTP' || createMonitorType === 'KEYWORD' ? (
                     <Button
                       variant="secondary"
                       disabled={isTestingConfiguration || isSubmitting}
@@ -1208,7 +1234,7 @@ export function Dashboard({
                   <Link href={detailPath} className={actionClassName({ variant: 'quiet' })}>
                     Cancel
                   </Link>
-                  {detailMonitor.type === 'HTTP' ? (
+                  {detailMonitor.type === 'HTTP' || detailMonitor.type === 'KEYWORD' ? (
                     <Button
                       variant="secondary"
                       disabled={isTestingConfiguration || isSubmitting}
@@ -1532,7 +1558,7 @@ export function Dashboard({
                           ) : (
                             <span>{monitor.timeoutMs / 1000}s timeout</span>
                           )}
-                          {(monitor.type ?? 'HTTP') === 'HTTP' ? (
+                          {(monitor.type ?? 'HTTP') === 'HTTP' || monitor.type === 'KEYWORD' ? (
                             <>
                               <span>{monitor.method}</span>
                               <span>
@@ -2027,22 +2053,37 @@ function MonitorDetailView({
                     }
                   />
                 </>
+              ) : monitor.configuration?.type === 'KEYWORD' ? (
+                <>
+                  <DetailRow label="URL" value={monitor.configuration.url} />
+                  <DetailRow
+                    label="Rule"
+                    value={
+                      monitor.configuration.match === 'CONTAINS'
+                        ? 'Must contain'
+                        : 'Must not contain'
+                    }
+                  />
+                  <DetailRow label="Keyword" value={monitor.configuration.keyword} />
+                </>
               ) : (
                 <DetailRow label="Method" value={monitor.method} />
               )}
               {monitor.type !== 'HEARTBEAT' ? (
                 <DetailRow label="Timeout" value={`${monitor.timeoutMs / 1000} seconds`} />
               ) : null}
-              {(monitor.type ?? 'HTTP') === 'HTTP' ? (
+              {monitor.type === 'HTTP' || monitor.type === 'KEYWORD' ? (
                 <>
                   <DetailRow
                     label="Redirects"
                     value={monitor.followRedirects ? 'Followed' : 'Final response only'}
                   />
-                  <DetailRow
-                    label="Expected status"
-                    value={statusPolicyLabel(monitor.statusPolicy)}
-                  />
+                  {monitor.type === 'HTTP' ? (
+                    <DetailRow
+                      label="Expected status"
+                      value={statusPolicyLabel(monitor.statusPolicy)}
+                    />
+                  ) : null}
                 </>
               ) : null}
               {monitor.type !== 'HEARTBEAT' ? (

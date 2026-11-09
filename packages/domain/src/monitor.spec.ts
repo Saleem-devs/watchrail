@@ -99,6 +99,48 @@ describe('heartbeat monitoring contracts', () => {
 });
 
 describe('createMonitor', () => {
+  it('creates keyword monitors as fixed GET checks with one literal text assertion', () => {
+    expect(
+      createMonitor({
+        type: 'KEYWORD',
+        name: 'Marketing copy',
+        url: 'https://example.com/',
+        keyword: 'Launch ready',
+        match: 'CONTAINS',
+        timeoutMs: 7_000,
+        followRedirects: false,
+      }),
+    ).toMatchObject({
+      type: 'KEYWORD',
+      method: 'GET',
+      statusPolicy: { type: 'ANY_2XX' },
+      requestBody: { type: 'NONE' },
+      keyword: 'Launch ready',
+      keywordMatch: 'CONTAINS',
+      assertions: {
+        textBody: [
+          {
+            operator: 'contains',
+            target: { value: 'Launch ready', sensitive: false },
+          },
+        ],
+      },
+    });
+  });
+
+  it('rejects HTTP-only customization on a keyword monitor', () => {
+    expect(() =>
+      createMonitor({
+        type: 'KEYWORD',
+        name: 'Unsafe keyword check',
+        url: 'https://example.com',
+        keyword: 'ready',
+        keywordMatch: 'CONTAINS',
+        method: 'POST',
+      }),
+    ).toThrow(MonitorInputError);
+  });
+
   it('creates a ping monitor with a normalized public target', () => {
     expect(
       createMonitor({

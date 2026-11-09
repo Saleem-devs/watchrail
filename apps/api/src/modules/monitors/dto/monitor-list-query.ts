@@ -11,7 +11,7 @@ export const monitorListQuerySchema = z
   .object({
     projectId: z.string().uuid().optional(),
     type: z
-      .enum(['HTTP', 'TCP', 'DNS', 'ICMP', 'API_WORKFLOW', 'HEARTBEAT', 'DOMAIN_EXPIRY'])
+      .enum(['HTTP', 'TCP', 'DNS', 'ICMP', 'API_WORKFLOW', 'HEARTBEAT', 'DOMAIN_EXPIRY', 'KEYWORD'])
       .optional(),
     name: optionalSearchTerm,
     state: z.enum(['operational', 'attention', 'paused', 'pending']).optional(),

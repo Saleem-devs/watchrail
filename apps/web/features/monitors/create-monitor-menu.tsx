@@ -12,6 +12,7 @@ import {
   Plug,
   Plus,
   RadioTower,
+  TextSearch,
   type LucideIcon,
 } from 'lucide-react';
 import { createMonitorTypePath, MONITOR_TYPES } from './monitor-types';
@@ -22,6 +23,7 @@ function MonitorTypeIcon({ type }: { type: (typeof MONITOR_TYPES)[number]['type'
     TCP: Plug,
     DNS: Database,
     ICMP: RadioTower,
+    KEYWORD: TextSearch,
     API_WORKFLOW: GitBranch,
     HEARTBEAT: Activity,
     DOMAIN_EXPIRY: CalendarClock,

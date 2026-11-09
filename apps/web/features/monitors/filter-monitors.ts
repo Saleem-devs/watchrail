@@ -85,6 +85,10 @@ export function filterMonitors(
         monitor.configuration.host.toLowerCase().includes(needle)) ||
       (monitor.configuration?.type === 'DOMAIN_EXPIRY' &&
         monitor.configuration.domainName.toLowerCase().includes(needle)) ||
+      (monitor.configuration?.type === 'KEYWORD' &&
+        `${monitor.configuration.url} ${monitor.configuration.keyword}`
+          .toLowerCase()
+          .includes(needle)) ||
       (monitor.configuration?.type === 'API_WORKFLOW' &&
         monitor.configuration.workflow.steps.some((step) =>
           `${step.name} ${step.url}`.toLowerCase().includes(needle),

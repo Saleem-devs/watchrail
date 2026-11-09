@@ -56,6 +56,10 @@ const outcomeLabel: Record<DiagnosticOutcome, string> = {
   DOWN: 'Down',
 };
 
+function isHttpProtocol(protocol: Monitor['type']): boolean {
+  return protocol === 'HTTP' || protocol === 'KEYWORD';
+}
+
 function OutcomeBadge({ outcome }: { outcome: DiagnosticOutcome }) {
   return (
     <span
@@ -75,7 +79,7 @@ function singleLocationHealth(
   return classifyScheduledObservation({
     outcome,
     reason,
-    assertionOutcome: protocol === 'HTTP' ? assertionOutcome : 'PASS',
+    assertionOutcome: isHttpProtocol(protocol) ? assertionOutcome : 'PASS',
   });
 }
 
@@ -94,23 +98,22 @@ function DiagnosticOutcomeSummary({
   assertionEvaluation: AssertionEvaluation;
   protocol?: Monitor['type'];
 }) {
-  const executionOutcome: DiagnosticOutcome =
-    protocol !== 'HTTP'
-      ? outcome
-      : (reason === 'CERTIFICATE_EXPIRING' || reason === 'CERTIFICATE_EVIDENCE_UNAVAILABLE') &&
-          statusCode !== null
-        ? 'PASS'
-        : stage !== 'HTTP' || statusCode === null
-          ? 'NO_RESPONSE'
-          : outcome;
+  const executionOutcome: DiagnosticOutcome = !isHttpProtocol(protocol)
+    ? outcome
+    : (reason === 'CERTIFICATE_EXPIRING' || reason === 'CERTIFICATE_EVIDENCE_UNAVAILABLE') &&
+        statusCode !== null
+      ? 'PASS'
+      : stage !== 'HTTP' || statusCode === null
+        ? 'NO_RESPONSE'
+        : outcome;
   const health = singleLocationHealth(outcome, reason, assertionEvaluation.outcome, protocol);
   return (
     <dl
-      className={`grid gap-px border-t border-rail-border bg-rail-border ${protocol === 'HTTP' ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}
+      className={`grid gap-px border-t border-rail-border bg-rail-border ${isHttpProtocol(protocol) ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}
     >
       <DiagnosticSignal
         label={
-          protocol === 'HTTP'
+          isHttpProtocol(protocol)
             ? 'HTTP execution'
             : protocol === 'TCP'
               ? 'TCP connection'
@@ -118,7 +121,7 @@ function DiagnosticOutcomeSummary({
         }
         outcome={executionOutcome}
       />
-      {protocol === 'HTTP' ? (
+      {isHttpProtocol(protocol) ? (
         <DiagnosticSignal label="Response validation" outcome={assertionEvaluation.outcome} />
       ) : null}
       <DiagnosticSignal label="Monitoring health" outcome={health} />
@@ -256,7 +259,7 @@ export function ManualDiagnostic({
       <dl className="grid grid-cols-2 gap-px bg-rail-border sm:grid-cols-4">
         <Metric
           label={
-            protocol === 'HTTP'
+            isHttpProtocol(protocol)
               ? 'HTTP'
               : protocol === 'TCP'
                 ? 'Connection'
@@ -265,7 +268,7 @@ export function ManualDiagnostic({
                   : 'DNS lookup'
           }
           value={
-            protocol === 'HTTP'
+            isHttpProtocol(protocol)
               ? (result.statusCode?.toString() ?? 'No response')
               : protocol === 'TCP'
                 ? tcpConnectionState(result.outcome, result.reason)
@@ -276,7 +279,7 @@ export function ManualDiagnostic({
         />
         <Metric
           label={
-            protocol === 'HTTP'
+            isHttpProtocol(protocol)
               ? 'Response'
               : protocol === 'TCP'
                 ? 'Connect latency'
@@ -317,7 +320,7 @@ export function ManualDiagnostic({
           {humanize(result.stage)} · {humanize(result.reason)}
         </p>
       </div>
-      {protocol === 'HTTP' ? (
+      {isHttpProtocol(protocol) ? (
         <>
           <AssertionDiagnostics evaluation={assertionEvaluation} />
           <TlsCertificateEvidencePanel
@@ -990,12 +993,12 @@ function MultiLocationDiagnostic({
                         </span>
                       </p>
                     )}
-                    {protocol === 'HTTP' && execution.diagnosticSummary.assertionEvaluation ? (
+                    {isHttpProtocol(protocol) && execution.diagnosticSummary.assertionEvaluation ? (
                       <AssertionDiagnostics
                         evaluation={execution.diagnosticSummary.assertionEvaluation}
                       />
                     ) : null}
-                    {protocol === 'HTTP' ? (
+                    {isHttpProtocol(protocol) ? (
                       <TlsCertificateEvidencePanel
                         certificates={execution.diagnosticSummary.tlsCertificates}
                         observedAt={execution.diagnosticSummary.checkedAt}
@@ -1008,7 +1011,7 @@ function MultiLocationDiagnostic({
           ))}
         </ul>
       ) : null}
-      {protocol === 'HTTP' ? <EvidenceRetentionNotice /> : null}
+      {isHttpProtocol(protocol) ? <EvidenceRetentionNotice /> : null}
     </section>
   );
 }
@@ -1183,7 +1186,7 @@ function HistoricalSingleLocationEvidence({
       <dl className="grid grid-cols-2 gap-px bg-rail-border sm:grid-cols-4">
         <Metric
           label={
-            protocol === 'HTTP'
+            isHttpProtocol(protocol)
               ? 'HTTP'
               : protocol === 'TCP'
                 ? 'Connection'
@@ -1192,7 +1195,7 @@ function HistoricalSingleLocationEvidence({
                   : 'DNS lookup'
           }
           value={
-            protocol === 'HTTP'
+            isHttpProtocol(protocol)
               ? (result.statusCode?.toString() ?? 'No response')
               : protocol === 'TCP'
                 ? tcpConnectionState(result.outcome, result.reason)
@@ -1203,7 +1206,7 @@ function HistoricalSingleLocationEvidence({
         />
         <Metric
           label={
-            protocol === 'HTTP'
+            isHttpProtocol(protocol)
               ? 'Response'
               : protocol === 'TCP'
                 ? 'Connect latency'
@@ -1239,7 +1242,7 @@ function HistoricalSingleLocationEvidence({
                   assertionEvaluation,
                 })}
       </p>
-      {protocol === 'HTTP' ? (
+      {isHttpProtocol(protocol) ? (
         <>
           <AssertionDiagnostics evaluation={assertionEvaluation} />
           <TlsCertificateEvidencePanel

@@ -202,7 +202,7 @@ export class ProbeCoordinatorRepository {
         requiredEngineVersion: row.requiredEngineVersion,
         organizationId: row.organizationId,
         monitorId: row.monitorId,
-        type: row.type,
+        type: row.type === 'KEYWORD' ? 'HTTP' : row.type,
         tcpHost: row.tcpHost,
         tcpPort: row.tcpPort,
         icmpHost: row.icmpHost,

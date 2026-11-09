@@ -34,7 +34,8 @@ export interface MaintenanceWindow {
 export interface MaintenanceMonitor {
   id: string;
   name: string;
-  type: 'HTTP' | 'TCP' | 'DNS' | 'ICMP' | 'API_WORKFLOW' | 'HEARTBEAT' | 'DOMAIN_EXPIRY';
+  type:
+    'HTTP' | 'TCP' | 'DNS' | 'ICMP' | 'API_WORKFLOW' | 'HEARTBEAT' | 'DOMAIN_EXPIRY' | 'KEYWORD';
   lifecycleState: 'ENABLED' | 'PAUSED';
 }
 

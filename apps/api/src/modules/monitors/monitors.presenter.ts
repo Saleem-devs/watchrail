@@ -34,11 +34,13 @@ export interface MonitorResponse {
   id: string;
   projectId: string;
   name: string;
-  type: 'HTTP' | 'TCP' | 'DNS' | 'ICMP' | 'API_WORKFLOW' | 'HEARTBEAT' | 'DOMAIN_EXPIRY';
+  type:
+    'HTTP' | 'TCP' | 'DNS' | 'ICMP' | 'KEYWORD' | 'API_WORKFLOW' | 'HEARTBEAT' | 'DOMAIN_EXPIRY';
   configuration:
     | { type: 'HTTP'; url: string }
     | { type: 'TCP'; host: string; port: number }
     | { type: 'ICMP'; host: string }
+    | { type: 'KEYWORD'; url: string; keyword: string; match: 'CONTAINS' | 'NOT_CONTAINS' }
     | {
         type: 'DNS';
         name: string;
@@ -147,38 +149,40 @@ export function toResponse(
     name: monitor.name,
     type: monitor.type,
     configuration:
-      monitor.type === 'DOMAIN_EXPIRY'
-        ? {
-            type: 'DOMAIN_EXPIRY',
-            domainName: requireDomainField(monitor.domainName, 'domain name'),
-            warningDays: requireDomainField(monitor.domainWarningDays, 'warning threshold'),
-          }
-        : monitor.type === 'API_WORKFLOW'
+      monitor.type === 'KEYWORD'
+        ? keywordConfiguration(monitor)
+        : monitor.type === 'DOMAIN_EXPIRY'
           ? {
-              type: 'API_WORKFLOW',
-              workflow: redactApiWorkflow(monitor.apiWorkflow),
+              type: 'DOMAIN_EXPIRY',
+              domainName: requireDomainField(monitor.domainName, 'domain name'),
+              warningDays: requireDomainField(monitor.domainWarningDays, 'warning threshold'),
             }
-          : monitor.type === 'HEARTBEAT'
-            ? { type: 'HEARTBEAT', heartbeat: monitor.heartbeat }
-            : monitor.type === 'TCP'
-              ? {
-                  type: 'TCP',
-                  host: requireTcpField(monitor.tcpHost, 'host'),
-                  port: requireTcpField(monitor.tcpPort, 'port'),
-                }
-              : monitor.type === 'ICMP'
+          : monitor.type === 'API_WORKFLOW'
+            ? {
+                type: 'API_WORKFLOW',
+                workflow: redactApiWorkflow(monitor.apiWorkflow),
+              }
+            : monitor.type === 'HEARTBEAT'
+              ? { type: 'HEARTBEAT', heartbeat: monitor.heartbeat }
+              : monitor.type === 'TCP'
                 ? {
-                    type: 'ICMP',
-                    host: requireIcmpField(monitor.icmpHost, 'host'),
+                    type: 'TCP',
+                    host: requireTcpField(monitor.tcpHost, 'host'),
+                    port: requireTcpField(monitor.tcpPort, 'port'),
                   }
-                : monitor.type === 'DNS'
+                : monitor.type === 'ICMP'
                   ? {
-                      type: 'DNS',
-                      name: requireDnsField(monitor.dnsName, 'name'),
-                      recordType: requireDnsField(monitor.dnsRecordType, 'record type'),
-                      expectedValues: monitor.dnsExpectedValues,
+                      type: 'ICMP',
+                      host: requireIcmpField(monitor.icmpHost, 'host'),
                     }
-                  : { type: 'HTTP', url: monitor.url },
+                  : monitor.type === 'DNS'
+                    ? {
+                        type: 'DNS',
+                        name: requireDnsField(monitor.dnsName, 'name'),
+                        recordType: requireDnsField(monitor.dnsRecordType, 'record type'),
+                        expectedValues: monitor.dnsExpectedValues,
+                      }
+                    : { type: 'HTTP', url: monitor.url },
     url: monitor.url,
     method: monitor.method,
     lifecycleState: monitor.lifecycleState,
@@ -198,6 +202,32 @@ export function toResponse(
       ? { ...currentCheck, checkedAt: currentCheck.checkedAt.toISOString() }
       : null,
     incidentState: toIncidentStateResponse(incidentState),
+  };
+}
+
+function keywordConfiguration(monitor: MonitorRecord): {
+  type: 'KEYWORD';
+  url: string;
+  keyword: string;
+  match: 'CONTAINS' | 'NOT_CONTAINS';
+} {
+  const assertions = parseStoredAssertionConfiguration(monitor.assertions).assertions;
+  const assertion = assertions.textBody[0];
+  if (
+    assertions.headers.length !== 0 ||
+    assertions.textBody.length !== 1 ||
+    assertions.jsonBody.length !== 0 ||
+    !assertion ||
+    (assertion.operator !== 'contains' && assertion.operator !== 'not_contains') ||
+    assertion.target.sensitive
+  ) {
+    throw new Error('Stored keyword monitor assertion is invalid.');
+  }
+  return {
+    type: 'KEYWORD',
+    url: monitor.url,
+    keyword: assertion.target.value,
+    match: assertion.operator === 'contains' ? 'CONTAINS' : 'NOT_CONTAINS',
   };
 }
 

@@ -178,7 +178,7 @@ describe('daily availability accounting', () => {
     expect((await state()).currentState).toBe('UNAVAILABLE');
   });
 
-  it('maps unavailable assertion evidence to UNKNOWN and accrues repeated states without resetting stateSince', async () => {
+  it('maps unavailable negative-match evidence to UNKNOWN and accrues repeated states without resetting stateSince', async () => {
     await complete((await scheduled()).id, result());
     const available = await state();
     const next = await scheduled();
@@ -199,7 +199,7 @@ describe('daily availability accounting', () => {
               index: 0,
               source: 'TEXT_BODY',
               subject: null,
-              operator: 'equals',
+              operator: 'not_contains',
               outcome: 'NOT_EVALUATED',
               reason: 'BODY_READ_FAILED',
             },

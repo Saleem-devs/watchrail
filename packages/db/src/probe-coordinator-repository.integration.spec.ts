@@ -137,6 +137,44 @@ describe('probe coordinator repository', () => {
     ).resolves.toBeNull();
   });
 
+  it('presents keyword monitors to remote probes as immutable HTTP assertion checks', async () => {
+    const remote = await createMachine('keyword');
+    const monitor = await monitors.create(
+      organizationId,
+      createMonitor({
+        type: 'KEYWORD',
+        name: 'Homepage copy',
+        url: 'https://example.com/',
+        keyword: 'Launch ready',
+        keywordMatch: 'CONTAINS',
+      }),
+    );
+    await monitors.updateLocations(organizationId, monitor.id, [remote.locationId]);
+    await rounds.create(organizationId, monitor.id);
+
+    const claim = await coordinator.claim(remote.machine, HTTP_ENGINE_VERSION);
+    if (claim.state !== 'CLAIMED') throw new Error('Expected a keyword probe lease.');
+    await expect(
+      coordinator.configuration(remote.machine, claim.lease.attemptId, claim.lease.claimToken),
+    ).resolves.toMatchObject({
+      type: 'HTTP',
+      url: 'https://example.com/',
+      method: 'GET',
+      statusPolicy: { type: 'ANY_2XX' },
+      assertions: {
+        contractVersion: 1,
+        assertions: {
+          textBody: [
+            {
+              operator: 'contains',
+              target: { value: 'Launch ready', sensitive: false },
+            },
+          ],
+        },
+      },
+    });
+  });
+
   it('rejects configuration after the authoritative round deadline before reconciliation', async () => {
     const fixture = await createFixture('configuration-deadline');
     const lease = await claimLease(fixture.machine);
