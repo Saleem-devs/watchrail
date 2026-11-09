@@ -447,6 +447,24 @@ describe('CheckExecutionRepository', () => {
     });
   });
 
+  it('rejects null ICMP targets in monitors and immutable configuration versions', async () => {
+    const round = await createIcmpRound();
+
+    await expect(
+      connection.pool.query('update monitors set icmp_host = null where id = $1', [
+        round.monitorId,
+      ]),
+    ).rejects.toMatchObject({ constraint: 'monitors_protocol_configuration' });
+    await expect(
+      connection.pool.query(
+        'update monitor_configuration_versions set icmp_host = null where monitor_id = $1',
+        [round.monitorId],
+      ),
+    ).rejects.toMatchObject({
+      constraint: 'monitor_configuration_versions_protocol_configuration',
+    });
+  });
+
   it('claims immutable domain settings and reloads bounded expiry evidence', async () => {
     const round = await createDomainExpiryRound();
     const claim = await repository.claim(round.id, 45_000);

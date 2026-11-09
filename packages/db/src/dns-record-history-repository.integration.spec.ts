@@ -426,11 +426,12 @@ describe('DnsRecordHistoryRepository', () => {
     const round = await new ManualRoundRepository(connection.db).create(organizationId, monitor.id);
     const availabilityStartResult = await connection.pool.query<{ accountedThrough: Date }>(
       `update monitor_availability_state
-       set tracking_started_at = clock_timestamp() - interval '1 hour',
-           state_since = clock_timestamp() - interval '1 hour',
-           accounted_through = clock_timestamp() - interval '1 hour',
-           enabled_since = clock_timestamp() - interval '1 hour',
-           updated_at = clock_timestamp() - interval '1 hour'
+       set tracking_started_at = fixture.at,
+           state_since = fixture.at,
+           accounted_through = fixture.at,
+           enabled_since = fixture.at,
+           updated_at = fixture.at
+       from (select clock_timestamp() - interval '1 hour' as at) fixture
        where monitor_id = $1
        returning accounted_through as "accountedThrough"`,
       [monitor.id],

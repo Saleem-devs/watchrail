@@ -66,6 +66,26 @@ export async function executeIcmpCheck(
         checkedAt,
       };
     }
+    if (result.type === 'EXECUTION_ERROR') {
+      return {
+        outcome: 'UNKNOWN',
+        stage: 'PROBE',
+        reason: 'INTERNAL_ERROR',
+        responseTimeMs: null,
+        attemptDurationMs: elapsed(clock, startedAt),
+        checkedAt,
+      };
+    }
+    if (result.type === 'NO_REPLY') {
+      return {
+        outcome: 'FAIL',
+        stage: 'ICMP',
+        reason: 'PING_TIMEOUT',
+        responseTimeMs: null,
+        attemptDurationMs: elapsed(clock, startedAt),
+        checkedAt,
+      };
+    }
     return {
       outcome: 'FAIL',
       stage: 'ICMP',

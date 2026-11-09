@@ -538,7 +538,7 @@ export const monitors = pgTable(
         or
         (${table.type}::text = 'TCP' and length(btrim(${table.tcpHost})) > 0 and ${table.tcpPort} between 1 and 65535 and ${table.icmpHost} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.domainName} is null and ${table.domainWarningDays} is null and ${table.apiWorkflow} is null and ${table.heartbeat} is null and ${table.heartbeatTokenHash} is null)
         or
-        (${table.type}::text = 'ICMP' and ${table.tcpHost} is null and ${table.tcpPort} is null and length(btrim(${table.icmpHost})) > 0 and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.domainName} is null and ${table.domainWarningDays} is null and ${table.apiWorkflow} is null and ${table.heartbeat} is null and ${table.heartbeatTokenHash} is null)
+        (${table.type}::text = 'ICMP' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.icmpHost} is not null and length(btrim(${table.icmpHost})) > 0 and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.domainName} is null and ${table.domainWarningDays} is null and ${table.apiWorkflow} is null and ${table.heartbeat} is null and ${table.heartbeatTokenHash} is null)
         or
         (${table.type}::text = 'DNS' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.icmpHost} is null and length(btrim(${table.dnsName})) > 0 and ${table.dnsRecordType} in ('A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS') and ${table.domainName} is null and ${table.domainWarningDays} is null and ${table.apiWorkflow} is null and ${table.heartbeat} is null and ${table.heartbeatTokenHash} is null)
         or
@@ -917,7 +917,7 @@ export const monitorConfigurationVersions = pgTable(
         or
         (${table.type}::text = 'TCP' and length(btrim(${table.tcpHost})) > 0 and ${table.tcpPort} between 1 and 65535 and ${table.icmpHost} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.domainName} is null and ${table.domainWarningDays} is null and ${table.apiWorkflow} is null and ${table.heartbeat} is null)
         or
-        (${table.type}::text = 'ICMP' and ${table.tcpHost} is null and ${table.tcpPort} is null and length(btrim(${table.icmpHost})) > 0 and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.domainName} is null and ${table.domainWarningDays} is null and ${table.apiWorkflow} is null and ${table.heartbeat} is null)
+        (${table.type}::text = 'ICMP' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.icmpHost} is not null and length(btrim(${table.icmpHost})) > 0 and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.domainName} is null and ${table.domainWarningDays} is null and ${table.apiWorkflow} is null and ${table.heartbeat} is null)
         or
         (${table.type}::text = 'DNS' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.icmpHost} is null and length(btrim(${table.dnsName})) > 0 and ${table.dnsRecordType} in ('A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS') and ${table.domainName} is null and ${table.domainWarningDays} is null and ${table.apiWorkflow} is null and ${table.heartbeat} is null)
         or

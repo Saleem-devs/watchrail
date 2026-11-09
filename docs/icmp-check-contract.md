@@ -56,12 +56,20 @@ Stable classifications are:
 `ICMP_UNAVAILABLE` never marks the target down. It means the probe image, host kernel, or container
 runtime could not provide the capability needed to send an ICMP echo request.
 
+The system adapter forces the supported `ping` process to use the C locale and captures a bounded
+amount of stdout and stderr. A completed process with no reply becomes `PING_TIMEOUT`; only explicit
+destination-unreachable evidence becomes `PING_HOST_UNREACHABLE`. Missing permissions or binaries
+become `ICMP_UNAVAILABLE`, while malformed reply evidence and other local execution errors remain
+indeterminate as `INTERNAL_ERROR`.
+
 ## Deadline and evidence
 
 The configured timeout is one wall-clock deadline covering DNS resolution and all address attempts.
 Trying another resolved address does not reset the deadline.
 
-Successful replies retain:
+Successful replies retain the RTT reported by the echo-reply output, including fractional and
+sub-millisecond values. Process startup and shutdown time is not substituted for RTT. The full
+resolution and subprocess duration remains available separately:
 
 ```text
 response_time_ms     elapsed time for the successful echo request

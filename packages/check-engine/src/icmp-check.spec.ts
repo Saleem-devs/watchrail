@@ -62,6 +62,42 @@ describe('executeIcmpCheck', () => {
     });
   });
 
+  it('classifies a completed ping with no reply as a timeout', async () => {
+    await expect(
+      executeIcmpCheck(
+        { host: 'edge.example.com', timeoutMs: 5_000 },
+        {
+          pinger: { ping: vi.fn().mockResolvedValue({ type: 'NO_REPLY' }) },
+          resolver: publicResolver,
+          clock: createClock(),
+        },
+      ),
+    ).resolves.toMatchObject({
+      outcome: 'FAIL',
+      stage: 'ICMP',
+      reason: 'PING_TIMEOUT',
+      responseTimeMs: null,
+    });
+  });
+
+  it('keeps local ping execution errors indeterminate', async () => {
+    await expect(
+      executeIcmpCheck(
+        { host: 'edge.example.com', timeoutMs: 5_000 },
+        {
+          pinger: { ping: vi.fn().mockResolvedValue({ type: 'EXECUTION_ERROR' }) },
+          resolver: publicResolver,
+          clock: createClock(),
+        },
+      ),
+    ).resolves.toMatchObject({
+      outcome: 'UNKNOWN',
+      stage: 'PROBE',
+      reason: 'INTERNAL_ERROR',
+      responseTimeMs: null,
+    });
+  });
+
   it('treats a missing or unauthorized ping capability as indeterminate', async () => {
     await expect(
       executeIcmpCheck(

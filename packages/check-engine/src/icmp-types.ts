@@ -51,8 +51,10 @@ export interface IcmpPingInput {
 
 export type IcmpPingResult =
   | { type: 'REPLY'; responseTimeMs: number }
+  | { type: 'NO_REPLY' }
   | { type: 'HOST_UNREACHABLE' }
-  | { type: 'ICMP_UNAVAILABLE' };
+  | { type: 'ICMP_UNAVAILABLE' }
+  | { type: 'EXECUTION_ERROR' };
 
 export interface IcmpPinger {
   ping(input: IcmpPingInput): Promise<IcmpPingResult>;

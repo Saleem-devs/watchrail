@@ -185,6 +185,39 @@ describe('incident lifecycle', () => {
     });
   });
 
+  it('keeps unavailable ICMP execution indeterminate without opening or resolving incidents', async () => {
+    await connection.db.delete(monitors).where(eq(monitors.id, monitorId));
+    const icmpMonitor = await new MonitorRepository(connection.db).create(
+      organizationId,
+      createMonitor({ type: 'ICMP', name: 'Edge ping', host: 'edge.example.com' }),
+    );
+    monitorId = icmpMonitor.id;
+
+    await complete((await scheduledRound()).id, icmpUnavailable());
+    await complete((await scheduledRound()).id, icmpUnavailable());
+    await complete((await scheduledRound()).id, icmpUnavailable());
+    expect(await state()).toMatchObject({ consecutiveFailures: 0 });
+    expect(await connection.db.select().from(incidents)).toEqual([]);
+    expect(await availabilityState()).toBe('UNKNOWN');
+
+    await complete((await scheduledRound()).id, icmpUnreachable());
+    await complete((await scheduledRound()).id, icmpUnreachable());
+    await complete((await scheduledRound()).id, icmpUnreachable());
+    const [opened] = await connection.db.select().from(incidents);
+    expect(opened).toMatchObject({ status: 'OPEN', severity: 'DOWN' });
+    expect(await availabilityState()).toBe('UNAVAILABLE');
+
+    await complete((await scheduledRound()).id, icmpUnavailable());
+    expect((await connection.db.select().from(incidents))[0]).toMatchObject({ status: 'OPEN' });
+    expect(await state()).toMatchObject({ consecutiveFailures: 3 });
+    expect(await availabilityState()).toBe('UNKNOWN');
+
+    await complete((await scheduledRound()).id, icmpReply());
+    expect((await connection.db.select().from(incidents))[0]).toMatchObject({ status: 'RESOLVED' });
+    expect(await state()).toMatchObject({ consecutiveFailures: 0 });
+    expect(await availabilityState()).toBe('AVAILABLE');
+  });
+
   it('keeps RDAP uncertainty indeterminate and uses one validated domain result per transition', async () => {
     await connection.db.delete(monitors).where(eq(monitors.id, monitorId));
     const domainMonitor = await new MonitorRepository(connection.db).create(
@@ -704,6 +737,23 @@ function unhealthy(): AuthoritativeCheckResult {
 
 function internalError(): AuthoritativeCheckResult {
   return result({ outcome: 'UNKNOWN', stage: 'PROBE', reason: 'INTERNAL_ERROR' });
+}
+
+function icmpUnavailable(): AuthoritativeCheckResult {
+  return result({ outcome: 'UNKNOWN', stage: 'PROBE', reason: 'ICMP_UNAVAILABLE' });
+}
+
+function icmpUnreachable(): AuthoritativeCheckResult {
+  return result({ outcome: 'FAIL', stage: 'ICMP', reason: 'PING_HOST_UNREACHABLE' });
+}
+
+function icmpReply(): AuthoritativeCheckResult {
+  return result({
+    outcome: 'PASS',
+    stage: 'ICMP',
+    reason: 'PING_REPLIED',
+    responseTimeMs: 12,
+  });
 }
 
 function prohibitedDestination(): AuthoritativeCheckResult {
