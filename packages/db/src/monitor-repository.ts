@@ -23,6 +23,7 @@ import {
   type StoredApiWorkflowConfigurationV1,
   type HeartbeatMonitorSettings,
   type DomainExpiryMonitorSettings,
+  type IcmpMonitorSettings,
 } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
 import {
@@ -86,6 +87,7 @@ export class MonitorRepository {
           type: monitor.type,
           tcpHost: monitor.type === 'TCP' ? monitor.host : null,
           tcpPort: monitor.type === 'TCP' ? monitor.port : null,
+          icmpHost: monitor.type === 'ICMP' ? monitor.host : null,
           dnsName: monitor.type === 'DNS' ? monitor.dnsName : null,
           dnsRecordType: monitor.type === 'DNS' ? monitor.dnsRecordType : null,
           dnsExpectedValues: monitor.type === 'DNS' ? monitor.dnsExpectedValues : [],
@@ -127,6 +129,7 @@ export class MonitorRepository {
         type: created.type,
         tcpHost: created.tcpHost,
         tcpPort: created.tcpPort,
+        icmpHost: created.icmpHost,
         dnsName: created.dnsName,
         dnsRecordType: created.dnsRecordType,
         dnsExpectedValues: created.dnsExpectedValues,
@@ -315,6 +318,7 @@ export class MonitorRepository {
         type: configuration.type,
         tcpHost: configuration.tcpHost,
         tcpPort: configuration.tcpPort,
+        icmpHost: configuration.icmpHost,
         dnsName: configuration.dnsName,
         dnsRecordType: configuration.dnsRecordType,
         dnsExpectedValues: configuration.dnsExpectedValues,
@@ -381,6 +385,7 @@ export class MonitorRepository {
         type: configuration.type,
         tcpHost: configuration.tcpHost,
         tcpPort: configuration.tcpPort,
+        icmpHost: configuration.icmpHost,
         dnsName: configuration.dnsName,
         dnsRecordType: configuration.dnsRecordType,
         dnsExpectedValues: configuration.dnsExpectedValues,
@@ -482,6 +487,7 @@ export class MonitorRepository {
         type: configuration.type,
         tcpHost: configuration.tcpHost,
         tcpPort: configuration.tcpPort,
+        icmpHost: configuration.icmpHost,
         dnsName: configuration.dnsName,
         dnsRecordType: configuration.dnsRecordType,
         dnsExpectedValues: configuration.dnsExpectedValues,
@@ -559,6 +565,7 @@ export class MonitorRepository {
         type: configuration.type,
         tcpHost: configuration.tcpHost,
         tcpPort: configuration.tcpPort,
+        icmpHost: configuration.icmpHost,
         dnsName: configuration.dnsName,
         dnsRecordType: configuration.dnsRecordType,
         dnsExpectedValues: configuration.dnsExpectedValues,
@@ -624,6 +631,63 @@ export class MonitorRepository {
         tcpHost: settings.host,
         tcpPort: settings.port,
         apiWorkflow: configuration.apiWorkflow,
+        url: configuration.url,
+        method: configuration.method,
+        timeoutMs: settings.timeoutMs,
+        intervalSeconds: configuration.intervalSeconds,
+        followRedirects: configuration.followRedirects,
+        statusPolicy: configuration.statusPolicy,
+        requestHeaders: configuration.requestHeaders,
+        requestBody: configuration.requestBody,
+        assertions: configuration.assertions,
+        tlsPolicy: configuration.tlsPolicy,
+        locations: configuration.locations,
+      });
+      return updated;
+    });
+  }
+
+  async updateIcmpSettings(
+    organizationId: string,
+    monitorId: string,
+    settings: IcmpMonitorSettings,
+  ): Promise<MonitorRecord> {
+    return this.db.transaction(async (tx) => {
+      const [monitor] = await tx
+        .select()
+        .from(monitors)
+        .where(and(eq(monitors.id, monitorId), eq(monitors.organizationId, organizationId)))
+        .limit(1)
+        .for('update');
+      if (!monitor) throw new MonitorUpdateNotFoundError();
+      if (monitor.type !== 'ICMP') throw new MonitorProtocolMismatchError('ICMP');
+
+      const [configuration] = await tx
+        .select()
+        .from(monitorConfigurationVersions)
+        .where(
+          and(
+            eq(monitorConfigurationVersions.monitorId, monitorId),
+            eq(monitorConfigurationVersions.organizationId, organizationId),
+          ),
+        )
+        .orderBy(desc(monitorConfigurationVersions.versionNumber))
+        .limit(1);
+      if (!configuration) throw new Error('Monitor has no configuration version.');
+
+      const [updated] = await tx
+        .update(monitors)
+        .set({ icmpHost: settings.host, timeoutMs: settings.timeoutMs, updatedAt: sql`now()` })
+        .where(and(eq(monitors.id, monitorId), eq(monitors.organizationId, organizationId)))
+        .returning();
+      if (!updated) throw new Error('The monitor update returned no record.');
+
+      await tx.insert(monitorConfigurationVersions).values({
+        organizationId,
+        monitorId,
+        versionNumber: configuration.versionNumber + 1,
+        type: 'ICMP',
+        icmpHost: settings.host,
         url: configuration.url,
         method: configuration.method,
         timeoutMs: settings.timeoutMs,
@@ -820,6 +884,7 @@ export class MonitorRepository {
         type: configuration.type,
         tcpHost: configuration.tcpHost,
         tcpPort: configuration.tcpPort,
+        icmpHost: configuration.icmpHost,
         dnsName: configuration.dnsName,
         dnsRecordType: configuration.dnsRecordType,
         dnsExpectedValues: configuration.dnsExpectedValues,
@@ -984,6 +1049,7 @@ export class MonitorRepository {
         type: configuration.type,
         tcpHost: configuration.tcpHost,
         tcpPort: configuration.tcpPort,
+        icmpHost: configuration.icmpHost,
         dnsName: configuration.dnsName,
         dnsRecordType: configuration.dnsRecordType,
         dnsExpectedValues: configuration.dnsExpectedValues,
@@ -1149,6 +1215,7 @@ export class MonitorRepository {
         type: configuration.type,
         tcpHost: configuration.tcpHost,
         tcpPort: configuration.tcpPort,
+        icmpHost: configuration.icmpHost,
         dnsName: configuration.dnsName,
         dnsRecordType: configuration.dnsRecordType,
         dnsExpectedValues: configuration.dnsExpectedValues,
@@ -1390,7 +1457,9 @@ export class CentralizedMonitorLocationError extends Error {
 }
 
 export class MonitorProtocolMismatchError extends Error {
-  constructor(protocol: 'HTTP' | 'TCP' | 'DNS' | 'API_WORKFLOW' | 'HEARTBEAT' | 'DOMAIN_EXPIRY') {
+  constructor(
+    protocol: 'HTTP' | 'TCP' | 'DNS' | 'ICMP' | 'API_WORKFLOW' | 'HEARTBEAT' | 'DOMAIN_EXPIRY',
+  ) {
     super(`This operation requires a ${protocol} monitor.`);
     this.name = 'MonitorProtocolMismatchError';
   }

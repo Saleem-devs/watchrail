@@ -11,6 +11,7 @@ import {
   Globe,
   Plug,
   Plus,
+  RadioTower,
   type LucideIcon,
 } from 'lucide-react';
 import { createMonitorTypePath, MONITOR_TYPES } from './monitor-types';
@@ -20,6 +21,7 @@ function MonitorTypeIcon({ type }: { type: (typeof MONITOR_TYPES)[number]['type'
     HTTP: Globe,
     TCP: Plug,
     DNS: Database,
+    ICMP: RadioTower,
     API_WORKFLOW: GitBranch,
     HEARTBEAT: Activity,
     DOMAIN_EXPIRY: CalendarClock,

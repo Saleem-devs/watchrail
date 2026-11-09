@@ -23,7 +23,7 @@ const copy = {
   create: {
     title: 'Create monitor',
     description:
-      'Add an HTTP endpoint, TCP service, DNS record, API workflow, or heartbeat and define how Watchrail verifies it.',
+      'Add an HTTP endpoint, TCP service, ping target, DNS record, API workflow, heartbeat, or domain expiry check.',
   },
 } as const;
 

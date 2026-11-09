@@ -1010,9 +1010,16 @@ function parseRegionalDiagnosticSummary(value: unknown): RegionalDiagnosticSumma
   if (Object.hasOwn(value, 'dnsAnswers')) parseDnsAnswers(value.dnsAnswers);
   const hasWorkflowResult = Object.hasOwn(value, 'workflowResult');
   if (hasWorkflowResult) parseApiWorkflowResult(value.workflowResult);
-  const validStage = ['DNS', 'CONNECT', 'TLS', 'HTTP', 'PROBE', 'WORKFLOW'].includes(
-    String(value.stage),
-  );
+  const validStage = [
+    'DNS',
+    'CONNECT',
+    'TLS',
+    'HTTP',
+    'ICMP',
+    'PROBE',
+    'WORKFLOW',
+    'DOMAIN',
+  ].includes(String(value.stage));
   const validTime = (candidate: unknown) =>
     candidate === null ||
     (typeof candidate === 'number' && Number.isFinite(candidate) && candidate >= 0);

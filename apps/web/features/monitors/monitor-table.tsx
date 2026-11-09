@@ -19,6 +19,7 @@ function formatLocations(locations: string[]): string {
 function latencyHeader(type?: MonitorType): string {
   if (type === 'TCP') return 'Connect latency';
   if (type === 'DNS') return 'Lookup latency';
+  if (type === 'ICMP') return 'Round-trip time';
   if (type === 'API_WORKFLOW') return 'Workflow duration';
   if (type === 'DOMAIN_EXPIRY') return 'RDAP lookup';
   return 'Latest latency';
@@ -48,6 +49,10 @@ function monitorColumns(
           ) : monitor.configuration?.type === 'DNS' ? (
             <span className="mt-0.5 block max-w-xs truncate text-xs text-rail-muted">
               {monitor.configuration.recordType} {monitor.configuration.name}
+            </span>
+          ) : monitor.configuration?.type === 'ICMP' ? (
+            <span className="mt-0.5 block max-w-xs truncate text-xs text-rail-muted">
+              {monitor.configuration.host}
             </span>
           ) : monitor.configuration?.type === 'API_WORKFLOW' ? (
             <span className="mt-0.5 block max-w-xs truncate text-xs text-rail-muted">

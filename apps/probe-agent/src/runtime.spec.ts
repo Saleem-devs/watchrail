@@ -1,4 +1,9 @@
-import type { DnsQueryResolver, HttpExecutor, TcpConnector } from '@watchrail/check-engine';
+import type {
+  DnsQueryResolver,
+  HttpExecutor,
+  IcmpPinger,
+  TcpConnector,
+} from '@watchrail/check-engine';
 import type { ProbeExecutionConfigurationV1, ProbeLeaseReferenceV1 } from '@watchrail/contracts';
 import {
   HTTP_ENGINE_VERSION,
@@ -6,6 +11,7 @@ import {
   TCP_ENGINE_VERSION,
   DNS_ENGINE_VERSION,
   API_WORKFLOW_ENGINE_VERSION,
+  ICMP_ENGINE_VERSION,
 } from '@watchrail/domain';
 import { describe, expect, it, vi } from 'vitest';
 import { ProbeCoordinatorClient, ProbeCoordinatorError } from './coordinator-client.js';
@@ -85,11 +91,12 @@ describe('ProbeAgentRuntime', () => {
 
     await runtime.run();
 
-    expect(claim).toHaveBeenNthCalledWith(1, API_WORKFLOW_ENGINE_VERSION, expect.any(AbortSignal));
-    expect(claim).toHaveBeenNthCalledWith(2, DNS_ENGINE_VERSION, expect.any(AbortSignal));
-    expect(claim).toHaveBeenNthCalledWith(3, TCP_ENGINE_VERSION, expect.any(AbortSignal));
-    expect(claim).toHaveBeenNthCalledWith(4, HTTP_ENGINE_VERSION, expect.any(AbortSignal));
-    expect(claim).toHaveBeenNthCalledWith(5, LEGACY_HTTP_ENGINE_VERSION, expect.any(AbortSignal));
+    expect(claim).toHaveBeenNthCalledWith(1, ICMP_ENGINE_VERSION, expect.any(AbortSignal));
+    expect(claim).toHaveBeenNthCalledWith(2, API_WORKFLOW_ENGINE_VERSION, expect.any(AbortSignal));
+    expect(claim).toHaveBeenNthCalledWith(3, DNS_ENGINE_VERSION, expect.any(AbortSignal));
+    expect(claim).toHaveBeenNthCalledWith(4, TCP_ENGINE_VERSION, expect.any(AbortSignal));
+    expect(claim).toHaveBeenNthCalledWith(5, HTTP_ENGINE_VERSION, expect.any(AbortSignal));
+    expect(claim).toHaveBeenNthCalledWith(6, LEGACY_HTTP_ENGINE_VERSION, expect.any(AbortSignal));
     expect(submit).toHaveBeenCalledOnce();
   });
 
@@ -165,6 +172,43 @@ describe('ProbeAgentRuntime', () => {
       dnsLease,
       DNS_ENGINE_VERSION,
       expect.objectContaining({ reason: 'RECORDS_MATCHED', answers: ['203.0.113.10'] }),
+    );
+  });
+
+  it('executes ICMP assignments with the ping engine', async () => {
+    const icmpConfiguration: ProbeExecutionConfigurationV1 = {
+      contractVersion: 1,
+      type: 'ICMP',
+      assignmentId: lease.assignmentId,
+      attemptId: lease.attemptId,
+      configurationVersionId: lease.configurationVersionId,
+      configurationVersionNumber: lease.configurationVersionNumber,
+      executionPolicyVersion: 'icmp-v1',
+      requiredEngineVersion: ICMP_ENGINE_VERSION,
+      host: '93.184.216.34',
+      timeoutMs: 8_000,
+    };
+    const icmpLease = {
+      ...lease,
+      executionPolicyVersion: 'icmp-v1',
+      requiredEngineVersion: ICMP_ENGINE_VERSION,
+    };
+    const ping = vi.fn().mockResolvedValue({ type: 'REPLY', responseTimeMs: 17 });
+    const fixture = runtimeFixture(icmpLease, 1, false, icmpConfiguration, undefined, undefined, {
+      ping,
+    });
+    vi.spyOn(fixture.client, 'submitSerialized').mockImplementation(fixture.submit);
+
+    await fixture.runtime.run();
+
+    expect(fixture.execute).not.toHaveBeenCalled();
+    expect(ping).toHaveBeenCalledWith(
+      expect.objectContaining({ host: '93.184.216.34', addresses: expect.any(Array) }),
+    );
+    expect(fixture.serialize).toHaveBeenCalledWith(
+      icmpLease,
+      ICMP_ENGINE_VERSION,
+      expect.objectContaining({ reason: 'PING_REPLIED', responseTimeMs: 17 }),
     );
   });
 
@@ -304,12 +348,14 @@ function runtimeFixture(
   runtimeConfiguration: ProbeExecutionConfigurationV1 = configuration,
   tcpConnector?: TcpConnector,
   dnsResolver?: DnsQueryResolver,
+  icmpPinger?: IcmpPinger,
 ) {
   const client = new ProbeCoordinatorClient('https://coordinator.example', 'm'.repeat(43));
   const state: { runtime?: ProbeAgentRuntime } = {};
   const claim = vi.fn();
   if (legacyFallback) {
     claim
+      .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(null)
@@ -352,7 +398,14 @@ function runtimeFixture(
   const executor: HttpExecutor = {
     execute: (input) => execute(input),
   };
-  const runtime = new ProbeAgentRuntime(client, config, executor, tcpConnector, dnsResolver);
+  const runtime = new ProbeAgentRuntime(
+    client,
+    config,
+    executor,
+    tcpConnector,
+    dnsResolver,
+    icmpPinger,
+  );
   state.runtime = runtime;
   return { client, runtime, claim, serialize, renew, submit, executorAbort, execute };
 }

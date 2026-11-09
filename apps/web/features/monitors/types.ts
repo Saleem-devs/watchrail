@@ -24,12 +24,13 @@ export interface TlsCertificateEvidence {
 export interface Monitor {
   id: string;
   projectId?: string;
-  type: 'HTTP' | 'TCP' | 'DNS' | 'API_WORKFLOW' | 'HEARTBEAT' | 'DOMAIN_EXPIRY';
+  type: 'HTTP' | 'TCP' | 'DNS' | 'ICMP' | 'API_WORKFLOW' | 'HEARTBEAT' | 'DOMAIN_EXPIRY';
   name: string;
   url: string;
   configuration:
     | { type: 'HTTP'; url: string }
     | { type: 'TCP'; host: string; port: number }
+    | { type: 'ICMP'; host: string }
     | {
         type: 'DNS';
         name: string;
@@ -157,6 +158,7 @@ export interface FieldErrors {
   host?: string[];
   port?: string[];
   tcpSettings?: string[];
+  icmpSettings?: string[];
   dnsName?: string[];
   dnsRecordType?: string[];
   dnsExpectedValues?: string[];

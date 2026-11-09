@@ -1,7 +1,7 @@
 export interface NotificationMonitor {
   id: string;
   name: string;
-  type: 'HTTP' | 'TCP' | 'DNS' | 'API_WORKFLOW';
+  type: 'HTTP' | 'TCP' | 'DNS' | 'ICMP' | 'API_WORKFLOW' | 'HEARTBEAT' | 'DOMAIN_EXPIRY';
   lifecycleState: 'ENABLED' | 'PAUSED';
 }
 

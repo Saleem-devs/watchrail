@@ -114,7 +114,15 @@ export function MonitorForm({
                   <legend className="p-0 text-xs font-medium text-rail-subtle">Protocol</legend>
                   <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                     {(
-                      ['HTTP', 'TCP', 'DNS', 'API_WORKFLOW', 'HEARTBEAT', 'DOMAIN_EXPIRY'] as const
+                      [
+                        'HTTP',
+                        'TCP',
+                        'DNS',
+                        'ICMP',
+                        'API_WORKFLOW',
+                        'HEARTBEAT',
+                        'DOMAIN_EXPIRY',
+                      ] as const
                     ).map((type) => (
                       <button
                         key={type}
@@ -143,11 +151,13 @@ export function MonitorForm({
                             ? 'TCP port'
                             : type === 'DNS'
                               ? 'DNS record'
-                              : type === 'API_WORKFLOW'
-                                ? 'API workflow'
-                                : type === 'HEARTBEAT'
-                                  ? 'Heartbeat'
-                                  : 'Domain expiry'}
+                              : type === 'ICMP'
+                                ? 'Ping host'
+                                : type === 'API_WORKFLOW'
+                                  ? 'API workflow'
+                                  : type === 'HEARTBEAT'
+                                    ? 'Heartbeat'
+                                    : 'Domain expiry'}
                       </button>
                     ))}
                   </div>
@@ -272,6 +282,38 @@ export function MonitorForm({
                     ) : null}
                   </label>
                 </div>
+              ) : monitorType === 'ICMP' ? (
+                <label
+                  className="grid gap-1.5 text-xs font-medium text-rail-subtle"
+                  htmlFor={`${id}-host`}
+                >
+                  Hostname or IP address
+                  <Input
+                    id={`${id}-host`}
+                    name="host"
+                    type="text"
+                    defaultValue={
+                      initialValues?.configuration?.type === 'ICMP'
+                        ? initialValues.configuration.host
+                        : ''
+                    }
+                    placeholder="edge.example.com"
+                    autoComplete="off"
+                    spellCheck={false}
+                    required
+                    aria-describedby={errors.host ? `${id}-host-error` : hostHelpId}
+                    aria-invalid={Boolean(errors.host)}
+                  />
+                  {errors.host ? (
+                    <span className="font-normal text-rail-danger" id={`${id}-host-error`}>
+                      {errors.host[0]}
+                    </span>
+                  ) : (
+                    <span className="font-normal leading-5 text-rail-muted" id={hostHelpId}>
+                      Enter a public host without a protocol, path, or credentials.
+                    </span>
+                  )}
+                </label>
               ) : monitorType === 'DNS' ? (
                 <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_10rem]">
                   <label
@@ -542,6 +584,18 @@ export function MonitorForm({
                 <p className="mt-3 mb-0 text-xs text-rail-danger">{errors.tcpSettings[0]}</p>
               ) : null}
             </section>
+          ) : monitorType === 'ICMP' ? (
+            <section className="px-5 py-5 sm:px-6">
+              <h2 className="m-0 text-sm font-semibold text-rail-text">Ping check</h2>
+              <p className="mt-1 mb-0 max-w-2xl text-xs leading-5 text-rail-muted">
+                Watchrail sends one ICMP echo request to a validated public address and records the
+                round-trip time. A missing ping capability remains indeterminate instead of marking
+                the host down.
+              </p>
+              {errors.icmpSettings ? (
+                <p className="mt-3 mb-0 text-xs text-rail-danger">{errors.icmpSettings[0]}</p>
+              ) : null}
+            </section>
           ) : monitorType === 'DNS' ? (
             <>
               <section className="px-5 py-5 sm:px-6">
@@ -624,7 +678,10 @@ export function MonitorForm({
                     min="1"
                     max="30"
                     step="1"
-                    defaultValue={(initialValues?.timeoutMs ?? 10_000) / 1_000}
+                    defaultValue={
+                      (initialValues?.timeoutMs ?? (monitorType === 'ICMP' ? 5_000 : 10_000)) /
+                      1_000
+                    }
                     required
                     aria-invalid={Boolean(errors.timeoutMs)}
                     className="pr-16"

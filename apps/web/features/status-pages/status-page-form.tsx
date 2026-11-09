@@ -25,6 +25,9 @@ function monitorTarget(monitor: StatusPageMonitor): string {
   if (monitor.configuration.type === 'DNS') {
     return `${monitor.configuration.recordType} ${monitor.configuration.name}`;
   }
+  if (monitor.configuration.type === 'ICMP') {
+    return monitor.configuration.host;
+  }
   if (monitor.configuration.type === 'API_WORKFLOW') {
     return `${monitor.configuration.workflow.steps.length} ordered HTTP steps`;
   }

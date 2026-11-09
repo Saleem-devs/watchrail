@@ -26,6 +26,7 @@ export function classifyScheduledObservation(
 ): ScheduledObservation {
   if (
     input.reason === 'INTERNAL_ERROR' ||
+    input.reason === 'ICMP_UNAVAILABLE' ||
     input.reason === 'PROHIBITED_DESTINATION' ||
     input.reason === 'CERTIFICATE_EVIDENCE_UNAVAILABLE' ||
     input.reason === 'RDAP_UNAVAILABLE' ||

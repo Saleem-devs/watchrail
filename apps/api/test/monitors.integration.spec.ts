@@ -376,6 +376,59 @@ describe('monitor API', () => {
     ]);
   });
 
+  it('creates and updates a ping monitor with protocol-specific configuration versions', async () => {
+    const created = await request(app.getHttpServer())
+      .post(`/api/monitors?projectId=${projectId}`)
+      .send({
+        type: 'ICMP',
+        name: 'Public edge',
+        host: 'EDGE.EXAMPLE.COM',
+        timeoutMs: 4_000,
+        locations: ['local'],
+      })
+      .expect(201);
+
+    expect(created.body.data).toMatchObject({
+      type: 'ICMP',
+      name: 'Public edge',
+      configuration: { type: 'ICMP', host: 'edge.example.com' },
+      timeoutMs: 4_000,
+      locations: ['local'],
+    });
+
+    const monitorId = created.body.data.id as string;
+    const updated = await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/icmp-settings`)
+      .send({ host: 'router.example.com', timeoutMs: 3_000 })
+      .expect(200);
+    expect(updated.body.data).toMatchObject({
+      type: 'ICMP',
+      configuration: { type: 'ICMP', host: 'router.example.com' },
+      timeoutMs: 3_000,
+    });
+
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/tcp-settings`)
+      .send({ host: 'router.example.com', port: 443, timeoutMs: 3_000 })
+      .expect(409);
+
+    const versions = await database.$client.query<{
+      type: string;
+      icmp_host: string;
+      timeout_ms: number;
+    }>(
+      `select type, icmp_host, timeout_ms
+       from monitor_configuration_versions
+       where monitor_id=$1
+       order by version_number`,
+      [monitorId],
+    );
+    expect(versions.rows).toEqual([
+      { type: 'ICMP', icmp_host: 'edge.example.com', timeout_ms: 4_000 },
+      { type: 'ICMP', icmp_host: 'router.example.com', timeout_ms: 3_000 },
+    ]);
+  });
+
   it('creates and updates a DNS monitor with protocol-specific configuration versions', async () => {
     const created = await request(app.getHttpServer())
       .post(`/api/monitors?projectId=${projectId}`)

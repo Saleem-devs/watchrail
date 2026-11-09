@@ -7,11 +7,13 @@ export const LOCAL_PROBE_LOCATION = 'local';
 export const HTTP_EXECUTION_POLICY_VERSION = 'http-v1';
 export const TCP_EXECUTION_POLICY_VERSION = 'tcp-v1';
 export const DNS_EXECUTION_POLICY_VERSION = 'dns-v1';
+export const ICMP_EXECUTION_POLICY_VERSION = 'icmp-v1';
 export const API_WORKFLOW_EXECUTION_POLICY_VERSION = 'api-workflow-v1';
 export const LEGACY_HTTP_ENGINE_VERSION = 'watchrail-http-v1';
 export const HTTP_ENGINE_VERSION = 'watchrail-http-v2';
 export const TCP_ENGINE_VERSION = 'watchrail-tcp-v1';
 export const DNS_ENGINE_VERSION = 'watchrail-dns-v1';
+export const ICMP_ENGINE_VERSION = 'watchrail-icmp-v1';
 export const API_WORKFLOW_ENGINE_VERSION = 'watchrail-api-workflow-v1';
 export const SUPPORTED_HTTP_ENGINE_VERSIONS = [
   LEGACY_HTTP_ENGINE_VERSION,
@@ -66,6 +68,12 @@ export function probeEngineSupports(
       (requiredEngineVersion === DNS_ENGINE_VERSION ||
         requiredEngineVersion === TCP_ENGINE_VERSION ||
         requiredEngineVersion === HTTP_ENGINE_VERSION ||
+        requiredEngineVersion === LEGACY_HTTP_ENGINE_VERSION)) ||
+    (agentEngineVersion === ICMP_ENGINE_VERSION &&
+      (requiredEngineVersion === API_WORKFLOW_ENGINE_VERSION ||
+        requiredEngineVersion === DNS_ENGINE_VERSION ||
+        requiredEngineVersion === TCP_ENGINE_VERSION ||
+        requiredEngineVersion === HTTP_ENGINE_VERSION ||
         requiredEngineVersion === LEGACY_HTTP_ENGINE_VERSION))
   );
 }
@@ -73,6 +81,16 @@ export function probeEngineSupports(
 export function requiredEngineVersionsForAgent(agentEngineVersion: string): readonly string[] {
   if (agentEngineVersion === API_WORKFLOW_ENGINE_VERSION) {
     return [
+      API_WORKFLOW_ENGINE_VERSION,
+      DNS_ENGINE_VERSION,
+      TCP_ENGINE_VERSION,
+      HTTP_ENGINE_VERSION,
+      LEGACY_HTTP_ENGINE_VERSION,
+    ];
+  }
+  if (agentEngineVersion === ICMP_ENGINE_VERSION) {
+    return [
+      ICMP_ENGINE_VERSION,
       API_WORKFLOW_ENGINE_VERSION,
       DNS_ENGINE_VERSION,
       TCP_ENGINE_VERSION,
@@ -107,6 +125,7 @@ export function agentEngineVersionsForRequirement(
       TCP_ENGINE_VERSION,
       DNS_ENGINE_VERSION,
       API_WORKFLOW_ENGINE_VERSION,
+      ICMP_ENGINE_VERSION,
     ];
   }
   if (requiredEngineVersion === HTTP_ENGINE_VERSION) {
@@ -115,14 +134,24 @@ export function agentEngineVersionsForRequirement(
       TCP_ENGINE_VERSION,
       DNS_ENGINE_VERSION,
       API_WORKFLOW_ENGINE_VERSION,
+      ICMP_ENGINE_VERSION,
     ];
   }
   if (requiredEngineVersion === TCP_ENGINE_VERSION) {
-    return [TCP_ENGINE_VERSION, DNS_ENGINE_VERSION, API_WORKFLOW_ENGINE_VERSION];
+    return [
+      TCP_ENGINE_VERSION,
+      DNS_ENGINE_VERSION,
+      API_WORKFLOW_ENGINE_VERSION,
+      ICMP_ENGINE_VERSION,
+    ];
   }
   if (requiredEngineVersion === DNS_ENGINE_VERSION) {
-    return [DNS_ENGINE_VERSION, API_WORKFLOW_ENGINE_VERSION];
+    return [DNS_ENGINE_VERSION, API_WORKFLOW_ENGINE_VERSION, ICMP_ENGINE_VERSION];
   }
+  if (requiredEngineVersion === API_WORKFLOW_ENGINE_VERSION) {
+    return [API_WORKFLOW_ENGINE_VERSION, ICMP_ENGINE_VERSION];
+  }
+  if (requiredEngineVersion === ICMP_ENGINE_VERSION) return [ICMP_ENGINE_VERSION];
   return [requiredEngineVersion];
 }
 
@@ -132,6 +161,7 @@ export function isSupportedHttpEngineVersion(value: string | null): boolean {
     (value === TCP_ENGINE_VERSION ||
       value === DNS_ENGINE_VERSION ||
       value === API_WORKFLOW_ENGINE_VERSION ||
+      value === ICMP_ENGINE_VERSION ||
       SUPPORTED_HTTP_ENGINE_VERSIONS.some((version) => version === value))
   );
 }

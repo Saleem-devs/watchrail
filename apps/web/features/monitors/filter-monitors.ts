@@ -81,6 +81,8 @@ export function filterMonitors(
         `${monitor.configuration.recordType} ${monitor.configuration.name}`
           .toLowerCase()
           .includes(needle)) ||
+      (monitor.configuration?.type === 'ICMP' &&
+        monitor.configuration.host.toLowerCase().includes(needle)) ||
       (monitor.configuration?.type === 'DOMAIN_EXPIRY' &&
         monitor.configuration.domainName.toLowerCase().includes(needle)) ||
       (monitor.configuration?.type === 'API_WORKFLOW' &&

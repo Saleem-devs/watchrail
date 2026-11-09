@@ -96,6 +96,19 @@ export interface DnsProbeExecutionConfigurationV1 {
   timeoutMs: number;
 }
 
+export interface IcmpProbeExecutionConfigurationV1 {
+  contractVersion: 1;
+  type: 'ICMP';
+  assignmentId: string;
+  attemptId: string;
+  configurationVersionId: string;
+  configurationVersionNumber: number;
+  executionPolicyVersion: string;
+  requiredEngineVersion: string;
+  host: string;
+  timeoutMs: number;
+}
+
 export interface ApiWorkflowProbeExecutionConfigurationV1 {
   contractVersion: 1;
   type: 'API_WORKFLOW';
@@ -112,6 +125,7 @@ export type ProbeExecutionConfigurationV1 =
   | HttpProbeExecutionConfigurationV1
   | TcpProbeExecutionConfigurationV1
   | DnsProbeExecutionConfigurationV1
+  | IcmpProbeExecutionConfigurationV1
   | ApiWorkflowProbeExecutionConfigurationV1;
 
 export class InvalidProbeCoordinatorContractError extends Error {
@@ -232,6 +246,38 @@ export function parseProbeExecutionConfiguration(value: unknown): ProbeExecution
       throw new InvalidProbeCoordinatorContractError();
     }
     return value as unknown as ApiWorkflowProbeExecutionConfigurationV1;
+  }
+  const icmpKeys = [
+    'assignmentId',
+    'attemptId',
+    'configurationVersionId',
+    'configurationVersionNumber',
+    'contractVersion',
+    'executionPolicyVersion',
+    'host',
+    'requiredEngineVersion',
+    'timeoutMs',
+    'type',
+  ];
+  if (hasExactKeys(value, icmpKeys) && value.type === 'ICMP') {
+    if (
+      value.contractVersion !== PROBE_COORDINATOR_CONTRACT_VERSION ||
+      !isUuid(value.assignmentId) ||
+      !isUuid(value.attemptId) ||
+      !isUuid(value.configurationVersionId) ||
+      !isPositiveInteger(value.configurationVersionNumber) ||
+      !isVersion(value.executionPolicyVersion) ||
+      !isVersion(value.requiredEngineVersion) ||
+      typeof value.host !== 'string' ||
+      value.host.length === 0 ||
+      value.host.length > 253 ||
+      !Number.isInteger(value.timeoutMs) ||
+      Number(value.timeoutMs) < 1_000 ||
+      Number(value.timeoutMs) > 30_000
+    ) {
+      throw new InvalidProbeCoordinatorContractError();
+    }
+    return value as unknown as IcmpProbeExecutionConfigurationV1;
   }
   const dnsKeys = [
     'assignmentId',

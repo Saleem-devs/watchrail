@@ -1367,6 +1367,10 @@ describe('Dashboard', () => {
       'href',
       '/projects/project-1/monitors/new/tcp',
     );
+    expect(within(menu).getByRole('menuitem', { name: /Ping monitor/ })).toHaveAttribute(
+      'href',
+      '/projects/project-1/monitors/new/ping',
+    );
     expect(within(menu).getByRole('menuitem', { name: /Heartbeat monitor/ })).toHaveAttribute(
       'href',
       '/projects/project-1/monitors/new/heartbeats',
@@ -1390,6 +1394,26 @@ describe('Dashboard', () => {
     expect(await screen.findByRole('heading', { name: 'Create DNS monitor' })).toBeInTheDocument();
     expect(screen.queryByText('Protocol')).not.toBeInTheDocument();
     expect(screen.getByLabelText(/DNS name/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Test configuration' })).not.toBeInTheDocument();
+  });
+
+  it('presents the dedicated ping form with the ICMP timeout default', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ data: [] }), { status: 200 }),
+    );
+
+    render(
+      <Dashboard
+        view="create"
+        projectId="project-1"
+        initialCreateMonitorType="ICMP"
+        lockCreateMonitorType
+      />,
+    );
+
+    expect(await screen.findByRole('heading', { name: 'Create Ping monitor' })).toBeInTheDocument();
+    expect(screen.getByLabelText(/Hostname or IP address/)).toBeInTheDocument();
+    expect(screen.getByRole('spinbutton', { name: /Timeout/ })).toHaveValue(5);
     expect(screen.queryByRole('button', { name: 'Test configuration' })).not.toBeInTheDocument();
   });
 });

@@ -14,6 +14,13 @@ export function tcpSettingsFromForm(formData: FormData) {
   };
 }
 
+export function icmpSettingsFromForm(formData: FormData) {
+  return {
+    host: formEntryString(formData.get('host') ?? undefined),
+    timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
+  };
+}
+
 export function dnsSettingsFromForm(formData: FormData) {
   return {
     name: formEntryString(formData.get('dnsName') ?? undefined),

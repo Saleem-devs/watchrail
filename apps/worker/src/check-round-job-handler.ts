@@ -4,10 +4,12 @@ import {
   executeApiWorkflow,
   executeHttpCheck,
   executeTcpCheck,
+  executeIcmpCheck,
   executeDomainExpiryCheck,
   NodeDnsQueryResolver,
   NodeTcpConnector,
   NodeRdapDomainClient,
+  SystemIcmpPinger,
 } from '@watchrail/check-engine';
 import { resolveApiWorkflowConfigurationWithWorkspaceSecrets } from '@watchrail/api-workflow-security';
 import type {
@@ -17,6 +19,7 @@ import type {
   HttpExecutor,
   TcpConnector,
   RdapDomainClient,
+  IcmpPinger,
 } from '@watchrail/check-engine';
 import type { ExecuteCheckRoundJobV1 } from '@watchrail/contracts';
 import {
@@ -75,6 +78,7 @@ export class CheckRoundJobHandler implements CheckJobHandler {
     private readonly tcpConnector: TcpConnector = new NodeTcpConnector(),
     private readonly dnsResolver: DnsQueryResolver = new NodeDnsQueryResolver(),
     private readonly rdapClient: RdapDomainClient = new NodeRdapDomainClient(),
+    private readonly icmpPinger: IcmpPinger = new SystemIcmpPinger(),
   ) {}
 
   async handle(payload: ExecuteCheckRoundJobV1): Promise<void> {
@@ -143,6 +147,33 @@ export class CheckRoundJobHandler implements CheckJobHandler {
           redirects: [],
           assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
           checkedAt: tcpResult.checkedAt,
+        },
+      );
+      if (!completed) throw new CheckExecutionClaimLostError();
+      return;
+    }
+
+    if (claim.execution.type === 'ICMP') {
+      const icmpResult = await executeIcmpCheck(
+        {
+          host: claim.execution.host,
+          timeoutMs: claim.execution.timeoutMs,
+        },
+        { pinger: this.icmpPinger },
+      );
+      const completed = await this.executions.complete(
+        claim.execution.assignmentId,
+        claim.execution.claimToken,
+        {
+          outcome: icmpResult.outcome,
+          stage: icmpResult.stage,
+          reason: icmpResult.reason,
+          statusCode: null,
+          responseTimeMs: icmpResult.responseTimeMs,
+          attemptDurationMs: icmpResult.attemptDurationMs,
+          redirects: [],
+          assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
+          checkedAt: icmpResult.checkedAt,
         },
       );
       if (!completed) throw new CheckExecutionClaimLostError();

@@ -6,6 +6,7 @@ export * from './check-round.js';
 export * from './dns.js';
 export * from './domain-expiry.js';
 export * from './http-redirect.js';
+export * from './icmp.js';
 export * from './heartbeat.js';
 export * from './maintenance-window.js';
 export * from './incident.js';

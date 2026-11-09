@@ -83,6 +83,19 @@ describe('CheckExecutionRepository', () => {
     return new ManualRoundRepository(connection.db).create(organizationId, monitor.id);
   }
 
+  async function createIcmpRound() {
+    const monitor = await new MonitorRepository(connection.db).create(
+      organizationId,
+      createMonitor({
+        type: 'ICMP',
+        name: 'Public edge',
+        host: 'edge.example.com',
+        timeoutMs: 4_000,
+      }),
+    );
+    return new ManualRoundRepository(connection.db).create(organizationId, monitor.id);
+  }
+
   async function createDomainExpiryRound() {
     const monitor = await new MonitorRepository(connection.db).create(
       organizationId,
@@ -307,7 +320,7 @@ describe('CheckExecutionRepository', () => {
     });
     if (claim.state !== 'CLAIMED') throw new Error('Expected a TCP execution claim.');
     if (claim.execution.type !== 'TCP') throw new Error('Expected TCP execution configuration.');
-    expect(claim.execution.url).toBeUndefined();
+    expect('url' in claim.execution).toBe(false);
     expect(claim.execution.statusPolicy).toBeUndefined();
   });
 
@@ -389,6 +402,66 @@ describe('CheckExecutionRepository', () => {
       responseTimeMs: 12,
       dnsAnswers: ['203.0.113.10'],
       checkedAt,
+    });
+  });
+
+  it('claims immutable ICMP settings and reloads ping latency evidence', async () => {
+    const round = await createIcmpRound();
+    const claim = await repository.claim(round.id, 45_000);
+    if (claim.state !== 'CLAIMED' || claim.execution.type !== 'ICMP') {
+      throw new Error('Expected an ICMP execution claim.');
+    }
+    expect(claim.execution).toMatchObject({
+      host: 'edge.example.com',
+      timeoutMs: 4_000,
+    });
+    expect('url' in claim.execution).toBe(false);
+
+    const checkedAt = new Date('2026-11-08T09:25:00.000Z');
+    await expect(
+      repository.complete(claim.execution.assignmentId, claim.execution.claimToken, {
+        outcome: 'PASS',
+        stage: 'ICMP',
+        reason: 'PING_REPLIED',
+        statusCode: null,
+        responseTimeMs: 21,
+        attemptDurationMs: 25,
+        redirects: [],
+        assertionEvaluation: EMPTY_ASSERTION_EVALUATION,
+        tlsCertificates: [],
+        checkedAt,
+      }),
+    ).resolves.toBe(true);
+
+    const stored = await new CheckHistoryRepository(connection.db).findForMonitor(
+      organizationId,
+      round.monitorId,
+      round.id,
+    );
+    expect(stored?.result).toMatchObject({
+      outcome: 'PASS',
+      stage: 'ICMP',
+      reason: 'PING_REPLIED',
+      responseTimeMs: 21,
+      checkedAt,
+    });
+  });
+
+  it('rejects null ICMP targets in monitors and immutable configuration versions', async () => {
+    const round = await createIcmpRound();
+
+    await expect(
+      connection.pool.query('update monitors set icmp_host = null where id = $1', [
+        round.monitorId,
+      ]),
+    ).rejects.toMatchObject({ constraint: 'monitors_protocol_configuration' });
+    await expect(
+      connection.pool.query(
+        'update monitor_configuration_versions set icmp_host = null where monitor_id = $1',
+        [round.monitorId],
+      ),
+    ).rejects.toMatchObject({
+      constraint: 'monitor_configuration_versions_protocol_configuration',
     });
   });
 

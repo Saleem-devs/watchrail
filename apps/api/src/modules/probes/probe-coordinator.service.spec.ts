@@ -190,6 +190,58 @@ describe('ProbeCoordinatorService submission audit', () => {
     expect(submit).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      engineVersion: 'watchrail-tcp-v1',
+      result: {
+        outcome: 'FAIL',
+        stage: 'CONNECT',
+        reason: 'HOST_UNREACHABLE',
+        connectionTimeMs: null,
+        attemptDurationMs: 15,
+        checkedAt: new Date().toISOString(),
+      },
+    },
+    {
+      engineVersion: 'watchrail-icmp-v1',
+      result: {
+        outcome: 'FAIL',
+        stage: 'ICMP',
+        reason: 'PING_HOST_UNREACHABLE',
+        responseTimeMs: null,
+        attemptDurationMs: 15,
+        checkedAt: new Date().toISOString(),
+      },
+    },
+  ])('accepts $result.reason for its protocol-specific result contract', async (body) => {
+    submit.mockResolvedValue({ state: 'ACCEPTED', duplicate: false });
+
+    await expect(
+      service.submit(machine, attemptId, claimToken, {
+        reference: {
+          contractVersion: 1,
+          assignmentId,
+          attemptId,
+          attemptNumber: 1,
+          engineVersion: body.engineVersion,
+        },
+        result: body.result,
+      }),
+    ).resolves.toEqual({ state: 'ACCEPTED', duplicate: false });
+
+    expect(submit).toHaveBeenCalledWith(
+      machine,
+      expect.objectContaining({ engineVersion: body.engineVersion }),
+      claimToken,
+      expect.objectContaining({
+        outcome: 'FAIL',
+        stage: body.result.stage,
+        reason: body.result.reason,
+        responseTimeMs: null,
+      }),
+    );
+  });
+
   it('accepts bounded workflow diagnostics and rejects injected response evidence', async () => {
     submit.mockResolvedValue({ state: 'ACCEPTED', duplicate: false });
     const checkedAt = new Date().toISOString();

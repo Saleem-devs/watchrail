@@ -1,5 +1,7 @@
 export { executeHttpCheck } from './http-check.js';
 export { executeTcpCheck } from './tcp-check.js';
+export { executeIcmpCheck } from './icmp-check.js';
+export { SystemIcmpPinger } from './system-icmp-pinger.js';
 export { executeDnsCheck } from './dns-check.js';
 export { executeDomainExpiryCheck } from './domain-expiry-check.js';
 export { NodeRdapDomainClient } from './node-rdap-client.js';
@@ -90,6 +92,14 @@ export type {
   TcpConnectResult,
   TcpConnector,
 } from './tcp-types.js';
+export type {
+  IcmpCheckDependencies,
+  IcmpCheckInput,
+  IcmpCheckResult,
+  IcmpPinger,
+  IcmpPingInput,
+  IcmpPingResult,
+} from './icmp-types.js';
 export type {
   DnsCheckDependencies,
   DnsCheckInput,

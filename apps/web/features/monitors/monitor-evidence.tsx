@@ -255,13 +255,23 @@ export function ManualDiagnostic({
       </div>
       <dl className="grid grid-cols-2 gap-px bg-rail-border sm:grid-cols-4">
         <Metric
-          label={protocol === 'HTTP' ? 'HTTP' : protocol === 'TCP' ? 'Connection' : 'DNS lookup'}
+          label={
+            protocol === 'HTTP'
+              ? 'HTTP'
+              : protocol === 'TCP'
+                ? 'Connection'
+                : protocol === 'ICMP'
+                  ? 'Ping'
+                  : 'DNS lookup'
+          }
           value={
             protocol === 'HTTP'
               ? (result.statusCode?.toString() ?? 'No response')
               : protocol === 'TCP'
                 ? tcpConnectionState(result.outcome, result.reason)
-                : dnsLookupState(result.outcome, result.reason)
+                : protocol === 'ICMP'
+                  ? icmpPingState(result.outcome, result.reason)
+                  : dnsLookupState(result.outcome, result.reason)
           }
         />
         <Metric
@@ -270,7 +280,9 @@ export function ManualDiagnostic({
               ? 'Response'
               : protocol === 'TCP'
                 ? 'Connect latency'
-                : 'Query latency'
+                : protocol === 'ICMP'
+                  ? 'Round-trip time'
+                  : 'Query latency'
           }
           value={formatMilliseconds(result.responseTimeMs)}
         />
@@ -289,15 +301,17 @@ export function ManualDiagnostic({
         <p className="m-0 font-medium text-rail-text">
           {protocol === 'TCP'
             ? tcpDiagnosticLabel(result.reason)
-            : protocol === 'DNS'
-              ? dnsDiagnosticLabel(result.reason)
-              : diagnosticFailureLabel({
-                  outcome: result.outcome,
-                  stage: result.stage,
-                  reason: result.reason,
-                  statusCode: result.statusCode,
-                  assertionEvaluation,
-                })}
+            : protocol === 'ICMP'
+              ? icmpDiagnosticLabel(result.reason)
+              : protocol === 'DNS'
+                ? dnsDiagnosticLabel(result.reason)
+                : diagnosticFailureLabel({
+                    outcome: result.outcome,
+                    stage: result.stage,
+                    reason: result.reason,
+                    statusCode: result.statusCode,
+                    assertionEvaluation,
+                  })}
         </p>
         <p className="mt-1 mb-0 text-rail-subtle">
           {humanize(result.stage)} · {humanize(result.reason)}
@@ -685,6 +699,33 @@ function tcpConnectionState(
 ): 'Established' | 'Failed' | 'Indeterminate' {
   if (outcome === 'UNKNOWN') return 'Indeterminate';
   return outcome === 'PASS' && reason === 'CONNECTED' ? 'Established' : 'Failed';
+}
+
+function icmpDiagnosticLabel(reason: string): string {
+  switch (reason) {
+    case 'PING_REPLIED':
+      return 'The target replied to the ICMP echo request.';
+    case 'PING_TIMEOUT':
+      return 'The target did not reply before the ping timeout.';
+    case 'PING_HOST_UNREACHABLE':
+      return 'The target network or host could not be reached by ICMP.';
+    case 'NAME_NOT_FOUND':
+      return 'The target hostname could not be resolved.';
+    case 'PROHIBITED_DESTINATION':
+      return 'The resolved target is blocked by Watchrail network safety policy.';
+    case 'ICMP_UNAVAILABLE':
+      return 'This probe cannot send ICMP echo requests.';
+    default:
+      return 'The ping check could not produce authoritative reachability evidence.';
+  }
+}
+
+function icmpPingState(
+  outcome: 'PASS' | 'FAIL' | 'UNKNOWN',
+  reason: string,
+): 'Replied' | 'Failed' | 'Indeterminate' {
+  if (outcome === 'UNKNOWN') return 'Indeterminate';
+  return outcome === 'PASS' && reason === 'PING_REPLIED' ? 'Replied' : 'Failed';
 }
 
 function regionalTcpConnectionState(reason: string): 'Established' | 'Failed' | 'Indeterminate' {
@@ -1141,13 +1182,23 @@ function HistoricalSingleLocationEvidence({
     <div className="mt-3 overflow-hidden rounded-rail-panel border border-rail-border bg-rail-sidebar/45">
       <dl className="grid grid-cols-2 gap-px bg-rail-border sm:grid-cols-4">
         <Metric
-          label={protocol === 'HTTP' ? 'HTTP' : protocol === 'TCP' ? 'Connection' : 'DNS lookup'}
+          label={
+            protocol === 'HTTP'
+              ? 'HTTP'
+              : protocol === 'TCP'
+                ? 'Connection'
+                : protocol === 'ICMP'
+                  ? 'Ping'
+                  : 'DNS lookup'
+          }
           value={
             protocol === 'HTTP'
               ? (result.statusCode?.toString() ?? 'No response')
               : protocol === 'TCP'
                 ? tcpConnectionState(result.outcome, result.reason)
-                : dnsLookupState(result.outcome, result.reason)
+                : protocol === 'ICMP'
+                  ? icmpPingState(result.outcome, result.reason)
+                  : dnsLookupState(result.outcome, result.reason)
           }
         />
         <Metric
@@ -1156,7 +1207,9 @@ function HistoricalSingleLocationEvidence({
               ? 'Response'
               : protocol === 'TCP'
                 ? 'Connect latency'
-                : 'Query latency'
+                : protocol === 'ICMP'
+                  ? 'Round-trip time'
+                  : 'Query latency'
           }
           value={formatMilliseconds(result.responseTimeMs)}
         />
@@ -1174,15 +1227,17 @@ function HistoricalSingleLocationEvidence({
       <p className="m-0 border-t border-rail-border px-4 py-3 text-xs text-rail-subtle">
         {protocol === 'TCP'
           ? tcpDiagnosticLabel(result.reason)
-          : protocol === 'DNS'
-            ? dnsDiagnosticLabel(result.reason)
-            : diagnosticFailureLabel({
-                outcome: result.outcome,
-                stage: result.stage,
-                reason: result.reason,
-                statusCode: result.statusCode,
-                assertionEvaluation,
-              })}
+          : protocol === 'ICMP'
+            ? icmpDiagnosticLabel(result.reason)
+            : protocol === 'DNS'
+              ? dnsDiagnosticLabel(result.reason)
+              : diagnosticFailureLabel({
+                  outcome: result.outcome,
+                  stage: result.stage,
+                  reason: result.reason,
+                  statusCode: result.statusCode,
+                  assertionEvaluation,
+                })}
       </p>
       {protocol === 'HTTP' ? (
         <>
