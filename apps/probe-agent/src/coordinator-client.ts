@@ -8,6 +8,7 @@ import {
 import type {
   ApiWorkflowResult,
   DnsCheckResult,
+  IcmpCheckResult,
   HttpCheckResult,
   TcpCheckResult,
 } from '@watchrail/check-engine';
@@ -103,7 +104,7 @@ export class ProbeCoordinatorClient {
   serializeSubmission(
     lease: ProbeLeaseReferenceV1,
     engineVersion: string,
-    result: HttpCheckResult | TcpCheckResult | DnsCheckResult | ApiWorkflowResult,
+    result: HttpCheckResult | TcpCheckResult | DnsCheckResult | IcmpCheckResult | ApiWorkflowResult,
   ): string {
     return JSON.stringify({
       reference: reference(lease, engineVersion),

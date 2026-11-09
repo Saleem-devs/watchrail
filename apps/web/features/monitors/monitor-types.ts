@@ -4,7 +4,7 @@ export type MonitorType = Monitor['type'];
 
 export interface MonitorTypeDefinition {
   type: MonitorType;
-  slug: 'http' | 'tcp' | 'dns' | 'api-workflows' | 'heartbeats' | 'domains';
+  slug: 'http' | 'tcp' | 'dns' | 'ping' | 'api-workflows' | 'heartbeats' | 'domains';
   label: string;
   singular: string;
   description: string;
@@ -38,6 +38,15 @@ export const MONITOR_TYPES: readonly MonitorTypeDefinition[] = [
     singular: 'DNS monitor',
     description: 'Record resolution, expected answers, lookup latency, and mismatches.',
     createDescription: 'Resolve a DNS record and optionally require expected answers.',
+    supportsConfigurationTest: false,
+  },
+  {
+    type: 'ICMP',
+    slug: 'ping',
+    label: 'Ping',
+    singular: 'Ping monitor',
+    description: 'ICMP reachability and round-trip latency for public hosts and network edges.',
+    createDescription: 'Ping a public hostname or IP address and measure its response time.',
     supportsConfigurationTest: false,
   },
   {

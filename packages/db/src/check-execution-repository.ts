@@ -93,6 +93,11 @@ export interface ClaimedDnsCheckExecution extends ClaimedCheckExecutionBase {
   expectedValues: string[];
 }
 
+export interface ClaimedIcmpCheckExecution extends ClaimedCheckExecutionBase {
+  type: 'ICMP';
+  host: string;
+}
+
 export interface ClaimedApiWorkflowExecution extends ClaimedCheckExecutionBase {
   type: 'API_WORKFLOW';
   workflow: StoredApiWorkflowConfigurationV1;
@@ -108,6 +113,7 @@ export type ClaimedCheckExecution =
   | ClaimedHttpCheckExecution
   | ClaimedTcpCheckExecution
   | ClaimedDnsCheckExecution
+  | ClaimedIcmpCheckExecution
   | ClaimedApiWorkflowExecution
   | ClaimedDomainExpiryExecution;
 
@@ -154,6 +160,7 @@ export class CheckExecutionRepository {
           type: monitorConfigurationVersions.type,
           tcpHost: monitorConfigurationVersions.tcpHost,
           tcpPort: monitorConfigurationVersions.tcpPort,
+          icmpHost: monitorConfigurationVersions.icmpHost,
           dnsName: monitorConfigurationVersions.dnsName,
           dnsRecordType: monitorConfigurationVersions.dnsRecordType,
           dnsExpectedValues: monitorConfigurationVersions.dnsExpectedValues,
@@ -230,37 +237,39 @@ export class CheckExecutionRepository {
         execution:
           candidate.type === 'TCP'
             ? createClaimedTcpExecution(candidate, claimed.claimToken, claimed.attemptNumber)
-            : candidate.type === 'DNS'
-              ? createClaimedDnsExecution(candidate, claimed.claimToken, claimed.attemptNumber)
-              : candidate.type === 'API_WORKFLOW'
-                ? createClaimedApiWorkflowExecution(
-                    candidate,
-                    claimed.claimToken,
-                    claimed.attemptNumber,
-                  )
-                : candidate.type === 'DOMAIN_EXPIRY'
-                  ? createClaimedDomainExpiryExecution(
+            : candidate.type === 'ICMP'
+              ? createClaimedIcmpExecution(candidate, claimed.claimToken, claimed.attemptNumber)
+              : candidate.type === 'DNS'
+                ? createClaimedDnsExecution(candidate, claimed.claimToken, claimed.attemptNumber)
+                : candidate.type === 'API_WORKFLOW'
+                  ? createClaimedApiWorkflowExecution(
                       candidate,
                       claimed.claimToken,
                       claimed.attemptNumber,
                     )
-                  : {
-                      type: 'HTTP',
-                      assignmentId: candidate.assignmentId,
-                      claimToken: claimed.claimToken,
-                      attemptNumber: claimed.attemptNumber,
-                      url: candidate.url,
-                      method: candidate.method,
-                      timeoutMs: candidate.timeoutMs,
-                      followRedirects: candidate.followRedirects,
-                      statusPolicy: candidate.statusPolicy,
-                      organizationId: candidate.organizationId,
-                      monitorId: candidate.monitorId,
-                      requestHeaders: candidate.requestHeaders,
-                      requestBody: candidate.requestBody,
-                      assertions: candidate.assertions,
-                      tlsPolicy: candidate.tlsPolicy,
-                    },
+                  : candidate.type === 'DOMAIN_EXPIRY'
+                    ? createClaimedDomainExpiryExecution(
+                        candidate,
+                        claimed.claimToken,
+                        claimed.attemptNumber,
+                      )
+                    : {
+                        type: 'HTTP',
+                        assignmentId: candidate.assignmentId,
+                        claimToken: claimed.claimToken,
+                        attemptNumber: claimed.attemptNumber,
+                        url: candidate.url,
+                        method: candidate.method,
+                        timeoutMs: candidate.timeoutMs,
+                        followRedirects: candidate.followRedirects,
+                        statusPolicy: candidate.statusPolicy,
+                        organizationId: candidate.organizationId,
+                        monitorId: candidate.monitorId,
+                        requestHeaders: candidate.requestHeaders,
+                        requestBody: candidate.requestBody,
+                        assertions: candidate.assertions,
+                        tlsPolicy: candidate.tlsPolicy,
+                      },
       };
     });
   }
@@ -317,6 +326,32 @@ export class CheckExecutionRepository {
       return true;
     });
   }
+}
+
+function createClaimedIcmpExecution(
+  candidate: {
+    assignmentId: string;
+    icmpHost: string | null;
+    timeoutMs: number;
+    organizationId: string;
+    monitorId: string;
+  },
+  claimToken: string,
+  attemptNumber: number,
+): ClaimedIcmpCheckExecution {
+  if (candidate.icmpHost === null) {
+    throw new Error('ICMP execution configuration is incomplete.');
+  }
+  return {
+    type: 'ICMP',
+    assignmentId: candidate.assignmentId,
+    claimToken,
+    attemptNumber,
+    host: candidate.icmpHost,
+    timeoutMs: candidate.timeoutMs,
+    organizationId: candidate.organizationId,
+    monitorId: candidate.monitorId,
+  };
 }
 
 function createClaimedApiWorkflowExecution(

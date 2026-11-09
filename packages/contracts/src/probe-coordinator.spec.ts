@@ -152,6 +152,26 @@ describe('probe coordinator contracts', () => {
     ).toThrow(InvalidProbeCoordinatorContractError);
   });
 
+  it('parses an exact protocol-specific ICMP execution configuration', () => {
+    const configuration = {
+      contractVersion: 1,
+      type: 'ICMP',
+      assignmentId,
+      attemptId,
+      configurationVersionId,
+      configurationVersionNumber: 10,
+      executionPolicyVersion: 'icmp-v1',
+      requiredEngineVersion: 'watchrail-icmp-v1',
+      host: 'edge.example.com',
+      timeoutMs: 4_000,
+    } as const;
+
+    expect(parseProbeExecutionConfiguration(configuration)).toEqual(configuration);
+    expect(() => parseProbeExecutionConfiguration({ ...configuration, port: 7 })).toThrow(
+      InvalidProbeCoordinatorContractError,
+    );
+  });
+
   it('parses a dedicated API workflow execution configuration', () => {
     const configuration = {
       contractVersion: 1,

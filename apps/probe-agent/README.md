@@ -1,8 +1,8 @@
 # Watchrail remote probe agent
 
 The probe agent is a standalone process. It talks only to the Watchrail coordinator over HTTPS and
-executes the shared `watchrail-http-v1` engine. It does not need PostgreSQL, Redis, HTTP-header or
-assertion encryption keyrings.
+executes the shared HTTP, TCP, DNS, ICMP, and API-workflow engines. It does not need PostgreSQL,
+Redis, HTTP-header or assertion encryption keyrings.
 
 Provide either an existing `PROBE_MACHINE_CREDENTIAL`, or a one-time
 `PROBE_ENROLLMENT_ID`/`PROBE_ENROLLMENT_TOKEN` pair plus an absolute `PROBE_CREDENTIAL_FILE` path
@@ -16,6 +16,10 @@ Required production configuration:
 PROBE_COORDINATOR_URL=https://watchrail.example.com
 PROBE_MACHINE_CREDENTIAL=<43-character base64url credential>
 ```
+
+Ping monitors require the `ping` executable and permission to send ICMP echo requests. The supplied
+container image installs `iputils`; its runtime must retain `NET_RAW` or the equivalent platform
+capability. Without it, the agent reports `ICMP_UNAVAILABLE` and does not mark the target down.
 
 The runtime sends heartbeats independently, claims one fenced lease at a time, renews while the check
 is executing, and retries transient result-submission failures using the exact same serialized body.

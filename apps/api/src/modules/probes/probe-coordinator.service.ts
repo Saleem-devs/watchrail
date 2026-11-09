@@ -91,6 +91,23 @@ export class ProbeCoordinatorService {
         timeoutMs: stored.timeoutMs,
       });
     }
+    if (stored.type === 'ICMP') {
+      if (stored.icmpHost === null) {
+        throw new Error('Stored ICMP execution configuration is incomplete.');
+      }
+      return parseProbeExecutionConfiguration({
+        contractVersion: 1,
+        type: 'ICMP',
+        assignmentId: stored.assignmentId,
+        attemptId: stored.attemptId,
+        configurationVersionId: stored.configurationVersionId,
+        configurationVersionNumber: stored.configurationVersionNumber,
+        executionPolicyVersion: stored.executionPolicyVersion,
+        requiredEngineVersion: stored.requiredEngineVersion,
+        host: stored.icmpHost,
+        timeoutMs: stored.timeoutMs,
+      });
+    }
     if (stored.type === 'API_WORKFLOW') {
       const resolveWorkspaceSecret = this.executionSecretResolver(stored.organizationId);
       return parseProbeExecutionConfiguration({
@@ -310,6 +327,15 @@ function parseResult(value: unknown): AuthoritativeCheckResult {
     'stage',
   ];
   if (hasExactKeys(value, tcpResultKeys)) return parseTcpResult(value);
+  const icmpResultKeys = [
+    'attemptDurationMs',
+    'checkedAt',
+    'outcome',
+    'reason',
+    'responseTimeMs',
+    'stage',
+  ];
+  if (hasExactKeys(value, icmpResultKeys)) return parseIcmpResult(value);
   const resultKeys = [
     'assertionEvaluation',
     'attemptDurationMs',
@@ -376,6 +402,43 @@ function parseResult(value: unknown): AuthoritativeCheckResult {
         Object.hasOwn(value, 'tlsCertificates') ? value.tlsCertificates : [],
       ),
     ),
+    checkedAt: new Date(value.checkedAt),
+  };
+}
+
+function parseIcmpResult(value: Record<string, unknown>): AuthoritativeCheckResult {
+  const reason = String(value.reason);
+  if (
+    ![
+      'PING_REPLIED',
+      'PING_TIMEOUT',
+      'PING_HOST_UNREACHABLE',
+      'NAME_NOT_FOUND',
+      'PROHIBITED_DESTINATION',
+      'ICMP_UNAVAILABLE',
+      'INTERNAL_ERROR',
+    ].includes(reason) ||
+    !['PASS', 'FAIL', 'UNKNOWN'].includes(String(value.outcome)) ||
+    !['DNS', 'ICMP', 'PROBE'].includes(String(value.stage)) ||
+    !isNullableNonNegativeNumber(value.responseTimeMs) ||
+    !isNonNegativeNumber(value.attemptDurationMs) ||
+    !isCanonicalTimestamp(value.checkedAt)
+  ) {
+    badRequest();
+  }
+  const expected = expectedClassification(reason);
+  if (value.outcome !== expected.outcome || value.stage !== expected.stage) badRequest();
+  if ((reason === 'PING_REPLIED') !== (value.responseTimeMs !== null)) badRequest();
+  return {
+    outcome: value.outcome as AuthoritativeCheckResult['outcome'],
+    stage: value.stage as AuthoritativeCheckResult['stage'],
+    reason: value.reason as AuthoritativeCheckResult['reason'],
+    statusCode: null,
+    responseTimeMs: value.responseTimeMs,
+    attemptDurationMs: value.attemptDurationMs,
+    redirects: [],
+    assertionEvaluation: { contractVersion: 1, outcome: 'PASS', diagnostics: [] },
+    tlsCertificates: [],
     checkedAt: new Date(value.checkedAt),
   };
 }
@@ -462,6 +525,9 @@ function expectedClassification(reason: string): { outcome: string; stage: strin
   if (reason === 'COMPLETED') return { outcome: 'PASS', stage: 'HTTP' };
   if (reason === 'CONNECTED') return { outcome: 'PASS', stage: 'CONNECT' };
   if (reason === 'RECORDS_MATCHED') return { outcome: 'PASS', stage: 'DNS' };
+  if (reason === 'PING_REPLIED') return { outcome: 'PASS', stage: 'ICMP' };
+  if (reason === 'PING_TIMEOUT') return { outcome: 'FAIL', stage: 'ICMP' };
+  if (reason === 'PING_HOST_UNREACHABLE') return { outcome: 'FAIL', stage: 'ICMP' };
   if (['NO_RECORDS', 'RECORD_MISMATCH', 'DNS_TIMEOUT'].includes(reason)) {
     return { outcome: 'FAIL', stage: 'DNS' };
   }

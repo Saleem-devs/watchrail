@@ -2,14 +2,17 @@ import {
   executeHttpCheck,
   executeDnsCheck,
   executeTcpCheck,
+  executeIcmpCheck,
   executeApiWorkflow,
   NodeDnsQueryResolver,
   NodeHttpExecutor,
   NodeTcpConnector,
+  SystemIcmpPinger,
   type HttpCheckResult,
   type HttpExecutor,
   type DnsQueryResolver,
   type TcpConnector,
+  type IcmpPinger,
 } from '@watchrail/check-engine';
 import {
   HTTP_ENGINE_VERSION,
@@ -17,6 +20,7 @@ import {
   TCP_ENGINE_VERSION,
   DNS_ENGINE_VERSION,
   API_WORKFLOW_ENGINE_VERSION,
+  ICMP_ENGINE_VERSION,
   PROBE_MAX_EXECUTION_MS,
   parseResponseAssertions,
   probeEngineSupports,
@@ -27,6 +31,7 @@ import type {
   TcpProbeExecutionConfigurationV1,
   DnsProbeExecutionConfigurationV1,
   ApiWorkflowProbeExecutionConfigurationV1,
+  IcmpProbeExecutionConfigurationV1,
 } from '@watchrail/contracts';
 import { ProbeCoordinatorError } from './coordinator-client.js';
 import type { ProbeCoordinatorClient } from './coordinator-client.js';
@@ -45,6 +50,7 @@ export class ProbeAgentRuntime {
     private readonly executor: HttpExecutor = new NodeHttpExecutor(),
     private readonly tcpConnector: TcpConnector = new NodeTcpConnector(),
     private readonly dnsResolver: DnsQueryResolver = new NodeDnsQueryResolver(),
+    private readonly icmpPinger: IcmpPinger = new SystemIcmpPinger(),
   ) {}
 
   async run(): Promise<void> {
@@ -102,7 +108,7 @@ export class ProbeAgentRuntime {
         configuration.configurationVersionNumber !== lease.configurationVersionNumber ||
         configuration.executionPolicyVersion !== lease.executionPolicyVersion ||
         configuration.requiredEngineVersion !== lease.requiredEngineVersion ||
-        !probeEngineSupports(API_WORKFLOW_ENGINE_VERSION, configuration.requiredEngineVersion)
+        !probeEngineSupports(ICMP_ENGINE_VERSION, configuration.requiredEngineVersion)
       ) {
         throw new ProbeCoordinatorError('INVALID');
       }
@@ -111,26 +117,31 @@ export class ProbeAgentRuntime {
             executor: this.executor,
             signal: abort.signal,
           })
-        : isDnsConfiguration(configuration)
-          ? await executeDnsCheck(
-              {
-                name: configuration.name,
-                recordType: configuration.recordType,
-                expectedValues: configuration.expectedValues,
-                timeoutMs: configuration.timeoutMs,
-              },
-              { resolver: this.dnsResolver, signal: abort.signal },
+        : isIcmpConfiguration(configuration)
+          ? await executeIcmpCheck(
+              { host: configuration.host, timeoutMs: configuration.timeoutMs },
+              { pinger: this.icmpPinger, signal: abort.signal },
             )
-          : isTcpConfiguration(configuration)
-            ? await executeTcpCheck(
+          : isDnsConfiguration(configuration)
+            ? await executeDnsCheck(
                 {
-                  host: configuration.host,
-                  port: configuration.port,
+                  name: configuration.name,
+                  recordType: configuration.recordType,
+                  expectedValues: configuration.expectedValues,
                   timeoutMs: configuration.timeoutMs,
                 },
-                { connector: this.tcpConnector, signal: abort.signal },
+                { resolver: this.dnsResolver, signal: abort.signal },
               )
-            : await executeHttpConfiguration(configuration, this.executor, abort.signal);
+            : isTcpConfiguration(configuration)
+              ? await executeTcpCheck(
+                  {
+                    host: configuration.host,
+                    port: configuration.port,
+                    timeoutMs: configuration.timeoutMs,
+                  },
+                  { connector: this.tcpConnector, signal: abort.signal },
+                )
+              : await executeHttpConfiguration(configuration, this.executor, abort.signal);
       const submissionResult =
         lease.requiredEngineVersion === LEGACY_HTTP_ENGINE_VERSION && 'statusCode' in result
           ? withoutTlsEvidence(result)
@@ -210,7 +221,7 @@ export class ProbeAgentRuntime {
     while (!this.stopping) {
       try {
         await this.client.heartbeat(
-          API_WORKFLOW_ENGINE_VERSION,
+          ICMP_ENGINE_VERSION,
           this.config.heartbeatIntervalMs,
           this.lifecycleAbort.signal,
         );
@@ -227,6 +238,8 @@ export class ProbeAgentRuntime {
   }
 
   private async claimCompatibleLease(): Promise<ProbeLeaseReferenceV1 | null> {
+    const icmpLease = await this.client.claim(ICMP_ENGINE_VERSION, this.lifecycleAbort.signal);
+    if (icmpLease) return icmpLease;
     const workflowLease = await this.client.claim(
       API_WORKFLOW_ENGINE_VERSION,
       this.lifecycleAbort.signal,
@@ -250,6 +263,12 @@ export class ProbeAgentRuntime {
   }
 }
 
+function isIcmpConfiguration(
+  configuration: ProbeExecutionConfigurationV1,
+): configuration is IcmpProbeExecutionConfigurationV1 {
+  return 'type' in configuration && configuration.type === 'ICMP';
+}
+
 function isWorkflowConfiguration(
   configuration: ProbeExecutionConfigurationV1,
 ): configuration is ApiWorkflowProbeExecutionConfigurationV1 {
@@ -271,7 +290,7 @@ function isTcpConfiguration(
 async function executeHttpConfiguration(
   configuration: Exclude<
     Awaited<ReturnType<ProbeCoordinatorClient['configuration']>>,
-    { type: 'TCP' } | { type: 'DNS' } | { type: 'API_WORKFLOW' }
+    { type: 'TCP' } | { type: 'DNS' } | { type: 'ICMP' } | { type: 'API_WORKFLOW' }
   >,
   executor: HttpExecutor,
   signal: AbortSignal,

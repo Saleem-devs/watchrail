@@ -39,6 +39,7 @@ import {
   DomainExpiryInputError,
   parseDomainExpiryMonitorSettings,
 } from './domain-expiry.js';
+import { ICMP_MONITOR_DEFAULTS, IcmpMonitorInputError, parseIcmpMonitorSettings } from './icmp.js';
 
 export const HTTP_METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] as const;
 export const HTTP_MONITOR_METHODS = [
@@ -58,6 +59,7 @@ export const MONITOR_TYPES = [
   'API_WORKFLOW',
   'HEARTBEAT',
   'DOMAIN_EXPIRY',
+  'ICMP',
 ] as const;
 export const MONITOR_LOCATIONS = ['local'] as const;
 export const MONITOR_INTERVAL_LIMITS = {
@@ -173,13 +175,19 @@ export interface NewDomainExpiryMonitor extends NewMonitorBase {
   domainWarningDays: number;
 }
 
+export interface NewIcmpMonitor extends NewMonitorBase {
+  type: 'ICMP';
+  host: string;
+}
+
 export type NewMonitor =
   | NewHttpMonitor
   | NewTcpMonitor
   | NewDnsMonitor
   | NewApiWorkflowMonitor
   | NewHeartbeatMonitor
-  | NewDomainExpiryMonitor;
+  | NewDomainExpiryMonitor
+  | NewIcmpMonitor;
 
 export interface MonitorFieldErrors {
   name?: string[];
@@ -686,6 +694,7 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
   if (type === 'API_WORKFLOW') return createApiWorkflowMonitor(command, name, fields);
   if (type === 'HEARTBEAT') return createHeartbeatMonitor(command, name, fields);
   if (type === 'DOMAIN_EXPIRY') return createDomainExpiryMonitor(command, name, fields);
+  if (type === 'ICMP') return createIcmpMonitor(command, name, fields);
   const url = normalizeUrl(command.url, fields);
   const statusPolicy = normalizeStatusPolicy(command.statusPolicy, fields);
   const tlsPolicy = normalizeTlsPolicy(command.tlsPolicy, url, fields, true);
@@ -750,6 +759,70 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
     requestHeaders,
     requestBody,
     assertions,
+    locations,
+  };
+}
+
+function createIcmpMonitor(
+  command: CreateMonitorCommand,
+  name: string,
+  fields: MonitorFieldErrors,
+): NewIcmpMonitor {
+  let settings: { host: string; timeoutMs: number } = {
+    host: '',
+    timeoutMs: ICMP_MONITOR_DEFAULTS.timeoutMs,
+  };
+  try {
+    settings = parseIcmpMonitorSettings({
+      host: command.host,
+      timeoutMs: command.timeoutMs ?? ICMP_MONITOR_DEFAULTS.timeoutMs,
+    });
+  } catch (error) {
+    if (!(error instanceof IcmpMonitorInputError)) throw error;
+    Object.assign(fields, error.fields);
+  }
+  const lifecycleState = normalizeInitialLifecycleState(command.lifecycleState, fields);
+  const intervalSeconds = normalizeIntervalSeconds(command.intervalSeconds, fields, true);
+  let locations: string[] = [...MONITOR_DEFAULTS.locations];
+  if (command.locations !== undefined) {
+    try {
+      locations = parseMonitorLocationSettings({ locations: command.locations }).locations;
+    } catch (error) {
+      if (error instanceof MonitorInputError) Object.assign(fields, error.fields);
+      else throw error;
+    }
+  }
+  const incompatibleFields = [
+    command.port,
+    command.url,
+    command.dnsName,
+    command.dnsRecordType,
+    command.dnsExpectedValues,
+    command.domainName,
+    command.domainWarningDays,
+    command.statusPolicy,
+    command.tlsPolicy,
+    command.method,
+    command.followRedirects,
+    command.requestHeaders,
+    command.requestBody,
+    command.assertions,
+    command.workflow,
+    command.heartbeat,
+  ];
+  if (incompatibleFields.some((value) => value !== undefined)) {
+    fields.type = [
+      'ICMP monitors cannot include HTTP, TCP, DNS, workflow, or heartbeat configuration.',
+    ];
+  }
+  if (Object.keys(fields).length > 0) throw new MonitorInputError(fields);
+  return {
+    type: 'ICMP',
+    name,
+    host: settings.host,
+    timeoutMs: settings.timeoutMs,
+    lifecycleState,
+    intervalSeconds,
     locations,
   };
 }
@@ -1059,7 +1132,7 @@ function createTcpMonitor(
 function normalizeMonitorType(value: unknown, fields: MonitorFieldErrors): MonitorType {
   if (value === undefined) return 'HTTP';
   if (typeof value !== 'string' || !MONITOR_TYPES.includes(value as MonitorType)) {
-    fields.type = ['Choose HTTP, TCP, DNS, API workflow, heartbeat, or domain expiry.'];
+    fields.type = ['Choose HTTP, TCP, DNS, ICMP, API workflow, heartbeat, or domain expiry.'];
     return 'HTTP';
   }
   return value as MonitorType;

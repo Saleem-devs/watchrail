@@ -85,11 +85,13 @@ export function MonitorTypeOverview({
       ? 'Average connect latency'
       : type === 'DNS'
         ? 'Average lookup latency'
-        : type === 'DOMAIN_EXPIRY'
-          ? 'Average RDAP lookup'
-          : type === 'API_WORKFLOW'
-            ? 'Average workflow duration'
-            : 'Average response latency';
+        : type === 'ICMP'
+          ? 'Average round-trip time'
+          : type === 'DOMAIN_EXPIRY'
+            ? 'Average RDAP lookup'
+            : type === 'API_WORKFLOW'
+              ? 'Average workflow duration'
+              : 'Average response latency';
 
   return (
     <section

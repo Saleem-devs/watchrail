@@ -99,6 +99,26 @@ describe('heartbeat monitoring contracts', () => {
 });
 
 describe('createMonitor', () => {
+  it('creates a ping monitor with a normalized public target', () => {
+    expect(
+      createMonitor({
+        type: 'ICMP',
+        name: 'Edge reachability',
+        host: ' Edge.Example.com ',
+        timeoutMs: 3_000,
+        intervalSeconds: 60,
+      }),
+    ).toEqual({
+      type: 'ICMP',
+      name: 'Edge reachability',
+      host: 'edge.example.com',
+      timeoutMs: 3_000,
+      lifecycleState: 'ENABLED',
+      intervalSeconds: 60,
+      locations: ['local'],
+    });
+  });
+
   it('creates centrally scheduled domain-expiry monitors with a daily default', () => {
     expect(
       createMonitor({

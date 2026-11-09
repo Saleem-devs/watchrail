@@ -8,6 +8,7 @@ import {
   API_WORKFLOW_ENGINE_VERSION,
   DNS_ENGINE_VERSION,
   HTTP_ENGINE_VERSION,
+  ICMP_ENGINE_VERSION,
 } from './probe.js';
 
 const organizationId = '11111111-1111-4111-8111-111111111111';
@@ -21,6 +22,12 @@ describe('probe domain', () => {
     expect(probeEngineSupports(API_WORKFLOW_ENGINE_VERSION, DNS_ENGINE_VERSION)).toBe(true);
     expect(probeEngineSupports(API_WORKFLOW_ENGINE_VERSION, HTTP_ENGINE_VERSION)).toBe(true);
     expect(probeEngineSupports(DNS_ENGINE_VERSION, API_WORKFLOW_ENGINE_VERSION)).toBe(false);
+  });
+
+  it('routes ping work only to ICMP-capable probe agents', () => {
+    expect(probeEngineSupports(ICMP_ENGINE_VERSION, ICMP_ENGINE_VERSION)).toBe(true);
+    expect(probeEngineSupports(ICMP_ENGINE_VERSION, API_WORKFLOW_ENGINE_VERSION)).toBe(true);
+    expect(probeEngineSupports(API_WORKFLOW_ENGINE_VERSION, ICMP_ENGINE_VERSION)).toBe(false);
   });
 
   it('parses an exact tenant-scoped location identity', () => {

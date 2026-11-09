@@ -219,6 +219,36 @@ describe('multi-location round persistence and prepared routing', () => {
     });
   });
 
+  it('routes ping rounds only to ICMP-capable probe agents', async () => {
+    const repository = new MonitorRepository(connection.db);
+    const monitor = await repository.create(
+      organizationA,
+      createMonitor({
+        type: 'ICMP',
+        name: 'Public edge',
+        host: 'edge.example.com',
+        timeoutMs: 4_000,
+      }),
+    );
+    const [location] = await connection.db
+      .insert(probeLocations)
+      .values({ organizationId: organizationA, name: 'Lagos', slug: 'lagos' })
+      .returning();
+    await repository.updateLocations(organizationA, monitor.id, [location!.id]);
+
+    const round = await new ManualRoundRepository(connection.db).create(organizationA, monitor.id);
+    const [assignment] = await connection.db
+      .select()
+      .from(checkExecutionAssignments)
+      .where(eq(checkExecutionAssignments.roundId, round.id));
+
+    expect(assignment).toMatchObject({
+      executionPolicyVersion: 'icmp-v1',
+      requiredEngineVersion: 'watchrail-icmp-v1',
+      location: location!.id,
+    });
+  });
+
   it('rejects a foreign organization location before appending a configuration version', async () => {
     const repository = new MonitorRepository(connection.db);
     const monitor = await repository.create(

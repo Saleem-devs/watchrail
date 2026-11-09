@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Logger } from '@nestjs/common';
-import type { HttpExecutor, RdapDomainClient, TcpConnector } from '@watchrail/check-engine';
+import type {
+  HttpExecutor,
+  IcmpPinger,
+  RdapDomainClient,
+  TcpConnector,
+} from '@watchrail/check-engine';
 import type { CheckExecutionRepository, WorkspaceSecretRepository } from '@watchrail/db';
 import { encryptHeaderValue, type HeaderEncryptionKeyring } from '@watchrail/http-header-security';
 import {
@@ -53,6 +58,7 @@ function createHandler(
   encryptionKeyring: HeaderEncryptionKeyring = keyring,
   tcpConnector?: TcpConnector,
   rdapClient?: RdapDomainClient,
+  icmpPinger?: IcmpPinger,
 ) {
   return new CheckRoundJobHandler(
     executions,
@@ -65,6 +71,7 @@ function createHandler(
     tcpConnector,
     undefined,
     rdapClient,
+    icmpPinger,
   );
 }
 
@@ -106,9 +113,9 @@ describe('CheckRoundJobHandler', () => {
     });
     complete.mockResolvedValue(true);
     const lookup = vi.fn<RdapDomainClient['lookup']>().mockResolvedValue({
-        expirationDate: new Date(Date.now() + 10 * 86_400_000),
-        sourceUrl: 'https://rdap.example/domain/example.com',
-      });
+      expirationDate: new Date(Date.now() + 10 * 86_400_000),
+      sourceUrl: 'https://rdap.example/domain/example.com',
+    });
     const rdapClient: RdapDomainClient = {
       lookup,
     };
@@ -331,6 +338,52 @@ describe('CheckRoundJobHandler', () => {
         reason: 'CONNECTED',
         statusCode: null,
         responseTimeMs: 18,
+      }),
+    );
+  });
+
+  it('executes ICMP claims through the protocol-specific pinger', async () => {
+    const { executions, executor, claim, complete, execute } = createDependencies();
+    claim.mockResolvedValue({
+      state: 'CLAIMED',
+      execution: {
+        type: 'ICMP',
+        assignmentId: claimedExecution.assignmentId,
+        claimToken: claimedExecution.claimToken,
+        attemptNumber: 1,
+        organizationId: claimedExecution.organizationId,
+        monitorId: claimedExecution.monitorId,
+        host: '93.184.216.34',
+        timeoutMs: 5_000,
+      },
+    });
+    const ping = vi.fn<IcmpPinger['ping']>().mockResolvedValue({
+      type: 'REPLY',
+      responseTimeMs: 14,
+    });
+    const pinger: IcmpPinger = { ping };
+    complete.mockResolvedValue(true);
+
+    await createHandler(executions, executor, keyring, undefined, undefined, pinger).handle(
+      payload,
+    );
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(ping).toHaveBeenCalledWith(
+      expect.objectContaining({
+        host: '93.184.216.34',
+        addresses: [expect.objectContaining({ address: '93.184.216.34' })],
+      }),
+    );
+    expect(complete).toHaveBeenCalledWith(
+      claimedExecution.assignmentId,
+      claimedExecution.claimToken,
+      expect.objectContaining({
+        outcome: 'PASS',
+        stage: 'ICMP',
+        reason: 'PING_REPLIED',
+        statusCode: null,
+        responseTimeMs: 14,
       }),
     );
   });

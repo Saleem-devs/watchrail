@@ -34,10 +34,11 @@ export interface MonitorResponse {
   id: string;
   projectId: string;
   name: string;
-  type: 'HTTP' | 'TCP' | 'DNS' | 'API_WORKFLOW' | 'HEARTBEAT' | 'DOMAIN_EXPIRY';
+  type: 'HTTP' | 'TCP' | 'DNS' | 'ICMP' | 'API_WORKFLOW' | 'HEARTBEAT' | 'DOMAIN_EXPIRY';
   configuration:
     | { type: 'HTTP'; url: string }
     | { type: 'TCP'; host: string; port: number }
+    | { type: 'ICMP'; host: string }
     | {
         type: 'DNS';
         name: string;
@@ -165,14 +166,19 @@ export function toResponse(
                   host: requireTcpField(monitor.tcpHost, 'host'),
                   port: requireTcpField(monitor.tcpPort, 'port'),
                 }
-              : monitor.type === 'DNS'
+              : monitor.type === 'ICMP'
                 ? {
-                    type: 'DNS',
-                    name: requireDnsField(monitor.dnsName, 'name'),
-                    recordType: requireDnsField(monitor.dnsRecordType, 'record type'),
-                    expectedValues: monitor.dnsExpectedValues,
+                    type: 'ICMP',
+                    host: requireIcmpField(monitor.icmpHost, 'host'),
                   }
-                : { type: 'HTTP', url: monitor.url },
+                : monitor.type === 'DNS'
+                  ? {
+                      type: 'DNS',
+                      name: requireDnsField(monitor.dnsName, 'name'),
+                      recordType: requireDnsField(monitor.dnsRecordType, 'record type'),
+                      expectedValues: monitor.dnsExpectedValues,
+                    }
+                  : { type: 'HTTP', url: monitor.url },
     url: monitor.url,
     method: monitor.method,
     lifecycleState: monitor.lifecycleState,
@@ -197,6 +203,11 @@ export function toResponse(
 
 function requireTcpField<T>(value: T | null, field: string): T {
   if (value === null) throw new Error(`Stored TCP monitor ${field} is missing.`);
+  return value;
+}
+
+function requireIcmpField<T>(value: T | null, field: string): T {
+  if (value === null) throw new Error(`Stored ICMP monitor ${field} is missing.`);
   return value;
 }
 

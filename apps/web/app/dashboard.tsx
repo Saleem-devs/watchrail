@@ -49,6 +49,7 @@ import {
   dnsSettingsFromForm,
   domainExpiryCreateSettingsFromForm,
   domainExpirySettingsFromForm,
+  icmpSettingsFromForm,
   heartbeatSettingsFromForm,
   requiresStateChangingMethodConfirmation,
   requestBodyFromForm,
@@ -92,6 +93,7 @@ function monitorTargetLabel(monitor: Monitor | undefined): string {
   if (monitor.configuration.type === 'DNS') {
     return `${monitor.configuration.recordType} ${monitor.configuration.name}`;
   }
+  if (monitor.configuration.type === 'ICMP') return monitor.configuration.host;
   if (monitor.configuration.type === 'API_WORKFLOW') {
     return `${monitor.configuration.workflow.steps.length} ordered HTTP steps`;
   }
@@ -401,6 +403,7 @@ export function Dashboard({
     const monitorType: Monitor['type'] =
       requestedType === 'TCP' ||
       requestedType === 'DNS' ||
+      requestedType === 'ICMP' ||
       requestedType === 'API_WORKFLOW' ||
       requestedType === 'HEARTBEAT' ||
       requestedType === 'DOMAIN_EXPIRY'
@@ -444,32 +447,40 @@ export function Dashboard({
                         locations: [formData.get('location')],
                         lifecycleState: formData.get('lifecycleState'),
                       }
-                    : monitorType === 'DNS'
+                    : monitorType === 'ICMP'
                       ? {
-                          type: 'DNS',
+                          type: 'ICMP',
                           name: formData.get('name'),
-                          dnsName: dnsSettingsFromForm(formData).name,
-                          dnsRecordType: dnsSettingsFromForm(formData).recordType,
-                          dnsExpectedValues: dnsSettingsFromForm(formData).expectedValues,
-                          timeoutMs: dnsSettingsFromForm(formData).timeoutMs,
+                          ...icmpSettingsFromForm(formData),
                           locations: [formData.get('location')],
                           lifecycleState: formData.get('lifecycleState'),
                         }
-                      : {
-                          type: 'HTTP',
-                          name: formData.get('name'),
-                          url: urlFromMonitorForm(formData),
-                          statusPolicy: statusPolicyFromForm(formData),
-                          tlsPolicy: tlsPolicyFromForm(formData),
-                          method: formData.get('method'),
-                          timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
-                          followRedirects: formData.get('followRedirects') === 'on',
-                          locations: [formData.get('location')],
-                          lifecycleState: formData.get('lifecycleState'),
-                          requestHeaders: requestHeadersFromForm(formData),
-                          requestBody: requestBodyFromForm(formData),
-                          assertions: responseAssertionsFromForm(formData),
-                        },
+                      : monitorType === 'DNS'
+                        ? {
+                            type: 'DNS',
+                            name: formData.get('name'),
+                            dnsName: dnsSettingsFromForm(formData).name,
+                            dnsRecordType: dnsSettingsFromForm(formData).recordType,
+                            dnsExpectedValues: dnsSettingsFromForm(formData).expectedValues,
+                            timeoutMs: dnsSettingsFromForm(formData).timeoutMs,
+                            locations: [formData.get('location')],
+                            lifecycleState: formData.get('lifecycleState'),
+                          }
+                        : {
+                            type: 'HTTP',
+                            name: formData.get('name'),
+                            url: urlFromMonitorForm(formData),
+                            statusPolicy: statusPolicyFromForm(formData),
+                            tlsPolicy: tlsPolicyFromForm(formData),
+                            method: formData.get('method'),
+                            timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
+                            followRedirects: formData.get('followRedirects') === 'on',
+                            locations: [formData.get('location')],
+                            lifecycleState: formData.get('lifecycleState'),
+                            requestHeaders: requestHeadersFromForm(formData),
+                            requestBody: requestBodyFromForm(formData),
+                            assertions: responseAssertionsFromForm(formData),
+                          },
           ),
         },
       );
@@ -517,23 +528,25 @@ export function Dashboard({
             ? { path: 'api-workflow', body: apiWorkflowFromForm(formData) }
             : monitorType === 'TCP'
               ? { path: 'tcp-settings', body: tcpSettingsFromForm(formData) }
-              : monitorType === 'DNS'
-                ? { path: 'dns-settings', body: dnsSettingsFromForm(formData) }
-                : {
-                    path: 'configuration',
-                    body: {
-                      httpSettings: {
-                        url: urlFromMonitorForm(formData),
-                        method: formData.get('method'),
-                        timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
-                        followRedirects: formData.get('followRedirects') === 'on',
-                        requestBody: requestBodyFromForm(formData),
-                        tlsPolicy: tlsPolicyFromForm(formData),
+              : monitorType === 'ICMP'
+                ? { path: 'icmp-settings', body: icmpSettingsFromForm(formData) }
+                : monitorType === 'DNS'
+                  ? { path: 'dns-settings', body: dnsSettingsFromForm(formData) }
+                  : {
+                      path: 'configuration',
+                      body: {
+                        httpSettings: {
+                          url: urlFromMonitorForm(formData),
+                          method: formData.get('method'),
+                          timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
+                          followRedirects: formData.get('followRedirects') === 'on',
+                          requestBody: requestBodyFromForm(formData),
+                          tlsPolicy: tlsPolicyFromForm(formData),
+                        },
+                        requestHeaders: requestHeadersFromForm(formData),
+                        assertions: responseAssertionsFromForm(formData),
                       },
-                      requestHeaders: requestHeadersFromForm(formData),
-                      assertions: responseAssertionsFromForm(formData),
                     },
-                  },
       { path: 'name', body: { name: formData.get('name') } },
       ...(monitorType === 'HTTP'
         ? [{ path: 'status-policy', body: { statusPolicy: statusPolicyFromForm(formData) } }]
@@ -779,6 +792,38 @@ export function Dashboard({
       );
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Could not update TCP settings.');
+    } finally {
+      setUpdatingSettingsIds((current) => {
+        const next = new Set(current);
+        next.delete(monitorId);
+        return next;
+      });
+    }
+  }
+
+  async function updateIcmpSettings(
+    monitorId: string,
+    event: FormEvent<HTMLFormElement>,
+  ): Promise<void> {
+    event.preventDefault();
+    const settings = icmpSettingsFromForm(new FormData(event.currentTarget));
+    setUpdatingSettingsIds((current) => new Set(current).add(monitorId));
+    setActionError(undefined);
+    try {
+      const response = await fetch(`/api/monitors/${monitorId}/icmp-settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(settings),
+      });
+      const body = (await response.json()) as { data?: Monitor } & ApiError;
+      if (!response.ok || !body.data) {
+        throw new Error(body.fields?.icmpSettings?.[0] ?? 'Could not update ping settings.');
+      }
+      setMonitors((current) =>
+        current.map((monitor) => (monitor.id === monitorId ? (body.data as Monitor) : monitor)),
+      );
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Could not update ping settings.');
     } finally {
       setUpdatingSettingsIds((current) => {
         const next = new Set(current);
@@ -1439,6 +1484,10 @@ export function Dashboard({
                               <span className="block max-w-full truncate text-sm text-rail-subtle">
                                 {monitor.configuration.host}:{monitor.configuration.port}
                               </span>
+                            ) : monitor.configuration?.type === 'ICMP' ? (
+                              <span className="block max-w-full truncate text-sm text-rail-subtle">
+                                {monitor.configuration.host}
+                              </span>
                             ) : monitor.configuration?.type === 'DNS' ? (
                               <span className="block max-w-full truncate text-sm text-rail-subtle">
                                 {monitor.configuration.recordType} {monitor.configuration.name}
@@ -1599,6 +1648,9 @@ export function Dashboard({
                             }
                             onUpdateTcpSettings={(event) =>
                               void updateTcpSettings(monitor.id, event)
+                            }
+                            onUpdateIcmpSettings={(event) =>
+                              void updateIcmpSettings(monitor.id, event)
                             }
                             onUpdateDnsSettings={(event) =>
                               void updateDnsSettings(monitor.id, event)
@@ -1927,6 +1979,8 @@ function MonitorDetailView({
                   <DetailRow label="Host" value={monitor.configuration.host} />
                   <DetailRow label="Port" value={String(monitor.configuration.port)} />
                 </>
+              ) : monitor.configuration?.type === 'ICMP' ? (
+                <DetailRow label="Host" value={monitor.configuration.host} />
               ) : monitor.configuration?.type === 'DNS' ? (
                 <>
                   <DetailRow label="DNS name" value={monitor.configuration.name} />
@@ -2069,6 +2123,7 @@ function MonitorConfiguration({
   onUpdateLocation,
   onUpdateHttpSettings,
   onUpdateTcpSettings,
+  onUpdateIcmpSettings,
   onUpdateDnsSettings,
   onUpdateStatusPolicy,
 }: {
@@ -2080,6 +2135,7 @@ function MonitorConfiguration({
   onUpdateLocation: (event: FormEvent<HTMLFormElement>) => void;
   onUpdateHttpSettings: (event: FormEvent<HTMLFormElement>) => void;
   onUpdateTcpSettings: (event: FormEvent<HTMLFormElement>) => void;
+  onUpdateIcmpSettings: (event: FormEvent<HTMLFormElement>) => void;
   onUpdateDnsSettings: (event: FormEvent<HTMLFormElement>) => void;
   onUpdateStatusPolicy: (event: FormEvent<HTMLFormElement>) => void;
 }) {
@@ -2220,6 +2276,33 @@ function MonitorConfiguration({
             </label>
             <button className="quiet-button" type="submit" disabled={updatingSettings}>
               {updatingSettings ? 'Saving…' : 'Save TCP settings'}
+            </button>
+          </Form>
+        ) : monitor.configuration?.type === 'ICMP' ? (
+          <Form className="status-policy-form" onSubmit={onUpdateIcmpSettings}>
+            <label>
+              Hostname or IP address
+              <input
+                name="host"
+                type="text"
+                defaultValue={monitor.configuration.host}
+                autoComplete="off"
+                required
+              />
+            </label>
+            <label>
+              Timeout (seconds)
+              <input
+                name="timeoutSeconds"
+                type="number"
+                min="1"
+                max="30"
+                step="1"
+                defaultValue={monitor.timeoutMs / 1_000}
+              />
+            </label>
+            <button className="quiet-button" type="submit" disabled={updatingSettings}>
+              {updatingSettings ? 'Saving…' : 'Save ping settings'}
             </button>
           </Form>
         ) : monitor.configuration?.type === 'DNS' ? (

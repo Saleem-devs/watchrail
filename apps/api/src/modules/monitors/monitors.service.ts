@@ -70,6 +70,7 @@ import {
   parseHttpMonitorSettings,
   parseHttpStatusPolicy,
   parseTcpMonitorSettings,
+  parseIcmpMonitorSettings,
   parseDnsMonitorSettings,
   parseHeartbeatMonitorSettings,
   HeartbeatInputError,
@@ -80,6 +81,7 @@ import {
   parseApiWorkflowConfiguration,
   RequestHeaderInputError,
   TcpMonitorInputError,
+  IcmpMonitorInputError,
   DnsMonitorInputError,
   parseDomainExpiryMonitorSettings,
   DomainExpiryInputError,
@@ -806,6 +808,32 @@ export class MonitorsService {
       return await this.monitors.updateTcpSettings(context.organizationId, monitorId, settings);
     } catch (error) {
       if (error instanceof MonitorInputError || error instanceof TcpMonitorInputError) {
+        throw new BadRequestException({
+          code: 'VALIDATION_FAILED',
+          message: error.message,
+          fields: error.fields,
+        });
+      }
+      if (error instanceof MonitorUpdateNotFoundError) {
+        throw new NotFoundException({ code: 'MONITOR_NOT_FOUND', message: error.message });
+      }
+      if (error instanceof MonitorProtocolMismatchError) {
+        throw new ConflictException({ code: 'MONITOR_PROTOCOL_MISMATCH', message: error.message });
+      }
+      throw error;
+    }
+  }
+
+  async updateIcmpSettings(
+    context: RequestContext,
+    monitorId: string,
+    value: unknown,
+  ): Promise<MonitorRecord> {
+    try {
+      const settings = parseIcmpMonitorSettings(value);
+      return await this.monitors.updateIcmpSettings(context.organizationId, monitorId, settings);
+    } catch (error) {
+      if (error instanceof IcmpMonitorInputError) {
         throw new BadRequestException({
           code: 'VALIDATION_FAILED',
           message: error.message,

@@ -61,9 +61,10 @@ export interface ProbeExecutionConfigurationRecord {
   requiredEngineVersion: string;
   organizationId: string;
   monitorId: string;
-  type: 'HTTP' | 'TCP' | 'DNS' | 'API_WORKFLOW';
+  type: 'HTTP' | 'TCP' | 'DNS' | 'ICMP' | 'API_WORKFLOW';
   tcpHost: string | null;
   tcpPort: number | null;
+  icmpHost: string | null;
   dnsName: string | null;
   dnsRecordType: 'A' | 'AAAA' | 'CNAME' | 'MX' | 'TXT' | 'NS' | null;
   dnsExpectedValues: string[];
@@ -135,6 +136,7 @@ export class ProbeCoordinatorRepository {
           type: monitorConfigurationVersions.type,
           tcpHost: monitorConfigurationVersions.tcpHost,
           tcpPort: monitorConfigurationVersions.tcpPort,
+          icmpHost: monitorConfigurationVersions.icmpHost,
           dnsName: monitorConfigurationVersions.dnsName,
           dnsRecordType: monitorConfigurationVersions.dnsRecordType,
           dnsExpectedValues: monitorConfigurationVersions.dnsExpectedValues,
@@ -203,6 +205,7 @@ export class ProbeCoordinatorRepository {
         type: row.type,
         tcpHost: row.tcpHost,
         tcpPort: row.tcpPort,
+        icmpHost: row.icmpHost,
         dnsName: row.dnsName,
         dnsRecordType: row.dnsRecordType,
         dnsExpectedValues: row.dnsExpectedValues,
