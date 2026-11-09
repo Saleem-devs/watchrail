@@ -513,6 +513,120 @@ describe('monitor API', () => {
     ]);
   });
 
+  it('creates, updates, and executes keyword monitors through the HTTP assertion engine', async () => {
+    const created = await request(app.getHttpServer())
+      .post(`/api/monitors?projectId=${projectId}`)
+      .send({
+        type: 'KEYWORD',
+        name: 'Homepage content',
+        url: 'https://example.com/',
+        keyword: 'Launch ready',
+        match: 'CONTAINS',
+        timeoutMs: 8_000,
+        followRedirects: true,
+        locations: ['local'],
+      })
+      .expect(201);
+
+    expect(created.body.data).toMatchObject({
+      type: 'KEYWORD',
+      configuration: {
+        type: 'KEYWORD',
+        url: 'https://example.com/',
+        keyword: 'Launch ready',
+        match: 'CONTAINS',
+      },
+      method: 'GET',
+      statusPolicy: { type: 'ANY_2XX' },
+      timeoutMs: 8_000,
+    });
+
+    const monitorId = created.body.data.id as string;
+    const updated = await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/keyword-settings`)
+      .send({
+        url: 'https://example.com/status',
+        keyword: 'maintenance',
+        match: 'NOT_CONTAINS',
+        timeoutMs: 5_000,
+        followRedirects: false,
+      })
+      .expect(200);
+    expect(updated.body.data).toMatchObject({
+      type: 'KEYWORD',
+      configuration: {
+        type: 'KEYWORD',
+        url: 'https://example.com/status',
+        keyword: 'maintenance',
+        match: 'NOT_CONTAINS',
+      },
+      timeoutMs: 5_000,
+      followRedirects: false,
+    });
+
+    await request(app.getHttpServer())
+      .patch(`/api/monitors/${monitorId}/http-settings`)
+      .send({
+        url: 'https://example.com/status',
+        method: 'POST',
+        timeoutMs: 5_000,
+        followRedirects: false,
+      })
+      .expect(409);
+
+    const round = await new ManualRoundRepository(database).create(
+      '00000000-0000-4000-8000-000000000002',
+      monitorId,
+    );
+    const claim = await new CheckExecutionRepository(database).claim(round.id, 30_000);
+    if (claim.state !== 'CLAIMED' || claim.execution.type !== 'HTTP') {
+      throw new Error('Expected keyword monitor to claim an HTTP execution.');
+    }
+    expect(claim.execution).toMatchObject({
+      url: 'https://example.com/status',
+      method: 'GET',
+      statusPolicy: { type: 'ANY_2XX' },
+      assertions: {
+        contractVersion: 1,
+        assertions: {
+          textBody: [
+            {
+              operator: 'not_contains',
+              target: { value: 'maintenance', sensitive: false },
+            },
+          ],
+        },
+      },
+    });
+
+    const versions = await database.$client.query<{
+      type: string;
+      url: string;
+      method: string;
+      timeout_ms: number;
+    }>(
+      `select type, url, method, timeout_ms
+       from monitor_configuration_versions
+       where monitor_id=$1
+       order by version_number`,
+      [monitorId],
+    );
+    expect(versions.rows).toEqual([
+      {
+        type: 'KEYWORD',
+        url: 'https://example.com/',
+        method: 'GET',
+        timeout_ms: 8_000,
+      },
+      {
+        type: 'KEYWORD',
+        url: 'https://example.com/status',
+        method: 'GET',
+        timeout_ms: 5_000,
+      },
+    ]);
+  });
+
   it('creates and updates a centrally scheduled domain expiry monitor', async () => {
     const created = await request(app.getHttpServer())
       .post(`/api/monitors?projectId=${projectId}`)

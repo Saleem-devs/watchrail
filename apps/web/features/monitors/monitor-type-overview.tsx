@@ -50,6 +50,9 @@ function supportingMetric(
   if (type === 'DOMAIN_EXPIRY') {
     return { label: 'Renewal policies', value: String(monitors.length) };
   }
+  if (type === 'KEYWORD') {
+    return { label: 'Content rules', value: String(monitors.length) };
+  }
   return {
     label: 'Active locations',
     value: String(new Set(monitors.flatMap((m) => m.locations)).size),

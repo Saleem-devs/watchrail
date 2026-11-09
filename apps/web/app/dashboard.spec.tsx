@@ -112,6 +112,66 @@ describe('Dashboard', () => {
     );
   });
 
+  it('creates a keyword monitor with one literal comparison rule', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: {
+              id: 'keyword-monitor-1',
+              type: 'KEYWORD',
+              name: 'Homepage copy',
+              url: 'https://example.com/',
+              configuration: {
+                type: 'KEYWORD',
+                url: 'https://example.com/',
+                keyword: 'Launch ready',
+                match: 'NOT_CONTAINS',
+              },
+              method: 'GET',
+              lifecycleState: 'ENABLED',
+              timeoutMs: 8_000,
+              followRedirects: true,
+              statusPolicy: { type: 'ANY_2XX' },
+              locations: ['local'],
+              createdAt: new Date().toISOString(),
+            },
+          }),
+          { status: 201 },
+        ),
+      );
+
+    render(<Dashboard view="create" />);
+    await screen.findByRole('heading', { name: 'Create monitor' });
+    await userEvent.click(screen.getByRole('button', { name: 'Keyword' }));
+    expect(screen.getByRole('button', { name: 'Test configuration' })).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText('Monitor name'), 'Homepage copy');
+    await userEvent.type(screen.getByLabelText(/Page URL/), 'https://example.com/');
+    await userEvent.click(screen.getByRole('combobox', { name: 'Response must' }));
+    await userEvent.click(screen.getByRole('option', { name: 'Not contain text' }));
+    await userEvent.type(screen.getByLabelText(/Text to match/), 'Launch ready');
+    const timeout = screen.getByLabelText(/Timeout/);
+    await userEvent.clear(timeout);
+    await userEvent.type(timeout, '8');
+    await userEvent.click(screen.getByRole('button', { name: 'Save monitor' }));
+
+    const request = fetchMock.mock.calls.at(-1)?.[1];
+    if (typeof request?.body !== 'string') throw new Error('Expected a JSON request body.');
+    expect(JSON.parse(request.body)).toEqual({
+      type: 'KEYWORD',
+      name: 'Homepage copy',
+      url: 'https://example.com/',
+      keyword: 'Launch ready',
+      match: 'NOT_CONTAINS',
+      timeoutMs: 8_000,
+      followRedirects: true,
+      locations: ['local'],
+      lifecycleState: 'ENABLED',
+    });
+  });
+
   it('creates a TCP monitor with protocol-specific fields and no HTTP payload', async () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')

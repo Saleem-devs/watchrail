@@ -85,6 +85,8 @@ import {
   DnsMonitorInputError,
   parseDomainExpiryMonitorSettings,
   DomainExpiryInputError,
+  parseKeywordMonitorSettings,
+  KeywordMonitorInputError,
 } from '@watchrail/domain';
 import type { CreateMonitorCommand } from '@watchrail/domain';
 import { RequestHeaderStorageError, storeRequestHeaders } from '@watchrail/http-header-security';
@@ -161,7 +163,7 @@ export class MonitorsService {
         );
         return Object.assign(created, { heartbeatToken });
       }
-      if (monitor.type !== 'HTTP') {
+      if (monitor.type !== 'HTTP' && monitor.type !== 'KEYWORD') {
         return await this.monitors.create(
           context.organizationId,
           monitorId,
@@ -793,6 +795,32 @@ export class MonitorsService {
       }
       if (error instanceof WorkspaceSecretUseAuthorizationError) {
         throw workspaceSecretUseForbidden();
+      }
+      throw error;
+    }
+  }
+
+  async updateKeywordSettings(
+    context: RequestContext,
+    monitorId: string,
+    value: unknown,
+  ): Promise<MonitorRecord> {
+    try {
+      const settings = parseKeywordMonitorSettings(value);
+      return await this.monitors.updateKeywordSettings(context.organizationId, monitorId, settings);
+    } catch (error) {
+      if (error instanceof KeywordMonitorInputError) {
+        throw new BadRequestException({
+          code: 'VALIDATION_FAILED',
+          message: error.message,
+          fields: error.fields,
+        });
+      }
+      if (error instanceof MonitorUpdateNotFoundError) {
+        throw new NotFoundException({ code: 'MONITOR_NOT_FOUND', message: error.message });
+      }
+      if (error instanceof MonitorProtocolMismatchError) {
+        throw new ConflictException({ code: 'MONITOR_PROTOCOL_MISMATCH', message: error.message });
       }
       throw error;
     }

@@ -24,6 +24,8 @@ import {
   type HeartbeatMonitorSettings,
   type DomainExpiryMonitorSettings,
   type IcmpMonitorSettings,
+  type KeywordMonitorSettings,
+  type KeywordMatchMode,
 } from '@watchrail/domain';
 import type { WatchrailDatabase } from './client.js';
 import {
@@ -62,7 +64,11 @@ export class MonitorRepository {
     if (!monitor) throw new Error('Monitor data is required.');
     const requestHeaders = typeof monitorOrId === 'string' ? suppliedRequestHeaders : [];
     const assertions =
-      typeof monitorOrId === 'string' ? suppliedAssertions : EMPTY_ASSERTION_CONFIGURATION;
+      typeof monitorOrId === 'string'
+        ? suppliedAssertions
+        : monitor.type === 'KEYWORD'
+          ? keywordAssertionConfiguration(monitor.keyword, monitor.keywordMatch)
+          : EMPTY_ASSERTION_CONFIGURATION;
     const projectId = suppliedProjectId ?? (await ensureDefaultProject(this.db, organizationId)).id;
     const apiWorkflow = monitor.type === 'API_WORKFLOW' ? suppliedApiWorkflow : null;
     if (monitor.type === 'API_WORKFLOW' && !apiWorkflow) {
@@ -75,6 +81,7 @@ export class MonitorRepository {
       monitor.type === 'HEARTBEAT'
         ? nextHeartbeatDeadline(monitor.heartbeat.schedule, new Date())
         : null;
+    const usesHttpExecution = monitor.type === 'HTTP' || monitor.type === 'KEYWORD';
 
     return this.db.transaction(async (tx) => {
       const [created] = await tx
@@ -96,8 +103,8 @@ export class MonitorRepository {
           apiWorkflow,
           heartbeat: monitor.type === 'HEARTBEAT' ? monitor.heartbeat : null,
           heartbeatTokenHash: monitor.type === 'HEARTBEAT' ? heartbeatTokenHash : null,
-          url: monitor.type === 'HTTP' ? monitor.url : '',
-          method: monitor.type === 'HTTP' ? monitor.method : 'GET',
+          url: usesHttpExecution ? monitor.url : '',
+          method: usesHttpExecution ? monitor.method : 'GET',
           lifecycleState: monitor.lifecycleState,
           timeoutMs: monitor.timeoutMs,
           intervalSeconds: monitor.intervalSeconds,
@@ -107,13 +114,12 @@ export class MonitorRepository {
                 ? heartbeatDeadline
                 : sql`clock_timestamp() + (${monitor.intervalSeconds} * interval '1 second')`
               : null,
-          followRedirects: monitor.type === 'HTTP' ? monitor.followRedirects : false,
-          statusPolicy:
-            monitor.type === 'HTTP' ? monitor.statusPolicy : { type: 'ANY_2XX' as const },
+          followRedirects: usesHttpExecution ? monitor.followRedirects : false,
+          statusPolicy: usesHttpExecution ? monitor.statusPolicy : { type: 'ANY_2XX' as const },
           requestHeaders,
-          requestBody: monitor.type === 'HTTP' ? monitor.requestBody : { type: 'NONE' as const },
+          requestBody: usesHttpExecution ? monitor.requestBody : { type: 'NONE' as const },
           assertions,
-          tlsPolicy: monitor.type === 'HTTP' ? monitor.tlsPolicy : { type: 'DISABLED' as const },
+          tlsPolicy: usesHttpExecution ? monitor.tlsPolicy : { type: 'DISABLED' as const },
           locations: monitor.locations,
         })
         .returning();
@@ -579,6 +585,74 @@ export class MonitorRepository {
         locations: configuration.locations,
       });
 
+      return updated;
+    });
+  }
+
+  async updateKeywordSettings(
+    organizationId: string,
+    monitorId: string,
+    settings: KeywordMonitorSettings,
+  ): Promise<MonitorRecord> {
+    return this.db.transaction(async (tx) => {
+      const [monitor] = await tx
+        .select()
+        .from(monitors)
+        .where(and(eq(monitors.id, monitorId), eq(monitors.organizationId, organizationId)))
+        .limit(1)
+        .for('update');
+      if (!monitor) throw new MonitorUpdateNotFoundError();
+      if (monitor.type !== 'KEYWORD') throw new MonitorProtocolMismatchError('KEYWORD');
+
+      const [configuration] = await tx
+        .select()
+        .from(monitorConfigurationVersions)
+        .where(
+          and(
+            eq(monitorConfigurationVersions.monitorId, monitorId),
+            eq(monitorConfigurationVersions.organizationId, organizationId),
+          ),
+        )
+        .orderBy(desc(monitorConfigurationVersions.versionNumber))
+        .limit(1);
+      if (!configuration) throw new Error('Monitor has no configuration version.');
+
+      const assertions = keywordAssertionConfiguration(settings.keyword, settings.match);
+      const [updated] = await tx
+        .update(monitors)
+        .set({
+          url: settings.url,
+          method: 'GET',
+          timeoutMs: settings.timeoutMs,
+          followRedirects: settings.followRedirects,
+          statusPolicy: { type: 'ANY_2XX' },
+          requestHeaders: [],
+          requestBody: { type: 'NONE' },
+          assertions,
+          tlsPolicy: { type: 'DISABLED' },
+          updatedAt: sql`now()`,
+        })
+        .where(and(eq(monitors.id, monitorId), eq(monitors.organizationId, organizationId)))
+        .returning();
+      if (!updated) throw new Error('The monitor update returned no record.');
+
+      await tx.insert(monitorConfigurationVersions).values({
+        organizationId,
+        monitorId,
+        versionNumber: configuration.versionNumber + 1,
+        type: 'KEYWORD',
+        url: settings.url,
+        method: 'GET',
+        timeoutMs: settings.timeoutMs,
+        intervalSeconds: configuration.intervalSeconds,
+        followRedirects: settings.followRedirects,
+        statusPolicy: { type: 'ANY_2XX' },
+        requestHeaders: [],
+        requestBody: { type: 'NONE' },
+        assertions,
+        tlsPolicy: { type: 'DISABLED' },
+        locations: configuration.locations,
+      });
       return updated;
     });
   }
@@ -1416,6 +1490,25 @@ function assertTlsPolicyUrlCompatibility(policy: { type: string }, url: string):
   }
 }
 
+function keywordAssertionConfiguration(
+  keyword: string,
+  match: KeywordMatchMode,
+): ResponseAssertionConfigurationV1 {
+  return {
+    contractVersion: 1,
+    assertions: {
+      headers: [],
+      textBody: [
+        {
+          operator: match === 'CONTAINS' ? 'contains' : 'not_contains',
+          target: { sensitive: false, value: keyword },
+        },
+      ],
+      jsonBody: [],
+    },
+  };
+}
+
 function isHttpMonitorMethod(method: string): method is HttpMonitorMethod {
   return (
     method === 'GET' ||
@@ -1458,7 +1551,8 @@ export class CentralizedMonitorLocationError extends Error {
 
 export class MonitorProtocolMismatchError extends Error {
   constructor(
-    protocol: 'HTTP' | 'TCP' | 'DNS' | 'ICMP' | 'API_WORKFLOW' | 'HEARTBEAT' | 'DOMAIN_EXPIRY',
+    protocol:
+      'HTTP' | 'TCP' | 'DNS' | 'ICMP' | 'API_WORKFLOW' | 'HEARTBEAT' | 'DOMAIN_EXPIRY' | 'KEYWORD',
   ) {
     super(`This operation requires a ${protocol} monitor.`);
     this.name = 'MonitorProtocolMismatchError';

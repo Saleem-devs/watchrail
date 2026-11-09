@@ -21,6 +21,42 @@ export function icmpSettingsFromForm(formData: FormData) {
   };
 }
 
+export function keywordSettingsFromForm(formData: FormData) {
+  return {
+    url: formEntryString(formData.get('url') ?? undefined),
+    keyword: formEntryString(formData.get('keyword') ?? undefined),
+    match: formEntryString(formData.get('keywordMatch') ?? undefined),
+    timeoutMs: Number(formData.get('timeoutSeconds')) * 1_000,
+    followRedirects: formData.get('followRedirects') === 'on',
+  };
+}
+
+export function keywordConfigurationTestFromForm(formData: FormData) {
+  const settings = keywordSettingsFromForm(formData);
+  return {
+    httpSettings: {
+      url: settings.url,
+      method: 'GET',
+      timeoutMs: settings.timeoutMs,
+      followRedirects: settings.followRedirects,
+      requestBody: { type: 'NONE' },
+      tlsPolicy: { type: 'DISABLED' },
+    },
+    statusPolicy: { type: 'ANY_2XX' },
+    requestHeaders: [],
+    assertions: {
+      headers: [],
+      textBody: [
+        {
+          operator: settings.match === 'NOT_CONTAINS' ? 'not_contains' : 'contains',
+          target: { value: settings.keyword, sensitive: false },
+        },
+      ],
+      jsonBody: [],
+    },
+  };
+}
+
 export function dnsSettingsFromForm(formData: FormData) {
   return {
     name: formEntryString(formData.get('dnsName') ?? undefined),

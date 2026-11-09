@@ -66,6 +66,11 @@ function monitorColumns(
             <span className="mt-0.5 block max-w-xs truncate text-xs text-rail-muted">
               {monitor.configuration.domainName} · {monitor.configuration.warningDays}-day warning
             </span>
+          ) : monitor.configuration?.type === 'KEYWORD' ? (
+            <span className="mt-0.5 block max-w-xs truncate text-xs text-rail-muted">
+              {monitor.configuration.match === 'CONTAINS' ? 'Contains' : 'Excludes'} “
+              {monitor.configuration.keyword}” · {monitor.configuration.url}
+            </span>
           ) : (
             <a
               href={monitor.url}

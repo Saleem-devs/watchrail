@@ -4,7 +4,7 @@ export type MonitorType = Monitor['type'];
 
 export interface MonitorTypeDefinition {
   type: MonitorType;
-  slug: 'http' | 'tcp' | 'dns' | 'ping' | 'api-workflows' | 'heartbeats' | 'domains';
+  slug: 'http' | 'tcp' | 'dns' | 'ping' | 'keywords' | 'api-workflows' | 'heartbeats' | 'domains';
   label: string;
   singular: string;
   description: string;
@@ -48,6 +48,15 @@ export const MONITOR_TYPES: readonly MonitorTypeDefinition[] = [
     description: 'ICMP reachability and round-trip latency for public hosts and network edges.',
     createDescription: 'Ping a public hostname or IP address and measure its response time.',
     supportsConfigurationTest: false,
+  },
+  {
+    type: 'KEYWORD',
+    slug: 'keywords',
+    label: 'Keywords',
+    singular: 'Keyword monitor',
+    description: 'Page availability and required or forbidden text in the final HTTP response.',
+    createDescription: 'Watch a page for text that must appear—or must stay absent.',
+    supportsConfigurationTest: true,
   },
   {
     type: 'API_WORKFLOW',

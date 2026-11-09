@@ -40,6 +40,13 @@ import {
   parseDomainExpiryMonitorSettings,
 } from './domain-expiry.js';
 import { ICMP_MONITOR_DEFAULTS, IcmpMonitorInputError, parseIcmpMonitorSettings } from './icmp.js';
+import {
+  KEYWORD_MONITOR_DEFAULTS,
+  KeywordMonitorInputError,
+  parseKeywordMonitorSettings,
+  type KeywordMatchMode,
+  type KeywordMonitorSettings,
+} from './keyword.js';
 
 export const HTTP_METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] as const;
 export const HTTP_MONITOR_METHODS = [
@@ -60,6 +67,7 @@ export const MONITOR_TYPES = [
   'HEARTBEAT',
   'DOMAIN_EXPIRY',
   'ICMP',
+  'KEYWORD',
 ] as const;
 export const MONITOR_LOCATIONS = ['local'] as const;
 export const MONITOR_INTERVAL_LIMITS = {
@@ -124,6 +132,9 @@ export interface CreateMonitorCommand {
   workflow?: unknown;
   heartbeat?: unknown;
   intervalSeconds?: unknown;
+  keyword?: unknown;
+  match?: unknown;
+  keywordMatch?: unknown;
 }
 
 interface NewMonitorBase {
@@ -180,6 +191,27 @@ export interface NewIcmpMonitor extends NewMonitorBase {
   host: string;
 }
 
+export interface NewKeywordMonitor extends NewMonitorBase {
+  type: 'KEYWORD';
+  url: string;
+  keyword: string;
+  keywordMatch: KeywordMatchMode;
+  method: 'GET';
+  followRedirects: boolean;
+  statusPolicy: { type: 'ANY_2XX' };
+  tlsPolicy: typeof DISABLED_TLS_CERTIFICATE_POLICY;
+  requestHeaders: [];
+  requestBody: { type: 'NONE' };
+  assertions: {
+    headers: [];
+    textBody: Array<{
+      operator: 'contains' | 'not_contains';
+      target: { value: string; sensitive: false };
+    }>;
+    jsonBody: [];
+  };
+}
+
 export type NewMonitor =
   | NewHttpMonitor
   | NewTcpMonitor
@@ -187,7 +219,8 @@ export type NewMonitor =
   | NewApiWorkflowMonitor
   | NewHeartbeatMonitor
   | NewDomainExpiryMonitor
-  | NewIcmpMonitor;
+  | NewIcmpMonitor
+  | NewKeywordMonitor;
 
 export interface MonitorFieldErrors {
   name?: string[];
@@ -220,6 +253,9 @@ export interface MonitorFieldErrors {
   intervalSeconds?: string[];
   lifecycleState?: string[];
   locations?: string[];
+  keyword?: string[];
+  keywordMatch?: string[];
+  keywordSettings?: string[];
 }
 
 export interface MonitorConfigurationUpdate {
@@ -689,12 +725,19 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
   const fields: MonitorFieldErrors = {};
   const name = normalizeName(command.name, fields);
   const type = normalizeMonitorType(command.type, fields);
+  if (
+    type !== 'KEYWORD' &&
+    [command.keyword, command.match, command.keywordMatch].some((value) => value !== undefined)
+  ) {
+    fields.type = ['Keyword comparison settings require a keyword monitor.'];
+  }
   if (type === 'TCP') return createTcpMonitor(command, name, fields);
   if (type === 'DNS') return createDnsMonitor(command, name, fields);
   if (type === 'API_WORKFLOW') return createApiWorkflowMonitor(command, name, fields);
   if (type === 'HEARTBEAT') return createHeartbeatMonitor(command, name, fields);
   if (type === 'DOMAIN_EXPIRY') return createDomainExpiryMonitor(command, name, fields);
   if (type === 'ICMP') return createIcmpMonitor(command, name, fields);
+  if (type === 'KEYWORD') return createKeywordMonitor(command, name, fields);
   const url = normalizeUrl(command.url, fields);
   const statusPolicy = normalizeStatusPolicy(command.statusPolicy, fields);
   const tlsPolicy = normalizeTlsPolicy(command.tlsPolicy, url, fields, true);
@@ -759,6 +802,88 @@ export function createMonitor(command: CreateMonitorCommand): NewMonitor {
     requestHeaders,
     requestBody,
     assertions,
+    locations,
+  };
+}
+
+function createKeywordMonitor(
+  command: CreateMonitorCommand,
+  name: string,
+  fields: MonitorFieldErrors,
+): NewKeywordMonitor {
+  let settings: KeywordMonitorSettings = {
+    url: '',
+    keyword: '',
+    match: KEYWORD_MONITOR_DEFAULTS.match,
+    timeoutMs: KEYWORD_MONITOR_DEFAULTS.timeoutMs,
+    followRedirects: KEYWORD_MONITOR_DEFAULTS.followRedirects,
+  };
+  try {
+    settings = parseKeywordMonitorSettings({
+      url: command.url,
+      keyword: command.keyword,
+      keywordMatch: command.match ?? command.keywordMatch,
+      timeoutMs: command.timeoutMs ?? KEYWORD_MONITOR_DEFAULTS.timeoutMs,
+      followRedirects: command.followRedirects ?? KEYWORD_MONITOR_DEFAULTS.followRedirects,
+    });
+  } catch (error) {
+    if (!(error instanceof KeywordMonitorInputError)) throw error;
+    Object.assign(fields, error.fields);
+  }
+  const lifecycleState = normalizeInitialLifecycleState(command.lifecycleState, fields);
+  const intervalSeconds = normalizeIntervalSeconds(command.intervalSeconds, fields, true);
+  let locations: string[] = [...MONITOR_DEFAULTS.locations];
+  if (command.locations !== undefined) {
+    try {
+      locations = parseMonitorLocationSettings({ locations: command.locations }).locations;
+    } catch (error) {
+      if (error instanceof MonitorInputError) Object.assign(fields, error.fields);
+      else throw error;
+    }
+  }
+  if (
+    [
+      command.host,
+      command.port,
+      command.dnsName,
+      command.dnsRecordType,
+      command.dnsExpectedValues,
+      command.domainName,
+      command.domainWarningDays,
+      command.workflow,
+      command.heartbeat,
+      command.requestHeaders,
+      command.requestBody,
+      command.assertions,
+      command.statusPolicy,
+      command.tlsPolicy,
+      command.method,
+    ].some((value) => value !== undefined)
+  ) {
+    fields.type = ['Keyword monitors accept only URL, text comparison, schedule, and locations.'];
+  }
+  if (Object.keys(fields).length > 0) throw new MonitorInputError(fields);
+  const operator = settings.match === 'CONTAINS' ? 'contains' : 'not_contains';
+  return {
+    type: 'KEYWORD',
+    name,
+    url: settings.url,
+    keyword: settings.keyword,
+    keywordMatch: settings.match,
+    method: 'GET',
+    lifecycleState,
+    timeoutMs: settings.timeoutMs,
+    intervalSeconds,
+    followRedirects: settings.followRedirects,
+    statusPolicy: { type: 'ANY_2XX' },
+    tlsPolicy: DISABLED_TLS_CERTIFICATE_POLICY,
+    requestHeaders: [],
+    requestBody: { type: 'NONE' },
+    assertions: {
+      headers: [],
+      textBody: [{ operator, target: { value: settings.keyword, sensitive: false } }],
+      jsonBody: [],
+    },
     locations,
   };
 }
@@ -1132,7 +1257,9 @@ function createTcpMonitor(
 function normalizeMonitorType(value: unknown, fields: MonitorFieldErrors): MonitorType {
   if (value === undefined) return 'HTTP';
   if (typeof value !== 'string' || !MONITOR_TYPES.includes(value as MonitorType)) {
-    fields.type = ['Choose HTTP, TCP, DNS, ICMP, API workflow, heartbeat, or domain expiry.'];
+    fields.type = [
+      'Choose HTTP, TCP, DNS, ICMP, keyword, API workflow, heartbeat, or domain expiry.',
+    ];
     return 'HTTP';
   }
   return value as MonitorType;

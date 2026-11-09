@@ -536,6 +536,8 @@ export const monitors = pgTable(
       sql`(
         (${table.type}::text = 'HTTP' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.icmpHost} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.domainName} is null and ${table.domainWarningDays} is null and ${table.apiWorkflow} is null and ${table.heartbeat} is null and ${table.heartbeatTokenHash} is null)
         or
+        (${table.type}::text = 'KEYWORD' and length(btrim(${table.url})) > 0 and ${table.method} = 'GET' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.icmpHost} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.domainName} is null and ${table.domainWarningDays} is null and ${table.apiWorkflow} is null and ${table.heartbeat} is null and ${table.heartbeatTokenHash} is null)
+        or
         (${table.type}::text = 'TCP' and length(btrim(${table.tcpHost})) > 0 and ${table.tcpPort} between 1 and 65535 and ${table.icmpHost} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.domainName} is null and ${table.domainWarningDays} is null and ${table.apiWorkflow} is null and ${table.heartbeat} is null and ${table.heartbeatTokenHash} is null)
         or
         (${table.type}::text = 'ICMP' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.icmpHost} is not null and length(btrim(${table.icmpHost})) > 0 and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.domainName} is null and ${table.domainWarningDays} is null and ${table.apiWorkflow} is null and ${table.heartbeat} is null and ${table.heartbeatTokenHash} is null)
@@ -914,6 +916,8 @@ export const monitorConfigurationVersions = pgTable(
       'monitor_configuration_versions_protocol_configuration',
       sql`(
         (${table.type}::text = 'HTTP' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.icmpHost} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.domainName} is null and ${table.domainWarningDays} is null and ${table.apiWorkflow} is null and ${table.heartbeat} is null)
+        or
+        (${table.type}::text = 'KEYWORD' and length(btrim(${table.url})) > 0 and ${table.method} = 'GET' and ${table.tcpHost} is null and ${table.tcpPort} is null and ${table.icmpHost} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.domainName} is null and ${table.domainWarningDays} is null and ${table.apiWorkflow} is null and ${table.heartbeat} is null)
         or
         (${table.type}::text = 'TCP' and length(btrim(${table.tcpHost})) > 0 and ${table.tcpPort} between 1 and 65535 and ${table.icmpHost} is null and ${table.dnsName} is null and ${table.dnsRecordType} is null and ${table.domainName} is null and ${table.domainWarningDays} is null and ${table.apiWorkflow} is null and ${table.heartbeat} is null)
         or

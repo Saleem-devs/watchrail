@@ -27,8 +27,14 @@ describe('evaluateTextBodyAssertions', () => {
     ['not_equals', 'ready', 'ready', 'FAIL'],
     ['contains', 'watchrail', 'watchrail is ready', 'PASS'],
     ['contains', 'Watchrail', 'watchrail is ready', 'FAIL'],
+    ['contains', 'a.b', 'literal a.b value', 'PASS'],
+    ['contains', 'a.b', 'literal axb value', 'FAIL'],
+    ['contains', '[error]', 'status [error]', 'PASS'],
+    ['contains', ' café ', 'result café ready', 'PASS'],
     ['not_contains', 'error', 'watchrail is ready', 'PASS'],
     ['not_contains', 'ready', 'watchrail is ready', 'FAIL'],
+    ['not_contains', '[error]', 'status error', 'PASS'],
+    ['not_contains', 'CAFÉ', 'result café ready', 'PASS'],
     ['equals', '', '', 'PASS'],
     ['contains', '', '', 'PASS'],
   ] as const)('evaluates %s literally as %s', (operator, expected, body, outcome) => {
@@ -91,6 +97,32 @@ describe('evaluateTextBodyAssertions', () => {
     });
     expect(JSON.stringify(evaluation)).not.toContain('WATCHRAIL_EXPECTED_SECRET');
   });
+
+  it.each([
+    'BODY_TOO_LARGE',
+    'UNSUPPORTED_CONTENT_ENCODING',
+    'UNSUPPORTED_CHARSET',
+    'BODY_READ_FAILED',
+  ] as const)(
+    'never treats unavailable body evidence as proof of a negative match: %s',
+    (reason) => {
+      const evaluation = evaluateTextBodyAssertions(
+        [{ operator: 'not_contains', target: target('maintenance') }],
+        { state: 'UNAVAILABLE', reason },
+      );
+
+      expect(evaluation).toMatchObject({
+        outcome: 'NOT_EVALUATED',
+        diagnostics: [
+          {
+            operator: 'not_contains',
+            outcome: 'NOT_EVALUATED',
+            reason,
+          },
+        ],
+      });
+    },
+  );
 
   it('defensively treats NOT_REQUESTED as unavailable', () => {
     expect(
@@ -234,6 +266,40 @@ describe('executeHttpCheck text-body assertions', () => {
       outcome: 'PASS',
       reason: 'COMPLETED',
       assertionEvaluation: { outcome: 'FAIL' },
+    });
+  });
+
+  it('does not infer absence when a successful response has incomplete body evidence', async () => {
+    const result = await executeHttpCheck(
+      baseInput({
+        textBodyAssertions: [
+          { operator: 'not_contains', target: target('maintenance') },
+        ],
+      }),
+      {
+        executor: {
+          execute: () =>
+            Promise.resolve({
+              ...response(null),
+              body: { state: 'UNAVAILABLE', reason: 'BODY_TOO_LARGE' },
+            }),
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      outcome: 'PASS',
+      reason: 'COMPLETED',
+      assertionEvaluation: {
+        outcome: 'NOT_EVALUATED',
+        diagnostics: [
+          {
+            operator: 'not_contains',
+            outcome: 'NOT_EVALUATED',
+            reason: 'BODY_TOO_LARGE',
+          },
+        ],
+      },
     });
   });
 
