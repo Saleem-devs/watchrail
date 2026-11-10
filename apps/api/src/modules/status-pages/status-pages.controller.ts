@@ -20,10 +20,14 @@ import {
   replaceStatusPageComponentsSchema,
   setStatusPagePublicationSchema,
   updateStatusPageSettingsSchema,
+  createStatusPageIncidentSchema,
+  updateStatusPageIncidentSchema,
   type CreateStatusPageInput,
   type ReplaceStatusPageComponentsInput,
   type SetStatusPagePublicationInput,
   type UpdateStatusPageSettingsInput,
+  type CreateStatusPageIncidentInput,
+  type UpdateStatusPageIncidentInput,
 } from './dto/status-page-input.js';
 import { presentStatusPage } from './status-pages.presenter.js';
 import { StatusPagesService } from './status-pages.service.js';
@@ -111,4 +115,77 @@ export class StatusPagesController {
       ),
     };
   }
+
+  @Get(':statusPageId/incidents')
+  @RequirePermission(PERMISSIONS.STATUS_PAGE_READ)
+  async listIncidents(
+    @Req() request: RequestWithContext,
+    @Param('statusPageId', ParseUUIDPipe) statusPageId: string,
+  ) {
+    return {
+      data: (await this.pages.listIncidents(request.watchrailContext, statusPageId)).map(
+        presentStatusPageIncident,
+      ),
+    };
+  }
+
+  @Get(':statusPageId/incidents/:incidentId')
+  @RequirePermission(PERMISSIONS.STATUS_PAGE_READ)
+  async findIncident(
+    @Req() request: RequestWithContext,
+    @Param('statusPageId', ParseUUIDPipe) statusPageId: string,
+    @Param('incidentId', ParseUUIDPipe) incidentId: string,
+  ) {
+    return {
+      data: presentStatusPageIncident(
+        await this.pages.findIncident(request.watchrailContext, statusPageId, incidentId),
+      ),
+    };
+  }
+
+  @Post(':statusPageId/incidents')
+  @RequirePermission(PERMISSIONS.STATUS_PAGE_MANAGE)
+  async createIncident(
+    @Req() request: RequestWithContext,
+    @Param('statusPageId', ParseUUIDPipe) statusPageId: string,
+    @Body(new ZodValidationPipe(createStatusPageIncidentSchema, 'incident'))
+    input: CreateStatusPageIncidentInput,
+  ) {
+    return {
+      data: presentStatusPageIncident(
+        await this.pages.createIncident(request.watchrailContext, statusPageId, input),
+      ),
+    };
+  }
+
+  @Post(':statusPageId/incidents/:incidentId/updates')
+  @RequirePermission(PERMISSIONS.STATUS_PAGE_MANAGE)
+  async updateIncident(
+    @Req() request: RequestWithContext,
+    @Param('statusPageId', ParseUUIDPipe) statusPageId: string,
+    @Param('incidentId', ParseUUIDPipe) incidentId: string,
+    @Body(new ZodValidationPipe(updateStatusPageIncidentSchema, 'update'))
+    input: UpdateStatusPageIncidentInput,
+  ) {
+    return {
+      data: presentStatusPageIncident(
+        await this.pages.updateIncident(request.watchrailContext, statusPageId, incidentId, input),
+      ),
+    };
+  }
+}
+
+function presentStatusPageIncident(
+  incident: Awaited<ReturnType<StatusPagesService['findIncident']>>,
+) {
+  return {
+    ...incident,
+    startedAt: incident.startedAt.toISOString(),
+    resolvedAt: incident.resolvedAt?.toISOString() ?? null,
+    updatedAt: incident.updatedAt.toISOString(),
+    updates: incident.updates.map((update) => ({
+      ...update,
+      createdAt: update.createdAt.toISOString(),
+    })),
+  };
 }

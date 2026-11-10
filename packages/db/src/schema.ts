@@ -61,6 +61,8 @@ import {
   type HeartbeatResultEvidenceV1,
   type MaintenanceWindowEffects,
   type MaintenanceWindowSchedule,
+  STATUS_PAGE_INCIDENT_IMPACTS,
+  STATUS_PAGE_INCIDENT_STATES,
 } from '@watchrail/domain';
 
 export const httpMethodEnum = pgEnum('http_method', HTTP_METHODS);
@@ -147,6 +149,14 @@ export const checkResultReasonEnum = pgEnum('check_result_reason', [
 ]);
 
 export const incidentStatusEnum = pgEnum('incident_status', ['OPEN', 'RESOLVED']);
+export const statusPageIncidentStateEnum = pgEnum(
+  'status_page_incident_state',
+  STATUS_PAGE_INCIDENT_STATES,
+);
+export const statusPageIncidentImpactEnum = pgEnum(
+  'status_page_incident_impact',
+  STATUS_PAGE_INCIDENT_IMPACTS,
+);
 export const incidentActionEnum = pgEnum('incident_action', [
   'ACKNOWLEDGED',
   'SILENCED',
@@ -668,6 +678,110 @@ export const statusPageComponents = pgTable(
       sql`${table.groupName} is null or length(btrim(${table.groupName})) > 0`,
     ),
     check('status_page_components_position_non_negative', sql`${table.position} >= 0`),
+  ],
+);
+
+export const statusPageIncidents = pgTable(
+  'status_page_incidents',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull(),
+    statusPageId: uuid('status_page_id').notNull(),
+    title: varchar('title', { length: 160 }).notNull(),
+    impact: statusPageIncidentImpactEnum('impact').notNull(),
+    state: statusPageIncidentStateEnum('state').notNull().default('INVESTIGATING'),
+    createdByActorId: uuid('created_by_actor_id').notNull(),
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('status_page_incidents_identity_unique').on(table.organizationId, table.id),
+    foreignKey({
+      name: 'status_page_incidents_page_fk',
+      columns: [table.statusPageId, table.organizationId],
+      foreignColumns: [statusPages.id, statusPages.organizationId],
+    }).onDelete('cascade'),
+    index('status_page_incidents_page_started_idx').on(
+      table.organizationId,
+      table.statusPageId,
+      table.startedAt,
+      table.id,
+    ),
+    check('status_page_incidents_title_not_blank', sql`length(btrim(${table.title})) > 0`),
+    check(
+      'status_page_incidents_resolution_consistent',
+      sql`(${table.state} = 'RESOLVED') = (${table.resolvedAt} is not null)`,
+    ),
+  ],
+);
+
+export const statusPageIncidentComponents = pgTable(
+  'status_page_incident_components',
+  {
+    organizationId: uuid('organization_id').notNull(),
+    incidentId: uuid('incident_id').notNull(),
+    componentId: uuid('component_id').notNull(),
+    displayName: varchar('display_name', { length: 100 }).notNull(),
+    position: integer('position').notNull(),
+  },
+  (table) => [
+    primaryKey({
+      name: 'status_page_incident_components_pk',
+      columns: [table.organizationId, table.incidentId, table.componentId],
+    }),
+    foreignKey({
+      name: 'status_page_incident_components_incident_fk',
+      columns: [table.organizationId, table.incidentId],
+      foreignColumns: [statusPageIncidents.organizationId, statusPageIncidents.id],
+    }).onDelete('cascade'),
+    unique('status_page_incident_components_position_unique').on(
+      table.organizationId,
+      table.incidentId,
+      table.position,
+    ),
+    check(
+      'status_page_incident_components_name_not_blank',
+      sql`length(btrim(${table.displayName})) > 0`,
+    ),
+    check('status_page_incident_components_position_non_negative', sql`${table.position} >= 0`),
+  ],
+);
+
+export const statusPageIncidentUpdates = pgTable(
+  'status_page_incident_updates',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull(),
+    incidentId: uuid('incident_id').notNull(),
+    sequence: integer('sequence').notNull(),
+    state: statusPageIncidentStateEnum('state').notNull(),
+    message: varchar('message', { length: 2000 }).notNull(),
+    createdByActorId: uuid('created_by_actor_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('status_page_incident_updates_identity_unique').on(table.organizationId, table.id),
+    foreignKey({
+      name: 'status_page_incident_updates_incident_fk',
+      columns: [table.organizationId, table.incidentId],
+      foreignColumns: [statusPageIncidents.organizationId, statusPageIncidents.id],
+    }).onDelete('cascade'),
+    unique('status_page_incident_updates_sequence_unique').on(
+      table.organizationId,
+      table.incidentId,
+      table.sequence,
+    ),
+    index('status_page_incident_updates_timeline_idx').on(
+      table.organizationId,
+      table.incidentId,
+      table.sequence,
+    ),
+    check('status_page_incident_updates_sequence_positive', sql`${table.sequence} > 0`),
+    check(
+      'status_page_incident_updates_message_not_blank',
+      sql`length(btrim(${table.message})) > 0`,
+    ),
   ],
 );
 

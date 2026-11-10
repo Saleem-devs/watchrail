@@ -47,7 +47,25 @@ export const setStatusPagePublicationSchema = z
   })
   .strict();
 
+export const createStatusPageIncidentSchema = z
+  .object({
+    title: z.string(),
+    impact: z.enum(['DEGRADED', 'DOWN']),
+    message: z.string(),
+    componentIds: z.array(z.uuid()),
+  })
+  .strict();
+
+export const updateStatusPageIncidentSchema = z
+  .object({
+    state: z.enum(['INVESTIGATING', 'IDENTIFIED', 'MONITORING', 'RESOLVED']),
+    message: z.string(),
+  })
+  .strict();
+
 export type CreateStatusPageInput = z.infer<typeof createStatusPageSchema>;
 export type UpdateStatusPageSettingsInput = z.infer<typeof updateStatusPageSettingsSchema>;
 export type ReplaceStatusPageComponentsInput = z.infer<typeof replaceStatusPageComponentsSchema>;
 export type SetStatusPagePublicationInput = z.infer<typeof setStatusPagePublicationSchema>;
+export type CreateStatusPageIncidentInput = z.infer<typeof createStatusPageIncidentSchema>;
+export type UpdateStatusPageIncidentInput = z.infer<typeof updateStatusPageIncidentSchema>;

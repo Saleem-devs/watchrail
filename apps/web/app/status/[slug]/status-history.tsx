@@ -50,6 +50,7 @@ export function StatusHistory({
     return { start, end: new Date(start.getTime() + DAY_MS) };
   });
   const incidents = [...activeIncidents, ...resolvedIncidents];
+  const measuredIncidents = incidents.filter(({ source }) => source !== 'MANUAL');
   const groups = groupComponents(components);
   const rangeStart = days[0]?.start.getTime() ?? today.getTime();
   const rangeEnd = generated.getTime();
@@ -80,7 +81,7 @@ export function StatusHistory({
               group.components.map((component) =>
                 measureUptime(
                   component.monitoringStartedAt,
-                  incidents.filter((incident) => incident.componentId === component.id),
+                  measuredIncidents.filter((incident) => incident.componentId === component.id),
                   rangeStart,
                   rangeEnd,
                 ),
@@ -101,7 +102,7 @@ export function StatusHistory({
                 </summary>
                 <ul className="m-0 list-none p-0">
                   {group.components.map((component) => {
-                    const componentIncidents = incidents.filter(
+                    const componentIncidents = measuredIncidents.filter(
                       (incident) => incident.componentId === component.id,
                     );
                     const componentUptime = measureUptime(
@@ -317,7 +318,7 @@ function measureUptime(
   return {
     measuredDurationMs: rangeEnd - measuredStart,
     unavailableDurationMs: overlapDuration(
-      incidents.filter(({ severity }) => severity === 'DOWN'),
+      incidents.filter(({ severity, source }) => severity === 'DOWN' && source !== 'MANUAL'),
       measuredStart,
       rangeEnd,
     ),

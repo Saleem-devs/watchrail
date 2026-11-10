@@ -14,6 +14,7 @@ import {
 import { InternalStatusPagesController } from './modules/public-status-pages/internal-status-pages.controller.js';
 import { PublicStatusPagesController } from './modules/public-status-pages/public-status-pages.controller.js';
 import { OverviewController } from './modules/overview/overview.controller.js';
+import { StatusPagesController } from './modules/status-pages/status-pages.controller.js';
 import { WorkspaceSecretsController } from './modules/workspace-secrets/workspace-secrets.controller.js';
 
 function routes(controller: { prototype: object }) {
@@ -67,8 +68,8 @@ describe('remaining API route contracts', () => {
       ...routes(MonitorUptimeController),
       ...routes(MonitorHistoryController),
     ];
-    expect(observed).toHaveLength(27);
-    expect(new Set(observed.map((item) => item.route)).size).toBe(27);
+    expect(observed).toHaveLength(29);
+    expect(new Set(observed.map((item) => item.route)).size).toBe(29);
     expect(observed.every((item) => typeof item.permission === 'string')).toBe(true);
     expect(observed).toContainEqual({
       route: 'POST monitors',
@@ -92,6 +93,14 @@ describe('remaining API route contracts', () => {
     });
     expect(observed).toContainEqual({
       route: 'PATCH monitors/:monitorId/dns-settings',
+      permission: 'monitor:update',
+    });
+    expect(observed).toContainEqual({
+      route: 'PATCH monitors/:monitorId/icmp-settings',
+      permission: 'monitor:update',
+    });
+    expect(observed).toContainEqual({
+      route: 'PATCH monitors/:monitorId/keyword-settings',
       permission: 'monitor:update',
     });
     expect(observed).toContainEqual({
@@ -138,6 +147,24 @@ describe('remaining API route contracts', () => {
       { route: 'POST incidents/:incidentId/silence', permission: 'incident:manage' },
       { route: 'DELETE incidents/:incidentId/silence', permission: 'incident:manage' },
       { route: 'POST incidents/:incidentId/resolve', permission: 'incident:manage' },
+    ]);
+  });
+
+  it('separates status-page incident reads from publishing actions', () => {
+    const incidentRoutes = routes(StatusPagesController).filter(({ route }) =>
+      route.includes('/incidents'),
+    );
+    expect(incidentRoutes).toEqual([
+      { route: 'GET status-pages/:statusPageId/incidents', permission: 'statusPage:read' },
+      {
+        route: 'GET status-pages/:statusPageId/incidents/:incidentId',
+        permission: 'statusPage:read',
+      },
+      { route: 'POST status-pages/:statusPageId/incidents', permission: 'statusPage:manage' },
+      {
+        route: 'POST status-pages/:statusPageId/incidents/:incidentId/updates',
+        permission: 'statusPage:manage',
+      },
     ]);
   });
 
