@@ -92,11 +92,11 @@ export class StatusPagesService {
     );
   }
 
-  listIncidents(
+  async listIncidents(
     context: RequestContext,
     statusPageId: string,
   ): Promise<StatusPageIncidentRecord[]> {
-    return this.incidents.list(context.organizationId, statusPageId);
+    return this.runIncident(() => this.incidents.list(context.organizationId, statusPageId));
   }
 
   async findIncident(
@@ -136,9 +136,7 @@ export class StatusPagesService {
     );
   }
 
-  private async runIncident(
-    operation: () => Promise<StatusPageIncidentRecord>,
-  ): Promise<StatusPageIncidentRecord> {
+  private async runIncident<Result>(operation: () => Promise<Result>): Promise<Result> {
     try {
       return await operation();
     } catch (error) {

@@ -140,6 +140,18 @@ describe('status page settings API', () => {
     });
     await request(app.getHttpServer()).get(`/api/status-pages/${foreign.id}`).expect(404);
     await request(app.getHttpServer())
+      .get(`/api/status-pages/${foreign.id}/incidents`)
+      .expect(404)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({ code: 'STATUS_PAGE_INCIDENT_NOT_FOUND' });
+      });
+    await request(app.getHttpServer())
+      .get('/api/status-pages/cccccccc-cccc-4ccc-8ccc-cccccccccccc/incidents')
+      .expect(404)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({ code: 'STATUS_PAGE_INCIDENT_NOT_FOUND' });
+      });
+    await request(app.getHttpServer())
       .post('/api/status-pages')
       .query({ projectId })
       .send({
@@ -152,6 +164,22 @@ describe('status page settings API', () => {
     expect(await new StatusPageRepository(database).listForOrganization(organizationB)).toEqual([
       foreign,
     ]);
+  });
+
+  it('lists an owned status page with no incidents as an empty collection', async () => {
+    const page = (
+      await request(app.getHttpServer())
+        .post('/api/status-pages')
+        .query({ projectId })
+        .send({ name: 'Quiet Status', slug: 'quiet-status', components: [] })
+        .expect(201)
+    ).body.data;
+
+    const response = await request(app.getHttpServer())
+      .get(`/api/status-pages/${page.id}/incidents`)
+      .expect(200);
+
+    expect(response.body.data).toEqual([]);
   });
 
   it('rejects invalid component replacement without changing the prior configuration', async () => {
