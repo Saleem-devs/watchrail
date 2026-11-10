@@ -15,6 +15,7 @@ import { PublicStatusPageRepository } from './public-status-page-repository.js';
 import { incidents, monitors } from './schema.js';
 import { ScheduledRoundRepository } from './scheduled-round-repository.js';
 import { StatusPageRepository } from './status-page-repository.js';
+import { StatusPageIncidentRepository } from './status-page-incident-repository.js';
 
 const organizationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
@@ -179,6 +180,63 @@ describe('PublicStatusPageRepository', () => {
     expect(projection).toMatchObject({
       status: 'PARTIAL_OUTAGE',
       components: [{ status: 'PARTIAL_OUTAGE' }, { status: 'OPERATIONAL' }],
+    });
+  });
+
+  it('projects manual incident updates and their component impact without exposing actor identity', async () => {
+    const configured = await createPage(true);
+    await completeScheduled(apiMonitorId, healthy());
+    await completeScheduled(webMonitorId, healthy());
+    const incidentRepository = new StatusPageIncidentRepository(connection.db);
+    const incident = await incidentRepository.create(
+      organizationId,
+      configured.id,
+      '11111111-1111-4111-8111-111111111111',
+      {
+        title: 'Elevated API errors',
+        impact: 'DEGRADED',
+        message: 'We are investigating elevated error rates.',
+        componentIds: [configured.components[0]!.id],
+      },
+    );
+    const active = await new PublicStatusPageRepository(connection.db).findPublishedBySlug(slug);
+    expect(active).toMatchObject({
+      status: 'PARTIAL_OUTAGE',
+      components: [{ status: 'PARTIAL_OUTAGE' }, { status: 'OPERATIONAL' }],
+      activeIncidents: [
+        {
+          id: incident.id,
+          source: 'MANUAL',
+          title: 'Elevated API errors',
+          lifecycleState: 'INVESTIGATING',
+          affectedComponents: [{ displayName: 'API' }],
+          updates: [{ sequence: 1, state: 'INVESTIGATING' }],
+        },
+      ],
+    });
+    expect(JSON.stringify(active)).not.toContain('11111111-1111-4111-8111-111111111111');
+
+    await incidentRepository.appendUpdate(
+      organizationId,
+      configured.id,
+      incident.id,
+      '11111111-1111-4111-8111-111111111111',
+      { state: 'RESOLVED', message: 'Error rates have returned to normal.' },
+    );
+    const resolved = await new PublicStatusPageRepository(connection.db).findPublishedBySlug(slug);
+    expect(resolved).toMatchObject({
+      status: 'OPERATIONAL',
+      activeIncidents: [],
+      resolvedIncidents: [
+        {
+          id: incident.id,
+          lifecycleState: 'RESOLVED',
+          updates: [
+            { sequence: 1, state: 'INVESTIGATING' },
+            { sequence: 2, state: 'RESOLVED' },
+          ],
+        },
+      ],
     });
   });
 

@@ -140,6 +140,18 @@ describe('status page settings API', () => {
     });
     await request(app.getHttpServer()).get(`/api/status-pages/${foreign.id}`).expect(404);
     await request(app.getHttpServer())
+      .get(`/api/status-pages/${foreign.id}/incidents`)
+      .expect(404)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({ code: 'STATUS_PAGE_INCIDENT_NOT_FOUND' });
+      });
+    await request(app.getHttpServer())
+      .get('/api/status-pages/cccccccc-cccc-4ccc-8ccc-cccccccccccc/incidents')
+      .expect(404)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({ code: 'STATUS_PAGE_INCIDENT_NOT_FOUND' });
+      });
+    await request(app.getHttpServer())
       .post('/api/status-pages')
       .query({ projectId })
       .send({
@@ -152,6 +164,22 @@ describe('status page settings API', () => {
     expect(await new StatusPageRepository(database).listForOrganization(organizationB)).toEqual([
       foreign,
     ]);
+  });
+
+  it('lists an owned status page with no incidents as an empty collection', async () => {
+    const page = (
+      await request(app.getHttpServer())
+        .post('/api/status-pages')
+        .query({ projectId })
+        .send({ name: 'Quiet Status', slug: 'quiet-status', components: [] })
+        .expect(201)
+    ).body.data;
+
+    const response = await request(app.getHttpServer())
+      .get(`/api/status-pages/${page.id}/incidents`)
+      .expect(200);
+
+    expect(response.body.data).toEqual([]);
   });
 
   it('rejects invalid component replacement without changing the prior configuration', async () => {
@@ -183,6 +211,69 @@ describe('status page settings API', () => {
       await request(app.getHttpServer()).get(`/api/status-pages/${created.id}`).expect(200)
     ).body.data;
     expect(current.components).toEqual(created.components);
+  });
+
+  it('creates and advances a manual incident through the status-page lifecycle', async () => {
+    const api = await createMonitorFor(DEVELOPMENT_REQUEST_CONTEXT.organizationId, 'IncidentAPI');
+    const page = (
+      await request(app.getHttpServer())
+        .post('/api/status-pages')
+        .query({ projectId })
+        .send({
+          name: 'Incident Status',
+          slug: 'incident-status',
+          components: [{ displayName: 'Public API', monitorId: api.id, position: 0 }],
+        })
+        .expect(201)
+    ).body.data;
+    const created = (
+      await request(app.getHttpServer())
+        .post(`/api/status-pages/${page.id}/incidents`)
+        .send({
+          title: 'API requests are failing',
+          impact: 'DOWN',
+          message: 'We are investigating failed requests.',
+          componentIds: [page.components[0].id],
+        })
+        .expect(201)
+    ).body.data;
+    expect(created).toMatchObject({
+      state: 'INVESTIGATING',
+      components: [{ displayName: 'Public API' }],
+      updates: [{ sequence: 1, state: 'INVESTIGATING' }],
+    });
+    const investigating = (
+      await request(app.getHttpServer())
+        .post(`/api/status-pages/${page.id}/incidents/${created.id}/updates`)
+        .send({
+          state: 'INVESTIGATING',
+          message: 'The investigation is continuing while we gather more evidence.',
+        })
+        .expect(201)
+    ).body.data;
+    expect(investigating.updates).toHaveLength(2);
+    const monitoring = (
+      await request(app.getHttpServer())
+        .post(`/api/status-pages/${page.id}/incidents/${created.id}/updates`)
+        .send({ state: 'MONITORING', message: 'A fix is deployed and metrics are recovering.' })
+        .expect(201)
+    ).body.data;
+    expect(monitoring).toMatchObject({
+      state: 'MONITORING',
+      updates: [
+        { sequence: 1, state: 'INVESTIGATING' },
+        { sequence: 2, state: 'INVESTIGATING' },
+        { sequence: 3, state: 'MONITORING' },
+      ],
+    });
+    await request(app.getHttpServer())
+      .post(`/api/status-pages/${page.id}/incidents/${created.id}/updates`)
+      .send({ state: 'IDENTIFIED', message: 'This transition moves backwards.' })
+      .expect(409);
+    expect(
+      (await request(app.getHttpServer()).get(`/api/status-pages/${page.id}/incidents`).expect(200))
+        .body.data,
+    ).toEqual([monitoring]);
   });
 
   it('keeps transport and domain validation fields compatible', async () => {

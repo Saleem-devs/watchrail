@@ -61,6 +61,50 @@ describe('public status page', () => {
     expect(screen.getByText('Investigation in progress')).toBeInTheDocument();
   });
 
+  it('renders a manual incident title and its public lifecycle state', () => {
+    const page = projection('PARTIAL_OUTAGE');
+    page.activeIncidents = [
+      {
+        id: 'manual-incident',
+        source: 'MANUAL',
+        componentIds: ['api'],
+        affectedComponents: [{ id: 'api', displayName: 'API' }],
+        title: 'Elevated API errors',
+        lifecycleState: 'IDENTIFIED',
+        severity: 'DOWN',
+        status: 'OPEN',
+        startedAt: '2026-10-10T20:00:00.000Z',
+        openedAt: '2026-10-10T20:00:00.000Z',
+        resolvedAt: null,
+        updates: [
+          {
+            id: 'update-1',
+            sequence: 1,
+            state: 'INVESTIGATING',
+            message: 'We are investigating elevated error rates.',
+            createdAt: '2026-10-10T20:00:00.000Z',
+          },
+          {
+            id: 'update-2',
+            sequence: 2,
+            state: 'IDENTIFIED',
+            message: 'We identified the affected upstream service.',
+            createdAt: '2026-10-10T20:10:00.000Z',
+          },
+        ],
+      },
+    ];
+
+    render(<StatusPageView page={page} />);
+
+    expect(screen.getByRole('link', { name: 'Elevated API errors' })).toHaveAttribute(
+      'href',
+      '/status/acme-status/incidents/manual-incident',
+    );
+    expect(screen.getByText('Identified')).toBeInTheDocument();
+    expect(screen.getByText('100% uptime')).toBeInTheDocument();
+  });
+
   it('refreshes manually and every 30 seconds while visible', () => {
     vi.useFakeTimers();
     render(<StatusPageRefresh />);

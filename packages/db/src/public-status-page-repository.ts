@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, ne, or, sql } from 'drizzle-orm';
 import {
   STATUS_PAGE_RESOLVED_INCIDENT_RETENTION_DAYS,
   derivePublicComponentStatus,
@@ -15,6 +15,9 @@ import {
   monitorAvailabilityState,
   monitors,
   statusPageComponents,
+  statusPageIncidentComponents,
+  statusPageIncidents,
+  statusPageIncidentUpdates,
   statusPages,
 } from './schema.js';
 
@@ -95,6 +98,66 @@ export class PublicStatusPageRepository {
         );
         const projectMaintenance = maintenance.get('*')?.windows ?? [];
         const componentByMonitor = new Map(rows.map((row) => [row.monitorId, row.componentId]));
+        const manualIncidentRows = await tx
+          .select()
+          .from(statusPageIncidents)
+          .where(
+            and(
+              eq(statusPageIncidents.organizationId, page.organizationId),
+              eq(statusPageIncidents.statusPageId, page.id),
+              or(
+                ne(statusPageIncidents.state, 'RESOLVED'),
+                and(
+                  eq(statusPageIncidents.state, 'RESOLVED'),
+                  gte(
+                    statusPageIncidents.resolvedAt,
+                    new Date(
+                      cutoff.getTime() -
+                        STATUS_PAGE_RESOLVED_INCIDENT_RETENTION_DAYS * 24 * 60 * 60 * 1_000,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          )
+          .orderBy(desc(statusPageIncidents.startedAt), desc(statusPageIncidents.id));
+        const manualIncidentIds = manualIncidentRows.map(({ id }) => id);
+        const manualComponentRows =
+          manualIncidentIds.length === 0
+            ? []
+            : await tx
+                .select()
+                .from(statusPageIncidentComponents)
+                .where(
+                  and(
+                    eq(statusPageIncidentComponents.organizationId, page.organizationId),
+                    inArray(statusPageIncidentComponents.incidentId, manualIncidentIds),
+                  ),
+                )
+                .orderBy(asc(statusPageIncidentComponents.position));
+        const manualUpdateRows =
+          manualIncidentIds.length === 0
+            ? []
+            : await tx
+                .select()
+                .from(statusPageIncidentUpdates)
+                .where(
+                  and(
+                    eq(statusPageIncidentUpdates.organizationId, page.organizationId),
+                    inArray(statusPageIncidentUpdates.incidentId, manualIncidentIds),
+                  ),
+                )
+                .orderBy(asc(statusPageIncidentUpdates.sequence));
+        const activeManualImpact = new Map<string, 'DEGRADED' | 'DOWN'>();
+        for (const incident of manualIncidentRows) {
+          if (incident.state === 'RESOLVED') continue;
+          for (const component of manualComponentRows.filter(
+            ({ incidentId }) => incidentId === incident.id,
+          )) {
+            const existing = activeManualImpact.get(component.componentId);
+            if (existing !== 'DOWN') activeManualImpact.set(component.componentId, incident.impact);
+          }
+        }
         const components = rows.map((row) => {
           if (!row.availabilityState) throw new PublicStatusPageStateInvariantError();
           const aggregateState: AggregateHealthState = row.activeIncidentId
@@ -108,10 +171,15 @@ export class PublicStatusPageRepository {
             ...projectMaintenance,
             ...(maintenance.get(row.monitorId)?.windows ?? []),
           ].filter(({ effects }) => effects.publishToStatusPage);
-          const status = derivePublicComponentStatus({
+          let status = derivePublicComponentStatus({
             lifecycleState: row.lifecycleState,
             aggregateState,
           });
+          const manualImpact = activeManualImpact.get(row.componentId);
+          if (manualImpact === 'DOWN') status = 'MAJOR_OUTAGE';
+          else if (manualImpact === 'DEGRADED' && status !== 'MAJOR_OUTAGE') {
+            status = 'PARTIAL_OUTAGE';
+          }
           return {
             id: row.componentId,
             displayName: row.displayName,
@@ -184,6 +252,7 @@ export class PublicStatusPageRepository {
           }
           const projection: PublicStatusPageIncidentV1 = {
             id: incident.id,
+            source: 'MONITOR',
             componentId,
             status: incident.status,
             severity: incident.severity === 'DEGRADED' ? 'DEGRADED' : 'DOWN',
@@ -194,6 +263,45 @@ export class PublicStatusPageRepository {
           if (incident.status === 'OPEN') activeIncidents.push(projection);
           else resolvedIncidents.push(projection);
         }
+        for (const incident of manualIncidentRows) {
+          const componentsForIncident = manualComponentRows.filter(
+            ({ incidentId }) => incidentId === incident.id,
+          );
+          const projection: PublicStatusPageIncidentV1 = {
+            id: incident.id,
+            source: 'MANUAL',
+            componentIds: componentsForIncident.map(({ componentId }) => componentId),
+            affectedComponents: componentsForIncident.map(({ componentId, displayName }) => ({
+              id: componentId,
+              displayName,
+            })),
+            title: incident.title,
+            lifecycleState: incident.state,
+            updates: manualUpdateRows
+              .filter(({ incidentId }) => incidentId === incident.id)
+              .map((update) => ({
+                id: update.id,
+                sequence: update.sequence,
+                state: update.state,
+                message: update.message,
+                createdAt: update.createdAt.toISOString(),
+              })),
+            status: incident.state === 'RESOLVED' ? 'RESOLVED' : 'OPEN',
+            severity: incident.impact,
+            startedAt: incident.startedAt.toISOString(),
+            openedAt: incident.startedAt.toISOString(),
+            resolvedAt: incident.resolvedAt?.toISOString() ?? null,
+          };
+          if (projection.status === 'OPEN') activeIncidents.push(projection);
+          else resolvedIncidents.push(projection);
+        }
+
+        activeIncidents.sort(
+          (left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt),
+        );
+        resolvedIncidents.sort(
+          (left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt),
+        );
 
         return {
           contractVersion: 1,

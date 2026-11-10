@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import type { PublicStatusPageIncidentV1 } from '@watchrail/domain';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { ChevronLeft } from 'lucide-react';
@@ -19,7 +20,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     return { title: 'Incident not found · Watchrail', robots: { index: false } };
   }
   const component = page.components.find(({ id }) => id === incident.componentId);
-  return { title: `${incidentTitle(component?.displayName, incident.severity)} · ${page.name}` };
+  return {
+    title: `${incident.title ?? incidentTitle(component?.displayName, incident.severity)} · ${page.name}`,
+  };
 }
 
 export default async function PublicIncidentPage({ params }: Props) {
@@ -32,7 +35,10 @@ export default async function PublicIncidentPage({ params }: Props) {
   if (!incident) notFound();
   const component = page.components.find(({ id }) => id === incident.componentId);
   const componentName = component?.displayName ?? 'Service';
-  const title = incidentTitle(componentName, incident.severity);
+  const affectedComponents = incident.affectedComponents ?? [
+    { id: incident.componentId ?? 'service', displayName: componentName },
+  ];
+  const title = incident.title ?? incidentTitle(componentName, incident.severity);
   const incidentsHref = `/status/${encodeURIComponent(page.slug)}/incidents`;
 
   return (
@@ -81,14 +87,19 @@ export default async function PublicIncidentPage({ params }: Props) {
                 Affected service
               </h2>
             </div>
-            <div className="flex items-center justify-between gap-4 bg-rail-surface px-4 py-5 sm:px-5">
-              <span className="text-sm text-rail-text">{componentName}</span>
-              <span
-                className={`text-xs font-medium ${incident.severity === 'DOWN' ? 'text-rail-danger' : 'text-rail-warning'}`}
+            {affectedComponents.map((affected) => (
+              <div
+                key={affected.id}
+                className="flex items-center justify-between gap-4 bg-rail-surface px-4 py-5 sm:px-5"
               >
-                {incident.severity === 'DOWN' ? 'Unavailable' : 'Degraded'}
-              </span>
-            </div>
+                <span className="text-sm text-rail-text">{affected.displayName}</span>
+                <span
+                  className={`text-xs font-medium ${incident.severity === 'DOWN' ? 'text-rail-danger' : 'text-rail-warning'}`}
+                >
+                  {incident.severity === 'DOWN' ? 'Unavailable' : 'Degraded'}
+                </span>
+              </div>
+            ))}
           </section>
 
           <section
@@ -102,7 +113,29 @@ export default async function PublicIncidentPage({ params }: Props) {
               </h2>
             </div>
             <ol className="m-0 grid list-none gap-px bg-rail-border p-0">
-              {incident.resolvedAt ? (
+              {incident.source === 'MANUAL' && incident.updates ? (
+                [...incident.updates].reverse().map((update) => (
+                  <li
+                    key={update.id}
+                    className="grid gap-2 bg-rail-surface px-4 py-5 sm:grid-cols-[minmax(0,1fr)_auto] sm:px-5"
+                  >
+                    <div>
+                      <h3 className="m-0 text-sm font-medium text-rail-text">
+                        {manualStateLabel(update.state)}
+                      </h3>
+                      <p className="mt-1 mb-0 whitespace-pre-wrap text-sm leading-6 text-rail-subtle">
+                        {update.message}
+                      </p>
+                    </div>
+                    <time
+                      className="text-xs tabular-nums text-rail-muted"
+                      dateTime={update.createdAt}
+                    >
+                      {formatUtc(update.createdAt)}
+                    </time>
+                  </li>
+                ))
+              ) : incident.resolvedAt ? (
                 <li className="grid gap-2 bg-rail-surface px-4 py-5 sm:grid-cols-[minmax(0,1fr)_auto] sm:px-5">
                   <div>
                     <h3 className="m-0 text-sm font-medium text-rail-text">Resolved</h3>
@@ -118,22 +151,24 @@ export default async function PublicIncidentPage({ params }: Props) {
                   </time>
                 </li>
               ) : null}
-              <li className="grid gap-2 bg-rail-surface px-4 py-5 sm:grid-cols-[minmax(0,1fr)_auto] sm:px-5">
-                <div>
-                  <h3 className="m-0 text-sm font-medium text-rail-text">Detected</h3>
-                  <p className="mt-1 mb-0 text-sm text-rail-subtle">
-                    Monitoring detected{' '}
-                    {incident.severity === 'DOWN' ? 'an outage' : 'degraded availability'} for{' '}
-                    {componentName}.
-                  </p>
-                </div>
-                <time
-                  className="text-xs tabular-nums text-rail-muted"
-                  dateTime={incident.startedAt}
-                >
-                  {formatUtc(incident.startedAt)}
-                </time>
-              </li>
+              {incident.source !== 'MANUAL' ? (
+                <li className="grid gap-2 bg-rail-surface px-4 py-5 sm:grid-cols-[minmax(0,1fr)_auto] sm:px-5">
+                  <div>
+                    <h3 className="m-0 text-sm font-medium text-rail-text">Detected</h3>
+                    <p className="mt-1 mb-0 text-sm text-rail-subtle">
+                      Monitoring detected{' '}
+                      {incident.severity === 'DOWN' ? 'an outage' : 'degraded availability'} for{' '}
+                      {componentName}.
+                    </p>
+                  </div>
+                  <time
+                    className="text-xs tabular-nums text-rail-muted"
+                    dateTime={incident.startedAt}
+                  >
+                    {formatUtc(incident.startedAt)}
+                  </time>
+                </li>
+              ) : null}
             </ol>
           </section>
         </article>
@@ -142,6 +177,15 @@ export default async function PublicIncidentPage({ params }: Props) {
       <StatusPageRefresh />
     </main>
   );
+}
+
+function manualStateLabel(state: NonNullable<PublicStatusPageIncidentV1['lifecycleState']>) {
+  return {
+    INVESTIGATING: 'Investigating',
+    IDENTIFIED: 'Identified',
+    MONITORING: 'Monitoring',
+    RESOLVED: 'Resolved',
+  }[state];
 }
 
 function BackIcon() {

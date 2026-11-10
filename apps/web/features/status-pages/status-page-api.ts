@@ -1,4 +1,9 @@
-import type { StatusPageApiError, StatusPageMonitor, WorkspaceStatusPage } from './types';
+import type {
+  StatusPageApiError,
+  StatusPageMonitor,
+  WorkspaceStatusPage,
+  WorkspaceStatusPageIncident,
+} from './types';
 
 export async function loadStatusPage(statusPageId: string): Promise<WorkspaceStatusPage> {
   const response = await fetch(`/api/status-pages/${statusPageId}`, {
@@ -21,8 +26,44 @@ export async function loadStatusPageMonitors(projectId?: string): Promise<Status
   return body.data;
 }
 
+export async function loadStatusPageIncidents(
+  statusPageId: string,
+): Promise<WorkspaceStatusPageIncident[]> {
+  const response = await fetch(`/api/status-pages/${statusPageId}/incidents`, {
+    headers: { Accept: 'application/json' },
+  });
+  const body = (await response.json()) as {
+    data?: WorkspaceStatusPageIncident[];
+  } & StatusPageApiError;
+  if (!response.ok || !body.data) {
+    throw new Error(apiErrorMessage(body, 'Could not load status-page incidents.'));
+  }
+  return body.data;
+}
+
+export async function loadStatusPageIncident(
+  statusPageId: string,
+  incidentId: string,
+): Promise<WorkspaceStatusPageIncident> {
+  const response = await fetch(`/api/status-pages/${statusPageId}/incidents/${incidentId}`, {
+    headers: { Accept: 'application/json' },
+  });
+  const body = (await response.json()) as {
+    data?: WorkspaceStatusPageIncident;
+  } & StatusPageApiError;
+  if (!response.ok || !body.data) {
+    throw new Error(apiErrorMessage(body, 'Could not load the status-page incident.'));
+  }
+  return body.data;
+}
+
 export function apiErrorMessage(error: StatusPageApiError, fallback: string): string {
   return (
-    error.fields?.statusPage?.[0] ?? error.fields?.components?.[0] ?? error.message ?? fallback
+    error.fields?.statusPage?.[0] ??
+    error.fields?.components?.[0] ??
+    error.fields?.componentIds?.[0] ??
+    error.fields?.incident?.[0] ??
+    error.message ??
+    fallback
   );
 }

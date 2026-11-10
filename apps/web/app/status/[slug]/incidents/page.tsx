@@ -70,15 +70,30 @@ export default async function PublicIncidentsPage({ params }: Props) {
                             <span
                               className={`size-2 rounded-full ${incident.status === 'OPEN' ? 'bg-rail-danger' : 'bg-rail-success'}`}
                             />
-                            {incidentTitle(names.get(incident.componentId), incident.severity)}
+                            {incident.title ??
+                              incidentTitle(
+                                incident.componentId ? names.get(incident.componentId) : undefined,
+                                incident.severity,
+                              )}
                           </span>
                           <span className="mt-2 block text-sm text-rail-subtle">
-                            {incident.status === 'OPEN'
-                              ? 'This interruption is active.'
-                              : 'The service recovered.'}
+                            {incident.source === 'MANUAL'
+                              ? incident.lifecycleState
+                                ? `${incident.lifecycleState.toLowerCase().replace('_', ' ')}.`
+                                : 'Operator update.'
+                              : incident.status === 'OPEN'
+                                ? 'This interruption is active.'
+                                : 'The service recovered.'}
                           </span>
                           <span className="mt-1 block text-xs text-rail-muted">
-                            Affects {names.get(incident.componentId) ?? 'service'}
+                            Affects{' '}
+                            {incident.affectedComponents
+                              ?.map(({ displayName }) => displayName)
+                              .join(', ') ??
+                              (incident.componentId
+                                ? names.get(incident.componentId)
+                                : undefined) ??
+                              'service'}
                           </span>
                         </span>
                         <span className="text-xs tabular-nums text-rail-muted sm:text-right">

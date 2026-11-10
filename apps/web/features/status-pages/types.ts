@@ -45,5 +45,29 @@ export interface StatusPageApiError {
   fields?: {
     statusPage?: string[];
     components?: string[];
+    componentIds?: string[];
+    incident?: string[];
   };
+}
+
+export type StatusPageIncidentState = 'INVESTIGATING' | 'IDENTIFIED' | 'MONITORING' | 'RESOLVED';
+
+export interface WorkspaceStatusPageIncident {
+  id: string;
+  statusPageId: string;
+  title: string;
+  impact: 'DEGRADED' | 'DOWN';
+  state: StatusPageIncidentState;
+  startedAt: string;
+  resolvedAt: string | null;
+  updatedAt: string;
+  components: Array<{ id: string; displayName: string; position: number }>;
+  updates: Array<{
+    id: string;
+    sequence: number;
+    state: StatusPageIncidentState;
+    message: string;
+    createdByActorId: string;
+    createdAt: string;
+  }>;
 }

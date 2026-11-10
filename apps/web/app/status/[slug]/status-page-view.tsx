@@ -120,11 +120,21 @@ function IncidentSection({
                       href={`/status/${encodeURIComponent(slug)}/incidents/${incident.id}`}
                       className="text-rail-text no-underline hover:underline hover:underline-offset-4"
                     >
-                      {names.get(incident.componentId) ?? 'Service incident'}
+                      {incident.title ??
+                        (incident.componentId ? names.get(incident.componentId) : undefined) ??
+                        'Service incident'}
                     </Link>
                   </h3>
                   <p className="mt-1 mb-0 text-xs text-rail-muted">
-                    {active ? 'Investigation in progress' : 'Service recovered'}
+                    {incident.source === 'MANUAL'
+                      ? incident.lifecycleState
+                        ? manualStateLabel(incident.lifecycleState)
+                        : active
+                          ? 'Investigation in progress'
+                          : 'Resolved'
+                      : active
+                        ? 'Investigation in progress'
+                        : 'Service recovered'}
                   </p>
                 </div>
                 <p className="m-0 text-xs tabular-nums text-rail-subtle sm:text-right">
@@ -144,6 +154,15 @@ function IncidentSection({
       </div>
     </section>
   );
+}
+
+function manualStateLabel(state: NonNullable<PublicStatusPageIncidentV1['lifecycleState']>) {
+  return {
+    INVESTIGATING: 'Investigating',
+    IDENTIFIED: 'Identified',
+    MONITORING: 'Monitoring',
+    RESOLVED: 'Resolved',
+  }[state];
 }
 
 function StatusIcon({ status }: { status: PublicStatusState }) {

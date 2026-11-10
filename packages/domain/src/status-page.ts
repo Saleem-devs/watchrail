@@ -1,4 +1,5 @@
 import type { MonitorLifecycleState } from './monitor.js';
+import type { StatusPageIncidentState } from './status-page-incident.js';
 
 export const PUBLIC_STATUS_STATES = [
   'OPERATIONAL',
@@ -78,7 +79,19 @@ export interface PublicMaintenanceWindowV1 {
 
 export interface PublicStatusPageIncidentV1 {
   id: string;
-  componentId: string;
+  source?: 'MONITOR' | 'MANUAL';
+  componentId?: string;
+  componentIds?: string[];
+  affectedComponents?: Array<{ id: string; displayName: string }>;
+  title?: string;
+  lifecycleState?: StatusPageIncidentState;
+  updates?: Array<{
+    id: string;
+    sequence: number;
+    state: StatusPageIncidentState;
+    message: string;
+    createdAt: string;
+  }>;
   status: 'OPEN' | 'RESOLVED';
   severity?: 'DEGRADED' | 'DOWN';
   startedAt: string;
