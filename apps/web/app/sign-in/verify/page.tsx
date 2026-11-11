@@ -3,7 +3,9 @@
 import { Suspense, type FormEvent, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Form } from '../../../components/ui/form';
+import { SignInBrand } from '../../../features/auth/sign-in-brand';
 import { authClient, ensureActiveOrganization } from '../../../lib/auth-client';
+import { commitAuthMethod } from '../../../lib/auth-method-preference';
 import { safeNextPath } from '../../../lib/safe-next-path';
 
 const RESEND_COOLDOWN_SECONDS = 60;
@@ -54,6 +56,7 @@ function OtpVerifyForm() {
         setError('Your workspace could not be selected. Please try signing in again.');
         return;
       }
+      commitAuthMethod('email');
       router.push(nextPath);
     } catch {
       setError('Verification failed. Please try again.');
@@ -88,12 +91,7 @@ function OtpVerifyForm() {
 
   return (
     <div className="sign-in-panel">
-      <div className="sign-in-brand">
-        <span className="sign-in-logo" aria-hidden="true">
-          ◈
-        </span>
-        <span className="sign-in-product">Watchrail</span>
-      </div>
+      <SignInBrand />
 
       <h1 className="sign-in-heading">Check your email</h1>
       <p className="sign-in-subheading">

@@ -26,6 +26,7 @@ export function proxy(request: NextRequest): NextResponse | undefined {
   if (
     pathname.startsWith('/_next/') ||
     pathname.startsWith('/api/') ||
+    pathname === '/watchrail-mark.svg' ||
     pathname === '/favicon.ico' ||
     pathname === '/sitemap.xml' ||
     pathname === '/robots.txt'
@@ -56,7 +57,8 @@ export const config = {
      * Match every path except:
      *  - _next/static, _next/image (Next.js assets)
      *  - favicon.ico, sitemap.xml, robots.txt
+     *  - the public Watchrail mark used by authentication
      */
-    '/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)',
+    '/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt|watchrail-mark.svg).*)',
   ],
 };

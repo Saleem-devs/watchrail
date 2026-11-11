@@ -1,0 +1,17 @@
+import Image from 'next/image';
+import Link from 'next/link';
+
+export function SignInBrand({ mobile = false }: { mobile?: boolean }) {
+  return (
+    <Link
+      href="/"
+      aria-label="Watchrail home"
+      className={mobile ? 'sign-in-brand sign-in-brand-mobile' : 'sign-in-brand'}
+    >
+      <Image src="/watchrail-mark.svg" alt="" width={30} height={30} className="sign-in-logo" />
+      <span className="sign-in-product">
+        watchrail<span aria-hidden="true">.</span>
+      </span>
+    </Link>
+  );
+}

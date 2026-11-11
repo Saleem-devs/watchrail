@@ -19,4 +19,9 @@ describe('Next.js sign-in proxy', () => {
     expect(response?.status).toBe(307);
     expect(response?.headers.get('location')).toContain('/sign-in?next=');
   });
+
+  it('serves the sign-in brand mark without a session cookie', () => {
+    const request = new NextRequest('https://watchrail.example.test/watchrail-mark.svg');
+    expect(proxy(request)).toBeUndefined();
+  });
 });
