@@ -217,7 +217,7 @@ export class EmailNotificationWorker {
   }
 }
 
-async function withSendDeadline<T>(
+export async function withSendDeadline<T>(
   send: (signal: AbortSignal) => Promise<T>,
   timeoutMs: number,
 ): Promise<T> {

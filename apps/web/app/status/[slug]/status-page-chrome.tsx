@@ -15,7 +15,7 @@ export function StatusPageHeader({
   return (
     <header
       data-ui="public-status-header"
-      className="flex min-h-16 items-center justify-between gap-4"
+      className="flex min-h-16 flex-wrap items-center justify-between gap-4 py-3"
     >
       <Link
         href={statusHref}
@@ -31,6 +31,9 @@ export function StatusPageHeader({
         </NavLink>
         <NavLink href={incidentsHref} current={active === 'incidents'}>
           Incidents
+        </NavLink>
+        <NavLink href={`${statusHref}/subscribe`} current={false}>
+          Subscribe
         </NavLink>
       </nav>
     </header>

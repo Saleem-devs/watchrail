@@ -73,6 +73,7 @@ describe('loadWorkerConfig', () => {
         ...requiredEnvironment,
         NODE_ENV: 'production',
         SMTP_HOST: 'smtp.example.test',
+        FRONTEND_URL: 'https://watchrail.example.test',
       }),
     ).toThrow('Auth email encryption keyring is required.');
   });

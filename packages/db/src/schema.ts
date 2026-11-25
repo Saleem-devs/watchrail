@@ -644,6 +644,116 @@ export const statusPages = pgTable(
   ],
 );
 
+export const statusPageSubscribers = pgTable(
+  'status_page_subscribers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull(),
+    statusPageId: uuid('status_page_id').notNull(),
+    emailHash: text('email_hash').notNull(),
+    encryptedDetails: jsonb('encrypted_details').notNull(),
+    generation: uuid('generation').notNull(),
+    state: text('state').notNull().default('PENDING'),
+    verificationHash: text('verification_hash').notNull(),
+    unsubscribeHash: text('unsubscribe_hash').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
+    requestedAt: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('status_subscriber_page_email').on(t.statusPageId, t.emailHash),
+    unique('status_subscriber_identity').on(t.id, t.statusPageId, t.organizationId),
+    unique('status_subscriber_verify_token').on(t.verificationHash),
+    unique('status_subscriber_unsubscribe_token').on(t.unsubscribeHash),
+    foreignKey({
+      columns: [t.statusPageId, t.organizationId],
+      foreignColumns: [statusPages.id, statusPages.organizationId],
+    }).onDelete('cascade'),
+    check('status_subscriber_state', sql`${t.state} in ('PENDING', 'ACTIVE', 'UNSUBSCRIBED')`),
+  ],
+);
+
+export const statusPageEmailEvents = pgTable(
+  'status_page_email_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull(),
+    statusPageId: uuid('status_page_id').notNull(),
+    sourceKey: text('source_key').notNull(),
+    subject: text('subject').notNull(),
+    body: text('body').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .default(sql`clock_timestamp()`),
+    expandedAt: timestamp('expanded_at', { withTimezone: true }),
+  },
+  (t) => [
+    unique('status_email_event_source').on(t.statusPageId, t.sourceKey),
+    unique('status_email_event_identity').on(t.id, t.statusPageId, t.organizationId),
+    foreignKey({
+      columns: [t.statusPageId, t.organizationId],
+      foreignColumns: [statusPages.id, statusPages.organizationId],
+    }).onDelete('cascade'),
+    index('status_email_event_pending').on(t.expandedAt, t.createdAt),
+  ],
+);
+
+export const statusPageEmailDeliveries = pgTable(
+  'status_page_email_deliveries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull(),
+    statusPageId: uuid('status_page_id').notNull(),
+    subscriberId: uuid('subscriber_id').notNull(),
+    generation: uuid('generation').notNull(),
+    eventId: uuid('event_id'),
+    kind: text('kind').notNull(),
+    encryptedPayload: jsonb('encrypted_payload'),
+    state: text('state').notNull().default('PENDING'),
+    availableAt: timestamp('available_at', { withTimezone: true }).notNull().defaultNow(),
+    leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+    claimToken: uuid('claim_token'),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    lastErrorCode: text('last_error_code'),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      columns: [t.subscriberId, t.statusPageId, t.organizationId],
+      foreignColumns: [
+        statusPageSubscribers.id,
+        statusPageSubscribers.statusPageId,
+        statusPageSubscribers.organizationId,
+      ],
+    }).onDelete('cascade'),
+    foreignKey({
+      columns: [t.eventId, t.statusPageId, t.organizationId],
+      foreignColumns: [
+        statusPageEmailEvents.id,
+        statusPageEmailEvents.statusPageId,
+        statusPageEmailEvents.organizationId,
+      ],
+    }).onDelete('cascade'),
+    unique('status_email_delivery_event').on(t.subscriberId, t.generation, t.eventId),
+    index('status_email_delivery_due').on(t.state, t.availableAt),
+    check(
+      'status_email_delivery_kind',
+      sql`(${t.kind} = 'VERIFY' and ${t.eventId} is null and ${t.encryptedPayload} is not null) or (${t.kind} = 'EVENT' and ${t.eventId} is not null)`,
+    ),
+    check(
+      'status_email_delivery_state',
+      sql`${t.state} in ('PENDING', 'SENDING', 'DELIVERED', 'SUPPRESSED', 'DEAD')`,
+    ),
+  ],
+);
+
+export const statusPageSubscriptionLimits = pgTable('status_page_subscription_limits', {
+  key: text('key').primaryKey(),
+  count: integer('count').notNull(),
+  resetsAt: timestamp('resets_at', { withTimezone: true }).notNull(),
+});
+
 export const statusPageComponents = pgTable(
   'status_page_components',
   {
