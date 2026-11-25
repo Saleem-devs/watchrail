@@ -336,7 +336,9 @@ async function assertTargetMonitors(
         inArray(monitors.id, target.monitorIds),
       ),
     )
-    .for('update');
+    // Preserve target validation while allowing component foreign-key KEY SHARE checks.
+    // Component replacement holds the page lock before checking its monitor reference.
+    .for('no key update');
   const found = new Set(selected.map(({ id }) => id));
   const invalid = target.monitorIds.filter((id) => !found.has(id));
   if (invalid.length > 0) throw new MaintenanceWindowTargetError(invalid);

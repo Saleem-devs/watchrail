@@ -1,9 +1,13 @@
 import { resolve } from 'node:path';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { beforeAll, beforeEach, afterAll, describe, it, expect } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { createMonitor } from '@watchrail/domain';
-import { createDatabaseConnection, type DatabaseConnection } from './client.js';
+import {
+  createDatabaseConnection,
+  type DatabaseConnection,
+  type WatchrailDatabase,
+} from './client.js';
 import { migrateDatabase } from './migration.js';
 import { MonitorRepository } from './monitor-repository.js';
 import { StatusPageRepository } from './status-page-repository.js';
@@ -202,6 +206,75 @@ describe('status-page subscriber delivery', () => {
         await pending?.catch(() => undefined);
         a.release();
         b.release();
+      }
+    },
+  );
+
+  it.each([
+    { published: true, publicMaintenance: true },
+    { published: false, publicMaintenance: true },
+    { published: true, publicMaintenance: false },
+  ])(
+    'completes monitor-targeted maintenance and component replacement concurrently: %j',
+    async ({ published, publicMaintenance }) => {
+      const p = await page();
+      await new StatusPageRepository(connection.db).setPublished(org, p.id, published);
+      let creation: ReturnType<MaintenanceWindowRepository['create']> | undefined;
+      try {
+        await connection.db.transaction(async (tx) => {
+          await tx.execute(sql`select id from status_pages where id = ${p.id} for update`);
+          const pid = (await tx.execute<{ pid: number }>(sql`select pg_backend_pid() as pid`))
+            .rows[0]!.pid;
+          creation = new MaintenanceWindowRepository(connection.db).create(
+            org,
+            p.projectId!,
+            actor,
+            {
+              name: 'Concurrent maintenance',
+              schedule: {
+                type: 'ONE_TIME',
+                startsAt: '2030-01-01T00:00:00Z',
+                endsAt: '2030-01-01T01:00:00Z',
+              },
+              target: { type: 'MONITORS', monitorIds: [p.components[0]!.monitorId] },
+              effects: {
+                suppressNotifications: true,
+                suppressIncidentCreation: true,
+                excludeFromUptime: true,
+                publishToStatusPage: publicMaintenance,
+              },
+            },
+          );
+          // Attach a rejection handler while the editor continues, then assert the original promise below.
+          void creation.catch(() => undefined);
+          await expect
+            .poll(
+              async () =>
+                (
+                  await connection.pool.query<{ waiting: boolean }>(
+                    `select exists(select 1 from pg_stat_activity where $1 = any(pg_blocking_pids(pid))) as waiting`,
+                    [pid],
+                  )
+                ).rows[0]!.waiting,
+            )
+            .toBe(true);
+          // Execute the actual repository in this already-open editor transaction (nested savepoint).
+          // Its methods use the transaction API, not the pool-only $client member.
+          const edited = await new StatusPageRepository(
+            tx as unknown as WatchrailDatabase,
+          ).replaceComponents(org, p.id, [
+            { monitorId: p.components[0]!.monitorId, displayName: 'Renamed API', position: 0 },
+          ]);
+          expect(edited.components[0]!.displayName).toBe('Renamed API');
+        });
+        const created = await creation!;
+        expect(created.target).toEqual({
+          type: 'MONITORS',
+          monitorIds: [p.components[0]!.monitorId],
+        });
+        expect(await events()).toHaveLength(published && publicMaintenance ? 1 : 0);
+      } finally {
+        await creation?.catch(() => undefined);
       }
     },
   );
