@@ -1,9 +1,12 @@
 'use client';
 
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
+import { ArrowLeft } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { Activity, BellRing, Braces, GitBranch, Mail, Radio, ShieldCheck } from 'lucide-react';
+import { Button } from '../../components/ui/button';
 import { Form } from '../../components/ui/form';
+import { Input } from '../../components/ui/form-control';
 import { SignInBrand } from '../../features/auth/sign-in-brand';
 import { authClient } from '../../lib/auth-client';
 import {
@@ -26,18 +29,38 @@ interface SocialButtonProps {
 
 function SocialButton({ label, icon, disabled, lastUsed, onClick }: SocialButtonProps) {
   return (
-    <button type="button" className="sign-in-social-btn" disabled={disabled} onClick={onClick}>
+    <Button variant="secondary" className="relative w-full" disabled={disabled} onClick={onClick}>
       <span className="sign-in-social-icon" aria-hidden="true">
         {icon}
       </span>
       <span className="sign-in-social-label">{label}</span>
-      {lastUsed ? <LastUsedBadge /> : null}
-    </button>
+      {lastUsed ? <LastUsedBadge social /> : null}
+    </Button>
   );
 }
 
-function LastUsedBadge() {
-  return <span className="sign-in-last-used">Last used</span>;
+function LastUsedBadge({ social = false }: { social?: boolean }) {
+  return (
+    <span className={social ? 'sign-in-last-used sign-in-social-last-used' : 'sign-in-last-used'}>
+      Last used
+    </span>
+  );
+}
+
+function GitHubIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z" />
+    </svg>
+  );
+}
+
+function GitLabIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="m23.955 13.587-1.342-4.135-2.664-8.189a.455.455 0 0 0-.867 0L16.418 9.45H7.582L4.918 1.263a.455.455 0 0 0-.867 0L1.387 9.452.045 13.587a.924.924 0 0 0 .331 1.023L12 23.054l11.624-8.443a.924.924 0 0 0 .331-1.023Z" />
+    </svg>
+  );
 }
 
 function GoogleIcon() {
@@ -133,135 +156,101 @@ export default function SignInPage() {
   const anyPending = emailPending || socialPending != null;
 
   return (
-    <main className="sign-in-page" data-watchrail-auth>
-      <section className="sign-in-context" aria-labelledby="sign-in-context-title">
+    <main className="sign-in-auth-view" data-watchrail-auth>
+      <Link href="/" className="sign-in-home-link">
+        <ArrowLeft aria-hidden="true" />
+        Back to home
+      </Link>
+
+      <div className="sign-in-auth-inner">
         <SignInBrand />
 
-        <div className="sign-in-context-copy">
-          <h2 id="sign-in-context-title">Know what changed before your customers do.</h2>
-          <p>
-            Watchrail verifies your services, coordinates incident response, and keeps public status
-            communication accurate.
-          </p>
+        <header className="sign-in-header">
+          <h1 id="sign-in-heading" className="sign-in-heading">
+            Continue to Watchrail
+          </h1>
+          <p className="sign-in-subheading">Sign in or create an account to continue.</p>
+        </header>
+
+        <div className="sign-in-social-list" aria-label="Social sign-in methods">
+          <SocialButton
+            label="Continue with GitHub"
+            icon={<GitHubIcon />}
+            disabled={anyPending}
+            lastUsed={lastUsedMethod === 'github'}
+            onClick={() => void handleSocial('github')}
+          />
+          <SocialButton
+            label="Continue with GitLab"
+            icon={<GitLabIcon />}
+            disabled={anyPending}
+            lastUsed={lastUsedMethod === 'gitlab'}
+            onClick={() => void handleSocial('gitlab')}
+          />
+          <SocialButton
+            label="Continue with Google"
+            icon={<GoogleIcon />}
+            disabled={anyPending}
+            lastUsed={lastUsedMethod === 'google'}
+            onClick={() => void handleSocial('google')}
+          />
         </div>
 
-        <ul className="sign-in-capabilities" aria-label="Watchrail reliability workflow">
-          <li>
-            <Activity aria-hidden="true" />
-            <span>Verify services from every assigned location</span>
-          </li>
-          <li>
-            <BellRing aria-hidden="true" />
-            <span>Route confirmed incidents to the right channels</span>
-          </li>
-          <li>
-            <Radio aria-hidden="true" />
-            <span>Publish clear updates without rewriting measured health</span>
-          </li>
-        </ul>
+        <div className="sign-in-divider" role="separator" aria-label="Email sign-in">
+          <span>Or continue with email</span>
+        </div>
 
-        <p className="sign-in-security-note">
-          <ShieldCheck aria-hidden="true" />
-          Passwordless by default. Watchrail never asks you to create a password.
+        <section className="sign-in-email-method" aria-labelledby="email-method-title">
+          <div className="sign-in-email-heading">
+            <span className="sign-in-email-copy">
+              <h2 id="email-method-title">Email</h2>
+              <p id="email-help">We’ll send a 6-digit verification code.</p>
+            </span>
+            {lastUsedMethod === 'email' ? <LastUsedBadge /> : null}
+          </div>
+
+          <Form onSubmit={(event) => void handleEmail(event)} noValidate>
+            <label className="sign-in-label" htmlFor="email">
+              Email address
+            </label>
+            <Input
+              ref={emailInputRef}
+              id="email"
+              type="email"
+              value={email}
+              placeholder="you@example.com"
+              autoComplete="email"
+              disabled={anyPending}
+              aria-invalid={emailError != null}
+              aria-describedby={emailError ? 'email-help email-error' : 'email-help'}
+              onChange={(event) => {
+                setEmail(event.target.value);
+                if (emailError) setEmailError(null);
+              }}
+            />
+            {emailError != null ? (
+              <p id="email-error" className="sign-in-error" role="alert">
+                {emailError}
+              </p>
+            ) : null}
+            <Button type="submit" variant="primary" className="mt-3 w-full" disabled={anyPending}>
+              {emailPending ? 'Sending code…' : 'Continue with email'}
+            </Button>
+          </Form>
+        </section>
+
+        <p className="sign-in-footnote">
+          By continuing, you agree to Watchrail’s{' '}
+          <a
+            href="https://github.com/Saleem-devs/watchrail"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            open-source terms
+          </a>
+          .
         </p>
-      </section>
-
-      <section className="sign-in-auth" aria-labelledby="sign-in-heading">
-        <div className="sign-in-auth-inner">
-          <SignInBrand mobile />
-
-          <header className="sign-in-header">
-            <h1 id="sign-in-heading" className="sign-in-heading">
-              Sign in to Watchrail
-            </h1>
-            <p className="sign-in-subheading">
-              Use GitHub, GitLab, Google, or a one-time code sent to your email.
-            </p>
-          </header>
-
-          <div className="sign-in-social-list" aria-label="Social sign-in methods">
-            <SocialButton
-              label="Continue with GitHub"
-              icon={<Braces />}
-              disabled={anyPending}
-              lastUsed={lastUsedMethod === 'github'}
-              onClick={() => void handleSocial('github')}
-            />
-            <SocialButton
-              label="Continue with GitLab"
-              icon={<GitBranch />}
-              disabled={anyPending}
-              lastUsed={lastUsedMethod === 'gitlab'}
-              onClick={() => void handleSocial('gitlab')}
-            />
-            <SocialButton
-              label="Continue with Google"
-              icon={<GoogleIcon />}
-              disabled={anyPending}
-              lastUsed={lastUsedMethod === 'google'}
-              onClick={() => void handleSocial('google')}
-            />
-          </div>
-
-          <div className="sign-in-divider" role="separator" aria-label="Email sign-in">
-            <span>Or use email</span>
-          </div>
-
-          <section className="sign-in-email-method" aria-labelledby="email-method-title">
-            <div className="sign-in-email-heading">
-              <span className="sign-in-email-icon" aria-hidden="true">
-                <Mail />
-              </span>
-              <span className="sign-in-email-copy">
-                <h2 id="email-method-title">Email verification code</h2>
-                <p id="email-help">We’ll send a 6-digit code. No password required.</p>
-              </span>
-              {lastUsedMethod === 'email' ? <LastUsedBadge /> : null}
-            </div>
-
-            <Form onSubmit={(event) => void handleEmail(event)} noValidate>
-              <label className="sign-in-label" htmlFor="email">
-                Email address
-              </label>
-              <input
-                ref={emailInputRef}
-                id="email"
-                type="email"
-                className="sign-in-input"
-                value={email}
-                autoComplete="email"
-                disabled={anyPending}
-                aria-invalid={emailError != null}
-                aria-describedby={emailError ? 'email-help email-error' : 'email-help'}
-                onChange={(event) => {
-                  setEmail(event.target.value);
-                  if (emailError) setEmailError(null);
-                }}
-              />
-              {emailError != null ? (
-                <p id="email-error" className="sign-in-error" role="alert">
-                  {emailError}
-                </p>
-              ) : null}
-              <button type="submit" className="sign-in-primary-btn" disabled={anyPending}>
-                {emailPending ? 'Sending code…' : 'Send sign-in code'}
-              </button>
-            </Form>
-          </section>
-
-          <p className="sign-in-footnote">
-            By continuing, you agree to Watchrail’s{' '}
-            <a
-              href="https://github.com/Saleem-devs/watchrail"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              open-source terms
-            </a>
-            .
-          </p>
-        </div>
-      </section>
+      </div>
     </main>
   );
 }

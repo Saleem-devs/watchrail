@@ -15,7 +15,10 @@ import type { NextRequest } from 'next/server';
 /** Routes that do not require authentication. */
 function isPublicPath(pathname: string): boolean {
   return (
-    pathname.startsWith('/sign-in') || pathname.startsWith('/status/') || pathname === '/status'
+    pathname.startsWith('/sign-in') ||
+    pathname === '/' ||
+    pathname.startsWith('/status/') ||
+    pathname === '/status'
   );
 }
 

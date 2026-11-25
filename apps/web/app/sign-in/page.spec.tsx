@@ -34,7 +34,10 @@ describe('SignInPage', () => {
     expect(github).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /continue with gitlab/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /continue with google/i })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Email verification code' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Email' })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('you@example.com')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Back to home' })).toHaveAttribute('href', '/');
+    expect(screen.getByText('Sign in or create an account to continue.')).toBeInTheDocument();
 
     await waitFor(() => expect(within(github).getByText('Last used')).toBeInTheDocument());
     expect(screen.getAllByText('Last used')).toHaveLength(1);
@@ -59,7 +62,7 @@ describe('SignInPage', () => {
 
     render(<SignInPage />);
     await userEvent.type(screen.getByLabelText('Email address'), 'operator@example.com');
-    await userEvent.click(screen.getByRole('button', { name: 'Send sign-in code' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Continue with email' }));
 
     await waitFor(() => {
       expect(sessionStorage.getItem('watchrail:pending-auth-method')).toBe('email');

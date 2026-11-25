@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Button } from '../../../components/ui/button';
 import { SignInBrand } from '../../../features/auth/sign-in-brand';
 import { ensureActiveOrganization } from '../../../lib/auth-client';
 import { commitAuthMethod } from '../../../lib/auth-method-preference';
@@ -43,13 +44,13 @@ export default function CompleteSignInPage() {
           <p className="sign-in-error" role="alert">
             {error}
           </p>
-          <button
-            type="button"
-            className="sign-in-primary-btn"
+          <Button
+            variant="primary"
+            className="mt-3 w-full"
             onClick={() => router.replace('/sign-in')}
           >
             Return to sign in
-          </button>
+          </Button>
         </>
       ) : (
         <p className="sign-in-subheading">Preparing your workspace…</p>

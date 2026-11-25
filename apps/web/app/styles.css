@@ -959,6 +959,214 @@ form {
     border: 0;
   }
 }
+
+/* ─── Authentication operator layout ──────────────────────────────────────── */
+
+.sign-in-shell {
+  display: block;
+  min-height: 100dvh;
+  padding: 0;
+}
+
+.sign-in-auth-column {
+  display: grid;
+  min-height: 100dvh;
+  background: var(--background);
+}
+
+.sign-in-auth-view,
+.sign-in-panel {
+  position: relative;
+  display: grid;
+  align-content: center;
+  width: min(100%, 608px);
+  min-height: 100dvh;
+  margin: 0 auto;
+  padding: 48px 24px;
+  border: 0;
+  background: transparent;
+}
+
+.sign-in-auth-inner {
+  width: 100%;
+  max-width: 560px;
+}
+
+.sign-in-home-link {
+  position: fixed;
+  top: 32px;
+  left: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  color: var(--text-subtle);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.sign-in-home-link:hover {
+  color: var(--text);
+}
+
+.sign-in-home-link:focus-visible {
+  border-radius: var(--radius-rail-control);
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.sign-in-home-link svg {
+  width: 17px;
+  height: 17px;
+  stroke-width: 1.75;
+}
+
+.sign-in-brand {
+  gap: 10px;
+  margin-bottom: 44px;
+}
+
+.sign-in-brand img {
+  width: 26px;
+  height: 26px;
+}
+
+.sign-in-product {
+  font-size: 15px;
+}
+
+.sign-in-header {
+  margin-bottom: 28px;
+}
+
+.sign-in-heading {
+  margin-bottom: 8px;
+  font-size: 24px;
+  font-weight: 650;
+  letter-spacing: -0.025em;
+}
+
+.sign-in-subheading {
+  font-size: 14px;
+}
+
+.sign-in-social-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.sign-in-social-list > :last-child {
+  grid-column: 1 / -1;
+}
+
+.sign-in-social-last-used {
+  position: absolute;
+  right: 12px;
+}
+
+.sign-in-social-btn {
+  min-height: 46px;
+  padding: 10px 13px;
+  border-color: var(--color-rail-border-strong);
+  background: transparent;
+  font-size: 14px;
+}
+
+.sign-in-social-btn:hover:not(:disabled) {
+  border-color: var(--text-subtle);
+  background: var(--color-rail-hover);
+}
+
+.sign-in-social-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.sign-in-divider {
+  margin: 24px 0;
+  font-size: 12px;
+}
+
+.sign-in-email-method {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.sign-in-email-method form,
+.sign-in-panel form {
+  padding: 0;
+}
+
+.sign-in-email-heading {
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin-bottom: 16px;
+}
+
+.sign-in-input {
+  min-height: 44px;
+  background: transparent;
+}
+
+.sign-in-primary-btn {
+  min-height: 44px;
+  margin-top: 12px;
+}
+
+.sign-in-footnote {
+  margin-top: 20px;
+  font-size: 12px;
+  text-align: left;
+}
+
+.sign-in-account-prompt {
+  margin: 22px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.sign-in-account-prompt a {
+  color: var(--text);
+  font-weight: 600;
+  text-underline-offset: 3px;
+}
+
+@media (max-width: 600px) {
+  .sign-in-social-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sign-in-social-list > :last-child {
+    grid-column: auto;
+  }
+
+  .sign-in-auth-view,
+  .sign-in-panel {
+    width: 100%;
+    min-height: 100dvh;
+    padding: 28px 20px;
+  }
+
+  .sign-in-home-link {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+  }
+
+  .sign-in-brand {
+    margin-bottom: 40px;
+  }
+
+  .sign-in-heading {
+    font-size: 24px;
+  }
+
+  .sign-in-input {
+    font-size: 16px;
+  }
+}
+
 .settings-shell {
   max-width: 1100px;
   margin: 0 auto;

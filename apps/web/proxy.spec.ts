@@ -3,7 +3,7 @@ import { NextRequest } from 'next/server';
 import { proxy } from './proxy';
 
 describe('Next.js sign-in proxy', () => {
-  it.each(['/sign-in', '/sign-in/verify?email=test%40example.com', '/sign-in/complete'])(
+  it.each(['/sign-in', '/', '/sign-in/verify?email=test%40example.com', '/sign-in/complete'])(
     'keeps %s accessible with a stale session cookie',
     (path) => {
       const request = new NextRequest(`https://watchrail.example.test${path}`, {
@@ -23,5 +23,9 @@ describe('Next.js sign-in proxy', () => {
   it('serves the sign-in brand mark without a session cookie', () => {
     const request = new NextRequest('https://watchrail.example.test/watchrail-mark.svg');
     expect(proxy(request)).toBeUndefined();
+  });
+
+  it('serves the public home page without a session cookie', () => {
+    expect(proxy(new NextRequest('https://watchrail.example.test/'))).toBeUndefined();
   });
 });
