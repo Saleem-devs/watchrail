@@ -40,3 +40,7 @@ trimmed/lowercase addresses drive identity, limits and SMTP; legacy malformed re
 are dead-lettered without sending. Migration `0066` serializes public-event capture with
 publication changes and includes weekdays/effective dates in recurring maintenance emails. Subscriber records and delivery evidence currently remain until
 the status page is deleted; automated retention and subscriber administration are follow-up work.
+
+### Status-page custom domains
+
+The optional self-hosted custom-domain setup uses verified customer subdomains and Caddy HTTPS behind the existing ingress proxy. See [deployment, eligibility, renewal and acceptance instructions](deploy/status-domains/README.md). Public production acceptance requires configured DNS and a reviewed proxy cutover.

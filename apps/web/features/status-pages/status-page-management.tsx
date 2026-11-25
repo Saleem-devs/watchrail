@@ -8,6 +8,7 @@ import { PageHeader } from '../../components/ui/page-header';
 import { apiErrorMessage, loadStatusPage, loadStatusPageMonitors } from './status-page-api';
 import { publicMonitorState } from './status-page-status';
 import type { StatusPageApiError, StatusPageMonitor, WorkspaceStatusPage } from './types';
+import { StatusPageDomainPanel } from './status-page-domain-panel';
 import { StatusPageIncidentsPanel } from './status-page-incidents-panel';
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
@@ -226,6 +227,8 @@ export function StatusPageManagement({
                 <Detail label="Updated" value={dateFormatter.format(new Date(page.updatedAt))} />
               </dl>
             </aside>
+
+            <StatusPageDomainPanel pageId={page.id} published={page.published} />
 
             <StatusPageIncidentsPanel projectBase={projectBase} statusPageId={page.id} />
 

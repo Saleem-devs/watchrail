@@ -12,6 +12,7 @@ import { MonitorHistoryController } from './modules/monitors/monitor-history.con
 import { MonitorsModule } from './modules/monitors/monitors.module.js';
 import { PublicStatusPagesModule } from './modules/public-status-pages/public-status-pages.module.js';
 import { DevelopmentIdentityMiddleware } from './auth/request-context.js';
+import { StatusDomainsController } from './modules/status-pages/status-domains.controller.js';
 import { StatusPagesController } from './modules/status-pages/status-pages.controller.js';
 import { StatusPagesModule } from './modules/status-pages/status-pages.module.js';
 import { WebhookEndpointsController } from './modules/webhook-endpoints/webhook-endpoints.controller.js';
@@ -103,6 +104,7 @@ export class AppModule implements NestModule {
         ProbeEnrollmentsController,
         ProbeLocationsController,
         StatusPagesController,
+        StatusDomainsController,
         WebhookEndpointsController,
         OrganizationsController,
         ProjectsController,

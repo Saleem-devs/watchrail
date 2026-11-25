@@ -470,6 +470,13 @@
       "when": 1795606191674,
       "tag": "0066_status_subscription_capture",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1795630193549,
+      "tag": "0067_status_page_domains",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,24 @@
+services:
+  status-domain-tls:
+    build: .
+    restart: unless-stopped
+    # Linux host networking: loopback-only 8443 does not compete for public 80/443.
+    network_mode: host
+    environment:
+      STATUS_DOMAIN_CADDY_ASK_SECRET: ${STATUS_DOMAIN_CADDY_ASK_SECRET:?Set a random secret of at least 32 characters}
+      ACME_EMAIL: ${ACME_EMAIL:?Set the certificate operator email}
+      ACME_DIRECTORY: ${ACME_DIRECTORY:-https://acme-staging-v02.api.letsencrypt.org/directory}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - status_domain_caddy_data:/data
+      - status_domain_caddy_config:/config
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+volumes:
+  status_domain_caddy_data:
+  status_domain_caddy_config:

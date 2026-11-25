@@ -1,3 +1,4 @@
+import { routeStatusDomain } from './lib/status-domain-routing';
 /**
  * Next.js 16 proxy — route-level authentication guard.
  *
@@ -22,7 +23,9 @@ function isPublicPath(pathname: string): boolean {
   );
 }
 
-export function proxy(request: NextRequest): NextResponse | undefined {
+export async function proxy(request: NextRequest): Promise<NextResponse | undefined> {
+  const customDomain = await routeStatusDomain(request);
+  if (customDomain) return customDomain;
   const { pathname } = request.nextUrl;
 
   // Let Next.js internals pass through unconditionally.
@@ -55,13 +58,6 @@ export function proxy(request: NextRequest): NextResponse | undefined {
 }
 
 export const config = {
-  matcher: [
-    /*
-     * Match every path except:
-     *  - _next/static, _next/image (Next.js assets)
-     *  - favicon.ico, sitemap.xml, robots.txt
-     *  - the public Watchrail mark used by authentication
-     */
-    '/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt|watchrail-mark.svg).*)',
-  ],
+  // Include assets and API routes: unknown hosts must never reach the application.
+  matcher: ['/:path*'],
 };

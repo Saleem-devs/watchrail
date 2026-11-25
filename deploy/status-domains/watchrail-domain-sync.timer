@@ -1,0 +1,7 @@
+[Unit]
+Description=Refresh Watchrail TLS routing once per minute
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+[Install]
+WantedBy=timers.target
