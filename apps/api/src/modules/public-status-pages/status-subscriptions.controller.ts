@@ -10,7 +10,7 @@ import {
   Res,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { StatusPageSubscriptionRepository } from '@watchrail/db';
+import { StatusPageSubscriptionRepository, normalizeSubscriptionEmail } from '@watchrail/db';
 import { Public } from '../../auth/auth.guard.js';
 import { APP_CONFIG, type AppConfig } from '../../config/config.js';
 
@@ -49,7 +49,7 @@ export class StatusSubscriptionsController {
       data.slug.length > 63 ||
       typeof data.email !== 'string' ||
       data.email.length > 320 ||
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(data.email.trim())
+      !normalizeSubscriptionEmail(data.email)
     ) {
       throw new BadRequestException({
         code: 'INVALID_SUBSCRIPTION',
@@ -80,7 +80,7 @@ export class StatusSubscriptionsController {
     }
     return {
       message: 'Subscription confirmed. You will receive future incident and maintenance updates.',
-      statusPageSlug: await this.subscriptions.publicPageSlug(data.token as string, 'verify'),
+      statusPageSlug: await this.subscriptions.publicPageSlug(data.token, 'verify'),
     };
   }
 

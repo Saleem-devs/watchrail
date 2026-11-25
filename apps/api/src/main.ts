@@ -3,6 +3,8 @@ import { resolve } from 'node:path';
 import { NestFactory } from '@nestjs/core';
 import { config as loadEnvironment } from 'dotenv';
 import { AppModule } from './app.module.js';
+import type { NestExpressApplication } from '@nestjs/platform-express';
+import { trustedProxyPredicate } from './config/trusted-proxies.js';
 import { APP_CONFIG, type AppConfig } from './config/config.js';
 
 loadEnvironment({ path: resolve(process.cwd(), '../../.env') });
@@ -10,7 +12,9 @@ loadEnvironment({ path: resolve(process.cwd(), '../../.env') });
 // The platform parser is disabled so Better Auth can read its raw request
 // stream. AppModule installs bounded JSON/form parsers after the Better Auth
 // middleware for all normal Nest controllers.
-const app = await NestFactory.create(AppModule, { bodyParser: false });
+const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
+
+app.set('trust proxy', trustedProxyPredicate(process.env.API_TRUSTED_PROXIES));
 
 app.setGlobalPrefix('api');
 app.enableShutdownHooks();

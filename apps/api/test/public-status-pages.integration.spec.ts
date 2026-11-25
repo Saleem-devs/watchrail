@@ -83,6 +83,18 @@ describe('public status page API', () => {
       published: true,
       components: [{ displayName: 'API', monitorId: monitor.id, position: 0 }],
     });
+    for (const email of [
+      'Alice<victim@example.com>',
+      'Bob<victim@example.com>',
+      '<victim@example.com>',
+      'victim@example.com(test)',
+      'a@example.com,b@example.com',
+    ]) {
+      await request(app.getHttpServer())
+        .post('/api/public/status-subscriptions')
+        .send({ slug: 'subscriber-status', email })
+        .expect(400);
+    }
     const subscribed = await request(app.getHttpServer())
       .post('/api/public/status-subscriptions')
       .send({ slug: 'subscriber-status', email: 'subscriber@example.com' })

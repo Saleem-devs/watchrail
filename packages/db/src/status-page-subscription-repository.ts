@@ -7,6 +7,31 @@ import { statusPageSubscribers, statusPageEmailDeliveries, statusPages } from '.
 export const subscriptionTokenHash = (value: string) =>
   createHash('sha256').update(value).digest('hex');
 
+/** Subscription inputs are bare ASCII mailboxes, never RFC display names or lists. */
+export function normalizeSubscriptionEmail(value: string): string | null {
+  const email = value.trim().toLowerCase();
+  if (email.length > 254) return null;
+  const parts = email.split('@');
+  if (parts.length !== 2) return null;
+  const [local, domain] = parts as [string, string];
+  if (
+    !local ||
+    local.length > 64 ||
+    !/^[a-z0-9!#$%&'*+/=?^_`{|}~.-]+$/u.test(local) ||
+    local.startsWith('.') ||
+    local.endsWith('.') ||
+    local.includes('..')
+  )
+    return null;
+  const labels = domain.split('.');
+  if (
+    labels.length < 2 ||
+    labels.some((label) => !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u.test(label))
+  )
+    return null;
+  return email;
+}
+
 export class StatusPageSubscriptionRepository {
   constructor(private readonly db: WatchrailDatabase) {}
 
@@ -25,7 +50,8 @@ export class StatusPageSubscriptionRepository {
   }
 
   async request(slug: string, email: string, keyring: AuthEmailKeyring): Promise<void> {
-    const canonical = email.trim().toLowerCase();
+    const canonical = normalizeSubscriptionEmail(email);
+    if (!canonical) throw new Error('Invalid subscription mailbox.');
     // Per-address global limits prevent targeting one mailbox through many pages.
     if (!(await this.consumeLimit(`email:${canonical}`, 5))) return;
     await this.db.transaction(async (tx) => {

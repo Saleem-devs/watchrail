@@ -100,6 +100,153 @@ describe('status-page subscriber delivery', () => {
     return connection.db.select().from(statusPageEmailDeliveries);
   }
 
+  it('rejects mailbox aliases expressed as display names, comments or lists before storing or limiting', async () => {
+    const p = await page();
+    for (const email of [
+      'Alice<victim@example.com>',
+      'Bob<victim@example.com>',
+      '<victim@example.com>',
+      'victim@example.com(test)',
+      'a@example.com,b@example.com',
+    ]) {
+      await expect(subscriptions.request(p.slug, email, keyring)).rejects.toThrow(
+        'Invalid subscription mailbox',
+      );
+    }
+    expect(await connection.db.select().from(statusPageSubscribers)).toHaveLength(0);
+    expect(
+      (await connection.pool.query('select * from status_page_subscription_limits')).rows,
+    ).toHaveLength(0);
+    await subscribe(p.slug, ' Visitor@Example.COM ');
+    await subscriptions.request(p.slug, 'visitor@example.com', keyring);
+    expect(await connection.db.select().from(statusPageSubscribers)).toHaveLength(1);
+    expect(await deliveries()).toHaveLength(1);
+  });
+
+  it.each(['manual', 'monitor', 'maintenance'])(
+    'serializes concurrent %s capture with unpublication without replay',
+    async (kind) => {
+      const p = await page();
+      const sub = await subscribe(p.slug);
+      await subscriptions.confirm(sub.verification);
+      const incident = await open(p);
+      const round = await new ManualRoundRepository(connection.db).create(
+        org,
+        p.components[0]!.monitorId,
+      );
+      const maintenance = await new MaintenanceWindowRepository(connection.db).create(
+        org,
+        p.projectId!,
+        actor,
+        {
+          name: 'Race maintenance',
+          schedule: {
+            type: 'ONE_TIME',
+            startsAt: '2030-01-01T00:00:00Z',
+            endsAt: '2030-01-01T01:00:00Z',
+          },
+          target: { type: 'PROJECT' },
+          effects: {
+            suppressNotifications: true,
+            suppressIncidentCreation: true,
+            excludeFromUptime: true,
+            publishToStatusPage: true,
+          },
+        },
+      );
+      const a = await connection.pool.connect();
+      const b = await connection.pool.connect();
+      let pending: Promise<unknown> | undefined;
+      try {
+        await a.query('begin');
+        await a.query('update status_pages set published=false where id=$1', [p.id]);
+        const pid = (await b.query<{ pid: number }>('select pg_backend_pid() as pid')).rows[0]!.pid;
+        pending =
+          kind === 'manual'
+            ? b.query(
+                `insert into status_page_incident_updates (organization_id, incident_id, sequence, state, message, created_by_actor_id)
+        values ($1,$2,2,'INVESTIGATING','Concurrent update',$3)`,
+                [org, incident.id, actor],
+              )
+            : kind === 'monitor'
+              ? b.query(
+                  `insert into incidents (organization_id, monitor_id, started_by_round_id, opened_by_round_id, started_at, opened_at, group_key, severity)
+          values ($1,$2,$3,$3,now(),now(),'race','DOWN')`,
+                  [org, round.monitorId, round.id],
+                )
+              : b.query(
+                  `insert into maintenance_window_audit_events (organization_id, project_id, maintenance_window_id, action, version_number, actor_id)
+          values ($1,$2,$3,'UPDATED',1,$4)`,
+                  [org, p.projectId, maintenance.id, actor],
+                );
+        // Observe the actual PostgreSQL lock wait instead of assuming a timing delay.
+        await expect
+          .poll(
+            async () =>
+              (
+                await connection.pool.query<{ blocked: boolean }>(
+                  'select cardinality(pg_blocking_pids($1)) > 0 as blocked',
+                  [pid],
+                )
+              ).rows[0]!.blocked,
+          )
+          .toBe(true);
+        await a.query('commit');
+        await pending;
+        await connection.pool.query('update status_pages set published=true where id=$1', [p.id]);
+        await expand();
+        expect(await events()).toHaveLength(2);
+        expect((await deliveries()).filter((d) => d.kind === 'EVENT')).toHaveLength(0);
+      } finally {
+        await a.query('rollback');
+        await pending?.catch(() => undefined);
+        a.release();
+        b.release();
+      }
+    },
+  );
+
+  it('includes weekdays and date bounds in recurring maintenance updates', async () => {
+    const p = await page();
+    const windows = new MaintenanceWindowRepository(connection.db);
+    const input = {
+      name: 'Weekly maintenance',
+      schedule: {
+        type: 'RECURRING',
+        timezone: 'UTC',
+        localTime: '20:00',
+        daysOfWeek: [1],
+        durationMinutes: 60,
+        startsOn: '2030-01-01',
+        endsOn: '2030-06-01',
+      },
+      target: { type: 'PROJECT' },
+      effects: {
+        suppressNotifications: true,
+        suppressIncidentCreation: true,
+        excludeFromUptime: true,
+        publishToStatusPage: true,
+      },
+    };
+    const window = await windows.create(org, p.projectId!, actor, input);
+    await windows.update(org, p.projectId!, window.id, actor, {
+      ...input,
+      schedule: {
+        ...input.schedule,
+        daysOfWeek: [5],
+        startsOn: '2030-02-01',
+        endsOn: '2030-07-01',
+      },
+    });
+    const captured = await events();
+    expect(captured[0]!.body).toContain('Monday');
+    expect(captured[0]!.body).toContain('2030-01-01');
+    expect(captured[0]!.body).toContain('2030-06-01');
+    expect(captured[1]!.body).toContain('Friday');
+    expect(captured[1]!.body).toContain('2030-02-01');
+    expect(captured[1]!.body).toContain('2030-07-01');
+  });
+
   it('requires verification, encrypts address and tokens, and never backfills pre-verification events', async () => {
     const p = await page();
     const sub = await subscribe(p.slug, 'Visitor@Example.com');
@@ -220,8 +367,8 @@ describe('status-page subscriber delivery', () => {
       .where(eq(incidents.id, incident!.id));
     const captured = await events();
     expect(captured).toHaveLength(2);
-    expect(captured[0].subject).toContain('Public API');
-    expect(captured[1].body).toContain('does not establish service recovery');
+    expect(captured[0]!.subject).toContain('Public API');
+    expect(captured[1]!.body).toContain('does not establish service recovery');
     expect(JSON.stringify(captured)).not.toContain('private.example.test');
     expect(JSON.stringify(captured)).not.toContain('Private endpoint');
   });

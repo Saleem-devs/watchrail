@@ -61,6 +61,36 @@ describe('status subscriber email worker', () => {
     );
     expect(f.store.finish).toHaveBeenCalledWith('delivery', 'claim', 'DELIVERED');
   });
+  it('marks normalized mailbox acceptance delivered without retrying', async () => {
+    const f = fixture();
+    f.authorization.details = encryptAuthEmail(
+      { email: ' Visitor@Example.COM ', unsubscribe: 'u'.repeat(43) },
+      'subscriber:subscriber:generation',
+      keyring,
+    );
+    await f.worker.processNext();
+    expect(f.sender.send).toHaveBeenCalledWith(
+      expect.objectContaining({ to: ['visitor@example.com'] }),
+      expect.anything(),
+    );
+    expect(f.store.finish).toHaveBeenCalledExactlyOnceWith('delivery', 'claim', 'DELIVERED');
+  });
+  it('does not send legacy formatted mailboxes', async () => {
+    const f = fixture();
+    f.authorization.details = encryptAuthEmail(
+      { email: 'Alice<visitor@example.com>', unsubscribe: 'u'.repeat(43) },
+      'subscriber:subscriber:generation',
+      keyring,
+    );
+    await f.worker.processNext();
+    expect(f.sender.send).not.toHaveBeenCalled();
+    expect(f.store.finish).toHaveBeenCalledWith(
+      'delivery',
+      'claim',
+      'DEAD',
+      'INVALID_SUBSCRIPTION_MAILBOX',
+    );
+  });
   it('sends verification links without activating the subscription', async () => {
     const f = fixture();
     f.authorization.kind = 'VERIFY';

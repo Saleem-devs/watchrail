@@ -1,6 +1,7 @@
 import { performance } from 'node:perf_hooks';
 import {
   decryptAuthEmail,
+  normalizeSubscriptionEmail,
   type AuthEmailKeyring,
   type StatusPageSubscriptionRepository,
 } from '@watchrail/db';
@@ -38,6 +39,11 @@ export class StatusPageEmailWorker {
         `subscriber:${authorized.subscriberId}:${authorized.generation}`,
         this.keyring,
       ) as { email: string; unsubscribe: string };
+      const email = normalizeSubscriptionEmail(details.email);
+      if (!email) {
+        await this.store.finish(claim.id, claim.token, 'DEAD', 'INVALID_SUBSCRIPTION_MAILBOX');
+        return 'PROCESSED';
+      }
       const unsubscribeUrl = `${this.origin}/status/subscriptions/manage#unsubscribe=${encodeURIComponent(details.unsubscribe)}`;
       let subject: string;
       let text: string;
@@ -71,10 +77,10 @@ export class StatusPageEmailWorker {
         return 'PROCESSED';
       }
       const result = await withSendDeadline(
-        (signal) => this.sender.send({ to: [details.email], subject, text }, { signal }),
+        (signal) => this.sender.send({ to: [email], subject, text }, { signal }),
         timeout,
       );
-      if (!result.accepted.some((value) => value.toLowerCase() === details.email.toLowerCase()))
+      if (!result.accepted.some((value) => normalizeSubscriptionEmail(value) === email))
         throw new Error('SMTP rejected recipient');
       await this.store.finish(claim.id, claim.token, 'DELIVERED');
     } catch {

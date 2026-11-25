@@ -7,7 +7,7 @@ In development
 ## Status-page email subscriptions
 
 Published pages offer verified, page-wide email subscriptions. Apply database migration
-`0065` before restarting the updated API and worker. Subscriber emails use the existing
+`0065` and corrective migration `0066` before restarting the updated API and worker. Subscriber emails use the existing
 SMTP configuration and `AUTH_EMAIL_*` encryption keyring; retain retired keys while stored
 subscriber records or deliveries still reference them. Set `FRONTEND_URL` to the public
 frontend origin (required by the worker in production).
@@ -28,6 +28,15 @@ when the page is republished.
 
 Public subscription requests use shared database limits: 30 requests per IP/hour, five per
 address/hour, 100 per page/hour, and a 60-second resend cooldown. No existing-subscriber lookup
-is exposed. Configure reverse-proxy IP handling deliberately; forwarded IP headers are not
-trusted by this feature. Subscriber records and delivery evidence currently remain until
+is exposed. Set `API_TRUSTED_PROXIES` to the exact Next.js/reverse-proxy source IPs or narrow CIDRs
+(comma-separated). Empty trusts no proxies; booleans, hop counts and /0 ranges are rejected.
+For local Next.js development use `127.0.0.1/32,::1/128`. Production must use its actual
+proxy topology. The public ingress must overwrite untrusted forwarding headers and each
+trusted subsequent proxy must append its observed peer; restrict direct access to internal
+proxies. Do not trust an entire client network. The API walks from the socket peer to the
+nearest untrusted hop; untrusted socket peers cannot select their bucket using forwarded headers.
+Bare ASCII mailboxes only are accepted: no display names, comments or lists. Canonical
+trimmed/lowercase addresses drive identity, limits and SMTP; legacy malformed recipients
+are dead-lettered without sending. Migration `0066` serializes public-event capture with
+publication changes and includes weekdays/effective dates in recurring maintenance emails. Subscriber records and delivery evidence currently remain until
 the status page is deleted; automated retention and subscriber administration are follow-up work.
