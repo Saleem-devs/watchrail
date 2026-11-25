@@ -15,6 +15,8 @@ import {
 import { createMonitor } from '@watchrail/domain';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { APP_CONFIG, type AppConfig } from '../src/config/config.js';
+import { decryptAuthEmail, statusPageEmailDeliveries, statusPageSubscribers } from '@watchrail/db';
 import { AppModule } from '../src/app.module.js';
 import {
   InternalStatusPageRateLimiter,
@@ -68,6 +70,71 @@ describe('public status page API', () => {
   afterAll(async () => {
     await app?.close();
     await container?.stop();
+  });
+
+  it('verifies public subscriptions without exposing addresses and supports unsubscribe', async () => {
+    const monitor = await new MonitorRepository(database).create(
+      organizationId,
+      createMonitor({ name: 'Subscriber API', url: 'https://example.com' }),
+    );
+    await new StatusPageRepository(database).create(organizationId, {
+      name: 'Subscriber status',
+      slug: 'subscriber-status',
+      published: true,
+      components: [{ displayName: 'API', monitorId: monitor.id, position: 0 }],
+    });
+    for (const email of [
+      'Alice<victim@example.com>',
+      'Bob<victim@example.com>',
+      '<victim@example.com>',
+      'victim@example.com(test)',
+      'a@example.com,b@example.com',
+    ]) {
+      await request(app.getHttpServer())
+        .post('/api/public/status-subscriptions')
+        .send({ slug: 'subscriber-status', email })
+        .expect(400);
+    }
+    const subscribed = await request(app.getHttpServer())
+      .post('/api/public/status-subscriptions')
+      .send({ slug: 'subscriber-status', email: 'subscriber@example.com' })
+      .expect(202);
+    const missing = await request(app.getHttpServer())
+      .post('/api/public/status-subscriptions')
+      .send({ slug: 'missing-status', email: 'other@example.com' })
+      .expect(202);
+    expect(subscribed.body).toEqual(missing.body);
+    expect(subscribed.headers['cache-control']).toBe('no-store');
+    expect(JSON.stringify(subscribed.body)).not.toContain('subscriber@example.com');
+    const [subscriber] = await database.select().from(statusPageSubscribers);
+    const [delivery] = await database.select().from(statusPageEmailDeliveries);
+    const keyring = app.get<AppConfig>(APP_CONFIG).authEmailKeyring;
+    const verification = decryptAuthEmail(
+      delivery!.encryptedPayload,
+      `status-verification:${delivery!.id}`,
+      keyring,
+    ) as { verification: string };
+    const details = decryptAuthEmail(
+      subscriber!.encryptedDetails,
+      `subscriber:${subscriber!.id}:${subscriber!.generation}`,
+      keyring,
+    ) as { unsubscribe: string };
+    await request(app.getHttpServer())
+      .post('/api/public/status-subscriptions/verify')
+      .send({ token: verification.verification })
+      .expect(200);
+    await request(app.getHttpServer())
+      .post('/api/public/status-subscriptions/unsubscribe')
+      .send({ token: details.unsubscribe })
+      .expect(200);
+    await request(app.getHttpServer())
+      .post('/api/public/status-subscriptions/verify')
+      .send({ token: verification.verification })
+      .expect(400);
+    await request(app.getHttpServer())
+      .post('/api/public/status-subscriptions')
+      .send({ slug: 'subscriber-status', email: 'not-an-email' })
+      .expect(400);
   });
 
   it('serves only published allow-listed data without authentication', async () => {

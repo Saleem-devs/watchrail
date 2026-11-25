@@ -1,3 +1,5 @@
+import { StatusPageEmailWorker } from './status-page-email-worker.js';
+import { StatusPageSubscriptionRepository } from '@watchrail/db';
 import { Module } from '@nestjs/common';
 import { DrizzleModule, getDrizzleToken } from '@nestjs/drizzle';
 import { NodeHttpExecutor } from '@watchrail/check-engine';
@@ -49,6 +51,25 @@ import { SlackNotificationWorker } from './slack-notification-worker.js';
     }),
   ],
   providers: [
+    {
+      provide: StatusPageSubscriptionRepository,
+      inject: [getDrizzleToken()],
+      useFactory: (db: WatchrailDatabase) => new StatusPageSubscriptionRepository(db),
+    },
+    {
+      provide: StatusPageEmailWorker,
+      inject: [StatusPageSubscriptionRepository, NodemailerNotificationEmailSender, WORKER_CONFIG],
+      useFactory: (
+        store: StatusPageSubscriptionRepository,
+        sender: NodemailerNotificationEmailSender,
+        config: WorkerConfig,
+      ) =>
+        new StatusPageEmailWorker(store, sender, config.authEmailKeyring, config.statusPageOrigin, {
+          leaseMs: config.emailNotificationLeaseDurationMs,
+          sendTimeoutMs: config.emailNotificationSendTimeoutMs,
+          maxAttempts: config.webhookDeliveryMaxAttempts,
+        }),
+    },
     {
       provide: AuthEmailOutboxRepository,
       inject: [getDrizzleToken()],
@@ -284,6 +305,7 @@ import { SlackNotificationWorker } from './slack-notification-worker.js';
         BullMqAuthEmailPublisher,
         EmailNotificationWorker,
         SlackNotificationWorker,
+        StatusPageEmailWorker,
       ],
       useFactory: (
         relay: CheckOutboxRelay,
@@ -301,6 +323,7 @@ import { SlackNotificationWorker } from './slack-notification-worker.js';
         authEmailPublisher: BullMqAuthEmailPublisher,
         emailNotifications: EmailNotificationWorker,
         slackNotifications: SlackNotificationWorker,
+        statusEmails: StatusPageEmailWorker,
       ) =>
         new WorkerRuntime(
           relay,
@@ -318,6 +341,7 @@ import { SlackNotificationWorker } from './slack-notification-worker.js';
           heartbeats,
           emailNotifications,
           slackNotifications,
+          statusEmails,
         ),
     },
   ],

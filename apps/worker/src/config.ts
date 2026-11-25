@@ -1,6 +1,7 @@
 export const WORKER_CONFIG = Symbol('WORKER_CONFIG');
 
 export interface WorkerConfig {
+  statusPageOrigin: string;
   databaseUrl: string;
   redisUrl: string;
   queuePublicationTimeoutMs: number;
@@ -233,6 +234,14 @@ export function loadWorkerConfig(environment: NodeJS.ProcessEnv = process.env): 
       'WEBHOOK_DELIVERY_IDLE_POLL_INTERVAL_MS',
       500,
     ),
+    statusPageOrigin: new URL(
+      requireUrl(
+        environment.FRONTEND_URL ??
+          (environment.NODE_ENV === 'production' ? undefined : 'http://localhost:3010'),
+        'FRONTEND_URL',
+        ['http:', 'https:'],
+      ),
+    ).origin,
     emailNotificationConcurrency: parseIntegerRange(
       environment.EMAIL_NOTIFICATION_CONCURRENCY,
       'EMAIL_NOTIFICATION_CONCURRENCY',

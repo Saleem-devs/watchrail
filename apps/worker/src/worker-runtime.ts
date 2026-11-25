@@ -1,3 +1,4 @@
+import type { StatusPageEmailWorker } from './status-page-email-worker.js';
 import {
   Injectable,
   Logger,
@@ -46,6 +47,7 @@ export class WorkerRuntime
   private webhookRunning: Promise<void>[] = [];
   private emailNotificationRunning: Promise<void>[] = [];
   private slackNotificationRunning: Promise<void>[] = [];
+  private statusEmailRunning: Promise<void> | undefined;
   private authEmailRunning: Promise<void> | undefined;
   private readonly wakeups = new Set<() => void>();
 
@@ -65,9 +67,11 @@ export class WorkerRuntime
     private readonly heartbeats?: HeartbeatRepository,
     private readonly emailNotifications?: EmailNotificationProcessor,
     private readonly slackNotifications?: SlackNotificationProcessor,
+    private readonly statusEmails?: StatusPageEmailWorker,
   ) {}
 
   onApplicationBootstrap(): void {
+    this.statusEmailRunning = this.statusEmails ? this.runStatusEmails() : undefined;
     this.outboxRunning = this.runOutboxRelay();
     this.schedulerRunning = this.runScheduledDispatch();
     this.heartbeatRunning = this.heartbeats ? this.runHeartbeatEvaluation() : undefined;
@@ -110,6 +114,7 @@ export class WorkerRuntime
       ...this.emailNotificationRunning,
       ...this.slackNotificationRunning,
       this.authEmailRunning,
+      this.statusEmailRunning,
       this.consumer.close(),
       this.authEmailConsumer?.close(),
     ]);
@@ -118,6 +123,18 @@ export class WorkerRuntime
   async onApplicationShutdown(): Promise<void> {
     await this.publisher.close();
     await this.authEmailPublisher?.close();
+  }
+
+  private async runStatusEmails(): Promise<void> {
+    while (!this.stopping) {
+      try {
+        if ((await this.statusEmails!.processNext()) === 'IDLE')
+          await this.wait(this.config.idlePollIntervalMs);
+      } catch {
+        this.logger.error('Status subscriber email dependency failure.');
+        await this.wait(this.config.dependencyErrorDelayMs);
+      }
+    }
   }
 
   private async runAuthEmailRelay(): Promise<void> {
