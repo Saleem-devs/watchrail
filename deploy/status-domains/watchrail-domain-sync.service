@@ -1,0 +1,7 @@
+[Unit]
+Description=Synchronize verified Watchrail TLS hostnames
+After=network-online.target nginx.service
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/watchrail/status-domains.env
+ExecStart=/usr/bin/python3 /opt/watchrail/deploy/status-domains/sync-hosts.py

@@ -1,0 +1,38 @@
+{
+	admin off
+	auto_https disable_redirects
+	https_port 8443
+	on_demand_tls {
+		ask http://127.0.0.1:4000/api/internal/status-domains/ask?key={$STATUS_DOMAIN_CADDY_ASK_SECRET}
+	}
+	servers {
+		protocols h1 h2
+		strict_sni_host on
+		listener_wrappers {
+			proxy_protocol {
+				allow 127.0.0.1/32 ::1/128
+				fallback_policy reject
+			}
+			tls
+		}
+	}
+}
+:8443 {
+	bind 127.0.0.1
+	tls {
+		on_demand
+		issuer acme {
+			email {$ACME_EMAIL}
+			dir {$ACME_DIRECTORY:https://acme-staging-v02.api.letsencrypt.org/directory}
+			disable_http_challenge
+		}
+	}
+	# Only the public page, its assets and subscription endpoints reach Next.js.
+	@internal path /api/internal/* /api/auth/*
+	respond @internal 404
+	reverse_proxy 127.0.0.1:3010 {
+		header_up Host {host}
+		header_up X-Forwarded-Host {host}
+		header_up X-Forwarded-For {remote_host}
+	}
+}

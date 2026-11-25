@@ -26,7 +26,8 @@
     "@watchrail/webhook-security": "workspace:*",
     "cron-parser": "5.10.1",
     "drizzle-orm": "0.45.2",
-    "pg": "8.23.0"
+    "pg": "8.23.0",
+    "tldts": "^7.5.5"
   },
   "devDependencies": {
     "@testcontainers/postgresql": "12.1.0",

@@ -10,6 +10,7 @@ import {
   migrateDatabase,
   MonitorRepository,
   StatusPageRepository,
+  StatusPageDomainRepository,
   type WatchrailDatabase,
 } from '@watchrail/db';
 import { createMonitor } from '@watchrail/domain';
@@ -304,6 +305,80 @@ describe('status page settings API', () => {
     expect(domainError.body.fields.statusPage).toEqual(
       expect.not.arrayContaining([expect.any(Object)]),
     );
+  });
+
+  it('scopes domain management and gates internal mapping and certificate issuance', async () => {
+    process.env.STATUS_DOMAIN_CNAME_TARGET = 'status.watchrail.dev';
+    process.env.STATUS_DOMAIN_CADDY_ASK_SECRET = 'integration-test-certificate-secret-32-chars';
+    const org = DEVELOPMENT_REQUEST_CONTEXT.organizationId;
+    const monitor = await createMonitorFor(org, 'Domains');
+    const page = await new StatusPageRepository(database).create(org, {
+      name: 'Domains',
+      slug: 'domains',
+      published: true,
+      components: [{ monitorId: monitor.id, displayName: 'API', position: 0 }],
+    });
+    const foreign = await new StatusPageRepository(database).create(organizationB, {
+      name: 'Foreign',
+      slug: 'foreign-domain',
+      published: false,
+      components: [],
+    });
+    const path = `/api/status-pages/${page.id}/domain`;
+    await request(app.getHttpServer())
+      .post(path)
+      .set('Authorization', 'Bearer invalid')
+      .send({ hostname: 'unauthorized.example.com' })
+      .expect(401);
+    expect((await request(app.getHttpServer()).get(path).expect(200)).body.data.domain).toBeNull();
+    await request(app.getHttpServer()).post(path).send({ hostname: 'example.com' }).expect(400);
+    await request(app.getHttpServer())
+      .post(`/api/status-pages/${foreign.id}/domain`)
+      .send({ hostname: 'foreign.example.com' })
+      .expect(404);
+    await request(app.getHttpServer())
+      .post(path)
+      .send({ hostname: 'status.example.com' })
+      .expect(201);
+    const routing = '/api/internal/status-domains';
+    await request(app.getHttpServer())
+      .get(`${routing}/resolve?hostname=status.example.com`)
+      .expect(401);
+    await request(app.getHttpServer()).get(`${routing}/ask?domain=status.example.com`).expect(401);
+    const secret = process.env.STATUS_DOMAIN_CADDY_ASK_SECRET;
+    await request(app.getHttpServer())
+      .get(`${routing}/ask`)
+      .query({ domain: 'status.example.com', key: secret })
+      .expect(404);
+    const domains = new StatusPageDomainRepository(database);
+    const claim = (await domains.claimCheck(org, page.id))!;
+    await domains.recordCheck(claim, true, true, null);
+    await request(app.getHttpServer())
+      .get(`${routing}/ask`)
+      .query({ domain: 'status.example.com', key: secret })
+      .expect(200);
+    const resolved = await request(app.getHttpServer())
+      .get(`${routing}/resolve?hostname=status.example.com`)
+      .set('x-watchrail-internal-token', 'watchrail-development-status-page-token')
+      .expect(200);
+    expect(resolved.body.data).toMatchObject({
+      pageId: page.id,
+      slug: page.slug,
+      httpsReady: false,
+    });
+    await request(app.getHttpServer()).delete(`/api/status-pages/${foreign.id}/domain`).expect(404);
+    await request(app.getHttpServer())
+      .patch(`/api/status-pages/${page.id}/publication`)
+      .send({ published: false })
+      .expect(200);
+    await request(app.getHttpServer())
+      .get(`${routing}/ask`)
+      .query({ domain: 'status.example.com', key: secret })
+      .expect(404);
+    await request(app.getHttpServer()).delete(path).expect(200);
+    expect((await request(app.getHttpServer()).get(path).expect(200)).body.data.domain).toBeNull();
+    delete process.env.STATUS_DOMAIN_CNAME_TARGET;
+    delete process.env.STATUS_DOMAIN_CADDY_ASK_SECRET;
   });
 
   async function createMonitorFor(organizationId: string, name: string) {

@@ -2835,3 +2835,29 @@ export type AuthMemberRecord = typeof authMember.$inferSelect;
 export type AuthInvitationRecord = typeof authInvitation.$inferSelect;
 export type AuthApiKeyRecord = typeof authApiKey.$inferSelect;
 export type AuthEmailOutboxRecord = typeof authEmailOutbox.$inferSelect;
+
+export const statusPageDomains = pgTable(
+  'status_page_domains',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull(),
+    statusPageId: uuid('status_page_id').notNull(),
+    hostname: varchar('hostname', { length: 253 }).notNull().unique(),
+    verificationToken: text('verification_token').notNull(),
+    httpsVerifiedAt: timestamp('https_verified_at', { withTimezone: true }),
+    httpsError: text('https_error'),
+    verifiedAt: timestamp('verified_at', { withTimezone: true }),
+    routingVerifiedAt: timestamp('routing_verified_at', { withTimezone: true }),
+    checkToken: uuid('check_token'),
+    lastCheckedAt: timestamp('last_checked_at', { withTimezone: true }),
+    lastError: text('last_error'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('status_page_domain_page_unique').on(table.statusPageId),
+    foreignKey({
+      columns: [table.statusPageId, table.organizationId],
+      foreignColumns: [statusPages.id, statusPages.organizationId],
+    }).onDelete('cascade'),
+  ],
+);
