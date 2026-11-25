@@ -2,8 +2,12 @@
 
 import { Suspense, type FormEvent, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { Button } from '../../../components/ui/button';
 import { Form } from '../../../components/ui/form';
+import { Input } from '../../../components/ui/form-control';
+import { SignInBrand } from '../../../features/auth/sign-in-brand';
 import { authClient, ensureActiveOrganization } from '../../../lib/auth-client';
+import { commitAuthMethod } from '../../../lib/auth-method-preference';
 import { safeNextPath } from '../../../lib/safe-next-path';
 
 const RESEND_COOLDOWN_SECONDS = 60;
@@ -54,6 +58,7 @@ function OtpVerifyForm() {
         setError('Your workspace could not be selected. Please try signing in again.');
         return;
       }
+      commitAuthMethod('email');
       router.push(nextPath);
     } catch {
       setError('Verification failed. Please try again.');
@@ -88,12 +93,7 @@ function OtpVerifyForm() {
 
   return (
     <div className="sign-in-panel">
-      <div className="sign-in-brand">
-        <span className="sign-in-logo" aria-hidden="true">
-          ◈
-        </span>
-        <span className="sign-in-product">Watchrail</span>
-      </div>
+      <SignInBrand />
 
       <h1 className="sign-in-heading">Check your email</h1>
       <p className="sign-in-subheading">
@@ -104,13 +104,13 @@ function OtpVerifyForm() {
         <label className="sign-in-label" htmlFor="otp">
           Verification code
         </label>
-        <input
+        <Input
           id="otp"
           type="text"
           inputMode="numeric"
           pattern="\d{6}"
           maxLength={6}
-          className="sign-in-input sign-in-otp-input"
+          className="sign-in-otp-input"
           placeholder="000000"
           value={otp}
           autoComplete="one-time-code"
@@ -130,27 +130,31 @@ function OtpVerifyForm() {
           </p>
         )}
 
-        <button
+        <Button
           type="submit"
-          className="sign-in-primary-btn"
+          variant="primary"
+          className="mt-3 w-full"
           disabled={verifying || otp.length !== 6}
         >
           {verifying ? 'Verifying…' : 'Verify code'}
-        </button>
+        </Button>
       </Form>
 
       <div className="sign-in-resend">
         {resendCountdown > 0 ? (
           <span className="sign-in-resend-timer">Resend available in {resendCountdown}s</span>
         ) : (
-          <button
-            type="button"
-            className="sign-in-resend-btn"
-            disabled={resending}
-            onClick={() => void handleResend()}
-          >
-            {resending ? 'Sending…' : "Didn't receive it? Resend code"}
-          </button>
+          <span className="inline-flex items-center justify-center gap-2">
+            <span>Didn’t receive it?</span>
+            <button
+              type="button"
+              className="cursor-pointer border-0 bg-transparent p-0 text-xs font-semibold text-rail-text hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-rail-accent disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={resending}
+              onClick={() => void handleResend()}
+            >
+              {resending ? 'Sending…' : 'Resend code'}
+            </button>
+          </span>
         )}
       </div>
 

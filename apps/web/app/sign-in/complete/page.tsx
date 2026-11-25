@@ -2,7 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Button } from '../../../components/ui/button';
+import { SignInBrand } from '../../../features/auth/sign-in-brand';
 import { ensureActiveOrganization } from '../../../lib/auth-client';
+import { commitAuthMethod } from '../../../lib/auth-method-preference';
 import { safeNextPath } from '../../../lib/safe-next-path';
 
 export default function CompleteSignInPage() {
@@ -19,6 +22,7 @@ export default function CompleteSignInPage() {
           setError('Your workspace could not be selected. Please sign in again.');
           return;
         }
+        commitAuthMethod();
         const nextPath = safeNextPath(new URLSearchParams(window.location.search).get('next'));
         router.replace(nextPath);
         router.refresh();
@@ -34,24 +38,19 @@ export default function CompleteSignInPage() {
 
   return (
     <div className="sign-in-panel" aria-live="polite" aria-busy={error == null}>
-      <div className="sign-in-brand">
-        <span className="sign-in-logo" aria-hidden="true">
-          ◈
-        </span>
-        <span className="sign-in-product">Watchrail</span>
-      </div>
+      <SignInBrand />
       {error ? (
         <>
           <p className="sign-in-error" role="alert">
             {error}
           </p>
-          <button
-            type="button"
-            className="sign-in-primary-btn"
+          <Button
+            variant="primary"
+            className="mt-3 w-full"
             onClick={() => router.replace('/sign-in')}
           >
             Return to sign in
-          </button>
+          </Button>
         </>
       ) : (
         <p className="sign-in-subheading">Preparing your workspace…</p>

@@ -9,11 +9,6 @@ node_modules/
 
 # Documentation
 docs/
-!docs/
-docs/*
-!docs/architecture-audit.md
-!docs/backend-development.md
-!docs/icmp-check-contract.md
 
 # Build output
 .next/

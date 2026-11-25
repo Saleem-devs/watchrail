@@ -155,7 +155,8 @@ export class AuthEmailOutboxRepository {
           isNull(authEmailOutbox.supersededAt),
           isNull(authEmailOutbox.deliveredAt),
           isNull(authEmailOutbox.failedAt),
-          sql`${authEmailOutbox.expiresAt} > ${now}`,
+          // Use the column encoder so local process timezones cannot shift this UTC timestamp.
+          gt(authEmailOutbox.expiresAt, now),
         ),
       )
       .limit(1);
